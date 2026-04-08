@@ -2,7 +2,7 @@
 
 import { useTripStore } from '@/store/tripStore';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import Navbar from '@/components/shared/Navbar';
 import ResultsHeader from '@/components/results/ResultsHeader';
 import Flowchart from '@/components/results/Flowchart';
@@ -12,7 +12,18 @@ import AIChatPanel from '@/components/results/AIChatPanel';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import { mockTrip } from '@/lib/mockData';
 
+// Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
+// during the static build pass. We split the page into an outer wrapper that
+// provides the boundary and an inner component that actually uses the hook.
 export default function ResultsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ResultsPageInner />
+    </Suspense>
+  );
+}
+
+function ResultsPageInner() {
   const { currentTrip, setTrip } = useTripStore();
   const router = useRouter();
   const searchParams = useSearchParams();
