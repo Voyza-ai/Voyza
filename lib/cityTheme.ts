@@ -31,7 +31,8 @@ export type CityTheme = {
   countrySoft: string;
   countryName: string;
   vibeAccent: string; // primary vibe color
-  gradient: string; // CSS gradient using both
+  gradient: string; // CSS gradient for the main card — brighter, vibrant
+  subGradient: string; // Slightly muted version for the activities sub-card
   borderRest: string;
   borderActive: string;
   glow: string;
@@ -48,11 +49,14 @@ export function getCityTheme(country: string, vibes?: Vibe[]): CityTheme {
     countrySoft: c.soft,
     countryName: c.name,
     vibeAccent,
-    // Layered gradient: country base on top, vibe at bottom — gives each
-    // card a unique two-tone wash.
-    gradient: `linear-gradient(160deg, ${c.base}1f 0%, ${c.base}08 38%, ${vibeAccent}14 100%)`,
-    borderRest: `${c.base}22`,
-    borderActive: `${c.base}80`,
+    // Main card — vibrant two-tone wash. Country color dominates, vibe color
+    // accents the bottom corner. Alphas: ~40% top → ~15% mid → ~30% vibe.
+    gradient: `linear-gradient(160deg, ${c.base}66 0%, ${c.base}26 45%, ${vibeAccent}4d 100%)`,
+    // Sub-card — same family, ~60% intensity so it reads as subordinate
+    // without becoming a dim, lifeless block. Alphas: ~25% / ~8% / ~19%.
+    subGradient: `linear-gradient(160deg, ${c.base}40 0%, ${c.base}14 45%, ${vibeAccent}30 100%)`,
+    borderRest: `${c.base}3a`,
+    borderActive: `${c.base}99`,
     glow: 'none',
     numberColor: `${c.base}cc`,
   };

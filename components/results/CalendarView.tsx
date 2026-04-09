@@ -130,41 +130,6 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
 
   return (
     <div className="px-8 py-6">
-      {/* Summary strip */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="flex flex-wrap gap-2 mb-6"
-      >
-        {trip.cities.map((city, i) => {
-          const theme = getCityTheme(city.country, city.vibes);
-          const arr = parseLocal(city.dates.arrival);
-          const dep = parseLocal(city.dates.departure);
-          const nights = daysBetween(arr, dep);
-          return (
-            <button
-              key={i}
-              onClick={() => onCityClick?.(i)}
-              className="flex items-center gap-2 px-3 py-2 rounded-2xl border transition-all hover:scale-[1.02]"
-              style={{
-                background: theme.gradient,
-                borderColor: theme.borderRest,
-              }}
-            >
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ background: theme.countryBase }}
-              />
-              <span className="text-white text-[13px] font-medium">{city.name}</span>
-              <span className="text-white/40 text-[11px]">
-                {nights} {nights === 1 ? 'night' : 'nights'}
-              </span>
-            </button>
-          );
-        })}
-      </motion.div>
-
       {/* Month grids */}
       <div className="flex flex-col gap-8">
         {months.map(({ year, month, cells }, mi) => {
@@ -180,7 +145,40 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: mi * 0.08 }}
             >
-              <h3 className="text-white/85 text-lg font-semibold mb-4">{monthName}</h3>
+              {/* Month header with inline city legend */}
+              <div className="flex items-center gap-4 flex-wrap mb-4">
+                <h3 className="text-white/85 text-lg font-semibold">{monthName}</h3>
+                <div className="flex flex-wrap gap-2">
+                  {trip.cities.map((city, i) => {
+                    const cTheme = getCityTheme(city.country, city.vibes);
+                    const arr = parseLocal(city.dates.arrival);
+                    const dep = parseLocal(city.dates.departure);
+                    const nights = daysBetween(arr, dep);
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => onCityClick?.(i)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all hover:scale-[1.04]"
+                        style={{
+                          background: cTheme.gradient,
+                          borderColor: cTheme.borderRest,
+                        }}
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{ background: cTheme.countryBase }}
+                        />
+                        <span className="text-white text-[11px] font-medium">
+                          {city.name}
+                        </span>
+                        <span className="text-white/40 text-[10px]">
+                          {nights}n
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
               {/* Weekday header */}
               <div className="grid grid-cols-7 gap-2 mb-2">

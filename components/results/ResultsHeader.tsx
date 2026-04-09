@@ -38,35 +38,36 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const liveSavings = Math.max(0, baseline - liveTotal);
 
   return (
-    <div className="px-8 pt-8 pb-2">
+    <div className="px-8 pt-5 pb-0">
       <div className="flex items-start justify-between gap-6 flex-wrap">
-        {/* Left: title + meta */}
+        {/* Left: label + inline meta, then title below */}
         <div className="flex-1 min-w-[280px]">
-          <div className="flex items-center gap-2 text-[#4f8ef7] text-xs uppercase tracking-[0.18em] font-medium mb-3">
-            <Sparkles size={12} />
-            <span>Optimized itinerary</span>
-          </div>
-          <h1 className="text-[32px] leading-tight font-semibold text-white mb-3">
-            {trip.title}
-          </h1>
-          <div className="flex items-center gap-5 text-white/50 text-sm flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <Calendar size={13} />
+          <div className="flex items-center gap-3 flex-wrap text-xs mb-2">
+            <div className="flex items-center gap-2 text-[#4f8ef7] uppercase tracking-[0.18em] font-medium">
+              <Sparkles size={12} />
+              <span>Optimized itinerary</span>
+            </div>
+            <span className="text-white/20">·</span>
+            <div className="flex items-center gap-1.5 text-white/50">
+              <Calendar size={12} />
               <span>
                 {startDate && formatDate(startDate)} – {endDate && formatDate(endDate)}
               </span>
               <span className="text-white/30">· {totalNights} nights</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <Users size={13} />
+            <span className="text-white/20">·</span>
+            <div className="flex items-center gap-1.5 text-white/50">
+              <Users size={12} />
               <span>
                 {trip.travelers} {trip.travelers === 1 ? 'traveler' : 'travelers'}
               </span>
             </div>
-            <div className="text-white/40">
-              {trip.cities.length} stops
-            </div>
+            <span className="text-white/20">·</span>
+            <span className="text-white/40">{trip.cities.length} stops</span>
           </div>
+          <h1 className="text-[30px] leading-tight font-semibold text-white">
+            {trip.title}
+          </h1>
         </div>
 
         {/* Right: cost summary */}

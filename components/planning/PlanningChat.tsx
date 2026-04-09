@@ -73,7 +73,7 @@ export default function PlanningChat() {
   const [chatMode, setChatMode] = useState(false); // open chat mode
   const [vibe, setVibe] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const initialized = useRef(false);
   const msgCounter = useRef(0);
 
@@ -124,6 +124,18 @@ export default function PlanningChat() {
     }, 80);
     return () => window.clearTimeout(id);
   }, [messages, isComplete, showIntent, currentStepIndex, intent, chatMode]);
+
+  // Auto-resize the chat textarea as the user types. Grows from 1 line up to
+  // MAX_INPUT_HEIGHT (~4 lines), then scrolls internally. Runs whenever
+  // textInput changes so clearing the input after submit also resets height.
+  // 16px text * 1.4 line-height * 4 lines = ~90px + 12px py padding ≈ 102px.
+  const MAX_INPUT_HEIGHT = 102;
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT)}px`;
+  }, [textInput]);
 
   const handleIntentSelect = (selectedIntent: Intent) => {
     setShowIntent(false);
@@ -514,21 +526,27 @@ export default function PlanningChat() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, ease: 'easeOut' }}
-            className="pointer-events-auto w-full max-w-2xl flex items-center gap-3 px-5 py-3 rounded-full border border-white/15 shadow-2xl shadow-black/40"
+            className="pointer-events-auto w-full max-w-2xl flex items-end gap-3 px-5 py-3 rounded-3xl border border-white/15 shadow-2xl shadow-black/40"
             style={{
               background: 'rgba(255,255,255,0.06)',
               backdropFilter: 'blur(16px)',
               WebkitBackdropFilter: 'blur(16px)',
             }}
           >
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
+              rows={1}
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleBarSubmit()}
+              onKeyDown={(e) => {
+                // Enter submits, Shift+Enter inserts a newline
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleBarSubmit();
+                }
+              }}
               placeholder={barPlaceholder}
-              className="flex-1 bg-transparent border-none outline-none text-white text-[16px] placeholder-white/35 py-1"
+              className="flex-1 min-w-0 w-full bg-transparent border-none outline-none resize-none text-white text-[16px] placeholder-white/35 py-1.5 leading-[1.4] max-h-[102px] overflow-y-auto"
             />
             <button
               onClick={handleBarSubmit}

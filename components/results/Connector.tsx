@@ -10,12 +10,15 @@ import {
   Luggage,
   ExternalLink,
   X,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { Transport } from '@/lib/types';
+import { useTripStore } from '@/store/tripStore';
 
 type ConnectorProps = {
   transport: Transport;
   index: number;
+  cityIndex: number;
   isExpanded: boolean;
   onToggle: () => void;
 };
@@ -31,16 +34,18 @@ const formatDateLong = (iso?: string) => {
   });
 };
 
-export default function Connector({ transport, index, isExpanded, onToggle }: ConnectorProps) {
+export default function Connector({ transport, cityIndex, isExpanded, onToggle }: ConnectorProps) {
+  const setTransportOut = useTripStore((s) => s.setTransportOut);
   const isFlight = transport.mode === 'flight';
   const Icon = isFlight ? Plane : TrainFront;
   const accentColor = isFlight ? '#4f8ef7' : '#34d399';
   const modeLabel = isFlight ? 'Flight' : 'Train';
+  const alternatives = transport.alternatives ?? [];
 
   return (
     <div
       className={`flex-shrink-0 flex items-center justify-center self-center transition-[width] duration-300 ease-out ${
-        isExpanded ? 'w-[240px] px-3 py-4' : 'w-[170px] px-2 py-12'
+        isExpanded ? 'w-[560px] px-3 py-4' : 'w-[170px] px-2 py-12'
       } relative`}
     >
       {/* Dashed line — only when collapsed */}
@@ -108,162 +113,156 @@ export default function Connector({ transport, index, isExpanded, onToggle }: Co
             </div>
         </button>
       ) : (
-        /* EXPANDED — full transit card (smaller than CityCard) */
+        /* EXPANDED — horizontal transit card (wide, short) */
         <div
-          className="relative z-10 w-[220px] rounded-2xl border backdrop-blur-xl overflow-hidden"
+          className="relative z-10 w-[540px] rounded-2xl border backdrop-blur-xl overflow-hidden"
           style={{
             background: `linear-gradient(160deg, ${accentColor}1a 0%, rgba(15,15,26,0.95) 65%)`,
             borderColor: `${accentColor}55`,
           }}
         >
-            {/* Top accent bar */}
-            <div
-              className="h-[2px] w-full"
-              style={{
-                background: `linear-gradient(90deg, ${accentColor} 0%, ${accentColor}50 100%)`,
-              }}
-            />
+          {/* Top accent bar */}
+          <div
+            className="h-[2px] w-full"
+            style={{
+              background: `linear-gradient(90deg, ${accentColor} 0%, ${accentColor}50 100%)`,
+            }}
+          />
 
-            {/* Header */}
-            <div
-              className="px-3 pt-3 pb-2 flex items-start justify-between gap-2 border-b"
-              style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <div
-                  className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{
-                    background: `${accentColor}1f`,
-                    border: `1px solid ${accentColor}50`,
-                  }}
-                >
-                  <Icon size={12} style={{ color: accentColor }} />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="text-[9px] uppercase tracking-wider font-medium"
-                      style={{ color: accentColor }}
-                    >
-                      {modeLabel}
+          {/* Header row: operator + date + close */}
+          <div
+            className="px-4 pt-3 pb-2.5 flex items-center justify-between gap-3 border-b"
+            style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                style={{
+                  background: `${accentColor}1f`,
+                  border: `1px solid ${accentColor}50`,
+                }}
+              >
+                <Icon size={14} style={{ color: accentColor }} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="text-[11px] uppercase tracking-wider font-semibold"
+                    style={{ color: accentColor }}
+                  >
+                    {modeLabel}
+                  </span>
+                  {(transport.flightNumber || transport.trainNumber) && (
+                    <span className="text-white/45 text-[11px] font-mono">
+                      {transport.flightNumber || transport.trainNumber}
                     </span>
-                    {(transport.flightNumber || transport.trainNumber) && (
-                      <span className="text-white/35 text-[9px] font-mono">
-                        {transport.flightNumber || transport.trainNumber}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-white text-[12px] font-semibold leading-tight truncate mt-0.5">
-                    {transport.operator}
-                  </div>
+                  )}
+                </div>
+                <div className="text-white text-[14px] font-semibold leading-tight truncate">
+                  {transport.operator}
                 </div>
               </div>
+            </div>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              {transport.departDate && (
+                <div className="text-white/55 text-[11px] uppercase tracking-wider">
+                  {formatDateLong(transport.departDate)}
+                </div>
+              )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onToggle();
                 }}
-                className="text-white/40 hover:text-white/85 transition-colors flex-shrink-0 -mt-0.5"
+                className="text-white/40 hover:text-white/85 transition-colors"
                 aria-label="Minimize"
               >
-                <X size={13} />
+                <X size={16} />
               </button>
             </div>
+          </div>
 
-            {/* Date */}
-            {transport.departDate && (
-              <div className="px-3 pt-2 text-white/45 text-[9px] uppercase tracking-wider">
-                {formatDateLong(transport.departDate)}
+          {/* Route row — horizontal: depart · duration · arrive */}
+          <div className="px-4 py-3.5 flex items-center gap-3">
+            {/* Depart block */}
+            <div className="flex-1 min-w-0">
+              <div className="text-white text-[18px] font-mono font-semibold tabular-nums leading-none">
+                {transport.departTime || '—'}
               </div>
-            )}
-
-            {/* Route — vertical timeline */}
-            <div className="px-3 py-2">
-              <div className="flex items-stretch gap-2.5">
-                {/* Timeline column */}
-                <div className="flex flex-col items-center pt-1">
-                  <div
-                    className="w-2 h-2 rounded-full border-2"
-                    style={{ borderColor: accentColor, background: 'transparent' }}
-                  />
-                  <div
-                    className="w-px flex-1 my-1"
-                    style={{ background: `${accentColor}50` }}
-                  />
-                  <div
-                    className="w-2 h-2 rounded-full"
-                    style={{ background: accentColor }}
-                  />
-                </div>
-
-                {/* Route info */}
-                <div className="flex-1 flex flex-col gap-2 min-w-0">
-                  {/* Depart */}
-                  <div>
-                    <div className="text-white text-[12px] font-mono font-semibold tabular-nums">
-                      {transport.departTime || '—'}
-                    </div>
-                    <div className="text-white/75 text-[10px] mt-0.5 leading-tight truncate">
-                      {transport.from || '—'}
-                    </div>
-                    {transport.fromStation && (
-                      <div className="text-white/35 text-[9px] mt-0.5 truncate">
-                        {transport.fromStation}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Duration */}
-                  <div className="flex items-center gap-1 text-white/40 text-[9px]">
-                    <Clock size={8} />
-                    <span>{transport.duration}</span>
-                    {transport.layovers !== undefined && (
-                      <span className="text-white/30">
-                        ·{' '}
-                        {transport.layovers === 0
-                          ? 'Direct'
-                          : `${transport.layovers} stop${transport.layovers > 1 ? 's' : ''}`}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Arrive */}
-                  <div>
-                    <div className="text-white text-[12px] font-mono font-semibold tabular-nums">
-                      {transport.arriveTime || '—'}
-                    </div>
-                    <div className="text-white/75 text-[10px] mt-0.5 leading-tight truncate">
-                      {transport.to || '—'}
-                    </div>
-                    {transport.toStation && (
-                      <div className="text-white/35 text-[9px] mt-0.5 truncate">
-                        {transport.toStation}
-                      </div>
-                    )}
-                  </div>
-                </div>
+              <div className="text-white/80 text-[12px] mt-1 leading-tight truncate">
+                {transport.from || '—'}
               </div>
+              {transport.fromStation && (
+                <div className="text-white/40 text-[11px] mt-0.5 truncate">
+                  {transport.fromStation}
+                </div>
+              )}
             </div>
 
-            {/* Baggage */}
+            {/* Center: duration + direct/layovers */}
+            <div className="flex-shrink-0 flex flex-col items-center gap-1 px-2">
+              <div className="flex items-center gap-1 text-white/55 text-[11px]">
+                <Clock size={11} />
+                <span className="font-medium">{transport.duration}</span>
+              </div>
+              <div className="flex items-center gap-1 w-full">
+                <div
+                  className="w-1.5 h-1.5 rounded-full border-[1.5px] flex-shrink-0"
+                  style={{ borderColor: accentColor }}
+                />
+                <div
+                  className="flex-1 h-px"
+                  style={{ background: `${accentColor}70` }}
+                />
+                <ArrowRight size={11} style={{ color: accentColor }} />
+                <div
+                  className="flex-1 h-px"
+                  style={{ background: `${accentColor}70` }}
+                />
+                <div
+                  className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  style={{ background: accentColor }}
+                />
+              </div>
+              {transport.layovers !== undefined && (
+                <div className="text-white/40 text-[10px]">
+                  {transport.layovers === 0
+                    ? 'Direct'
+                    : `${transport.layovers} stop${transport.layovers > 1 ? 's' : ''}`}
+                </div>
+              )}
+            </div>
+
+            {/* Arrive block */}
+            <div className="flex-1 min-w-0 text-right">
+              <div className="text-white text-[18px] font-mono font-semibold tabular-nums leading-none">
+                {transport.arriveTime || '—'}
+              </div>
+              <div className="text-white/80 text-[12px] mt-1 leading-tight truncate">
+                {transport.to || '—'}
+              </div>
+              {transport.toStation && (
+                <div className="text-white/40 text-[11px] mt-0.5 truncate">
+                  {transport.toStation}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Baggage + price + book — single row */}
+          <div
+            className="px-4 py-2.5 border-t flex items-center justify-between gap-3"
+            style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+          >
             {transport.baggage && (
-              <div
-                className="px-3 py-2 border-t flex items-start gap-1.5 text-white/60 text-[10px]"
-                style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-              >
-                <Luggage size={9} className="text-white/35 mt-0.5 flex-shrink-0" />
-                <span className="leading-snug">{transport.baggage}</span>
+              <div className="flex items-center gap-1.5 text-white/60 text-[11px] min-w-0">
+                <Luggage size={12} className="text-white/40 flex-shrink-0" />
+                <span className="truncate">{transport.baggage}</span>
               </div>
             )}
-
-            {/* Footer: price + book */}
-            <div
-              className="px-3 py-2.5 border-t flex items-center justify-between gap-2"
-              style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-            >
-              <div>
-                <div className="text-white/40 text-[8px] uppercase tracking-wider">Price</div>
-                <div className="text-white text-sm font-semibold">${transport.price}</div>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <div className="text-white text-[17px] font-semibold tabular-nums">
+                ${transport.price}
               </div>
               {transport.bookingUrl ? (
                 <a
@@ -271,16 +270,79 @@ export default function Connector({ transport, index, isExpanded, onToggle }: Co
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1 text-[11px] text-white px-3 py-1.5 rounded-full transition-all hover:brightness-110"
+                  className="flex items-center gap-1 text-[12px] font-medium text-white px-3.5 py-1.5 rounded-full transition-all hover:brightness-110"
                   style={{ background: accentColor }}
                 >
                   Book
-                  <ExternalLink size={9} />
+                  <ExternalLink size={11} />
                 </a>
               ) : (
-                <div className="text-white/30 text-[10px]">Soon</div>
+                <div className="text-white/30 text-[11px]">Soon</div>
               )}
             </div>
+          </div>
+
+          {/* Other options — horizontal row of alternative pills */}
+          {alternatives.length > 0 && (
+            <div
+              className="px-4 py-3 border-t"
+              style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+            >
+              <div className="text-white/45 text-[10px] uppercase tracking-wider mb-2 font-medium">
+                Other options
+              </div>
+              <div className="flex gap-2">
+                {alternatives.map((alt, ai) => {
+                  const altIsFlight = alt.mode === 'flight';
+                  const AltIcon = altIsFlight ? Plane : TrainFront;
+                  const altAccent = altIsFlight ? '#4f8ef7' : '#34d399';
+                  return (
+                    <button
+                      key={ai}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setTransportOut(cityIndex, ai);
+                      }}
+                      className="group flex-1 min-w-0 flex flex-col gap-1.5 px-3 py-2.5 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] hover:border-white/25 transition-all text-left"
+                    >
+                      <div className="flex items-center justify-between gap-1.5">
+                        <div
+                          className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{
+                            background: `${altAccent}25`,
+                            border: `1px solid ${altAccent}55`,
+                          }}
+                        >
+                          <AltIcon size={10} style={{ color: altAccent }} />
+                        </div>
+                        <span className="text-white text-[13px] font-semibold tabular-nums">
+                          ${alt.price}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-1 text-white/85 text-[11px] font-mono tabular-nums">
+                        <span>{alt.departTime}</span>
+                        <span className="text-white/30 text-[9px]">→</span>
+                        <span>{alt.arriveTime}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-white/55 text-[10px]">
+                        <Clock size={9} className="text-white/40 flex-shrink-0" />
+                        <span className="font-medium">{alt.duration}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-1 pt-0.5 border-t border-white/[0.06]">
+                        <span className="text-white/55 text-[10px] truncate">
+                          {alt.operator}
+                        </span>
+                        <ArrowLeftRight
+                          size={10}
+                          className="text-white/25 group-hover:text-white/80 transition-colors flex-shrink-0"
+                        />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

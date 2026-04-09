@@ -5,12 +5,9 @@ import { motion } from 'framer-motion';
 import {
   Star,
   Building2,
-  Utensils,
-  MapPin,
   ChevronLeft,
   ChevronRight,
   Zap,
-  Info,
 } from 'lucide-react';
 import { City } from '@/lib/types';
 import { getCityTheme, getVibeColor, VIBE_LABEL } from '@/lib/cityTheme';
@@ -20,8 +17,10 @@ import { useTripStore } from '@/store/tripStore';
 type CityCardProps = {
   city: City;
   index: number;
+  /** This specific card is being hovered — drives the scale-up animation */
   isActive: boolean;
-  isAnyActive: boolean;
+  /** Another city is being hovered — drives the dim-out animation */
+  isDimmed: boolean;
   onHover: () => void;
   onLeave: () => void;
   onClick: () => void;
@@ -42,7 +41,7 @@ export default function CityCard({
   city,
   index,
   isActive,
-  isAnyActive,
+  isDimmed,
   onHover,
   onLeave,
   onClick,
@@ -60,7 +59,7 @@ export default function CityCard({
   return (
     <motion.div
       animate={{
-        opacity: isAnyActive && !isActive ? 0.55 : 1,
+        opacity: isDimmed ? 0.35 : 1,
         scale: isActive ? 1.04 : 1,
       }}
       transition={{
@@ -159,47 +158,6 @@ export default function CityCard({
       {/* Hotel */}
       <HotelSection city={city} cityIndex={index} />
 
-      <div className="h-px bg-white/5 mx-6" />
-
-      {/* Activities */}
-      <div className="px-6 py-4">
-        <div className="flex items-center gap-2 text-white/35 text-[11px] uppercase tracking-wider mb-2">
-          <MapPin size={11} />
-          <span>Top picks</span>
-        </div>
-        <ul className="flex flex-col gap-1.5">
-          {city.activities.slice(0, 3).map((activity, i) => (
-            <li key={i} className="text-white/70 text-[13px] leading-snug flex gap-2">
-              <span className="flex-shrink-0" style={{ color: `${theme.vibeAccent}99` }}>
-                ·
-              </span>
-              <span>{activity}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="h-px bg-white/5 mx-6" />
-
-      {/* Restaurants */}
-      <div className="px-6 py-4">
-        <div className="flex items-center gap-2 text-white/35 text-[11px] uppercase tracking-wider mb-2">
-          <Utensils size={11} />
-          <span>Eat here</span>
-        </div>
-        <ul className="flex flex-col gap-1">
-          {city.restaurants.slice(0, 2).map((r, i) => (
-            <li
-              key={i}
-              className="text-white/70 text-[13px] leading-snug flex items-center justify-between gap-2"
-            >
-              <span className="truncate">{r.name}</span>
-              <span className="text-white/30 text-[11px] flex-shrink-0">{r.priceRange}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
       {/* Open detail hint */}
       <div className="px-6 pb-5 pt-1">
         <div
@@ -221,12 +179,6 @@ function HotelSection({ city, cityIndex }: { city: City; cityIndex: number }) {
   const isCustom = eff.isCustom;
   const ranked = !isCustom && city.hotels.length > 1;
   const [slideDir, setSlideDir] = useState<1 | -1>(1);
-  const [showFees, setShowFees] = useState(false);
-
-  const room = Math.round(eff.roomSubtotal);
-  const taxes = Math.round(eff.taxesSubtotal);
-  const total = Math.round(eff.total);
-  const hasTaxes = taxes > 0;
 
   const stop = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -323,46 +275,6 @@ function HotelSection({ city, cityIndex }: { city: City; cityIndex: number }) {
                 ${Math.round(eff.pricePerNight)}/night
               </div>
             </div>
-          </div>
-
-          {/* Stay total breakdown */}
-          <div className="mt-3 pt-2 border-t border-white/5">
-            <div className="flex items-center justify-between text-[11px]">
-              <button
-                type="button"
-                onClick={(e) => {
-                  stop(e);
-                  if (hasTaxes) setShowFees((v) => !v);
-                }}
-                className="flex items-center gap-1 text-white/35 uppercase tracking-wider hover:text-white/60 transition-colors"
-              >
-                <span>Stay total</span>
-                {hasTaxes && <Info size={10} className="opacity-70" />}
-              </button>
-              <span className="text-white/85 font-semibold tabular-nums">
-                ${total.toLocaleString()}
-              </span>
-            </div>
-
-            {hasTaxes && showFees && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                transition={{ duration: 0.2 }}
-                className="mt-1.5 flex flex-col gap-0.5 text-[10.5px] text-white/45 tabular-nums"
-              >
-                <div className="flex justify-between">
-                  <span>
-                    Room · ${Math.round(eff.pricePerNight)} × {eff.nights}n
-                  </span>
-                  <span>${room.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Taxes & fees</span>
-                  <span>${taxes.toLocaleString()}</span>
-                </div>
-              </motion.div>
-            )}
           </div>
         </motion.div>
       </div>

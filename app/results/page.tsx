@@ -48,38 +48,45 @@ function ResultsPageInner() {
   };
 
   return (
-    <main className="min-h-screen bg-voyza-bg text-white">
+    <main className="h-screen overflow-hidden bg-voyza-bg text-white flex flex-col">
       <Navbar />
 
-      <div className="flex flex-col lg:flex-row gap-6 px-6 pb-10 pt-16 max-w-[1600px] mx-auto">
-        {/* Main column */}
-        <div className="flex-1 min-w-0">
+      {/* Page body fills the viewport below the navbar. Nothing here scrolls
+          except the Flowchart window and the AI chat panel. */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6 px-6 pb-6 pt-[3.75rem] max-w-[1600px] w-full mx-auto">
+        {/* Main column — header pinned, cards window scrolls inside */}
+        <div className="flex-1 min-w-0 flex flex-col min-h-0">
           <ResultsHeader trip={currentTrip} />
           <ViewTabs value={view} onChange={setView} />
 
-          {openCityIndex !== null ? (
-            <CityDetailPanel
-              trip={currentTrip}
-              cityIndex={openCityIndex}
-              onClose={() => setOpenCityIndex(null)}
-              onPrev={() => setOpenCityIndex((i) => (i !== null && i > 0 ? i - 1 : i))}
-              onNext={() =>
-                setOpenCityIndex((i) =>
-                  i !== null && i < currentTrip.cities.length - 1 ? i + 1 : i
-                )
-              }
-            />
-          ) : view === 'flowchart' ? (
-            <Flowchart trip={currentTrip} onCityClick={handleCityClick} />
-          ) : (
-            <CalendarView trip={currentTrip} onCityClick={handleCityClick} />
-          )}
-
-          {/* "Why this trip is cheaper" moved into the AI chat — ask it there */}
+          {/* Scrollable cards window */}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {openCityIndex !== null ? (
+              <CityDetailPanel
+                trip={currentTrip}
+                cityIndex={openCityIndex}
+                onClose={() => setOpenCityIndex(null)}
+                onPrev={() =>
+                  setOpenCityIndex((i) => (i !== null && i > 0 ? i - 1 : i))
+                }
+                onNext={() =>
+                  setOpenCityIndex((i) =>
+                    i !== null && i < currentTrip.cities.length - 1 ? i + 1 : i
+                  )
+                }
+              />
+            ) : view === 'flowchart' ? (
+              <Flowchart trip={currentTrip} onCityClick={handleCityClick} />
+            ) : (
+              <div className="h-full overflow-y-auto">
+                <CalendarView trip={currentTrip} onCityClick={handleCityClick} />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* AI chat sidebar */}
-        <aside className="lg:w-[380px] lg:flex-shrink-0 lg:sticky lg:top-20 lg:h-[calc(100vh-6rem)] mt-8">
+        <aside className="lg:w-[380px] lg:flex-shrink-0 min-h-0 flex lg:mt-3">
           <AIChatPanel trip={currentTrip} />
         </aside>
       </div>

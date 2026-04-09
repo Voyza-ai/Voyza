@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
   ChevronLeft,
@@ -13,6 +14,9 @@ import {
   Check,
   Award,
   Zap,
+  Info,
+  Shuffle,
+  Map as MapIcon,
 } from 'lucide-react';
 import { Trip, Hotel } from '@/lib/types';
 import { useTripStore } from '@/store/tripStore';
@@ -52,13 +56,22 @@ export default function CityDetailPanel({
   const theme = getCityTheme(city.country, city.vibes);
   const nights = nightsBetween(city.dates.arrival, city.dates.departure);
   const eff = effectiveHotel(city);
+  const [showFees, setShowFees] = useState(false);
+  const stayRoom = Math.round(eff.roomSubtotal);
+  const stayTaxes = Math.round(eff.taxesSubtotal);
+  const stayTotal = Math.round(eff.total);
+  const hasTaxes = stayTaxes > 0;
 
   const canPrev = cityIndex > 0;
   const canNext = cityIndex < trip.cities.length - 1;
 
   return (
-    <div
-      className="mx-8 mt-2 rounded-3xl border overflow-hidden"
+    <motion.div
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }}
+      className="h-full flex flex-col rounded-3xl border overflow-hidden"
       style={{
         background: theme.gradient,
         borderColor: theme.borderActive,
@@ -66,14 +79,14 @@ export default function CityDetailPanel({
     >
       {/* Top accent bar */}
       <div
-        className="h-[3px] w-full"
+        className="h-[3px] w-full flex-shrink-0"
         style={{
           background: `linear-gradient(90deg, ${theme.countryBase} 0%, ${theme.vibeAccent} 100%)`,
         }}
       />
 
-      {/* Header */}
-      <div className="px-7 pt-6 pb-5 flex items-start justify-between gap-4 border-b border-white/8">
+      {/* Header — pinned */}
+      <div className="px-7 pt-6 pb-5 flex items-start justify-between gap-4 border-b border-white/8 flex-shrink-0">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] mb-2"
             style={{ color: theme.numberColor }}
@@ -140,26 +153,97 @@ export default function CityDetailPanel({
         </div>
       </div>
 
-      {/* Body grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-0">
+      {/* Body grid — fills remaining height; each column scrolls internally */}
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-0">
         {/* LEFT: Hotel picker */}
-        <div className="px-7 py-6 border-r border-white/8">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2 text-white/40 text-[11px] uppercase tracking-[0.18em]">
+        <div className="px-7 py-6 border-r border-white/8 overflow-y-auto min-h-0">
+          <div className="flex items-start justify-between mb-4 gap-4">
+            <div className="flex items-center gap-2 text-white/40 text-[11px] uppercase tracking-[0.18em] pt-1">
               <Building2 size={12} />
               <span>Where you&apos;ll stay</span>
             </div>
-            <div className="text-white/55 text-[11px]">
-              <span className="text-white/30">Stay total</span>{' '}
-              <span className="text-white/85 font-semibold tabular-nums">
-                ${Math.round(eff.total).toLocaleString()}
-              </span>
-              <span className="text-white/25"> · {nights} nights</span>
+            <div className="flex flex-col items-end">
+              <button
+                type="button"
+                onClick={() => hasTaxes && setShowFees((v) => !v)}
+                className={`group flex items-center gap-1.5 text-[11px] px-2 py-1 -mr-2 rounded-full border transition-all duration-200 ${
+                  hasTaxes
+                    ? 'cursor-pointer border-white/10 hover:border-white/25 hover:bg-white/[0.06]'
+                    : 'cursor-default border-transparent'
+                }`}
+                aria-label={hasTaxes ? 'Toggle fee breakdown' : undefined}
+              >
+                <span className="text-white/30 group-hover:text-white/55 transition-colors">
+                  Stay total
+                </span>
+                <span className="text-white/85 group-hover:text-white font-semibold tabular-nums transition-colors">
+                  ${stayTotal.toLocaleString()}
+                </span>
+                <span className="text-white/25 group-hover:text-white/45 transition-colors">
+                  · {nights} nights
+                </span>
+                {hasTaxes && (
+                  <Info
+                    size={11}
+                    className="text-white/40 group-hover:text-white/85 ml-0.5 transition-colors"
+                  />
+                )}
+              </button>
+              <AnimatePresence initial={false}>
+                {hasTaxes && showFees && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                    animate={{ opacity: 1, height: 'auto', marginTop: 6 }}
+                    exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                    transition={{ duration: 0.22, ease: [0.22, 0.61, 0.36, 1] }}
+                    className="overflow-hidden flex flex-col items-end gap-0.5 text-[10.5px] text-white/45 tabular-nums min-w-[180px]"
+                  >
+                    <div className="flex justify-between w-full">
+                      <span>
+                        Room · ${Math.round(eff.pricePerNight)} × {nights}n
+                      </span>
+                      <span>${stayRoom.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between w-full">
+                      <span>Taxes &amp; fees</span>
+                      <span>${stayTaxes.toLocaleString()}</span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
+          {/* Coming-soon actions: randomize nearby hotels + open map */}
+          <div className="flex items-center gap-2 mb-3">
+            <button
+              type="button"
+              disabled
+              title="Coming soon"
+              className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-white/[0.03] text-[11px] text-white/40 cursor-not-allowed"
+            >
+              <Shuffle size={12} />
+              <span>Randomize nearby</span>
+              <span className="ml-1 px-1.5 py-[1px] rounded-full bg-white/[0.06] text-[9px] uppercase tracking-wider text-white/45">
+                Coming soon
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled
+              title="Coming soon"
+              className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-white/[0.03] text-[11px] text-white/40 cursor-not-allowed"
+            >
+              <MapIcon size={12} />
+              <span>Open map</span>
+              <span className="ml-1 px-1.5 py-[1px] rounded-full bg-white/[0.06] text-[9px] uppercase tracking-wider text-white/45">
+                Coming soon
+              </span>
+            </button>
+          </div>
+
           <div className="flex flex-col gap-2">
-            {city.hotels.map((h, i) => (
+            {city.hotels.slice(0, 4).map((h, i) => (
               <HotelRow
                 key={h.name}
                 hotel={h}
@@ -184,7 +268,7 @@ export default function CityDetailPanel({
         </div>
 
         {/* RIGHT: Activities + restaurants */}
-        <div className="px-7 py-6 flex flex-col gap-6">
+        <div className="px-7 py-6 flex flex-col gap-6 overflow-y-auto min-h-0">
           <div>
             <div className="flex items-center gap-2 text-white/40 text-[11px] uppercase tracking-[0.18em] mb-3">
               <MapPin size={12} />
@@ -218,7 +302,7 @@ export default function CityDetailPanel({
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 

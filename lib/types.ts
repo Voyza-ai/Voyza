@@ -17,6 +17,8 @@ export type Transport = {
   bookingUrl?: string;
   flightNumber?: string;
   trainNumber?: string;
+  /** Alternative departures the user can swap to (other times / modes). */
+  alternatives?: Transport[];
 };
 
 export type Hotel = {

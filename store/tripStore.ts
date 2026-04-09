@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Trip, PlanningAnswers, City, CustomHotel } from '@/lib/types';
+import { Trip, PlanningAnswers, City, CustomHotel, Transport } from '@/lib/types';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -28,6 +28,7 @@ type TripStore = {
   cycleHotel: (cityIndex: number, direction: 1 | -1) => void;
   setCustomHotel: (cityIndex: number, custom: CustomHotel) => void;
   clearCustomHotel: (cityIndex: number) => void;
+  setTransportOut: (cityIndex: number, alternativeIndex: number) => void;
   addChatMessage: (role: 'user' | 'assistant', content: string) => void;
   resetPlanning: () => void;
 };
@@ -107,6 +108,34 @@ export const useTripStore = create<TripStore>((set) => ({
       const c = cities[cityIndex];
       if (!c) return state;
       cities[cityIndex] = { ...c, customHotel: undefined };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  setTransportOut: (cityIndex, alternativeIndex) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      const currentOut = c.transportOut;
+      const alts = currentOut.alternatives ?? [];
+      const chosen = alts[alternativeIndex];
+      if (!chosen) return state;
+      // Move the currently picked option into alternatives (without its own
+      // nested alternatives) and pull the chosen one out.
+      const { alternatives: _chosenAlts, ...chosenFlat } = chosen;
+      const { alternatives: _curAlts, ...currentFlat } = currentOut;
+      const newAlts: Transport[] = alts.filter((_, i) => i !== alternativeIndex);
+      newAlts.unshift(currentFlat);
+      const newOut: Transport = { ...chosenFlat, alternatives: newAlts };
+      cities[cityIndex] = { ...c, transportOut: newOut };
+      // Keep the next city's transportIn in sync (strip alternatives).
+      if (cityIndex + 1 < cities.length) {
+        cities[cityIndex + 1] = {
+          ...cities[cityIndex + 1],
+          transportIn: chosenFlat,
+        };
+      }
       return { currentTrip: { ...state.currentTrip, cities } };
     }),
 
