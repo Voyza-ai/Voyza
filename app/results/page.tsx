@@ -10,6 +10,7 @@ import CalendarView from '@/components/results/CalendarView';
 import ViewTabs, { ResultsView } from '@/components/results/ViewTabs';
 import AIChatPanel from '@/components/results/AIChatPanel';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
+import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import { mockTrip } from '@/lib/mockData';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
@@ -30,6 +31,7 @@ function ResultsPageInner() {
   const isDemo = searchParams.get('demo') === '1';
   const [view, setView] = useState<ResultsView>('flowchart');
   const [openCityIndex, setOpenCityIndex] = useState<number | null>(null);
+  const [openActivitiesIndex, setOpenActivitiesIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (!currentTrip && isDemo) {
@@ -45,10 +47,16 @@ function ResultsPageInner() {
 
   const handleCityClick = (cityIndex: number) => {
     setOpenCityIndex(cityIndex);
+    setOpenActivitiesIndex(null);
+  };
+
+  const handleActivitiesClick = (cityIndex: number) => {
+    setOpenActivitiesIndex(cityIndex);
+    setOpenCityIndex(null);
   };
 
   return (
-    <main className="h-screen overflow-hidden bg-voyza-bg text-white flex flex-col">
+    <main className="h-screen overflow-hidden dot-grid-bg text-gray-900 flex flex-col">
       <Navbar />
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
@@ -75,8 +83,22 @@ function ResultsPageInner() {
                   )
                 }
               />
+            ) : openActivitiesIndex !== null ? (
+              <ActivitiesDetailPanel
+                trip={currentTrip}
+                cityIndex={openActivitiesIndex}
+                onClose={() => setOpenActivitiesIndex(null)}
+                onPrev={() =>
+                  setOpenActivitiesIndex((i) => (i !== null && i > 0 ? i - 1 : i))
+                }
+                onNext={() =>
+                  setOpenActivitiesIndex((i) =>
+                    i !== null && i < currentTrip.cities.length - 1 ? i + 1 : i
+                  )
+                }
+              />
             ) : view === 'flowchart' ? (
-              <Flowchart trip={currentTrip} onCityClick={handleCityClick} />
+              <Flowchart trip={currentTrip} onCityClick={handleCityClick} onActivitiesClick={handleActivitiesClick} />
             ) : (
               <div className="h-full overflow-y-auto">
                 <CalendarView trip={currentTrip} onCityClick={handleCityClick} />

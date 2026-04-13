@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Star,
   Building2,
@@ -10,7 +10,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { City } from '@/lib/types';
-import { getCityTheme, getVibeColor, VIBE_LABEL } from '@/lib/cityTheme';
+import { getCityColor } from '@/lib/cityColors';
+import { getVibeColor, VIBE_LABEL } from '@/lib/cityTheme';
 import { effectiveHotel } from '@/lib/tripTotals';
 import { useTripStore } from '@/store/tripStore';
 
@@ -46,7 +47,7 @@ export default function CityCard({
   onLeave,
   onClick,
 }: CityCardProps) {
-  const theme = getCityTheme(city.country, city.vibes);
+  const color = getCityColor(city.colorIndex ?? index);
   const arrival = formatDate(city.dates.arrival);
   const departure = formatDate(city.dates.departure);
   const nights = Math.round(
@@ -70,26 +71,18 @@ export default function CityCard({
       onMouseLeave={onLeave}
       onClick={onClick}
       tabIndex={0}
-      className="relative flex-shrink-0 w-[300px] rounded-3xl border cursor-pointer overflow-hidden transition-colors duration-300 outline-none"
+      className="relative flex-shrink-0 w-[300px] rounded-3xl border-2 cursor-pointer overflow-hidden transition-colors duration-300 outline-none"
       style={{
-        background: theme.gradient,
-        borderColor: isActive ? theme.borderActive : theme.borderRest,
-        boxShadow: isActive ? theme.glow : 'none',
+        background: color.bg,
+        borderColor: isActive ? color.text : color.border,
+        boxShadow: isActive ? `0 0 20px ${color.border}` : 'none',
       }}
     >
-      {/* Top accent bar — country base color, fading to vibe accent */}
-      <div
-        className="absolute top-0 left-0 right-0 h-[3px] opacity-80"
-        style={{
-          background: `linear-gradient(90deg, ${theme.countryBase} 0%, ${theme.vibeAccent} 100%)`,
-        }}
-      />
-
       {/* City number + stay total badge */}
       <div className="absolute top-4 right-4 flex flex-col items-end gap-1.5">
         <span
           className="text-[11px] font-medium leading-none"
-          style={{ color: theme.numberColor }}
+          style={{ color: color.text }}
         >
           {String(index + 1).padStart(2, '0')}
         </span>
@@ -100,14 +93,14 @@ export default function CityCard({
           transition={{ duration: 0.25, ease: 'easeOut' }}
           className="flex flex-col items-end px-2.5 py-1 rounded-lg border tabular-nums"
           style={{
-            background: 'rgba(255,255,255,0.04)',
-            borderColor: 'rgba(255,255,255,0.1)',
+            background: 'rgba(255,255,255,0.65)',
+            borderColor: 'rgba(0,0,0,0.12)',
           }}
         >
-          <span className="text-[9px] uppercase tracking-wider text-white/40 leading-none mb-0.5">
+          <span className="text-[9px] uppercase tracking-wider leading-none mb-0.5" style={{ color: `${color.text}99` }}>
             Stay
           </span>
-          <span className="text-white text-[15px] font-semibold leading-none">
+          <span className="text-[15px] font-bold leading-none" style={{ color: color.text }}>
             ${stayTotal.toLocaleString()}
           </span>
         </motion.div>
@@ -116,15 +109,15 @@ export default function CityCard({
       {/* Header */}
       <div className="px-6 pt-6 pb-4">
         <div className="flex items-baseline gap-2 mb-1">
-          <h3 className="text-2xl font-semibold text-white">{city.name}</h3>
+          <h3 className="text-2xl font-semibold" style={{ color: color.text }}>{city.name}</h3>
         </div>
-        <p className="text-white/45 text-sm">{city.country}</p>
+        <p className="text-sm font-medium" style={{ color: `${color.text}bb` }}>{city.country}</p>
 
-        <div className="flex items-center gap-2 mt-3 text-white/55 text-[13px]">
+        <div className="flex items-center gap-2 mt-3 text-[13px]" style={{ color: `${color.text}cc` }}>
           <span>{arrival}</span>
-          <span className="text-white/20">→</span>
+          <span style={{ color: `${color.text}88` }}>→</span>
           <span>{departure}</span>
-          <span className="text-white/25 ml-1">
+          <span className="ml-1" style={{ color: `${color.text}aa` }}>
             · {nights} {nights === 1 ? 'night' : 'nights'}
           </span>
         </div>
@@ -139,8 +132,8 @@ export default function CityCard({
                   key={v}
                   className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border"
                   style={{
-                    background: `${c}1a`,
-                    borderColor: `${c}40`,
+                    background: `rgba(255,255,255,0.7)`,
+                    borderColor: `${c}60`,
                     color: c,
                   }}
                 >
@@ -152,28 +145,32 @@ export default function CityCard({
         )}
       </div>
 
-      {/* Divider */}
-      <div className="h-px bg-white/5 mx-6" />
-
-      {/* Hotel */}
-      <HotelSection city={city} cityIndex={index} />
+      {/* Hotel pill — darker shade of card bg */}
+      <div
+        className="mx-4 rounded-2xl"
+        style={{ background: `${color.text}15` }}
+      >
+        <HotelSection city={city} cityIndex={index} color={color} />
+      </div>
 
       {/* Open detail hint */}
       <div className="px-6 pb-5 pt-1">
         <div
           className="text-center text-[11px] uppercase tracking-wider transition-colors"
-          style={{ color: isActive ? theme.countryBase : 'rgba(255,255,255,0.2)' }}
+          style={{ color: isActive ? color.text : 'rgba(0,0,0,0.35)' }}
         >
           Click to open full guide
         </div>
       </div>
+
+      {/* Color picker on hover */}
     </motion.div>
   );
 }
 
 /* ----------------------------- Hotel section ----------------------------- */
 
-function HotelSection({ city, cityIndex }: { city: City; cityIndex: number }) {
+function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: number; color: { bg: string; text: string; border: string; name: string } }) {
   const cycleHotel = useTripStore((s) => s.cycleHotel);
   const eff = effectiveHotel(city);
   const isCustom = eff.isCustom;
@@ -196,11 +193,11 @@ function HotelSection({ city, cityIndex }: { city: City; cityIndex: number }) {
   return (
     <div className="px-6 py-4">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 text-white/35 text-[11px] uppercase tracking-wider">
+        <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider" style={{ color: `${color.text}aa` }}>
           <Building2 size={11} />
           <span>Stay</span>
           {isCustom && (
-            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-white/8 border border-white/15 text-white/60 text-[9px] tracking-wider">
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-black/5 border border-black/8 text-gray-500 text-[9px] tracking-wider">
               YOUR PICK
             </span>
           )}
@@ -208,9 +205,9 @@ function HotelSection({ city, cityIndex }: { city: City; cityIndex: number }) {
             <span
               className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] tracking-wider"
               style={{
-                background: 'rgba(79,142,247,0.12)',
-                border: '1px solid rgba(79,142,247,0.3)',
-                color: '#7aa9f8',
+                background: 'rgba(46,107,196,0.14)',
+                border: '1px solid rgba(46,107,196,0.35)',
+                color: '#2e6bc4',
               }}
               title="Bookable directly through Voyza in your one upfront payment"
             >
@@ -220,14 +217,14 @@ function HotelSection({ city, cityIndex }: { city: City; cityIndex: number }) {
           )}
         </div>
         {ranked && (
-          <div className="flex items-center gap-1 text-white/35 text-[10px]">
+          <div className="flex items-center gap-1 text-gray-400 text-[10px]">
             <button
               type="button"
               onClick={(e) => {
                 stop(e);
                 handleCycle(-1);
               }}
-              className="w-5 h-5 rounded-full flex items-center justify-center text-white/55 hover:text-white hover:bg-white/8 transition-colors"
+              className="w-5 h-5 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-black/5 transition-colors"
               aria-label="Previous hotel option"
             >
               <ChevronLeft size={12} />
@@ -238,7 +235,7 @@ function HotelSection({ city, cityIndex }: { city: City; cityIndex: number }) {
                 stop(e);
                 handleCycle(1);
               }}
-              className="w-5 h-5 rounded-full flex items-center justify-center text-white/55 hover:text-white hover:bg-white/8 transition-colors"
+              className="w-5 h-5 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-black/5 transition-colors"
               aria-label="Next hotel option"
             >
               <ChevronRight size={12} />
@@ -257,11 +254,11 @@ function HotelSection({ city, cityIndex }: { city: City; cityIndex: number }) {
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-white/85 text-sm font-medium leading-tight truncate">
+              <div className="text-sm font-semibold leading-tight truncate" style={{ color: color.text }}>
                 {eff.name}
               </div>
               {eff.area && (
-                <div className="text-white/35 text-[12px] mt-0.5 truncate">{eff.area}</div>
+                <div className="text-[12px] mt-0.5 truncate" style={{ color: `${color.text}99` }}>{eff.area}</div>
               )}
             </div>
             <div className="text-right flex-shrink-0">
@@ -271,7 +268,7 @@ function HotelSection({ city, cityIndex }: { city: City; cityIndex: number }) {
                   <span>{eff.rating}</span>
                 </div>
               )}
-              <div className="text-white/55 text-xs mt-0.5">
+              <div className="text-xs mt-0.5 font-medium" style={{ color: `${color.text}aa` }}>
                 ${Math.round(eff.pricePerNight)}/night
               </div>
             </div>

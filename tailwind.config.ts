@@ -10,16 +10,16 @@ const config: Config = {
     extend: {
       colors: {
         voyza: {
-          bg: "#0f0f1a",
-          card: "#1a1a2e",
-          "card-hover": "#1e1e35",
-          accent: "#4f8ef7",
-          "accent-light": "#1a2a4f",
-          border: "#2a2a3e",
-          "border-accent": "#4f8ef7",
+          bg: "#FAFAFA",
+          card: "#ffffff",
+          "card-hover": "#f5f5f7",
+          accent: "#2e6bc4",
+          "accent-light": "#e8f0fe",
+          border: "#e5e7eb",
+          "border-accent": "#2e6bc4",
           success: "#4caf50",
-          train: "#10b981",
-          flight: "#4f8ef7",
+          train: "#22c088",
+          flight: "#2e6bc4",
         },
       },
       fontFamily: {

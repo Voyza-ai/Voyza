@@ -60,9 +60,18 @@ export function effectiveHotel(city: City): {
   };
 }
 
-/** Sum of all hotel totals across the trip. */
+/** Sum of all hotel totals across the trip, accounting for multi-room stays. */
 export function hotelsTotal(trip: Trip): number {
-  return trip.cities.reduce((sum, c) => sum + effectiveHotel(c).total, 0);
+  return trip.cities.reduce((sum, c) => {
+    const eff = effectiveHotel(c);
+    // Determine rooms needed for the group
+    const hotel = c.customHotel
+      ? null
+      : c.hotels[c.selectedHotelIndex] ?? c.hotels[0];
+    const guestsPerRoom = hotel?.maxGuests;
+    const roomsNeeded = guestsPerRoom ? Math.ceil(trip.travelers / guestsPerRoom) : 1;
+    return sum + eff.total * roomsNeeded;
+  }, 0);
 }
 
 /** Sum of all transport costs (transportOut for each city). */

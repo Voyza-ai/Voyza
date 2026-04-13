@@ -18,14 +18,16 @@ const MAIN_CARD_HEIGHT = 320;
 type FlowchartProps = {
   trip: Trip;
   onCityClick?: (cityIndex: number) => void;
+  onActivitiesClick?: (cityIndex: number) => void;
 };
 
-export default function Flowchart({ trip, onCityClick }: FlowchartProps) {
+export default function Flowchart({ trip, onCityClick, onActivitiesClick }: FlowchartProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   // Sub-card hover is independent from main card hover — each card is its
   // own object even though they're visually linked.
   const [activeSubIndex, setActiveSubIndex] = useState<number | null>(null);
   const [openConnectors, setOpenConnectors] = useState<Set<number>>(new Set());
+  const [expandedActivities, setExpandedActivities] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -100,8 +102,8 @@ export default function Flowchart({ trip, onCityClick }: FlowchartProps) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={() => scrollByAmount('left')}
-          className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full flex items-center justify-center text-white/70 hover:text-white border border-white/10 hover:border-white/25 backdrop-blur-md transition-all hover:scale-105 active:scale-95"
-          style={{ background: 'rgba(15,15,26,0.85)' }}
+          className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full flex items-center justify-center text-gray-600 hover:text-gray-900 border border-gray-200 hover:border-gray-400 backdrop-blur-md transition-all hover:scale-105 active:scale-95"
+          style={{ background: '#ffffff' }}
           aria-label="Scroll left"
         >
           <ChevronLeft size={18} />
@@ -115,35 +117,21 @@ export default function Flowchart({ trip, onCityClick }: FlowchartProps) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={() => scrollByAmount('right')}
-          className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full flex items-center justify-center text-white/70 hover:text-white border border-white/10 hover:border-white/25 backdrop-blur-md transition-all hover:scale-105 active:scale-95"
-          style={{ background: 'rgba(15,15,26,0.85)' }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full flex items-center justify-center text-gray-600 hover:text-gray-900 border border-gray-200 hover:border-gray-400 backdrop-blur-md transition-all hover:scale-105 active:scale-95"
+          style={{ background: '#ffffff' }}
           aria-label="Scroll right"
         >
           <ChevronRight size={18} />
         </motion.button>
       )}
 
-      {/* Edge fade gradients */}
-      <div
-        className="pointer-events-none absolute left-0 top-0 bottom-0 w-16 z-10 transition-opacity"
-        style={{
-          background: 'linear-gradient(90deg, #0f0f1a 0%, transparent 100%)',
-          opacity: canScrollLeft ? 1 : 0,
-        }}
-      />
-      <div
-        className="pointer-events-none absolute right-0 top-0 bottom-0 w-16 z-10 transition-opacity"
-        style={{
-          background: 'linear-gradient(270deg, #0f0f1a 0%, transparent 100%)',
-          opacity: canScrollRight ? 1 : 0,
-        }}
-      />
+      {/* Edge fade gradients removed — clean canvas, no tint */}
 
       {/* Scrollable flowchart window — scrolls both horizontally (between
           cities) and vertically (when sub-cards push past the viewport) */}
       <div
         ref={scrollRef}
-        className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden scrollbar-hide"
+        className="flex-1 min-h-0 overflow-x-auto overflow-y-auto scrollbar-hide"
         style={{
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
@@ -155,7 +143,15 @@ export default function Flowchart({ trip, onCityClick }: FlowchartProps) {
           }
         `}</style>
 
-        <div className="flex items-start px-12 pt-3 pb-12 min-w-max gap-6">
+        <motion.div
+          className="flex items-start px-12 pt-3 pb-12 min-w-max gap-6"
+          initial="hidden"
+          animate="visible"
+          variants={{
+            hidden: {},
+            visible: { transition: { staggerChildren: 0.12 } },
+          }}
+        >
           {trip.cities.map((city, idx) => {
             const hasSub =
               city.activities.length > 0 || city.restaurants.length > 0;
@@ -165,7 +161,14 @@ export default function Flowchart({ trip, onCityClick }: FlowchartProps) {
             const hoveredCity = activeIndex ?? activeSubIndex;
             const isDimmed = hoveredCity !== null && hoveredCity !== idx;
             return (
-              <div key={city.name} className="flex items-stretch">
+              <motion.div
+                key={city.name}
+                className="flex items-stretch"
+                variants={{
+                  hidden: { opacity: 0, y: 24 },
+                  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 0.61, 0.36, 1] } },
+                }}
+              >
                 {/* City column: main card → linker line → sub-card */}
                 <div
                   ref={(el) => {
@@ -190,16 +193,24 @@ export default function Flowchart({ trip, onCityClick }: FlowchartProps) {
                         className="w-px h-5"
                         style={{
                           background:
-                            'linear-gradient(180deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.08) 100%)',
+                            'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.06) 100%)',
                         }}
                       />
                       <CityActivitiesCard
                         city={city}
+                        cityIndex={idx}
                         isActive={activeSubIndex === idx}
                         isDimmed={isDimmed}
+                        expanded={expandedActivities === idx}
                         onHover={() => setActiveSubIndex(idx)}
                         onLeave={() => setActiveSubIndex(null)}
-                        onClick={() => onCityClick?.(idx)}
+                        onToggleExpand={() => {
+                          if (onActivitiesClick) {
+                            onActivitiesClick(idx);
+                          } else {
+                            setExpandedActivities((prev) => (prev === idx ? null : idx));
+                          }
+                        }}
                       />
                     </>
                   )}
@@ -224,14 +235,14 @@ export default function Flowchart({ trip, onCityClick }: FlowchartProps) {
                     />
                   </div>
                 )}
-              </div>
+              </motion.div>
             );
           })}
-        </div>
+        </motion.div>
       </div>
 
       {/* Hint — pinned below the scroll window */}
-      <div className="flex-shrink-0 text-center pt-2 pb-1 text-white/25 text-xs">
+      <div className="flex-shrink-0 text-center pt-2 pb-1 text-gray-500 text-xs">
         Hover or use ← → keys to focus a stop · Click to open the full guide
       </div>
     </div>

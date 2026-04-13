@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Send, SkipForward } from 'lucide-react';
+import { ArrowRight, Send, SkipForward, Pencil, Check, X } from 'lucide-react';
 import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -72,6 +72,8 @@ export default function PlanningChat() {
   const [showIntent, setShowIntent] = useState(false);
   const [chatMode, setChatMode] = useState(false); // open chat mode
   const [vibe, setVibe] = useState<string | null>(null);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editingMsgValue, setEditingMsgValue] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const initialized = useRef(false);
@@ -443,16 +445,90 @@ export default function PlanningChat() {
                 transition={{ duration: 0.35, ease: 'easeOut' }}
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div
-                  className={`max-w-[80%] px-5 py-3.5 rounded-2xl text-[17px] leading-relaxed ${
-                    msg.role === 'user'
-                      ? 'bg-[#4f8ef7] text-white rounded-br-md'
-                      : 'text-white/80'
-                  }`}
-                  style={msg.role === 'assistant' ? { background: 'rgba(255,255,255,0.05)' } : undefined}
-                >
-                  {msg.content}
-                </div>
+                {msg.role === 'user' && editingMsgId === msg.id ? (
+                  /* Inline edit mode for user messages */
+                  <div className="max-w-[80%] flex flex-col gap-2">
+                    <textarea
+                      autoFocus
+                      value={editingMsgValue}
+                      onChange={(e) => setEditingMsgValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          const trimmed = editingMsgValue.trim();
+                          if (trimmed) {
+                            setMessages((prev) =>
+                              prev.map((m) =>
+                                m.id === msg.id ? { ...m, content: trimmed } : m
+                              )
+                            );
+                          }
+                          setEditingMsgId(null);
+                        }
+                        if (e.key === 'Escape') setEditingMsgId(null);
+                      }}
+                      className="w-full bg-[#4f8ef7]/80 text-white rounded-2xl rounded-br-md px-5 py-3.5 text-[17px] leading-relaxed resize-none outline-none border-2 border-white/30 focus:border-white/60"
+                      rows={2}
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingMsgId(null)}
+                        className="flex items-center gap-1 text-[12px] text-white/50 hover:text-white/80 transition-colors px-2 py-1"
+                      >
+                        <X size={12} />
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const trimmed = editingMsgValue.trim();
+                          if (trimmed) {
+                            setMessages((prev) =>
+                              prev.map((m) =>
+                                m.id === msg.id ? { ...m, content: trimmed } : m
+                              )
+                            );
+                          }
+                          setEditingMsgId(null);
+                        }}
+                        className="flex items-center gap-1 text-[12px] text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1 transition-all"
+                      >
+                        <Check size={12} />
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Normal message display */
+                  <div className="group relative max-w-[80%]">
+                    <div
+                      className={`w-fit px-5 py-3.5 rounded-2xl text-[17px] leading-relaxed ${
+                        msg.role === 'user'
+                          ? 'bg-[#4f8ef7] text-white rounded-br-md ml-auto'
+                          : 'text-white/80'
+                      }`}
+                      style={msg.role === 'assistant' ? { background: 'rgba(255,255,255,0.05)' } : undefined}
+                    >
+                      {msg.content}
+                    </div>
+                    {/* Edit button — only on user messages */}
+                    {msg.role === 'user' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingMsgId(msg.id);
+                          setEditingMsgValue(msg.content);
+                        }}
+                        className="absolute -left-8 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        style={{ background: 'rgba(255,255,255,0.1)' }}
+                        title="Edit message"
+                      >
+                        <Pencil size={11} className="text-white/60" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </motion.div>
             ))}
           </AnimatePresence>
@@ -546,7 +622,8 @@ export default function PlanningChat() {
                 }
               }}
               placeholder={barPlaceholder}
-              className="flex-1 min-w-0 w-full bg-transparent border-none outline-none resize-none text-white text-[16px] placeholder-white/35 py-1.5 leading-[1.4] max-h-[102px] overflow-y-auto"
+              className="flex-1 min-w-0 w-full bg-transparent border-none outline-none resize-none text-white text-[16px] placeholder-white/35 py-1.5 leading-[1.4] max-h-[102px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              style={{ caretColor: 'rgba(255,255,255,0.7)' }}
             />
             <button
               onClick={handleBarSubmit}

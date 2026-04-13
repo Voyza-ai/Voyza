@@ -114,29 +114,30 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
 
   return (
     <div
-      className="flex flex-col h-full rounded-3xl border backdrop-blur-md overflow-hidden"
+      className="flex flex-col h-full rounded-3xl border-2 overflow-hidden"
       style={{
-        background: 'rgba(255,255,255,0.02)',
-        borderColor: 'rgba(255,255,255,0.08)',
+        background: '#eef3fb',
+        borderColor: '#2e6bc4',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04)',
       }}
     >
-      {/* Header */}
+      {/* Header — blue like navbar */}
       <div
-        className="px-5 py-4 border-b flex items-center gap-2.5"
-        style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+        className="px-5 py-4 flex items-center gap-2.5"
+        style={{ background: '#2e6bc4' }}
       >
         <div
           className="w-8 h-8 rounded-full flex items-center justify-center"
           style={{
-            background: 'rgba(79,142,247,0.12)',
-            border: '1px solid rgba(79,142,247,0.25)',
+            background: 'rgba(255,255,255,0.2)',
+            border: '1px solid rgba(255,255,255,0.3)',
           }}
         >
-          <Sparkles size={14} className="text-[#4f8ef7]" />
+          <Sparkles size={14} className="text-white" />
         </div>
         <div>
           <div className="text-white text-sm font-medium leading-tight">Voyza AI</div>
-          <div className="text-white/35 text-[11px]">Tweak your trip in plain English</div>
+          <div className="text-white/60 text-[11px]">Tweak your trip in plain English</div>
         </div>
       </div>
 
@@ -158,18 +159,18 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
               <div
                 className={`max-w-[88%] px-3.5 py-2.5 rounded-2xl text-[13px] leading-relaxed whitespace-pre-wrap ${
                   msg.role === 'user'
-                    ? 'text-white rounded-br-md'
-                    : 'text-white/85 rounded-bl-md'
+                    ? 'text-gray-900 rounded-br-md'
+                    : 'text-gray-700 rounded-bl-md'
                 }`}
                 style={{
                   background:
                     msg.role === 'user'
-                      ? 'rgba(79,142,247,0.18)'
-                      : 'rgba(255,255,255,0.04)',
+                      ? 'rgba(46,107,196,0.12)'
+                      : 'rgba(0,0,0,0.03)',
                   border:
                     msg.role === 'user'
-                      ? '1px solid rgba(79,142,247,0.3)'
-                      : '1px solid rgba(255,255,255,0.06)',
+                      ? '1px solid rgba(46,107,196,0.2)'
+                      : '1px solid rgba(0,0,0,0.06)',
                 }}
               >
                 {msg.content}
@@ -188,14 +189,14 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
               <div
                 className="px-3.5 py-3 rounded-2xl rounded-bl-md flex items-center gap-1"
                 style={{
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  background: 'rgba(0,0,0,0.03)',
+                  border: '1px solid rgba(0,0,0,0.06)',
                 }}
               >
                 {[0, 1, 2].map((i) => (
                   <motion.div
                     key={i}
-                    className="w-1.5 h-1.5 rounded-full bg-white/40"
+                    className="w-1.5 h-1.5 rounded-full bg-gray-400"
                     animate={{ opacity: [0.3, 1, 0.3] }}
                     transition={{
                       duration: 1.1,
@@ -217,8 +218,8 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
             <button
               key={prompt}
               onClick={() => handleSend(prompt)}
-              className="text-[11px] text-white/60 hover:text-white px-2.5 py-1.5 rounded-full border border-white/8 hover:border-white/20 transition-colors"
-              style={{ background: 'rgba(255,255,255,0.02)' }}
+              className="text-[11px] text-[#2e6bc4] hover:text-[#1e5ab3] px-2.5 py-1.5 rounded-full border transition-colors"
+              style={{ background: 'rgba(46,107,196,0.08)', borderColor: 'rgba(46,107,196,0.25)' }}
             >
               {prompt}
             </button>
@@ -229,22 +230,24 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
       {/* Input */}
       <form
         onSubmit={handleSubmit}
-        className="p-3 border-t flex items-center gap-2"
-        style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+        className="p-3 flex items-center gap-2"
+        style={{ borderTop: '2px solid #2e6bc4' }}
       >
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask about your trip..."
-          className="flex-1 bg-transparent text-white text-[13px] placeholder:text-white/30 outline-none px-3 py-2"
+          className="flex-1 text-gray-900 text-[13px] placeholder:text-gray-400 outline-none px-3 py-2 rounded-lg"
+          style={{ background: 'rgba(46,107,196,0.06)' }}
         />
         <button
           type="submit"
           disabled={!input.trim() || isTyping}
           className="w-9 h-9 rounded-full flex items-center justify-center text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed enabled:hover:scale-105 active:scale-95"
           style={{
-            background: input.trim() && !isTyping ? '#4f8ef7' : 'rgba(255,255,255,0.06)',
+            background: input.trim() && !isTyping ? '#2e6bc4' : 'rgba(0,0,0,0.05)',
+            color: input.trim() && !isTyping ? '#ffffff' : 'rgba(0,0,0,0.4)',
           }}
           aria-label="Send"
         >

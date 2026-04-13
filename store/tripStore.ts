@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Trip, PlanningAnswers, City, CustomHotel, Transport } from '@/lib/types';
+import { Trip, PlanningAnswers, City, CustomHotel, Transport, Restaurant, ScheduledEvent } from '@/lib/types';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -29,6 +29,17 @@ type TripStore = {
   setCustomHotel: (cityIndex: number, custom: CustomHotel) => void;
   clearCustomHotel: (cityIndex: number) => void;
   setTransportOut: (cityIndex: number, alternativeIndex: number) => void;
+  setCityColor: (cityIndex: number, colorIndex: number) => void;
+  addActivity: (cityIndex: number, activity: string) => void;
+  removeActivity: (cityIndex: number, activityIndex: number) => void;
+  updateActivity: (cityIndex: number, activityIndex: number, value: string) => void;
+  addRestaurant: (cityIndex: number, restaurant: Restaurant) => void;
+  removeRestaurant: (cityIndex: number, restaurantIndex: number) => void;
+  updateRestaurant: (cityIndex: number, restaurantIndex: number, updates: Partial<Restaurant>) => void;
+  setDaySchedule: (cityIndex: number, date: string, events: ScheduledEvent[]) => void;
+  addScheduledEvent: (cityIndex: number, date: string, event: ScheduledEvent) => void;
+  updateScheduledEvent: (cityIndex: number, date: string, eventId: string, updates: Partial<ScheduledEvent>) => void;
+  removeScheduledEvent: (cityIndex: number, date: string, eventId: string) => void;
   addChatMessage: (role: 'user' | 'assistant', content: string) => void;
   resetPlanning: () => void;
 };
@@ -136,6 +147,129 @@ export const useTripStore = create<TripStore>((set) => ({
           transportIn: chosenFlat,
         };
       }
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  setCityColor: (cityIndex, colorIndex) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      cities[cityIndex] = { ...cities[cityIndex], colorIndex };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  addActivity: (cityIndex, activity) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      cities[cityIndex] = { ...c, activities: [...c.activities, activity] };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  removeActivity: (cityIndex, activityIndex) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      const activities = c.activities.filter((_, i) => i !== activityIndex);
+      cities[cityIndex] = { ...c, activities };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  updateActivity: (cityIndex, activityIndex, value) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      const activities = [...c.activities];
+      activities[activityIndex] = value;
+      cities[cityIndex] = { ...c, activities };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  addRestaurant: (cityIndex, restaurant) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      cities[cityIndex] = { ...c, restaurants: [...c.restaurants, restaurant] };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  removeRestaurant: (cityIndex, restaurantIndex) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      const restaurants = c.restaurants.filter((_, i) => i !== restaurantIndex);
+      cities[cityIndex] = { ...c, restaurants };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  updateRestaurant: (cityIndex, restaurantIndex, updates) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      const restaurants = [...c.restaurants];
+      restaurants[restaurantIndex] = { ...restaurants[restaurantIndex], ...updates };
+      cities[cityIndex] = { ...c, restaurants };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  setDaySchedule: (cityIndex, date, events) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      const schedule = { ...(c.schedule ?? {}), [date]: events };
+      cities[cityIndex] = { ...c, schedule };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  addScheduledEvent: (cityIndex, date, event) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      const dayEvents = [...(c.schedule?.[date] ?? []), event];
+      const schedule = { ...(c.schedule ?? {}), [date]: dayEvents };
+      cities[cityIndex] = { ...c, schedule };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  updateScheduledEvent: (cityIndex, date, eventId, updates) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      const dayEvents = (c.schedule?.[date] ?? []).map((e) =>
+        e.id === eventId ? { ...e, ...updates } : e
+      );
+      const schedule = { ...(c.schedule ?? {}), [date]: dayEvents };
+      cities[cityIndex] = { ...c, schedule };
+      return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  removeScheduledEvent: (cityIndex, date, eventId) =>
+    set((state) => {
+      if (!state.currentTrip) return state;
+      const cities = [...state.currentTrip.cities];
+      const c = cities[cityIndex];
+      if (!c) return state;
+      const dayEvents = (c.schedule?.[date] ?? []).filter((e) => e.id !== eventId);
+      const schedule = { ...(c.schedule ?? {}), [date]: dayEvents };
+      cities[cityIndex] = { ...c, schedule };
       return { currentTrip: { ...state.currentTrip, cities } };
     }),
 
