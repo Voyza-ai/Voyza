@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, PenSquare } from 'lucide-react';
 import { Trip } from '@/lib/types';
+import Link from 'next/link';
 import CityCard from './CityCard';
 import CityActivitiesCard from './CityActivitiesCard';
 import Connector from './Connector';
@@ -95,6 +96,19 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
 
   return (
     <div className="relative h-full flex flex-col min-h-0">
+      {/* Edit in Canvas button — top right */}
+      {trip.id && (
+        <Link
+          href={`/canvas/${trip.id}`}
+          target="_blank"
+          className="absolute top-3 right-3 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all hover:brightness-110"
+          style={{ background: '#4f8ef7' }}
+        >
+          <PenSquare size={12} />
+          Edit in Canvas
+        </Link>
+      )}
+
       {/* Left scroll button */}
       {canScrollLeft && (
         <motion.button

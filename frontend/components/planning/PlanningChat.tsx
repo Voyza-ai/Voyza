@@ -7,6 +7,7 @@ import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { mockTrip } from '@/lib/mockData';
+import { interpretPlan, optimizeTrip } from '@/lib/api';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import DatePicker from './DatePicker';
@@ -326,7 +327,31 @@ export default function PlanningChat() {
     advanceToNextStep(currentStepIndex);
   };
 
-  const handleFindTrip = () => {
+  const handleFindTrip = async () => {
+    // Try backend API first, fall back to mock
+    try {
+      const parsed = await interpretPlan({
+        rawInput: answers.rawInput ?? answers.destinations?.join(', ') ?? '',
+        userLocation: 'unknown',
+      });
+
+      if (parsed.destinations && parsed.destinations.length >= 2) {
+        const result = await optimizeTrip({
+          cities: parsed.destinations.map((d: string) => ({ name: d })),
+          startDate: parsed.dates?.start ?? new Date().toISOString().split('T')[0],
+          travelers: parsed.travelers ?? answers.travelers ?? 1,
+          budget: parsed.budget ?? answers.budget,
+        });
+        // For now, use mock trip but with optimized ordering info
+        // Full integration would build the trip from optimization results
+        setTrip(mockTrip);
+        router.push('/results');
+        return;
+      }
+    } catch {
+      // Fall back to mock
+    }
+
     setTrip(mockTrip);
     router.push('/results');
   };

@@ -17,11 +17,20 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 
-  // Anthropic
-  ANTHROPIC_API_KEY: z.string().min(1),
+  // Anthropic — optional so backend boots without it
+  ANTHROPIC_API_KEY: z.string().optional(),
 
   // Providers — optional during early development
   DUFFEL_ACCESS_TOKEN: z.string().optional(),
+
+  // Hotels (RapidAPI / Booking.com)
+  RAPIDAPI_KEY: z.string().optional(),
+
+  // Deutsche Bahn REST API
+  DB_REST_BASE_URL: z.string().default('https://v6.db.transport.rest'),
+
+  // Frontend URL for invite links and redirects
+  FRONTEND_URL: z.string().default('http://localhost:3000'),
 });
 
 const parsed = envSchema.safeParse(process.env);

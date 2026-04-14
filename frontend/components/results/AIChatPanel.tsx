@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Sparkles, Bot } from 'lucide-react';
 import { Trip } from '@/lib/types';
+import { editPlan } from '@/lib/api';
 
 type Message = {
   id: number;
@@ -95,16 +96,29 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
     setInput('');
     setIsTyping(true);
 
-    // Simulate AI response delay
-    setTimeout(() => {
-      const aiMsg: Message = {
-        id: idRef.current++,
-        role: 'ai',
-        content: generateMockResponse(trimmed, trip),
-      };
-      setMessages((prev) => [...prev, aiMsg]);
-      setIsTyping(false);
-    }, 900 + Math.random() * 600);
+    // Try backend API first, fall back to mock
+    editPlan({ message: trimmed, currentTrip: trip })
+      .then((result) => {
+        const content = result._mock
+          ? generateMockResponse(trimmed, trip)
+          : result.message ?? generateMockResponse(trimmed, trip);
+        const aiMsg: Message = {
+          id: idRef.current++,
+          role: 'ai',
+          content,
+        };
+        setMessages((prev) => [...prev, aiMsg]);
+        setIsTyping(false);
+      })
+      .catch(() => {
+        const aiMsg: Message = {
+          id: idRef.current++,
+          role: 'ai',
+          content: generateMockResponse(trimmed, trip),
+        };
+        setMessages((prev) => [...prev, aiMsg]);
+        setIsTyping(false);
+      });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
