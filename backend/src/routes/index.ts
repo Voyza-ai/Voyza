@@ -45,13 +45,14 @@ router.post(
 );
 
 // ─── Optimize ────────────────────────────────────────────────
+// Accept cities as either string[] or { name, country? }[]
+const cityItem = z.union([
+  z.string().min(1),
+  z.object({ name: z.string().min(1), country: z.string().optional() }),
+]);
+
 const optimizeSchema = z.object({
-  cities: z.array(
-    z.object({
-      name: z.string().min(1),
-      country: z.string().optional(),
-    }),
-  ).min(2),
+  cities: z.array(cityItem).min(2),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   travelers: z.number().int().positive().default(1),
   budget: z.number().positive().optional(),
@@ -61,7 +62,11 @@ router.post(
   '/optimize',
   asyncHandler(async (req, res) => {
     const input = optimizeSchema.parse(req.body);
-    const result = await optimize(input);
+    // Normalize: strings become { name } objects
+    const cities = input.cities.map((c) =>
+      typeof c === 'string' ? { name: c } : c,
+    );
+    const result = await optimize({ ...input, cities });
     res.json(result);
   }),
 );

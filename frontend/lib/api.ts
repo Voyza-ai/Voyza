@@ -52,8 +52,8 @@ export type FlightOffer = {
 export async function searchFlights(params: {
   origin: string;
   destination: string;
-  departureDate: string;
-  passengers?: number;
+  date: string;
+  travelers?: number;
   cabinClass?: string;
 }): Promise<FlightOffer[]> {
   const data = await apiFetch<{ offers: FlightOffer[] }>('/api/flights/search', {
@@ -138,7 +138,7 @@ export type OptimizeResult = {
 };
 
 export async function optimizeTrip(params: {
-  cities: Array<{ name: string; country?: string }>;
+  cities: string[] | Array<{ name: string; country?: string }>;
   startDate: string;
   travelers?: number;
   budget?: number;
