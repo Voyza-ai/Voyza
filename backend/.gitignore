@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Env files — real secrets live only on local machines and deploy envs
+.env
+.env.local
+.env.*.local
+
+# Allow the example template to be committed
+!.env.example
