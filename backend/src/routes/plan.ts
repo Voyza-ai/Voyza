@@ -6,9 +6,10 @@ import { logger } from '../utils/logger';
 
 const router = Router();
 
-// Lazy Anthropic client getter — returns null if key not set
+// Lazy Anthropic client getter — returns null if key not set or placeholder
 function getAnthropicSafe() {
-  if (!env.ANTHROPIC_API_KEY) return null;
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key || key === 'your_anthropic_api_key' || key.startsWith('your_')) return null;
   try {
     const { getAnthropic } = require('../services/anthropic');
     return getAnthropic();
@@ -52,13 +53,69 @@ router.post(
       }
     }
 
-    // Mock response
+    // Mock response — extract city/country names from the raw input
+    const words = rawInput
+      .split(/[,&+]|\band\b/i)
+      .map((w) => w.trim())
+      .filter(Boolean);
+
+    // Map common country names to their capital/major city
+    const countryToCity: Record<string, string> = {
+      japan: 'Tokyo',
+      china: 'Beijing',
+      france: 'Paris',
+      italy: 'Rome',
+      spain: 'Barcelona',
+      germany: 'Berlin',
+      uk: 'London',
+      england: 'London',
+      thailand: 'Bangkok',
+      india: 'Delhi',
+      brazil: 'São Paulo',
+      mexico: 'Mexico City',
+      turkey: 'Istanbul',
+      greece: 'Athens',
+      portugal: 'Lisbon',
+      netherlands: 'Amsterdam',
+      austria: 'Vienna',
+      korea: 'Seoul',
+      australia: 'Sydney',
+      egypt: 'Cairo',
+      morocco: 'Marrakech',
+      croatia: 'Dubrovnik',
+      czech: 'Prague',
+      hungary: 'Budapest',
+      switzerland: 'Zurich',
+      ireland: 'Dublin',
+      scotland: 'Edinburgh',
+      vietnam: 'Hanoi',
+      indonesia: 'Bali',
+      philippines: 'Manila',
+      colombia: 'Bogotá',
+      argentina: 'Buenos Aires',
+      peru: 'Lima',
+    };
+
+    const destinations = words.map((w) => {
+      const lower = w.toLowerCase();
+      return countryToCity[lower] ?? w.charAt(0).toUpperCase() + w.slice(1);
+    });
+
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(start.getDate() + 30);
+    const end = new Date(start);
+    end.setDate(end.getDate() + destinations.length * 3);
+
     res.json({
-      destinations: ['Paris', 'Rome'],
-      dates: { start: '2026-06-01', end: '2026-06-14' },
+      destinations,
+      dates: {
+        start: start.toISOString().split('T')[0],
+        end: end.toISOString().split('T')[0],
+      },
       travelers: 2,
-      budget: 2000,
-      vibe: 'city break',
+      budget: null,
+      vibe: 'adventure',
       _mock: true,
     });
   }),

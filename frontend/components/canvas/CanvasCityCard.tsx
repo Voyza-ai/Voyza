@@ -35,10 +35,10 @@ export default function CanvasCityCard({
   return (
     <div className="flex items-center">
       <motion.div
-        className="relative flex-shrink-0 w-[220px] rounded-2xl border overflow-hidden"
+        className="relative flex-shrink-0 w-[220px] rounded-2xl border overflow-hidden shadow-sm"
         style={{
-          background: 'rgba(255,255,255,0.06)',
-          borderColor: 'rgba(255,255,255,0.12)',
+          background: '#ffffff',
+          borderColor: 'rgba(0,0,0,0.08)',
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -59,12 +59,12 @@ export default function CanvasCityCard({
 
         {/* City header */}
         <div className="px-4 pt-4 pb-2">
-          <div className="text-white text-[15px] font-semibold">{city.name}</div>
-          <div className="text-white/40 text-[11px]">{city.country}</div>
+          <div className="text-gray-900 text-[15px] font-semibold">{city.name}</div>
+          <div className="text-gray-400 text-[11px]">{city.country}</div>
         </div>
 
         {/* Dates */}
-        <div className="px-4 pb-2 flex items-center gap-1.5 text-white/50 text-[11px]">
+        <div className="px-4 pb-2 flex items-center gap-1.5 text-gray-500 text-[11px]">
           <Calendar size={10} />
           <span>
             {city.dates?.arrival} — {city.dates?.departure}
@@ -74,9 +74,9 @@ export default function CanvasCityCard({
         {/* Hotel info */}
         {hotel && (
           <div className="px-4 pb-2 flex items-center gap-1.5">
-            <Hotel size={11} className="text-white/40" />
-            <span className="text-white/60 text-[11px] truncate flex-1">{hotel.name}</span>
-            <span className="text-white/80 text-[12px] font-medium">
+            <Hotel size={11} className="text-gray-400" />
+            <span className="text-gray-500 text-[11px] truncate flex-1">{hotel.name}</span>
+            <span className="text-gray-700 text-[12px] font-medium">
               ${hotel.pricePerNight}/n
             </span>
           </div>
@@ -86,15 +86,15 @@ export default function CanvasCityCard({
         {transportOut && !isLast && (
           <div
             className="px-4 py-2 border-t flex items-center gap-1.5"
-            style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+            style={{ borderColor: 'rgba(0,0,0,0.06)' }}
           >
             {transportOut.mode === 'flight' ? (
               <Plane size={11} style={{ color: accentColor }} />
             ) : (
               <TrainFront size={11} style={{ color: accentColor }} />
             )}
-            <span className="text-white/50 text-[11px]">{transportOut.duration}</span>
-            <span className="text-white/80 text-[12px] font-medium ml-auto">
+            <span className="text-gray-500 text-[11px]">{transportOut.duration}</span>
+            <span className="text-gray-700 text-[12px] font-medium ml-auto">
               ${transportOut.price}
             </span>
           </div>
@@ -113,13 +113,13 @@ export default function CanvasCityCard({
           {canEdit && (
             <button
               onClick={() => onAddAfter(index)}
-              className="w-7 h-7 rounded-full flex items-center justify-center border transition-all hover:scale-110 active:scale-95"
+              className="w-7 h-7 rounded-full flex items-center justify-center border transition-all hover:scale-110 active:scale-95 hover:border-[#2563eb]"
               style={{
-                background: 'rgba(255,255,255,0.06)',
-                borderColor: 'rgba(255,255,255,0.15)',
+                background: '#ffffff',
+                borderColor: 'rgba(0,0,0,0.12)',
               }}
             >
-              <Plus size={12} className="text-white/50" />
+              <Plus size={12} className="text-gray-400" />
             </button>
           )}
           <div

@@ -34,15 +34,14 @@ export default function SuggestionsPanel({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="fixed bottom-4 left-4 z-30 w-[280px] max-h-[320px] overflow-y-auto rounded-2xl border"
+      className="fixed bottom-4 left-4 z-30 w-[280px] max-h-[320px] overflow-y-auto rounded-2xl border shadow-lg"
       style={{
-        background: 'rgba(18,18,18,0.95)',
-        borderColor: 'rgba(255,255,255,0.1)',
-        backdropFilter: 'blur(20px)',
+        background: '#ffffff',
+        borderColor: 'rgba(0,0,0,0.08)',
       }}
     >
-      <div className="px-3 py-2.5 border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-        <span className="text-white/70 text-[12px] font-medium">
+      <div className="px-3 py-2.5 border-b" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
+        <span className="text-gray-600 text-[12px] font-medium">
           Pending Suggestions ({pending.length})
         </span>
       </div>
@@ -57,23 +56,23 @@ export default function SuggestionsPanel({
               exit={{ opacity: 0, x: 10 }}
               className="rounded-lg p-2.5 border"
               style={{
-                background: 'rgba(255,255,255,0.04)',
-                borderColor: 'rgba(255,255,255,0.08)',
+                background: '#f8fafc',
+                borderColor: 'rgba(0,0,0,0.06)',
               }}
             >
               <div className="flex items-center gap-2 mb-1.5">
                 {s.type === 'add_city' && (
-                  <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center">
-                    <span className="text-[9px] text-blue-400">+</span>
+                  <div className="w-5 h-5 rounded-full bg-blue-50 flex items-center justify-center">
+                    <span className="text-[9px] text-[#2563eb]">+</span>
                   </div>
                 )}
                 {s.type === 'comment' && (
-                  <MessageCircle size={12} className="text-amber-400" />
+                  <MessageCircle size={12} className="text-amber-500" />
                 )}
                 {s.type === 'reaction' && (
-                  <Smile size={12} className="text-green-400" />
+                  <Smile size={12} className="text-green-500" />
                 )}
-                <span className="text-white/80 text-[12px] font-medium flex-1">
+                <span className="text-gray-700 text-[12px] font-medium flex-1">
                   {s.type === 'add_city'
                     ? `Add ${s.payload?.name ?? 'city'}`
                     : s.type === 'comment'
@@ -83,7 +82,7 @@ export default function SuggestionsPanel({
               </div>
 
               {s.type === 'comment' && s.payload?.text && (
-                <div className="text-white/40 text-[11px] mb-2 pl-7">
+                <div className="text-gray-500 text-[11px] mb-2 pl-7">
                   {s.payload.text}
                 </div>
               )}
@@ -92,14 +91,14 @@ export default function SuggestionsPanel({
                 <div className="flex items-center gap-2 pl-7">
                   <button
                     onClick={() => onApprove(s.id)}
-                    className="flex items-center gap-1 text-[10px] text-green-400 hover:text-green-300 transition-colors"
+                    className="flex items-center gap-1 text-[10px] text-green-600 hover:text-green-700 transition-colors"
                   >
                     <Check size={10} />
                     Approve
                   </button>
                   <button
                     onClick={() => onReject(s.id)}
-                    className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                    className="flex items-center gap-1 text-[10px] text-red-500 hover:text-red-600 transition-colors"
                   >
                     <X size={10} />
                     Reject

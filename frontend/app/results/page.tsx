@@ -2,7 +2,7 @@
 
 import { useTripStore } from '@/store/tripStore';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import Navbar from '@/components/shared/Navbar';
 import ResultsHeader from '@/components/results/ResultsHeader';
 import Flowchart from '@/components/results/Flowchart';
@@ -11,7 +11,8 @@ import ViewTabs, { ResultsView } from '@/components/results/ViewTabs';
 import AIChatPanel from '@/components/results/AIChatPanel';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
-import { mockTrip } from '@/lib/mockData';
+import { searchHotels } from '@/lib/api';
+import { Hotel } from '@/lib/types';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
 // during the static build pass. We split the page into an outer wrapper that
@@ -28,20 +29,101 @@ function ResultsPageInner() {
   const { currentTrip, setTrip } = useTripStore();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const isDemo = searchParams.get('demo') === '1';
+  const tripId = searchParams.get('tripId');
   const [view, setView] = useState<ResultsView>('flowchart');
   const [openCityIndex, setOpenCityIndex] = useState<number | null>(null);
   const [openActivitiesIndex, setOpenActivitiesIndex] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!currentTrip && isDemo) {
-      setTrip(mockTrip);
+    // If we already have a trip in the store (e.g. from PlanningChat), use it
+    if (currentTrip) return;
+
+    // If a tripId is provided, fetch the trip from the backend
+    if (tripId) {
+      setLoading(true);
+      const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+      fetch(`${BASE_URL}/api/trips/${tripId}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`Failed to load trip (${res.status})`);
+          return res.json();
+        })
+        .then((data) => {
+          setTrip(data.trip ?? data);
+          setLoading(false);
+        })
+        .catch((err) => {
+          setError(err.message);
+          setLoading(false);
+        });
       return;
     }
-    if (!currentTrip && !isDemo) {
-      router.push('/plan');
-    }
-  }, [currentTrip, router, isDemo, setTrip]);
+
+    // No trip in store and no tripId — redirect to planning
+    router.push('/plan');
+  }, [currentTrip, tripId, router, setTrip]);
+
+  // Enrich cities with real hotel data if hotels[] is empty
+  const updateCity = useTripStore((s) => s.updateCity);
+  const hotelsFetchedRef = useRef(false);
+
+  useEffect(() => {
+    if (!currentTrip || hotelsFetchedRef.current) return;
+    hotelsFetchedRef.current = true;
+
+    currentTrip.cities.forEach((city, idx) => {
+      // Skip if city already has hotels populated (e.g. from backend optimizer)
+      if (city.hotels.length > 1) return;
+
+      searchHotels({
+        city: city.name,
+        checkin: city.dates.arrival,
+        checkout: city.dates.departure,
+        adults: currentTrip.travelers,
+      })
+        .then((results) => {
+          if (results.length === 0) return;
+          const hotels: Hotel[] = results.map((r) => ({
+            name: r.name,
+            rating: r.rating,
+            pricePerNight: r.pricePerNight,
+            area: '',
+            bookingUrl: r.bookingUrl,
+          }));
+          updateCity(idx, {
+            hotels,
+            hotel: hotels[0],
+            selectedHotelIndex: 0,
+          });
+        })
+        .catch(() => {});
+    });
+  }, [currentTrip, updateCity]);
+
+  if (loading) {
+    return (
+      <main className="h-screen flex items-center justify-center" style={{ background: '#f0f4f8' }}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-[#2563eb] border-t-transparent rounded-full animate-spin" />
+          <p className="text-gray-500 text-sm">Loading your trip...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="h-screen flex items-center justify-center" style={{ background: '#f0f4f8' }}>
+        <div className="text-center">
+          <p className="text-red-500 text-sm mb-2">{error}</p>
+          <button onClick={() => router.push('/plan')} className="text-[#2563eb] text-sm underline">
+            Back to planning
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   if (!currentTrip) return null;
 

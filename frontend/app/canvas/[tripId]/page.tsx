@@ -44,7 +44,6 @@ export default function CanvasPage() {
         setLocalState(session.state);
 
         const { suggestions: initialSuggestions } = await getCanvasSuggestions(tripId);
-        // suggestions are handled by realtime after initial load
         void initialSuggestions;
       } catch {
         // handle error
@@ -59,13 +58,11 @@ export default function CanvasPage() {
     }
   }, [canvasState, role]);
 
-  // Show toasts
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // Save handler (owner only)
   const handleSave = async () => {
     if (role !== 'owner' || !localState) return;
     setSaving(true);
@@ -79,7 +76,6 @@ export default function CanvasPage() {
     }
   };
 
-  // Remove city from canvas
   const handleRemoveCity = (index: number) => {
     if (!localState?.cities) return;
     const cities = [...localState.cities];
@@ -87,7 +83,6 @@ export default function CanvasPage() {
     setLocalState({ ...localState, cities });
   };
 
-  // Add city after index
   const handleAddAfter = (index: number) => {
     setAddingAfterIndex(index);
     setSearchInput('');
@@ -114,7 +109,6 @@ export default function CanvasPage() {
     setSearchInput('');
   };
 
-  // Add from suggested panel
   const handleAddSuggestedCity = (dest: Destination) => {
     if (!localState?.cities) return;
     const cities = [...localState.cities];
@@ -133,7 +127,6 @@ export default function CanvasPage() {
     setLocalState({ ...localState, cities });
   };
 
-  // Suggest city (for suggesters)
   const handleSuggestCity = async (dest: Destination) => {
     try {
       await postCanvasSuggestion(tripId, 'add_city', {
@@ -147,7 +140,6 @@ export default function CanvasPage() {
     }
   };
 
-  // Approve/reject suggestions
   const handleApprove = async (suggestionId: string) => {
     try {
       await updateSuggestionStatus(tripId, suggestionId, 'approved');
@@ -169,11 +161,11 @@ export default function CanvasPage() {
   const tripTitle = localState?.trip?.title ?? 'Canvas';
 
   return (
-    <div className="h-screen w-screen flex flex-col" style={{ background: '#0f0f0f' }}>
-      {/* Top bar */}
+    <div className="h-screen w-screen flex flex-col" style={{ background: '#f0f4f8' }}>
+      {/* Top bar — solid blue like navbar */}
       <div
-        className="flex-shrink-0 h-14 px-5 flex items-center justify-between border-b"
-        style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+        className="flex-shrink-0 h-14 px-5 flex items-center justify-between"
+        style={{ background: '#2563eb' }}
       >
         {/* Left: trip title */}
         <div className="flex items-center gap-3">
@@ -181,13 +173,13 @@ export default function CanvasPage() {
           <div
             className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]"
             style={{
-              background: isConnected ? 'rgba(34,192,136,0.15)' : 'rgba(255,60,60,0.15)',
-              color: isConnected ? '#22c088' : '#ff3c3c',
+              background: isConnected ? 'rgba(255,255,255,0.15)' : 'rgba(255,60,60,0.25)',
+              color: isConnected ? '#ffffff' : '#ffc9c9',
             }}
           >
             <div
               className="w-1.5 h-1.5 rounded-full"
-              style={{ background: isConnected ? '#22c088' : '#ff3c3c' }}
+              style={{ background: isConnected ? '#4ade80' : '#ff3c3c' }}
             />
             {isConnected ? 'Live' : 'Connecting...'}
           </div>
@@ -200,8 +192,8 @@ export default function CanvasPage() {
               key={m.id ?? i}
               className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-medium text-white border-2"
               style={{
-                background: `hsl(${i * 60}, 60%, 45%)`,
-                borderColor: m.accepted_at ? '#22c088' : 'rgba(255,255,255,0.2)',
+                background: `hsl(${i * 60}, 60%, 55%)`,
+                borderColor: m.accepted_at ? '#4ade80' : 'rgba(255,255,255,0.4)',
               }}
               title={m.invited_email}
             >
@@ -226,8 +218,8 @@ export default function CanvasPage() {
           {role === 'owner' && (
             <button
               onClick={() => setShowInvite(true)}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white/80 transition-all hover:text-white"
-              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white/90 transition-all hover:text-white hover:bg-white/20"
+              style={{ background: 'rgba(255,255,255,0.15)' }}
             >
               <Share2 size={12} />
               Share
@@ -256,10 +248,10 @@ export default function CanvasPage() {
           {(role === 'owner' || role === 'editor') && (
             <button
               onClick={() => setAddingAfterIndex(cities.length - 1)}
-              className="ml-4 w-12 h-12 rounded-full flex items-center justify-center border-2 border-dashed transition-all hover:scale-105"
-              style={{ borderColor: 'rgba(255,255,255,0.15)' }}
+              className="ml-4 w-12 h-12 rounded-full flex items-center justify-center border-2 border-dashed transition-all hover:scale-105 hover:border-[#2563eb]"
+              style={{ borderColor: 'rgba(0,0,0,0.15)' }}
             >
-              <span className="text-white/30 text-[20px]">+</span>
+              <span className="text-gray-400 text-[20px]">+</span>
             </button>
           )}
         </div>
@@ -269,14 +261,13 @@ export default function CanvasPage() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 p-4 rounded-2xl"
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 p-4 rounded-2xl shadow-xl"
             style={{
-              background: 'rgba(18,18,18,0.95)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              backdropFilter: 'blur(20px)',
+              background: '#ffffff',
+              border: '1px solid rgba(0,0,0,0.1)',
             }}
           >
-            <div className="text-white/60 text-[12px] mb-2">Add a city</div>
+            <div className="text-gray-500 text-[12px] mb-2">Add a city</div>
             <div className="flex gap-2">
               <input
                 autoFocus
@@ -287,14 +278,14 @@ export default function CanvasPage() {
                   if (e.key === 'Escape') setAddingAfterIndex(null);
                 }}
                 placeholder="City name..."
-                className="px-3 py-2 rounded-lg text-[13px] text-white placeholder-white/30 outline-none w-[200px]"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                className="px-3 py-2 rounded-lg text-[13px] text-gray-900 placeholder-gray-400 outline-none w-[200px]"
+                style={{ background: '#f0f4f8', border: '1px solid rgba(0,0,0,0.1)' }}
               />
               <button
                 onClick={handleAddCityConfirm}
                 disabled={!searchInput.trim()}
                 className="px-4 py-2 rounded-lg text-[12px] font-medium text-white transition-all disabled:opacity-30"
-                style={{ background: '#4f8ef7' }}
+                style={{ background: '#2563eb' }}
               >
                 Add
               </button>
@@ -334,7 +325,7 @@ export default function CanvasPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 20 }}
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-full text-[13px] text-white font-medium"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-full text-[13px] text-white font-medium shadow-lg"
           style={{ background: 'rgba(34,192,136,0.9)' }}
         >
           {toast}

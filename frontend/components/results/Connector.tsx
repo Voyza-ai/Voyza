@@ -2,6 +2,7 @@
 
 // Plain conditional rendering — no AnimatePresence (it gets stuck mid-exit
 // when the tab is throttled or not visible). The morph is now an instant swap.
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Plane,
@@ -12,9 +13,12 @@ import {
   ExternalLink,
   X,
   ArrowLeftRight,
+  AlertTriangle,
+  ThumbsUp,
 } from 'lucide-react';
 import { Transport } from '@/lib/types';
 import { useTripStore } from '@/store/tripStore';
+import { compareLeg, LegComparison } from '@/lib/api';
 
 type ConnectorProps = {
   transport: Transport;
@@ -49,6 +53,24 @@ export default function Connector({ transport, cityIndex, isExpanded, onToggle }
   const accentColor = MODE_COLORS[transport.mode] ?? '#2e6bc4';
   const modeLabel = isFlight ? 'Flight' : isTrain ? 'Train' : 'Bus';
   const alternatives = transport.alternatives ?? [];
+
+  // Fetch flight vs train comparison when expanded
+  const [comparison, setComparison] = useState<LegComparison | null>(null);
+  const [compLoading, setCompLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isExpanded || comparison) return;
+    if (!transport.from || !transport.to || !transport.departDate) return;
+    setCompLoading(true);
+    compareLeg({
+      origin: transport.from,
+      destination: transport.to,
+      date: transport.departDate,
+    })
+      .then(setComparison)
+      .catch(() => {})
+      .finally(() => setCompLoading(false));
+  }, [isExpanded, transport.from, transport.to, transport.departDate, comparison]);
 
   return (
     <div
@@ -360,6 +382,113 @@ export default function Connector({ transport, cityIndex, isExpanded, onToggle }
                 })}
               </div>
             </div>
+          )}
+
+          {/* Flight vs Train comparison (from compareLeg API) */}
+          <TransportDetailCard comparison={comparison} loading={compLoading} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------- TransportDetailCard — flight vs train comparison -------------- */
+
+function TransportDetailCard({
+  comparison,
+  loading,
+}: {
+  comparison: LegComparison | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="px-4 py-3 border-t" style={{ borderColor: 'rgba(0,0,0,0.08)' }}>
+        <div className="text-gray-400 text-[11px] animate-pulse">Comparing flight vs train...</div>
+      </div>
+    );
+  }
+  if (!comparison) return null;
+  if (comparison.recommendation === 'unavailable') return null;
+
+  const { flightOption, trainOption, cheapest, fastest, recommendation, priceDifference, timeDifference } = comparison;
+
+  return (
+    <div
+      className="px-4 py-3 border-t"
+      style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+    >
+      <div className="text-gray-600 text-[10px] uppercase tracking-wider mb-2 font-medium">
+        Flight vs Train
+      </div>
+      <div className="flex gap-2">
+        {/* Flight option */}
+        {flightOption && (
+          <div
+            className="flex-1 rounded-lg p-2.5 border"
+            style={{
+              background: recommendation === 'flight' ? 'rgba(46,107,196,0.08)' : 'rgba(0,0,0,0.02)',
+              borderColor: recommendation === 'flight' ? '#2e6bc4' : 'rgba(0,0,0,0.06)',
+            }}
+          >
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Plane size={11} style={{ color: '#2e6bc4' }} />
+              <span className="text-gray-700 text-[11px] font-medium">Flight</span>
+              {recommendation === 'flight' && (
+                <ThumbsUp size={9} className="text-[#2e6bc4] ml-auto" />
+              )}
+            </div>
+            <div className="text-gray-900 text-[14px] font-semibold">${flightOption.price}</div>
+            <div className="text-gray-500 text-[10px] mt-0.5">{flightOption.durationMinutes}min · {flightOption.carrier}</div>
+            {flightOption.stops > 0 && (
+              <div className="text-gray-400 text-[10px]">{flightOption.stops} stop{flightOption.stops > 1 ? 's' : ''}</div>
+            )}
+          </div>
+        )}
+
+        {/* Train option */}
+        {trainOption && (
+          <div
+            className="flex-1 rounded-lg p-2.5 border"
+            style={{
+              background: recommendation === 'train' ? 'rgba(34,192,136,0.08)' : 'rgba(0,0,0,0.02)',
+              borderColor: recommendation === 'train' ? '#22c088' : 'rgba(0,0,0,0.06)',
+            }}
+          >
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <TrainFront size={11} style={{ color: '#22c088' }} />
+              <span className="text-gray-700 text-[11px] font-medium">Train</span>
+              {recommendation === 'train' && (
+                <ThumbsUp size={9} className="text-[#22c088] ml-auto" />
+              )}
+            </div>
+            <div className="text-gray-900 text-[14px] font-semibold">
+              {trainOption.price != null ? `$${trainOption.price}` : 'Price varies'}
+            </div>
+            <div className="text-gray-500 text-[10px] mt-0.5">{trainOption.durationMinutes}min · {trainOption.operator}</div>
+            {trainOption.limitedCoverage && (
+              <div className="flex items-center gap-1 text-amber-500 text-[10px] mt-0.5">
+                <AlertTriangle size={9} />
+                <span>Limited coverage</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Summary line */}
+      {(priceDifference !== 0 || timeDifference !== 0) && (
+        <div className="mt-2 text-gray-500 text-[10px]">
+          {cheapest !== 'same' && cheapest !== 'unavailable' && (
+            <span>
+              {cheapest === 'flight' ? 'Flight' : 'Train'} saves ${Math.abs(priceDifference)}
+            </span>
+          )}
+          {cheapest !== 'same' && fastest !== 'same' && cheapest !== 'unavailable' && fastest !== 'unavailable' && ' · '}
+          {fastest !== 'same' && fastest !== 'unavailable' && (
+            <span>
+              {fastest === 'flight' ? 'Flight' : 'Train'} saves {Math.abs(timeDifference)}min
+            </span>
           )}
         </div>
       )}

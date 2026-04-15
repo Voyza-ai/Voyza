@@ -1,3 +1,8 @@
+/**
+ * @deprecated — Mock data kept for PlanningChat demo fallback only.
+ * All real data now flows from the backend API via lib/api.ts.
+ * Do not add new imports of this file.
+ */
 import { Trip, City, Hotel } from './types';
 import { rankHotels } from './hotelScore';
 

@@ -7,7 +7,8 @@ import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { mockTrip } from '@/lib/mockData';
-import { interpretPlan, optimizeTrip } from '@/lib/api';
+import { interpretPlan, optimizeTrip, OptimizeResult } from '@/lib/api';
+import { Trip, City, Transport } from '@/lib/types';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import DatePicker from './DatePicker';
@@ -327,7 +328,70 @@ export default function PlanningChat() {
     advanceToNextStep(currentStepIndex);
   };
 
+  const buildTripFromOptimize = (
+    result: OptimizeResult,
+    travelers: number,
+  ): Trip => {
+    const route = result.bestRoute;
+    const emptyTransport: Transport = {
+      mode: 'flight',
+      operator: '',
+      duration: '',
+      price: 0,
+    };
+
+    const cities: City[] = route.ordering.map((name, i) => {
+      const leg = route.legs?.[i] ?? {};
+      const cityDates = result.dates?.[name] ?? {
+        arrival: new Date().toISOString().split('T')[0],
+        departure: new Date().toISOString().split('T')[0],
+      };
+
+      const transportIn: Transport = i === 0
+        ? emptyTransport
+        : {
+            mode: (leg.mode as 'flight' | 'train') ?? 'flight',
+            operator: leg.carrier ?? leg.operator ?? '',
+            duration: leg.durationMinutes ? `${leg.durationMinutes}min` : '',
+            price: leg.price ?? 0,
+            from: route.ordering[i - 1],
+            to: name,
+          };
+
+      return {
+        name,
+        country: '',
+        dates: cityDates,
+        transportIn,
+        transportOut: emptyTransport,
+        hotel: { name: '', rating: 0, pricePerNight: 0, area: '' },
+        hotels: [],
+        selectedHotelIndex: 0,
+        activities: [],
+        restaurants: [],
+        vibes: [],
+      };
+    });
+
+    // Wire transportOut for each city to the next city's transportIn
+    for (let i = 0; i < cities.length - 1; i++) {
+      cities[i].transportOut = cities[i + 1].transportIn;
+    }
+
+    return {
+      title: cities.map((c) => c.name).join(' → '),
+      status: 'planning',
+      totalCost: Math.round(route.totalCost ?? 0),
+      savings: Math.round(result.savingsVsNaive ?? 0),
+      travelers,
+      cities,
+      savingsTips: [],
+    };
+  };
+
   const handleFindTrip = async () => {
+    const travelers = answers.travelers ?? 1;
+
     // Try backend API first, fall back to mock
     try {
       const parsed = await interpretPlan({
@@ -339,12 +403,12 @@ export default function PlanningChat() {
         const result = await optimizeTrip({
           cities: parsed.destinations.map((d: string) => ({ name: d })),
           startDate: parsed.dates?.start ?? new Date().toISOString().split('T')[0],
-          travelers: parsed.travelers ?? answers.travelers ?? 1,
+          travelers: parsed.travelers ?? travelers,
           budget: parsed.budget ?? answers.budget,
         });
-        // For now, use mock trip but with optimized ordering info
-        // Full integration would build the trip from optimization results
-        setTrip(mockTrip);
+
+        const trip = buildTripFromOptimize(result, parsed.travelers ?? travelers);
+        setTrip(trip);
         router.push('/results');
         return;
       }

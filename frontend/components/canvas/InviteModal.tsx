@@ -53,7 +53,7 @@ export default function InviteModal({ tripId, isOpen, onClose, members }: Invite
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.6)' }}
+          style={{ background: 'rgba(0,0,0,0.3)' }}
           onClick={onClose}
         >
           <motion.div
@@ -61,19 +61,19 @@ export default function InviteModal({ tripId, isOpen, onClose, members }: Invite
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.95, opacity: 0 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-[420px] rounded-2xl border overflow-hidden"
+            className="w-[420px] rounded-2xl border overflow-hidden shadow-xl"
             style={{
-              background: '#1a1a1a',
-              borderColor: 'rgba(255,255,255,0.1)',
+              background: '#ffffff',
+              borderColor: 'rgba(0,0,0,0.08)',
             }}
           >
             {/* Header */}
-            <div className="px-5 py-4 flex items-center justify-between border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+            <div className="px-5 py-4 flex items-center justify-between border-b" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
               <div className="flex items-center gap-2">
-                <Users size={16} className="text-white/60" />
-                <span className="text-white text-[14px] font-medium">Share Canvas</span>
+                <Users size={16} className="text-gray-500" />
+                <span className="text-gray-900 text-[14px] font-medium">Share Canvas</span>
               </div>
-              <button onClick={onClose} className="text-white/40 hover:text-white/70 transition-colors">
+              <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -86,14 +86,14 @@ export default function InviteModal({ tripId, isOpen, onClose, members }: Invite
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Email address"
-                  className="flex-1 px-3 py-2 rounded-lg text-[13px] text-white placeholder-white/30 outline-none"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                  className="flex-1 px-3 py-2 rounded-lg text-[13px] text-gray-900 placeholder-gray-400 outline-none"
+                  style={{ background: '#f0f4f8', border: '1px solid rgba(0,0,0,0.08)' }}
                 />
                 <select
                   value={role}
                   onChange={(e) => setRole(e.target.value as any)}
-                  className="px-3 py-2 rounded-lg text-[13px] text-white outline-none appearance-none"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                  className="px-3 py-2 rounded-lg text-[13px] text-gray-700 outline-none appearance-none"
+                  style={{ background: '#f0f4f8', border: '1px solid rgba(0,0,0,0.08)' }}
                 >
                   <option value="editor">Editor</option>
                   <option value="suggester">Suggester</option>
@@ -103,18 +103,18 @@ export default function InviteModal({ tripId, isOpen, onClose, members }: Invite
               <button
                 onClick={handleInvite}
                 disabled={!email.trim() || sending}
-                className="w-full py-2 rounded-lg text-[13px] font-medium text-white transition-all disabled:opacity-30"
-                style={{ background: '#4f8ef7' }}
+                className="w-full py-2 rounded-lg text-[13px] font-medium text-white transition-all disabled:opacity-30 hover:brightness-110"
+                style={{ background: '#2563eb' }}
               >
                 {sending ? 'Sending...' : 'Send Invite'}
               </button>
 
               {inviteLink && (
-                <div className="mt-3 p-2.5 rounded-lg flex items-center gap-2" style={{ background: 'rgba(79,142,247,0.1)' }}>
-                  <span className="text-white/60 text-[11px] truncate flex-1">{inviteLink}</span>
+                <div className="mt-3 p-2.5 rounded-lg flex items-center gap-2" style={{ background: 'rgba(37,99,235,0.06)' }}>
+                  <span className="text-gray-500 text-[11px] truncate flex-1">{inviteLink}</span>
                   <button
                     onClick={() => copyLink(inviteLink, 'invite')}
-                    className="text-white/50 hover:text-white/80 transition-colors flex-shrink-0"
+                    className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
                   >
                     {copiedId === 'invite' ? <Check size={12} /> : <Copy size={12} />}
                   </button>
@@ -125,24 +125,24 @@ export default function InviteModal({ tripId, isOpen, onClose, members }: Invite
             {/* Members list */}
             {members.length > 0 && (
               <div className="px-5 pb-4">
-                <div className="text-white/40 text-[11px] uppercase tracking-wider mb-2">Members</div>
+                <div className="text-gray-400 text-[11px] uppercase tracking-wider mb-2">Members</div>
                 <div className="flex flex-col gap-1.5">
                   {members.map((m) => (
                     <div
                       key={m.id}
                       className="flex items-center gap-2 px-3 py-2 rounded-lg"
-                      style={{ background: 'rgba(255,255,255,0.03)' }}
+                      style={{ background: '#f8fafc' }}
                     >
                       <div
                         className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-medium text-white"
-                        style={{ background: m.accepted_at ? '#22c088' : 'rgba(255,255,255,0.1)' }}
+                        style={{ background: m.accepted_at ? '#22c088' : '#cbd5e1' }}
                       >
                         {m.invited_email?.[0]?.toUpperCase() ?? '?'}
                       </div>
-                      <span className="text-white/70 text-[12px] flex-1 truncate">
+                      <span className="text-gray-600 text-[12px] flex-1 truncate">
                         {m.invited_email}
                       </span>
-                      <span className="text-white/30 text-[10px] uppercase">
+                      <span className="text-gray-400 text-[10px] uppercase">
                         {m.role}
                       </span>
                       {m.accepted_at && (

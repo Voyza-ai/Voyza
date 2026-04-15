@@ -52,16 +52,16 @@ export default function SuggestedCitiesPanel({
       {/* Toggle button on right edge */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed right-0 top-1/2 -translate-y-1/2 z-30 w-8 h-20 rounded-l-lg flex items-center justify-center transition-colors"
+        className="fixed right-0 top-1/2 -translate-y-1/2 z-30 w-8 h-20 rounded-l-lg flex items-center justify-center transition-colors shadow-sm"
         style={{
-          background: 'rgba(255,255,255,0.08)',
-          borderLeft: '1px solid rgba(255,255,255,0.12)',
+          background: '#ffffff',
+          borderLeft: '1px solid rgba(0,0,0,0.08)',
         }}
       >
         {isOpen ? (
-          <ChevronRight size={14} className="text-white/60" />
+          <ChevronRight size={14} className="text-gray-400" />
         ) : (
-          <ChevronLeft size={14} className="text-white/60" />
+          <ChevronLeft size={14} className="text-gray-400" />
         )}
       </button>
 
@@ -73,22 +73,21 @@ export default function SuggestedCitiesPanel({
             animate={{ x: 0 }}
             exit={{ x: 320 }}
             transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-            className="fixed right-0 top-0 bottom-0 w-[300px] z-20 flex flex-col"
+            className="fixed right-0 top-0 bottom-0 w-[300px] z-20 flex flex-col shadow-xl"
             style={{
-              background: 'rgba(18,18,18,0.95)',
-              borderLeft: '1px solid rgba(255,255,255,0.1)',
-              backdropFilter: 'blur(20px)',
+              background: '#ffffff',
+              borderLeft: '1px solid rgba(0,0,0,0.08)',
             }}
           >
             {/* Header */}
             <div className="px-4 pt-16 pb-3 flex items-center justify-between">
-              <div className="text-white/80 text-[13px] font-medium">
+              <div className="text-gray-700 text-[13px] font-medium">
                 Suggested Cities
               </div>
               <button
                 onClick={fetchSuggestions}
                 disabled={loading}
-                className="text-white/40 hover:text-white/70 transition-colors disabled:opacity-30"
+                className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-30"
               >
                 <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
               </button>
@@ -101,25 +100,25 @@ export default function SuggestedCitiesPanel({
                   key={dest.name}
                   className="rounded-xl border p-3"
                   style={{
-                    background: 'rgba(255,255,255,0.04)',
-                    borderColor: 'rgba(255,255,255,0.08)',
+                    background: '#f8fafc',
+                    borderColor: 'rgba(0,0,0,0.06)',
                   }}
                 >
                   <div className="flex items-baseline justify-between mb-1">
-                    <span className="text-white text-[13px] font-medium">
+                    <span className="text-gray-900 text-[13px] font-medium">
                       {dest.name}
                     </span>
-                    <span className="text-white/50 text-[11px]">
+                    <span className="text-gray-400 text-[11px]">
                       ~${dest.estimatedCost}
                     </span>
                   </div>
-                  <div className="text-white/40 text-[11px] mb-2.5 leading-relaxed">
+                  <div className="text-gray-500 text-[11px] mb-2.5 leading-relaxed">
                     {dest.reason}
                   </div>
                   {canEdit ? (
                     <button
                       onClick={() => onAddCity(dest)}
-                      className="flex items-center gap-1.5 text-[11px] text-[#4f8ef7] hover:text-[#6fa3ff] transition-colors"
+                      className="flex items-center gap-1.5 text-[11px] text-[#2563eb] hover:text-[#1d4ed8] transition-colors"
                     >
                       <Plus size={11} />
                       Add to canvas
@@ -127,7 +126,7 @@ export default function SuggestedCitiesPanel({
                   ) : role === 'suggester' ? (
                     <button
                       onClick={() => onSuggestCity(dest)}
-                      className="flex items-center gap-1.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors"
+                      className="flex items-center gap-1.5 text-[11px] text-amber-500 hover:text-amber-600 transition-colors"
                     >
                       <MessageSquare size={11} />
                       Suggest
@@ -137,7 +136,7 @@ export default function SuggestedCitiesPanel({
               ))}
 
               {destinations.length === 0 && !loading && (
-                <div className="text-white/30 text-[12px] text-center py-8">
+                <div className="text-gray-400 text-[12px] text-center py-8">
                   No suggestions yet
                 </div>
               )}

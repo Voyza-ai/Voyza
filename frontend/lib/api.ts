@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 async function getAuthHeader(): Promise<Record<string, string>> {
+  if (!supabase) return {};
   const { data } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
   if (token) return { Authorization: `Bearer ${token}` };

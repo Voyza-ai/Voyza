@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Sparkles, Bot } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { editPlan } from '@/lib/api';
+import { useTripStore } from '@/store/tripStore';
 
 type Message = {
   id: number;
@@ -69,6 +70,7 @@ const generateMockResponse = (input: string, trip: Trip): string => {
 };
 
 export default function AIChatPanel({ trip }: AIChatPanelProps) {
+  const setTrip = useTripStore((s) => s.setTrip);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 0,
@@ -87,7 +89,7 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
     }
   }, [messages, isTyping]);
 
-  const handleSend = (text: string) => {
+  const handleSend = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isTyping) return;
 
@@ -96,30 +98,29 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
     setInput('');
     setIsTyping(true);
 
-    // Try backend API first, fall back to mock
-    editPlan({ message: trimmed, currentTrip: trip })
-      .then((result) => {
-        const content = result._mock
-          ? generateMockResponse(trimmed, trip)
-          : result.message ?? generateMockResponse(trimmed, trip);
-        const aiMsg: Message = {
-          id: idRef.current++,
-          role: 'ai',
-          content,
-        };
-        setMessages((prev) => [...prev, aiMsg]);
-        setIsTyping(false);
-      })
-      .catch(() => {
-        const aiMsg: Message = {
-          id: idRef.current++,
-          role: 'ai',
-          content: generateMockResponse(trimmed, trip),
-        };
-        setMessages((prev) => [...prev, aiMsg]);
-        setIsTyping(false);
-      });
-  };
+    try {
+      const result = await editPlan({ message: trimmed, currentTrip: trip });
+      const reply = result.message ?? result.reply ?? 'Done — I have updated your trip.';
+
+      // If the backend returned an updated trip, apply it to the store
+      if (result.trip) {
+        setTrip(result.trip);
+      }
+
+      const aiMsg: Message = { id: idRef.current++, role: 'ai', content: reply };
+      setMessages((prev) => [...prev, aiMsg]);
+    } catch {
+      // Fallback to local mock response when backend is unavailable
+      const aiMsg: Message = {
+        id: idRef.current++,
+        role: 'ai',
+        content: generateMockResponse(trimmed, trip),
+      };
+      setMessages((prev) => [...prev, aiMsg]);
+    } finally {
+      setIsTyping(false);
+    }
+  }, [isTyping, trip, setTrip]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

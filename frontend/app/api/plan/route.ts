@@ -1,29 +1,33 @@
 import { NextResponse } from 'next/server';
-import { mockTrip } from '@/lib/mockData';
-// import { SYSTEM_PROMPT } from '@/lib/anthropic';
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    console.log('Planning request:', body);
 
-    // TODO: Replace with actual Anthropic API call when ready
-    // For now, return mock data with a slight delay to simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    return NextResponse.json({
-      success: true,
-      trip: {
-        ...mockTrip,
-        id: `trip-${Date.now()}`,
-        travelers: body.travelers || 2,
-      },
+    // Proxy to the real backend
+    const res = await fetch(`${BACKEND_URL}/api/plan/interpret`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return NextResponse.json(
+        { success: false, error: err.error ?? `Backend error ${res.status}` },
+        { status: res.status },
+      );
+    }
+
+    const data = await res.json();
+    return NextResponse.json({ success: true, ...data });
   } catch (error) {
     console.error('Planning error:', error);
     return NextResponse.json(
       { success: false, error: 'Failed to plan trip' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
