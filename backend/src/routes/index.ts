@@ -7,7 +7,9 @@ import hotels from './hotels';
 import ai from './ai';
 import plan from './plan';
 import canvas from './canvas';
+import trips from './trips';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { requireAuth } from '../middleware/auth';
 import { compareLeg } from '../services/compareLeg';
 import { optimize } from '../services/optimizer';
 
@@ -23,7 +25,8 @@ router.use('/trains', trains);
 router.use('/hotels', hotels);
 router.use('/ai', ai);
 router.use('/plan', plan);
-router.use('/canvas', canvas);
+router.use('/canvas', requireAuth, canvas);
+router.use('/trips', requireAuth, trips);
 
 // ─── Compare Leg ─────────────────────────────────────────────
 const compareLegSchema = z.object({

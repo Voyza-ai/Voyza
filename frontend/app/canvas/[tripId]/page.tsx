@@ -17,8 +17,17 @@ import {
   updateSuggestionStatus,
   Destination,
 } from '@/lib/api';
+import ProtectedRoute from '@/components/shared/ProtectedRoute';
 
 export default function CanvasPage() {
+  return (
+    <ProtectedRoute>
+      <CanvasPageInner />
+    </ProtectedRoute>
+  );
+}
+
+function CanvasPageInner() {
   const params = useParams();
   const tripId = params.tripId as string;
 

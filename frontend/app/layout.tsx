@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import '@/styles/globals.css';
+import AuthProvider from '@/components/shared/AuthProvider';
 
 export const metadata: Metadata = {
   title: 'Voyza — The Smartest Way to Travel',
@@ -14,7 +15,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-voyza-bg text-gray-900 antialiased">{children}</body>
+      <body className="bg-voyza-bg text-gray-900 antialiased">
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

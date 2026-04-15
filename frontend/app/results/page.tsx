@@ -11,8 +11,11 @@ import ViewTabs, { ResultsView } from '@/components/results/ViewTabs';
 import AIChatPanel from '@/components/results/AIChatPanel';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
-import { searchHotels } from '@/lib/api';
+import { searchHotels, saveTrip as saveTripApi } from '@/lib/api';
 import { Hotel } from '@/lib/types';
+import { getCurrentUser } from '@/lib/supabase';
+import { Bookmark } from 'lucide-react';
+import LoginModal from '@/components/shared/LoginModal';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
 // during the static build pass. We split the page into an outer wrapper that
@@ -35,6 +38,33 @@ function ResultsPageInner() {
   const [openActivitiesIndex, setOpenActivitiesIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [saveToast, setSaveToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const doSaveTrip = async () => {
+    if (!currentTrip || saving) return;
+    setSaving(true);
+    try {
+      const result = await saveTripApi(currentTrip);
+      setSaveToast({ type: 'success', message: 'Trip saved!' });
+      window.history.replaceState(null, '', `?tripId=${result.tripId}`);
+    } catch {
+      setSaveToast({ type: 'error', message: 'Failed to save trip' });
+    } finally {
+      setSaving(false);
+      setTimeout(() => setSaveToast(null), 3000);
+    }
+  };
+
+  const handleSaveTrip = async () => {
+    const user = await getCurrentUser();
+    if (!user) {
+      setShowLoginModal(true);
+      return;
+    }
+    doSaveTrip();
+  };
 
   useEffect(() => {
     // If we already have a trip in the store (e.g. from PlanningChat), use it
@@ -146,7 +176,22 @@ function ResultsPageInner() {
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6 px-6 pb-6 pt-[3.75rem] max-w-[1600px] w-full mx-auto">
         {/* Main column — header pinned, cards window scrolls inside */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
-          <ResultsHeader trip={currentTrip} />
+          <div className="flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <ResultsHeader trip={currentTrip} />
+            </div>
+            <div className="flex-shrink-0 pt-5 pr-8">
+              <button
+                onClick={handleSaveTrip}
+                disabled={saving}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white transition-all disabled:opacity-50"
+                style={{ background: '#2563eb' }}
+              >
+                <Bookmark size={14} />
+                {saving ? 'Saving...' : 'Save trip'}
+              </button>
+            </div>
+          </div>
           <ViewTabs value={view} onChange={setView} />
 
           {/* Scrollable cards window */}
@@ -194,6 +239,26 @@ function ResultsPageInner() {
           <AIChatPanel trip={currentTrip} />
         </aside>
       </div>
+
+      {/* Save toast */}
+      {saveToast && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg text-sm font-medium shadow-lg"
+          style={{
+            background: saveToast.type === 'success' ? '#f0fdf4' : '#fef2f2',
+            color: saveToast.type === 'success' ? '#16a34a' : '#dc2626',
+          }}
+        >
+          {saveToast.message}
+        </div>
+      )}
+
+      {/* Login modal for save flow */}
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onSuccess={doSaveTrip}
+      />
     </main>
   );
 }

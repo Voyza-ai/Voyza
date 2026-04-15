@@ -277,3 +277,31 @@ export async function inviteToCanvas(
     },
   );
 }
+
+// ─── Trip CRUD ──────────────────────────────────────────────
+export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }> {
+  return apiFetch<{ tripId: string; trip: any }>('/api/trips', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: trip.title,
+      travelers: trip.travelers,
+      totalCost: trip.totalCost,
+      savingsVsAlternative: trip.savings,
+      cities: trip.cities,
+    }),
+  });
+}
+
+export async function getTrips(): Promise<{ trips: any[] }> {
+  return apiFetch<{ trips: any[] }>('/api/trips');
+}
+
+export async function getTrip(tripId: string): Promise<any> {
+  return apiFetch<any>(`/api/trips/${tripId}`);
+}
+
+export async function deleteTrip(tripId: string): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(`/api/trips/${tripId}`, {
+    method: 'DELETE',
+  });
+}

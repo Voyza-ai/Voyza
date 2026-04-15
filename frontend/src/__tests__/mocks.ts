@@ -8,6 +8,7 @@ jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush, replace: jest.fn(), back: jest.fn() }),
   useSearchParams: () => mockSearchParams,
   useParams: () => ({ tripId: 'trip-test-123' }),
+  usePathname: () => '/test',
 }));
 
 // Mock next/link
@@ -63,6 +64,21 @@ jest.mock('@/lib/supabase', () => ({
   getAuthHeader: jest.fn().mockResolvedValue({}),
 }));
 
+// Mock authStore — logged-in user by default for canvas/protected tests
+jest.mock('@/store/authStore', () => ({
+  useAuthStore: (selector: any) => {
+    const state = {
+      user: { id: 'u1', email: 'test@test.com', user_metadata: {} },
+      session: { access_token: 'tok' },
+      isLoading: false,
+      setUser: jest.fn(),
+      setSession: jest.fn(),
+      signOut: jest.fn(),
+    };
+    return selector(state);
+  },
+}));
+
 // Mock useCanvasRealtime
 jest.mock('@/hooks/useCanvasRealtime', () => ({
   useCanvasRealtime: () => ({
@@ -89,6 +105,10 @@ jest.mock('@/lib/api', () => ({
   postCanvasSuggestion: jest.fn().mockResolvedValue({ suggestion: {} }),
   updateSuggestionStatus: jest.fn().mockResolvedValue({ suggestion: {} }),
   inviteToCanvas: jest.fn().mockResolvedValue({ member: {}, inviteLink: 'https://voyza.app/invite/abc' }),
+  saveTrip: jest.fn().mockResolvedValue({ tripId: 'trip-123', trip: {} }),
+  getTrips: jest.fn().mockResolvedValue({ trips: [] }),
+  getTrip: jest.fn().mockResolvedValue({ trip: {} }),
+  deleteTrip: jest.fn().mockResolvedValue({ success: true }),
 }));
 
 // Mock styled-jsx (used by Flowchart)
