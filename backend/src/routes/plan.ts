@@ -44,12 +44,14 @@ router.post(
         ],
       });
 
-      const text = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
+      const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
+      // Strip markdown code fences if present
+      const text = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
       try {
         const parsed = JSON.parse(text);
         return res.json(parsed);
       } catch {
-        return res.json({ raw: text });
+        return res.json({ raw: rawText });
       }
     }
 
@@ -209,7 +211,8 @@ router.post(
           ],
         });
 
-        const text = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
+        const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
+        const text = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
         try {
           const ranked = JSON.parse(text);
           if (Array.isArray(ranked)) {
@@ -256,11 +259,12 @@ router.post(
         ],
       });
 
-      const text = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
+      const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
+      const text = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
       try {
         return res.json(JSON.parse(text));
       } catch {
-        return res.json({ action: 'no_change', message: text });
+        return res.json({ action: 'no_change', message: rawText });
       }
     }
 
