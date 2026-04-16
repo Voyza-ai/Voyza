@@ -6,8 +6,7 @@ import { ArrowRight, Send, SkipForward, Pencil, Check, X } from 'lucide-react';
 import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { mockTrip } from '@/lib/mockData';
-import { interpretPlan, optimizeTrip, OptimizeResult } from '@/lib/api';
+import { interpretPlan, optimizeTrip, searchHotels, OptimizeResult } from '@/lib/api';
 import { Trip, City, Transport } from '@/lib/types';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
@@ -389,35 +388,89 @@ export default function PlanningChat() {
     };
   };
 
+  const [findTripLoading, setFindTripLoading] = useState(false);
+  const [findTripStatus, setFindTripStatus] = useState('');
+  const [findTripError, setFindTripError] = useState<string | null>(null);
+
   const handleFindTrip = async () => {
     const travelers = answers.travelers ?? 1;
+    setFindTripLoading(true);
+    setFindTripError(null);
 
-    // Try backend API first, fall back to mock
     try {
+      // Step 1: Interpret user input
+      setFindTripStatus('Understanding your trip...');
+      const rawInput = answers.rawInput ?? answers.destinations?.join(', ') ?? '';
+      if (!rawInput.trim()) {
+        throw new Error('No trip details provided. Please describe your trip first.');
+      }
+
       const parsed = await interpretPlan({
-        rawInput: answers.rawInput ?? answers.destinations?.join(', ') ?? '',
+        rawInput,
         userLocation: 'unknown',
       });
 
-      if (parsed.destinations && parsed.destinations.length >= 2) {
-        const result = await optimizeTrip({
-          cities: parsed.destinations.map((d: string) => ({ name: d })),
-          startDate: parsed.dates?.start ?? new Date().toISOString().split('T')[0],
-          travelers: parsed.travelers ?? travelers,
-          budget: parsed.budget ?? answers.budget,
-        });
-
-        const trip = buildTripFromOptimize(result, parsed.travelers ?? travelers);
-        setTrip(trip);
-        router.push('/results');
-        return;
+      if (!parsed.destinations || parsed.destinations.length === 0) {
+        throw new Error('Could not identify any destinations. Please try describing your trip again.');
       }
-    } catch {
-      // Fall back to mock
-    }
 
-    setTrip(mockTrip);
-    router.push('/results');
+      // Step 2: Optimize route (works for single or multi-city)
+      setFindTripStatus('Finding the best routes...');
+      const result = await optimizeTrip({
+        cities: parsed.destinations.map((d: string) => ({ name: d })),
+        startDate: parsed.dates?.start ?? answers.dateRange?.start ?? new Date().toISOString().split('T')[0],
+        travelers: parsed.travelers ?? travelers,
+        budget: parsed.budget ?? answers.budget,
+      });
+
+      const trip = buildTripFromOptimize(result, parsed.travelers ?? travelers);
+
+      // Step 3: Fetch hotels for each city
+      setFindTripStatus('Finding hotels...');
+      const hotelPromises = trip.cities.map(async (city) => {
+        try {
+          const results = await searchHotels({
+            city: city.name,
+            checkin: city.dates.arrival,
+            checkout: city.dates.departure,
+            adults: parsed.travelers ?? travelers,
+          });
+          if (results.length > 0) {
+            const hotels = results.map((r) => ({
+              name: r.name,
+              rating: r.rating,
+              pricePerNight: r.pricePerNight,
+              area: '',
+              bookingUrl: r.bookingUrl,
+            }));
+            return { hotels, hotel: hotels[0], selectedHotelIndex: 0 };
+          }
+        } catch {
+          // Hotel search failure is non-fatal — results page will retry
+        }
+        return null;
+      });
+
+      const hotelResults = await Promise.all(hotelPromises);
+      hotelResults.forEach((result, idx) => {
+        if (result) {
+          trip.cities[idx] = { ...trip.cities[idx], ...result };
+        }
+      });
+
+      setTrip(trip);
+      router.push('/results');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
+      setFindTripError(message);
+      setMessages((prev) => [
+        ...prev,
+        { id: nextId(), role: 'assistant', content: `Sorry, I ran into a problem: ${message}` },
+      ]);
+    } finally {
+      setFindTripLoading(false);
+      setFindTripStatus('');
+    }
   };
 
   const currentStep = steps.length ? steps[currentStepIndex] : null;
@@ -665,18 +718,31 @@ export default function PlanningChat() {
           {/* Find my trip button */}
           {isComplete && (
             <motion.div
-              className="flex justify-center mt-8 mb-10"
+              className="flex flex-col items-center mt-8 mb-10 gap-3"
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.8 }}
             >
               <button
                 onClick={handleFindTrip}
-                className="flex items-center gap-3 bg-[#4f8ef7] hover:bg-[#3d7de6] text-white font-semibold px-12 py-5 rounded-full text-[18px] shadow-lg shadow-blue-500/25 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                disabled={findTripLoading}
+                className="flex items-center gap-3 bg-[#4f8ef7] hover:bg-[#3d7de6] text-white font-semibold px-12 py-5 rounded-full text-[18px] shadow-lg shadow-blue-500/25 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-60 disabled:hover:scale-100 disabled:cursor-not-allowed"
               >
-                Find my trip
-                <ArrowRight size={22} />
+                {findTripLoading ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    {findTripStatus || 'Working on it...'}
+                  </>
+                ) : (
+                  <>
+                    Find my trip
+                    <ArrowRight size={22} />
+                  </>
+                )}
               </button>
+              {findTripError && (
+                <p className="text-red-400 text-sm text-center max-w-md">{findTripError}</p>
+              )}
             </motion.div>
           )}
         </div>
