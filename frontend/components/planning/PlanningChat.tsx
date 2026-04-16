@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Send, SkipForward, Pencil, Check, X } from 'lucide-react';
+import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin } from 'lucide-react';
 import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -392,8 +392,115 @@ export default function PlanningChat() {
   const [findTripStatus, setFindTripStatus] = useState('');
   const [findTripError, setFindTripError] = useState<string | null>(null);
 
+  // City selection state — shown when user mentions countries
+  const [citySelectionData, setCitySelectionData] = useState<{
+    countries: Array<{ country: string; cities: string[] }>;
+    selectedCities: Record<string, string[]>; // country → selected cities
+    parsedData: any; // the full interpret response to resume after selection
+  } | null>(null);
+
+  const handleCityToggle = (country: string, city: string) => {
+    if (!citySelectionData) return;
+    const current = citySelectionData.selectedCities[country] ?? [];
+    const updated = current.includes(city)
+      ? current.filter((c) => c !== city)
+      : [...current, city];
+    setCitySelectionData({
+      ...citySelectionData,
+      selectedCities: { ...citySelectionData.selectedCities, [country]: updated },
+    });
+  };
+
+  const handleCitySelectionConfirm = () => {
+    if (!citySelectionData) return;
+    const allSelected = Object.values(citySelectionData.selectedCities).flat();
+    if (allSelected.length === 0) return;
+
+    // Add a message showing what the user picked
+    const summary = Object.entries(citySelectionData.selectedCities)
+      .filter(([, cities]) => cities.length > 0)
+      .map(([country, cities]) => `${country}: ${cities.join(', ')}`)
+      .join(' | ');
+    setMessages((prev) => [
+      ...prev,
+      { id: nextId(), role: 'user', content: summary },
+      { id: nextId(), role: 'assistant', content: "Great choices! Let me find the best routes and prices." },
+    ]);
+
+    // Resume the trip finding with the selected cities
+    const parsed = citySelectionData.parsedData;
+    parsed.destinations = allSelected;
+    parsed.needsCitySelection = false;
+    setCitySelectionData(null);
+    runOptimizeAndBuild(parsed);
+  };
+
+  const runOptimizeAndBuild = async (parsed: any) => {
+    const travelers = parsed.travelers ?? answers.travelers ?? 1;
+    setFindTripLoading(true);
+    setFindTripError(null);
+
+    try {
+      // Step 2: Optimize route
+      setFindTripStatus('Finding the best routes...');
+      const result = await optimizeTrip({
+        cities: parsed.destinations.map((d: string) => ({ name: d })),
+        startDate: parsed.dates?.start ?? answers.dateRange?.start ?? new Date().toISOString().split('T')[0],
+        travelers,
+        budget: parsed.budget ?? answers.budget,
+      });
+
+      const trip = buildTripFromOptimize(result, travelers);
+
+      // Step 3: Fetch hotels for each city
+      setFindTripStatus('Finding hotels...');
+      const hotelPromises = trip.cities.map(async (city) => {
+        try {
+          const results = await searchHotels({
+            city: city.name,
+            checkin: city.dates.arrival,
+            checkout: city.dates.departure,
+            adults: travelers,
+          });
+          if (results.length > 0) {
+            const hotels = results.map((r) => ({
+              name: r.name,
+              rating: r.rating,
+              pricePerNight: r.pricePerNight,
+              area: '',
+              bookingUrl: r.bookingUrl,
+            }));
+            return { hotels, hotel: hotels[0], selectedHotelIndex: 0 };
+          }
+        } catch {
+          // Hotel search failure is non-fatal
+        }
+        return null;
+      });
+
+      const hotelResults = await Promise.all(hotelPromises);
+      hotelResults.forEach((hotelResult, idx) => {
+        if (hotelResult) {
+          trip.cities[idx] = { ...trip.cities[idx], ...hotelResult };
+        }
+      });
+
+      setTrip(trip);
+      router.push('/results');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
+      setFindTripError(message);
+      setMessages((prev) => [
+        ...prev,
+        { id: nextId(), role: 'assistant', content: `Sorry, I ran into a problem: ${message}` },
+      ]);
+    } finally {
+      setFindTripLoading(false);
+      setFindTripStatus('');
+    }
+  };
+
   const handleFindTrip = async () => {
-    const travelers = answers.travelers ?? 1;
     setFindTripLoading(true);
     setFindTripError(null);
 
@@ -414,52 +521,45 @@ export default function PlanningChat() {
         throw new Error('Could not identify any destinations. Please try describing your trip again.');
       }
 
-      // Step 2: Optimize route (works for single or multi-city)
-      setFindTripStatus('Finding the best routes...');
-      const result = await optimizeTrip({
-        cities: parsed.destinations.map((d: string) => ({ name: d })),
-        startDate: parsed.dates?.start ?? answers.dateRange?.start ?? new Date().toISOString().split('T')[0],
-        travelers: parsed.travelers ?? travelers,
-        budget: parsed.budget ?? answers.budget,
-      });
+      // If countries were detected, show city picker
+      if (parsed.needsCitySelection && parsed.countries && parsed.countries.length > 0) {
+        setFindTripLoading(false);
+        setFindTripStatus('');
 
-      const trip = buildTripFromOptimize(result, parsed.travelers ?? travelers);
-
-      // Step 3: Fetch hotels for each city
-      setFindTripStatus('Finding hotels...');
-      const hotelPromises = trip.cities.map(async (city) => {
-        try {
-          const results = await searchHotels({
-            city: city.name,
-            checkin: city.dates.arrival,
-            checkout: city.dates.departure,
-            adults: parsed.travelers ?? travelers,
-          });
-          if (results.length > 0) {
-            const hotels = results.map((r) => ({
-              name: r.name,
-              rating: r.rating,
-              pricePerNight: r.pricePerNight,
-              area: '',
-              bookingUrl: r.bookingUrl,
-            }));
-            return { hotels, hotel: hotels[0], selectedHotelIndex: 0 };
-          }
-        } catch {
-          // Hotel search failure is non-fatal — results page will retry
+        // Pre-select the first city per country as default
+        const defaultSelections: Record<string, string[]> = {};
+        for (const c of parsed.countries) {
+          defaultSelections[c.country] = [c.cities[0]];
         }
-        return null;
-      });
 
-      const hotelResults = await Promise.all(hotelPromises);
-      hotelResults.forEach((result, idx) => {
-        if (result) {
-          trip.cities[idx] = { ...trip.cities[idx], ...result };
+        // For any destinations that aren't from a country (direct city names), keep them
+        const directCities = parsed.destinations.filter(
+          (d: string) => !parsed.countries.some((c: any) => c.cities.includes(d))
+        );
+
+        if (directCities.length > 0) {
+          defaultSelections['_direct'] = directCities;
         }
-      });
 
-      setTrip(trip);
-      router.push('/results');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextId(),
+            role: 'assistant',
+            content: `I see you want to visit ${parsed.countries.map((c: any) => c.country).join(' and ')}! Which cities would you like to include?`,
+          },
+        ]);
+
+        setCitySelectionData({
+          countries: parsed.countries,
+          selectedCities: defaultSelections,
+          parsedData: parsed,
+        });
+        return;
+      }
+
+      // No country selection needed — go straight to optimize
+      await runOptimizeAndBuild(parsed);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
       setFindTripError(message);
@@ -467,7 +567,6 @@ export default function PlanningChat() {
         ...prev,
         { id: nextId(), role: 'assistant', content: `Sorry, I ran into a problem: ${message}` },
       ]);
-    } finally {
       setFindTripLoading(false);
       setFindTripStatus('');
     }
@@ -715,8 +814,56 @@ export default function PlanningChat() {
             </motion.div>
           )}
 
+          {/* City selection picker — shown when countries are detected */}
+          {citySelectionData && (
+            <motion.div
+              className="mt-6 mb-4 w-full max-w-2xl mx-auto"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+            >
+              {citySelectionData.countries.map((countryData) => (
+                <div key={countryData.country} className="mb-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <MapPin size={16} className="text-[#4f8ef7]" />
+                    <span className="text-white/90 font-medium text-[15px]">{countryData.country}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {countryData.cities.map((city) => {
+                      const isSelected = (citySelectionData.selectedCities[countryData.country] ?? []).includes(city);
+                      return (
+                        <button
+                          key={city}
+                          onClick={() => handleCityToggle(countryData.country, city)}
+                          className={`px-4 py-2 rounded-full text-[13px] font-medium transition-all border ${
+                            isSelected
+                              ? 'bg-[#4f8ef7] border-[#4f8ef7] text-white shadow-md shadow-blue-500/20'
+                              : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:border-white/25'
+                          }`}
+                        >
+                          {city}
+                          {isSelected && <Check size={12} className="inline ml-1.5 -mt-0.5" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              <div className="flex justify-center mt-4">
+                <button
+                  onClick={handleCitySelectionConfirm}
+                  disabled={Object.values(citySelectionData.selectedCities).flat().filter(c => !citySelectionData.selectedCities['_direct']?.includes(c)).length === 0}
+                  className="flex items-center gap-3 bg-[#4f8ef7] hover:bg-[#3d7de6] text-white font-semibold px-10 py-4 rounded-full text-[16px] shadow-lg shadow-blue-500/25 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Continue with these cities
+                  <ArrowRight size={20} />
+                </button>
+              </div>
+            </motion.div>
+          )}
+
           {/* Find my trip button */}
-          {isComplete && (
+          {isComplete && !citySelectionData && (
             <motion.div
               className="flex flex-col items-center mt-8 mb-10 gap-3"
               initial={{ opacity: 0, y: 16 }}

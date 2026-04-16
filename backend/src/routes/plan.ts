@@ -30,12 +30,59 @@ router.post(
     const { rawInput, userLocation } = interpretSchema.parse(req.body);
     const anthropic = getAnthropicSafe();
 
+    // Popular cities per country — used by both AI and mock paths
+    const COUNTRY_CITIES: Record<string, string[]> = {
+      japan: ['Tokyo', 'Osaka', 'Kyoto', 'Hiroshima', 'Yokohama', 'Fukuoka'],
+      china: ['Beijing', 'Shanghai', 'Guangzhou', 'Shenzhen', 'Chengdu', 'Xi\'an'],
+      france: ['Paris', 'Lyon', 'Marseille', 'Nice', 'Bordeaux', 'Strasbourg'],
+      italy: ['Rome', 'Florence', 'Milan', 'Venice', 'Naples', 'Amalfi'],
+      spain: ['Barcelona', 'Madrid', 'Seville', 'Valencia', 'Granada', 'Bilbao'],
+      germany: ['Berlin', 'Munich', 'Hamburg', 'Frankfurt', 'Cologne', 'Dresden'],
+      uk: ['London', 'Edinburgh', 'Manchester', 'Oxford', 'Bath', 'Liverpool'],
+      england: ['London', 'Manchester', 'Oxford', 'Bath', 'Liverpool', 'Bristol'],
+      thailand: ['Bangkok', 'Chiang Mai', 'Phuket', 'Pattaya', 'Krabi', 'Koh Samui'],
+      india: ['Delhi', 'Mumbai', 'Jaipur', 'Goa', 'Bangalore', 'Varanasi'],
+      brazil: ['São Paulo', 'Rio de Janeiro', 'Salvador', 'Brasília', 'Florianópolis', 'Recife'],
+      mexico: ['Mexico City', 'Cancún', 'Guadalajara', 'Oaxaca', 'Playa del Carmen', 'Mérida'],
+      turkey: ['Istanbul', 'Cappadocia', 'Antalya', 'Izmir', 'Bodrum', 'Ankara'],
+      greece: ['Athens', 'Santorini', 'Mykonos', 'Crete', 'Rhodes', 'Thessaloniki'],
+      portugal: ['Lisbon', 'Porto', 'Faro', 'Sintra', 'Madeira', 'Évora'],
+      netherlands: ['Amsterdam', 'Rotterdam', 'The Hague', 'Utrecht', 'Eindhoven', 'Leiden'],
+      austria: ['Vienna', 'Salzburg', 'Innsbruck', 'Graz', 'Hallstatt', 'Linz'],
+      korea: ['Seoul', 'Busan', 'Jeju', 'Incheon', 'Gyeongju', 'Daegu'],
+      australia: ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Gold Coast', 'Cairns'],
+      egypt: ['Cairo', 'Luxor', 'Aswan', 'Alexandria', 'Hurghada', 'Sharm El Sheikh'],
+      morocco: ['Marrakech', 'Fez', 'Casablanca', 'Chefchaouen', 'Essaouira', 'Tangier'],
+      croatia: ['Dubrovnik', 'Split', 'Zagreb', 'Hvar', 'Zadar', 'Plitvice'],
+      czech: ['Prague', 'Český Krumlov', 'Brno', 'Karlovy Vary', 'Kutná Hora', 'Olomouc'],
+      hungary: ['Budapest', 'Eger', 'Pécs', 'Debrecen', 'Szeged', 'Győr'],
+      switzerland: ['Zurich', 'Geneva', 'Lucerne', 'Interlaken', 'Bern', 'Zermatt'],
+      ireland: ['Dublin', 'Galway', 'Cork', 'Killarney', 'Limerick', 'Belfast'],
+      scotland: ['Edinburgh', 'Glasgow', 'Inverness', 'Aberdeen', 'St Andrews', 'Isle of Skye'],
+      vietnam: ['Hanoi', 'Ho Chi Minh City', 'Da Nang', 'Hoi An', 'Ha Long Bay', 'Nha Trang'],
+      indonesia: ['Bali', 'Jakarta', 'Yogyakarta', 'Lombok', 'Komodo', 'Bandung'],
+      philippines: ['Manila', 'Cebu', 'Palawan', 'Boracay', 'Siargao', 'Bohol'],
+      colombia: ['Bogotá', 'Medellín', 'Cartagena', 'Cali', 'Santa Marta', 'San Andrés'],
+      argentina: ['Buenos Aires', 'Mendoza', 'Bariloche', 'Ushuaia', 'Córdoba', 'Salta'],
+      peru: ['Lima', 'Cusco', 'Machu Picchu', 'Arequipa', 'Lake Titicaca', 'Sacred Valley'],
+      singapore: ['Singapore'],
+      'south korea': ['Seoul', 'Busan', 'Jeju', 'Incheon', 'Gyeongju', 'Daegu'],
+    };
+
     if (anthropic) {
       const { DEFAULT_MODEL } = require('../services/anthropic');
       const response = await anthropic.messages.create({
         model: DEFAULT_MODEL,
         max_tokens: 1024,
-        system: `You are a travel planning assistant. Parse the user's trip description into structured data. Return JSON with: destinations (string[]), dates ({ start, end } in YYYY-MM-DD), travelers (number), budget (number or null), vibe (string).`,
+        system: `You are a travel planning assistant. Parse the user's trip description into structured data.
+Return JSON with:
+- destinations (string[]) — specific city names, NOT country names
+- countries (Array<{ country: string, cities: string[] }>) — if the user mentioned a country (e.g. "Japan"), include it here with 4-6 popular cities to visit. If the user mentioned a specific city, omit the country entry.
+- dates ({ start, end } in YYYY-MM-DD) — infer from context or null
+- travelers (number)
+- budget (number or null)
+- vibe (string)
+- needsCitySelection (boolean) — true if any destination was a country name rather than a specific city`,
         messages: [
           {
             role: 'user',
@@ -61,47 +108,23 @@ router.post(
       .map((w) => w.trim())
       .filter(Boolean);
 
-    // Map common country names to their capital/major city
-    const countryToCity: Record<string, string> = {
-      japan: 'Tokyo',
-      china: 'Beijing',
-      france: 'Paris',
-      italy: 'Rome',
-      spain: 'Barcelona',
-      germany: 'Berlin',
-      uk: 'London',
-      england: 'London',
-      thailand: 'Bangkok',
-      india: 'Delhi',
-      brazil: 'São Paulo',
-      mexico: 'Mexico City',
-      turkey: 'Istanbul',
-      greece: 'Athens',
-      portugal: 'Lisbon',
-      netherlands: 'Amsterdam',
-      austria: 'Vienna',
-      korea: 'Seoul',
-      australia: 'Sydney',
-      egypt: 'Cairo',
-      morocco: 'Marrakech',
-      croatia: 'Dubrovnik',
-      czech: 'Prague',
-      hungary: 'Budapest',
-      switzerland: 'Zurich',
-      ireland: 'Dublin',
-      scotland: 'Edinburgh',
-      vietnam: 'Hanoi',
-      indonesia: 'Bali',
-      philippines: 'Manila',
-      colombia: 'Bogotá',
-      argentina: 'Buenos Aires',
-      peru: 'Lima',
-    };
+    const destinations: string[] = [];
+    const countries: Array<{ country: string; cities: string[] }> = [];
+    let needsCitySelection = false;
 
-    const destinations = words.map((w) => {
+    for (const w of words) {
       const lower = w.toLowerCase();
-      return countryToCity[lower] ?? w.charAt(0).toUpperCase() + w.slice(1);
-    });
+      const citiesForCountry = COUNTRY_CITIES[lower];
+      if (citiesForCountry) {
+        // It's a country — add default city but flag for selection
+        destinations.push(citiesForCountry[0]);
+        countries.push({ country: w.charAt(0).toUpperCase() + w.slice(1), cities: citiesForCountry });
+        needsCitySelection = true;
+      } else {
+        // Assume it's already a city name
+        destinations.push(w.charAt(0).toUpperCase() + w.slice(1));
+      }
+    }
 
     const today = new Date();
     const start = new Date(today);
@@ -111,6 +134,8 @@ router.post(
 
     return res.json({
       destinations,
+      countries,
+      needsCitySelection,
       dates: {
         start: start.toISOString().split('T')[0],
         end: end.toISOString().split('T')[0],
