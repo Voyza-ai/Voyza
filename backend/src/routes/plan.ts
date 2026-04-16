@@ -107,7 +107,7 @@ router.post(
     const end = new Date(start);
     end.setDate(end.getDate() + destinations.length * 3);
 
-    res.json({
+    return res.json({
       destinations,
       dates: {
         start: start.toISOString().split('T')[0],
@@ -265,7 +265,7 @@ router.post(
     }
 
     // Mock
-    res.json({
+    return res.json({
       action: 'no_change',
       message: 'AI editing requires Anthropic API key',
       _mock: true,
