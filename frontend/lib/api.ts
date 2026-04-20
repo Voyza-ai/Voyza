@@ -122,6 +122,13 @@ export async function searchTrains(params: {
 }
 
 // ─── Optimize ────────────────────────────────────────────────
+export type DateShiftSuggestion = {
+  dayOffset: number;
+  newStartDate: string;
+  newTotalCost: number;
+  savings: number;
+};
+
 export type OptimizeResult = {
   routes: Array<{
     ordering: string[];
@@ -136,6 +143,8 @@ export type OptimizeResult = {
   savingsVsNaive: number;
   iataCodes: Record<string, string>;
   dates: Record<string, { arrival: string; departure: string }>;
+  /** Present when shifting the trip by ±1 or ±2 days saves meaningful money. */
+  dateShiftSuggestion?: DateShiftSuggestion;
 };
 
 export async function optimizeTrip(params: {
@@ -216,6 +225,52 @@ export async function editPlan(params: {
     method: 'POST',
     body: JSON.stringify(params),
   });
+}
+
+// ─── Activities (Claude-picked) ──────────────────────────────
+export type ActivitySuggestion = {
+  name: string;
+  category: 'landmark' | 'museum' | 'food' | 'nature' | 'nightlife' | 'experience' | 'shopping';
+  timeOfDay: 'morning' | 'afternoon' | 'evening';
+  durationHours: number;
+  reason: string;
+};
+
+export async function searchActivities(params: {
+  city: string;
+  country?: string;
+  vibe?: string;
+  travelers?: number;
+  nights?: number;
+}): Promise<ActivitySuggestion[]> {
+  const data = await apiFetch<{ activities: ActivitySuggestion[] }>('/api/plan/activities', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+  return data.activities;
+}
+
+// ─── Restaurants (Claude-picked) ─────────────────────────────
+export type RestaurantSuggestion = {
+  name: string;
+  cuisine: string;
+  priceRange: '$' | '$$' | '$$$' | '$$$$';
+  mealType: 'breakfast' | 'lunch' | 'dinner' | 'any';
+  reason: string;
+};
+
+export async function searchRestaurants(params: {
+  city: string;
+  country?: string;
+  vibe?: string;
+  travelers?: number;
+  budget?: number;
+}): Promise<RestaurantSuggestion[]> {
+  const data = await apiFetch<{ restaurants: RestaurantSuggestion[] }>('/api/plan/restaurants', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+  return data.restaurants;
 }
 
 // ─── Canvas API ──────────────────────────────────────────────

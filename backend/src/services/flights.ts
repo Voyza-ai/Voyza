@@ -69,7 +69,7 @@ export async function searchFlights(params: SearchFlightsParams): Promise<Flight
 
     const offers = offerRequest.data.offers ?? [];
 
-    return offers.map((offer: any) => {
+    const mapped = offers.map((offer: any) => {
       const slice = offer.slices?.[0];
       const firstSegment = slice?.segments?.[0];
       const lastSegment = slice?.segments?.[slice.segments.length - 1];
@@ -78,6 +78,15 @@ export async function searchFlights(params: SearchFlightsParams): Promise<Flight
       const depTime = new Date(firstSegment?.departing_at ?? date);
       const arrTime = new Date(lastSegment?.arriving_at ?? date);
       const durationMinutes = Math.round((arrTime.getTime() - depTime.getTime()) / 60000);
+
+      // Real bookable deep link. Duffel doesn't expose a public offer-redirect
+      // page — the old `https://duffel.com/redirect/offers/...` URL 404s. Until
+      // we build in-app booking (Duffel Orders API), send users to Google
+      // Flights pre-filled with the exact route + date. From there they can
+      // book directly with the airline or a trusted OTA.
+      const googleFlightsUrl = `https://www.google.com/travel/flights?q=${encodeURIComponent(
+        `Flights to ${destination} from ${origin} on ${date}`,
+      )}`;
 
       return {
         id: offer.id,
@@ -89,10 +98,20 @@ export async function searchFlights(params: SearchFlightsParams): Promise<Flight
         stops: (slice?.segments?.length ?? 1) - 1,
         carrier: carrier.name ?? 'Unknown',
         carrierCode: carrier.iata_code ?? '',
-        bookingUrl: `https://duffel.com/redirect/offers/${offer.id}`,
+        bookingUrl: googleFlightsUrl,
         raw: offer,
       };
     });
+
+    // Normalize all prices to USD
+    const { convertToUsd } = await import('./currency');
+    return await Promise.all(
+      mapped.map(async (o) => {
+        if (!o.currency || o.currency === 'USD') return o;
+        const usd = await convertToUsd(o.price, o.currency);
+        return { ...o, price: usd, currency: 'USD' };
+      }),
+    );
   } catch (err: any) {
     if (err instanceof AppError) throw err;
     logger.error('Duffel searchFlights failed', { message: err?.message, origin, destination });

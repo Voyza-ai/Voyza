@@ -11,6 +11,8 @@ import ViewTabs, { ResultsView } from '@/components/results/ViewTabs';
 import AIChatPanel from '@/components/results/AIChatPanel';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
+import DateShiftBanner from '@/components/results/DateShiftBanner';
+import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import { searchHotels } from '@/lib/api';
 import { Hotel } from '@/lib/types';
 
@@ -147,6 +149,12 @@ function ResultsPageInner() {
         {/* Main column — header pinned, cards window scrolls inside */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
           <ResultsHeader trip={currentTrip} />
+          {typeof currentTrip.budget === 'number' && (
+            <BudgetOverBanner budget={currentTrip.budget} totalCost={currentTrip.totalCost} />
+          )}
+          {currentTrip.dateShiftSuggestion && (
+            <DateShiftBanner suggestion={currentTrip.dateShiftSuggestion} />
+          )}
           <ViewTabs value={view} onChange={setView} />
 
           {/* Scrollable cards window */}

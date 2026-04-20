@@ -1,5 +1,15 @@
-import 'dotenv/config';
+import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
+
+// Load .env BEFORE reading process.env.
+// Override any empty-string values in the parent shell (e.g. the parent
+// process leaks `ANTHROPIC_API_KEY=""` and dotenv by default won't touch
+// already-set keys, even empty ones). We only override keys whose current
+// value is empty so production deployments (Railway, Vercel) still win.
+const parsedDotenv = loadDotenv().parsed ?? {};
+for (const [key, value] of Object.entries(parsedDotenv)) {
+  if (!process.env[key]) process.env[key] = value;
+}
 
 /**
  * Central env validation.

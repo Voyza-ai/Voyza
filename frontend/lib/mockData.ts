@@ -23,7 +23,7 @@ export const mockTrip: Trip = {
   id: 'mock-1',
   title: 'Rome · Florence · Barcelona · Lisbon',
   status: 'planning',
-  // Default = sum of top-ranked hotel × nights × travelers + transportOut
+  // Default = sum of top-ranked hotel × nights (group total) + transportOut
   // (matches what `liveTripTotal` computes against the default selections).
   totalCost: 3879,
   savings: 612,

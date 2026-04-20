@@ -122,6 +122,16 @@ export type Trip = {
   travelers: number;
   cities: City[];
   savingsTips: string[];
+  /** The user's stated total-trip budget in USD, if they gave one. Lets the
+   *  results page show a "you're over budget" warning when totalCost > budget. */
+  budget?: number;
+  /** Optional suggestion from the optimizer when shifting dates saves money. */
+  dateShiftSuggestion?: {
+    dayOffset: number;
+    newStartDate: string;
+    newTotalCost: number;
+    savings: number;
+  };
   createdAt?: string;
   ownerId?: string;
 };

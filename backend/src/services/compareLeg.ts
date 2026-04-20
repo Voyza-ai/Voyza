@@ -70,6 +70,10 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
   // Pick cheapest flight
   let bestFlight: FlightOffer | null = null;
   if (cachedFlight) {
+    // Cache doesn't store bookingUrl, so send to Google Flights pre-filled.
+    const cachedBookingUrl = `https://www.google.com/travel/flights?q=${encodeURIComponent(
+      `Flights to ${destination} from ${origin} on ${date}`,
+    )}`;
     bestFlight = {
       id: cachedFlight.id,
       price: cachedFlight.price,
@@ -80,7 +84,7 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
       stops: 0,
       carrier: cachedFlight.operator ?? '',
       carrierCode: '',
-      bookingUrl: '',
+      bookingUrl: cachedBookingUrl,
       raw: {},
     };
   } else if (flightsResult && flightsResult.length > 0) {
@@ -90,16 +94,23 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
   // Pick cheapest train
   let bestTrain: TrainOffer | null = null;
   if (cachedTrain) {
+    // Cached prices are already stored in USD (converted by trains.ts before
+    // the first cache write). The cached currency label just follows suit.
+    // Cache doesn't store bookingUrl, so fall back to Google search for the
+    // exact route so the Book button always leads somewhere real.
+    const cachedBookingUrl = `https://www.google.com/search?q=${encodeURIComponent(
+      `train ${origin} to ${destination} ${date}`,
+    )}`;
     bestTrain = {
       id: cachedTrain.id,
       price: cachedTrain.price,
-      currency: 'EUR',
+      currency: 'USD',
       departure: '',
       arrival: '',
       durationMinutes: cachedTrain.duration_minutes ?? 0,
       operator: cachedTrain.operator ?? '',
       trainType: '',
-      bookingUrl: '',
+      bookingUrl: cachedBookingUrl,
       limitedCoverage: false,
     };
   } else if (trainsResult && Array.isArray(trainsResult) && trainsResult.length > 0) {

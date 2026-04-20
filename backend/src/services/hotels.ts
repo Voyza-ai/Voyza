@@ -146,6 +146,24 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
         };
       });
 
+    // Convert all non-USD prices to USD before returning.
+    // Booking frequently ignores filter_by_currency=USD and returns
+    // local currency for `min_total_price`, so we normalize here.
+    const { convertToUsd } = await import('./currency');
+    hotels = await Promise.all(
+      hotels.map(async (h) => {
+        if (!h.currency || h.currency === 'USD') return h;
+        const usdTotal = await convertToUsd(h.price, h.currency);
+        const usdPerNight = await convertToUsd(h.pricePerNight, h.currency);
+        return {
+          ...h,
+          price: usdTotal,
+          pricePerNight: usdPerNight,
+          currency: 'USD',
+        };
+      }),
+    );
+
     if (maxPrice !== undefined) {
       hotels = hotels.filter((h) => h.price <= maxPrice);
     }

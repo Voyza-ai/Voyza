@@ -16,3 +16,8 @@ yarn-error.log*
 
 # Env files — real values are per-workspace
 # (each workspace has its own .gitignore for specifics)
+
+# Claude Code session-local — contains worktree state and MCP credentials
+.claude/worktrees/
+.claude/launch.json
+.mcp.json

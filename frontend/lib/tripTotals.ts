@@ -79,8 +79,17 @@ export function transportTotal(trip: Trip): number {
   return trip.cities.reduce((sum, c) => sum + (c.transportOut?.price ?? 0), 0);
 }
 
-/** Live trip total = hotels + transport, multiplied by traveler count. */
+/**
+ * Live trip total = hotels + transport (group total).
+ *
+ * Both components are already group totals:
+ * - `hotelsTotal` accounts for rooms needed (one room priced per night, not
+ *   per person — multi-room stays multiply via `roomsNeeded`).
+ * - `transportTotal` uses Duffel / DB prices which are quoted for the whole
+ *   passenger set on the booking.
+ *
+ * Per-person display is just `liveTripTotal / travelers` in the header.
+ */
 export function liveTripTotal(trip: Trip): number {
-  const perPerson = hotelsTotal(trip) + transportTotal(trip);
-  return Math.round(perPerson * trip.travelers);
+  return Math.round(hotelsTotal(trip) + transportTotal(trip));
 }

@@ -15,4 +15,4 @@ export function getAnthropic(): Anthropic {
 }
 
 /** Default model for planning/chat. Update here to roll out across the app. */
-export const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+export const DEFAULT_MODEL = 'claude-sonnet-4-5';

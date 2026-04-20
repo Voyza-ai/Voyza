@@ -18,6 +18,56 @@ function getAnthropicSafe() {
   }
 }
 
+/**
+ * Extract a JSON object/array from free-form AI output. Handles:
+ * - Clean JSON (parses directly)
+ * - Markdown-fenced JSON (```json ... ```)
+ * - JSON followed by explanatory text (finds the balanced braces)
+ * - JSON preceded by preamble
+ *
+ * Returns the parsed object or null if nothing parseable is found.
+ */
+function extractJson(raw: string): any | null {
+  if (!raw) return null;
+  const stripped = raw.trim();
+
+  // Try direct parse first
+  try { return JSON.parse(stripped); } catch {}
+
+  // Try markdown-fenced block: ```json ... ``` (anywhere in the text)
+  const fenceMatch = stripped.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch) {
+    try { return JSON.parse(fenceMatch[1].trim()); } catch {}
+  }
+
+  // Try finding the first balanced {...} or [...] block
+  for (const [open, close] of [['{', '}'], ['[', ']']] as const) {
+    const start = stripped.indexOf(open);
+    if (start === -1) continue;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < stripped.length; i++) {
+      const c = stripped[i];
+      if (escape) { escape = false; continue; }
+      if (c === '\\') { escape = true; continue; }
+      if (c === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (c === open) depth++;
+      else if (c === close) {
+        depth--;
+        if (depth === 0) {
+          const candidate = stripped.slice(start, i + 1);
+          try { return JSON.parse(candidate); } catch {}
+          break;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 // ─── POST /api/plan/interpret ────────────────────────────────
 const interpretSchema = z.object({
   rawInput: z.string().min(1),
@@ -75,13 +125,22 @@ router.post(
         model: DEFAULT_MODEL,
         max_tokens: 1024,
         system: `You are a travel planning assistant. Parse the user's trip description into structured data.
+
+Today's date is ${new Date().toISOString().split('T')[0]}. Use this to resolve relative phrases like "next week", "tomorrow", "in a month", "this summer" into absolute YYYY-MM-DD dates.
+
+CRITICAL:
+1. Only populate fields that the user EXPLICITLY mentioned. Never guess or assume. If the user didn't mention a field, set it to null. This lets the app ask follow-up questions instead of using a wrong default.
+2. Respond with ONLY the JSON object, nothing else. No markdown fences, no explanation before or after. Just raw JSON.
+
 Return JSON with:
-- destinations (string[]) — specific city names, NOT country names
+- destinations (string[]) — specific city names ONLY the user mentioned (NOT country names, NOT inferred)
 - countries (Array<{ country: string, cities: string[] }>) — if the user mentioned a country (e.g. "Japan"), include it here with 4-6 popular cities to visit. If the user mentioned a specific city, omit the country entry.
-- dates ({ start, end } in YYYY-MM-DD) — infer from context or null
-- travelers (number)
-- budget (number or null)
-- vibe (string)
+- dates ({ start, end } in YYYY-MM-DD) — resolve relative phrases using today's date above. Only return null if the user said nothing about timing.
+- travelers (number or null) — the TOTAL group size including the person planning. "Me and 3 friends" → 4. "3 of us" → 3. "Just me" → 1. "Traveling with 3 people" is ambiguous — treat as 3 total (assume the number includes them). Return null if unstated.
+- travelersAmbiguous (boolean) — true if the user's phrasing was ambiguous and could reasonably be interpreted as either "N total" OR "N + me = N+1 total" (e.g. "traveling with 3 people", "going with 3 friends"). Set false for unambiguous phrasing like "3 of us", "group of 4", "just me".
+- budget (number or null) — ONLY if user mentioned a budget amount. If unstated, return null.
+- budgetPerPerson (boolean or null) — true if user explicitly said "per person" / "each". false if user said "total" / "altogether" / "for the trip". null if budget unclear or not given.
+- vibe (string or null) — ONLY if user mentioned a vibe/feeling (e.g. "beach", "adventure", "culture"). If unstated, return null. Do NOT infer from the destination.
 - needsCitySelection (boolean) — true if any destination was a country name rather than a specific city`,
         messages: [
           {
@@ -92,14 +151,9 @@ Return JSON with:
       });
 
       const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
-      // Strip markdown code fences if present
-      const text = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-      try {
-        const parsed = JSON.parse(text);
-        return res.json(parsed);
-      } catch {
-        return res.json({ raw: rawText });
-      }
+      const parsed = extractJson(rawText);
+      if (parsed) return res.json(parsed);
+      return res.json({ raw: rawText });
     }
 
     // Mock response — extract city/country names from the raw input
@@ -227,7 +281,7 @@ router.post(
         const response = await anthropic.messages.create({
           model: DEFAULT_MODEL,
           max_tokens: 512,
-          system: 'You rank travel destinations. Return JSON array of { name, reason } sorted by best fit.',
+          system: 'You rank travel destinations. Respond with ONLY a JSON array of { name, reason } sorted by best fit. No markdown fences, no explanation.',
           messages: [
             {
               role: 'user',
@@ -237,9 +291,8 @@ router.post(
         });
 
         const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
-        const text = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+        const ranked = extractJson(rawText);
         try {
-          const ranked = JSON.parse(text);
           if (Array.isArray(ranked)) {
             candidates = candidates.map((c) => {
               const match = ranked.find((r: any) => r.name === c.name);
@@ -275,7 +328,7 @@ router.post(
       const response = await anthropic.messages.create({
         model: DEFAULT_MODEL,
         max_tokens: 2048,
-        system: `You are a travel trip editor. Given a trip and a user message, return a JSON patch to apply. Actions: add_city, remove_city, swap_hotel, change_dates, reorder, no_change. Format: { action, data, message }.`,
+        system: `You are a travel trip editor. Given a trip and a user message, return a JSON patch to apply. Actions: add_city, remove_city, swap_hotel, change_dates, reorder, no_change. Format: { action, data, message }. Respond with ONLY the JSON object, no markdown fences, no explanation.`,
         messages: [
           {
             role: 'user',
@@ -285,18 +338,151 @@ router.post(
       });
 
       const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
-      const text = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-      try {
-        return res.json(JSON.parse(text));
-      } catch {
-        return res.json({ action: 'no_change', message: rawText });
-      }
+      const parsed = extractJson(rawText);
+      if (parsed) return res.json(parsed);
+      return res.json({ action: 'no_change', message: rawText });
     }
 
     // Mock
     return res.json({
       action: 'no_change',
       message: 'AI editing requires Anthropic API key',
+      _mock: true,
+    });
+  }),
+);
+
+// ─── POST /api/plan/activities ───────────────────────────────
+// AI-picks (Claude) returns 5 activity names + short reason per city.
+// Later we'll enrich each with real POI data (Google Places / Foursquare).
+const activitiesSchema = z.object({
+  city: z.string().min(1),
+  country: z.string().optional(),
+  vibe: z.string().optional(),
+  travelers: z.number().int().positive().optional(),
+  nights: z.number().int().positive().optional(),
+});
+
+router.post(
+  '/activities',
+  asyncHandler(async (req, res) => {
+    const { city, country, vibe, travelers, nights } = activitiesSchema.parse(req.body);
+    const anthropic = getAnthropicSafe();
+
+    if (anthropic) {
+      const { DEFAULT_MODEL } = require('../services/anthropic');
+      const n = Math.max(5, Math.min(8, (nights ?? 2) * 2 + 1));
+
+      const vibeHint = vibe ? `The traveler's vibe is: ${vibe}. ` : '';
+      const groupHint = travelers && travelers > 1 ? `They're traveling as a group of ${travelers}. ` : '';
+
+      const response = await anthropic.messages.create({
+        model: DEFAULT_MODEL,
+        max_tokens: 1024,
+        system: `You recommend things to do in a city. ${vibeHint}${groupHint}Pick ${n} diverse activities — a mix of must-see landmarks, cultural experiences, food, and a couple lesser-known picks. Avoid generic listicle fodder.
+
+Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
+{
+  "name": "specific activity or place name (not a generic description)",
+  "category": "landmark" | "museum" | "food" | "nature" | "nightlife" | "experience" | "shopping",
+  "timeOfDay": "morning" | "afternoon" | "evening",
+  "durationHours": number between 1 and 4,
+  "reason": "one short sentence why"
+}`,
+        messages: [
+          {
+            role: 'user',
+            content: `Activities in ${city}${country ? `, ${country}` : ''}.`,
+          },
+        ],
+      });
+
+      const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
+      const parsed = extractJson(rawText);
+      if (Array.isArray(parsed)) {
+        return res.json({ activities: parsed });
+      }
+      // fall through to mock if parse failed
+    }
+
+    // Mock fallback
+    return res.json({
+      activities: [
+        { name: `Explore ${city} old town`, category: 'landmark', timeOfDay: 'morning', durationHours: 2, reason: 'Classic starting point' },
+        { name: `Local food tour in ${city}`, category: 'food', timeOfDay: 'afternoon', durationHours: 3, reason: 'Taste the local cuisine' },
+        { name: `${city} main museum`, category: 'museum', timeOfDay: 'afternoon', durationHours: 2, reason: 'Cultural highlight' },
+        { name: `Sunset walk`, category: 'experience', timeOfDay: 'evening', durationHours: 1, reason: 'Golden hour views' },
+        { name: `Neighborhood wandering`, category: 'experience', timeOfDay: 'afternoon', durationHours: 2, reason: 'Discover local life' },
+      ],
+      _mock: true,
+    });
+  }),
+);
+
+// ─── POST /api/plan/restaurants ──────────────────────────────
+// AI-picks (Claude) returns 5 restaurant recommendations per city.
+// Later we'll enrich each with real POI data (Google Places / Foursquare).
+const restaurantsSchema = z.object({
+  city: z.string().min(1),
+  country: z.string().optional(),
+  vibe: z.string().optional(),
+  travelers: z.number().int().positive().optional(),
+  budget: z.number().int().positive().optional(),
+});
+
+router.post(
+  '/restaurants',
+  asyncHandler(async (req, res) => {
+    const { city, country, vibe, travelers, budget } = restaurantsSchema.parse(req.body);
+    const anthropic = getAnthropicSafe();
+
+    if (anthropic) {
+      const { DEFAULT_MODEL } = require('../services/anthropic');
+
+      const vibeHint = vibe ? `The traveler's vibe is: ${vibe}. ` : '';
+      const groupHint = travelers && travelers > 1 ? `Group of ${travelers}. ` : '';
+      const budgetHint = budget
+        ? `Their total trip budget is $${budget} — recommend a mix but skew toward mid-range.`
+        : 'Mix a couple affordable spots, a couple mid-range, and one special splurge.';
+
+      const response = await anthropic.messages.create({
+        model: DEFAULT_MODEL,
+        max_tokens: 1024,
+        system: `You recommend restaurants in a city. ${vibeHint}${groupHint}Pick 5 diverse spots representing local specialties. Avoid generic chain restaurants and tourist traps. ${budgetHint}
+
+Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
+{
+  "name": "specific restaurant name (real, well-known spot)",
+  "cuisine": "short cuisine label, e.g. 'Roman pasta', 'Neapolitan pizza', 'izakaya', 'ramen'",
+  "priceRange": "$" | "$$" | "$$$" | "$$$$",
+  "mealType": "breakfast" | "lunch" | "dinner" | "any",
+  "reason": "one short sentence why a traveler should go"
+}`,
+        messages: [
+          {
+            role: 'user',
+            content: `Restaurants in ${city}${country ? `, ${country}` : ''}.`,
+          },
+        ],
+      });
+
+      const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
+      const parsed = extractJson(rawText);
+      if (Array.isArray(parsed)) {
+        return res.json({ restaurants: parsed });
+      }
+      // fall through to mock
+    }
+
+    // Mock fallback
+    return res.json({
+      restaurants: [
+        { name: `${city} neighborhood trattoria`, cuisine: 'local', priceRange: '$$', mealType: 'dinner', reason: 'Classic local spot' },
+        { name: `${city} casual lunch cafe`, cuisine: 'cafe', priceRange: '$', mealType: 'lunch', reason: 'Quick casual bite' },
+        { name: `${city} upscale restaurant`, cuisine: 'contemporary', priceRange: '$$$', mealType: 'dinner', reason: 'Special occasion' },
+        { name: `${city} street food market`, cuisine: 'street food', priceRange: '$', mealType: 'any', reason: 'Local flavors' },
+        { name: `${city} breakfast bakery`, cuisine: 'bakery', priceRange: '$', mealType: 'breakfast', reason: 'Great way to start the day' },
+      ],
       _mock: true,
     });
   }),
