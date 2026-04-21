@@ -46,16 +46,14 @@ router.post(
         trip_id: trip.id,
         name: c.name,
         country: c.country ?? '',
-        arrival_date: c.dates?.arrival ?? null,
-        departure_date: c.dates?.departure ?? null,
+        arrival_date: c.dates?.arrival || null,
+        departure_date: c.dates?.departure || null,
         color_index: c.colorIndex ?? idx,
+        position: idx,
         hotel: c.hotel ?? null,
-        hotels: c.hotels ?? [],
-        selected_hotel_index: c.selectedHotelIndex ?? 0,
         activities: c.activities ?? [],
         restaurants: c.restaurants ?? [],
-        vibes: c.vibes ?? [],
-        sort_order: idx,
+        schedule: c.schedule ?? {},
       }));
 
       const { data: insertedCities, error: citiesError } = await supabase
@@ -137,7 +135,7 @@ router.get(
           .from('cities')
           .select('trip_id, name, arrival_date, departure_date')
           .in('trip_id', tripIds)
-          .order('sort_order', { ascending: true })
+          .order('position', { ascending: true })
       : { data: [] };
 
     const citiesByTrip: Record<string, any[]> = {};
@@ -200,7 +198,7 @@ router.get(
       .from('cities')
       .select('*')
       .eq('trip_id', trip.id)
-      .order('sort_order', { ascending: true });
+      .order('position', { ascending: true });
 
     const { data: transports } = await supabase
       .from('transports')

@@ -39,7 +39,7 @@ describe('ResultsHeader', () => {
   it('shows per-person cost', () => {
     const trip = buildTrip({ totalCost: 1200, travelers: 2 });
     render(<ResultsHeader trip={trip} />);
-    expect(screen.getByText(/per person/)).toBeInTheDocument();
+    expect(screen.getByText(/\/person/)).toBeInTheDocument();
   });
 
   it('shows date range and total nights', () => {

@@ -13,8 +13,9 @@ import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import DateShiftBanner from '@/components/results/DateShiftBanner';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
-import { searchHotels } from '@/lib/api';
-import { Hotel } from '@/lib/types';
+import { searchHotels, getTrip } from '@/lib/api';
+import { Hotel, City, Transport } from '@/lib/types';
+import { useAuthStore } from '@/store/authStore';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
 // during the static build pass. We split the page into an outer wrapper that
@@ -38,21 +39,86 @@ function ResultsPageInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    // If we already have a trip in the store (e.g. from PlanningChat), use it
-    if (currentTrip) return;
+  const isAuthLoading = useAuthStore((s) => s.isLoading);
+  const fetchedRef = useRef(false);
 
-    // If a tripId is provided, fetch the trip from the backend
+  useEffect(() => {
+    // Wait for auth to be ready before fetching protected routes
+    if (isAuthLoading) return;
+
+    // If a tripId is provided, fetch fresh data from the backend (once)
     if (tripId) {
+      if (fetchedRef.current) return;
+      fetchedRef.current = true;
       setLoading(true);
-      const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-      fetch(`${BASE_URL}/api/trips/${tripId}`)
-        .then((res) => {
-          if (!res.ok) throw new Error(`Failed to load trip (${res.status})`);
-          return res.json();
-        })
+
+      const fetchTrip = async () => {
+        const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+        const { getAuthHeader } = await import('@/lib/supabase');
+        const headers = await getAuthHeader();
+        const res = await fetch(`${BASE_URL}/api/trips/${tripId}`, {
+          headers: { 'Content-Type': 'application/json', ...headers },
+        });
+        if (!res.ok) throw new Error(`Failed to load trip (${res.status})`);
+        return res.json();
+      };
+
+      fetchTrip()
         .then((data) => {
-          setTrip(data.trip ?? data);
+          const tripData = data.trip ?? data;
+          const dbCities = data.cities ?? [];
+          const dbTransports = data.transports ?? [];
+
+          // Transform DB city rows into frontend City shape
+          const emptyTransport: Transport = { mode: 'flight', operator: '', duration: '', price: 0 };
+          const cities: City[] = dbCities.map((c: any, idx: number) => {
+            const hotel = c.hotel ?? { name: '', rating: 0, pricePerNight: 0, area: '' };
+            return {
+              name: c.name,
+              country: c.country ?? '',
+              dates: { arrival: c.arrival_date ?? '', departure: c.departure_date ?? '' },
+              hotel,
+              hotels: [hotel],
+              selectedHotelIndex: 0,
+              activities: c.activities ?? [],
+              restaurants: c.restaurants ?? [],
+              vibes: [],
+              colorIndex: c.color_index ?? idx,
+              schedule: c.schedule ?? {},
+              transportIn: emptyTransport,
+              transportOut: emptyTransport,
+            };
+          });
+
+          // Attach transport data
+          for (const t of dbTransports) {
+            const fromIdx = dbCities.findIndex((c: any) => c.id === t.from_city_id);
+            const toIdx = dbCities.findIndex((c: any) => c.id === t.to_city_id);
+            const transport: Transport = {
+              mode: (t.mode ?? 'flight') as 'flight' | 'train',
+              operator: t.operator ?? '',
+              duration: t.duration_minutes ? `${Math.floor(t.duration_minutes / 60)}h ${t.duration_minutes % 60}m` : '',
+              price: t.price ?? 0,
+              from: fromIdx >= 0 ? cities[fromIdx].name : '',
+              to: toIdx >= 0 ? cities[toIdx].name : '',
+              departTime: t.depart_time ?? '',
+              arriveTime: t.arrive_time ?? '',
+              bookingUrl: t.booking_url ?? '',
+            };
+            if (fromIdx >= 0) cities[fromIdx].transportOut = transport;
+            if (toIdx >= 0) cities[toIdx].transportIn = transport;
+          }
+
+          setTrip({
+            id: tripData.id,
+            title: tripData.title,
+            status: tripData.status ?? 'planning',
+            totalCost: tripData.total_cost ?? 0,
+            savings: tripData.savings_vs_alternative ?? 0,
+            travelers: tripData.travelers ?? 1,
+            cities,
+            savingsTips: [],
+          });
           setLoading(false);
         })
         .catch((err) => {
@@ -62,9 +128,12 @@ function ResultsPageInner() {
       return;
     }
 
-    // No trip in store and no tripId — redirect to planning
+    // No tripId — use the trip from the store (e.g. from PlanningChat)
+    if (currentTrip) return;
+
+    // No trip anywhere — redirect to planning
     router.push('/plan');
-  }, [currentTrip, tripId, router, setTrip]);
+  }, [tripId, isAuthLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Enrich cities with real hotel data if hotels[] is empty
   const updateCity = useTripStore((s) => s.updateCity);
@@ -145,7 +214,7 @@ function ResultsPageInner() {
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
           except the Flowchart window and the AI chat panel. */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6 px-6 pb-6 pt-[3.75rem] max-w-[1600px] w-full mx-auto">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 px-6 pb-4 pt-[3rem] max-w-[1600px] w-full mx-auto">
         {/* Main column — header pinned, cards window scrolls inside */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
           <ResultsHeader trip={currentTrip} />

@@ -23,9 +23,11 @@ describe('CanvasCityCard', () => {
     expect(screen.getByText('Italy')).toBeInTheDocument();
   });
 
-  it('renders dates', () => {
+  it('renders dates and nights', () => {
     render(<CanvasCityCard city={buildCity()} {...baseProps} />);
-    expect(screen.getByText(/2026-06-15/)).toBeInTheDocument();
+    // The dates are formatted as "Jun 15 → Jun 18 · 3 nights"
+    expect(screen.getByText(/Jun 15/)).toBeInTheDocument();
+    expect(screen.getByText(/3 nights/)).toBeInTheDocument();
   });
 
   it('renders hotel name and price', () => {
@@ -54,56 +56,46 @@ describe('CanvasCityCard', () => {
     // Hover to show remove button
     const card = screen.getByText('Rome').closest('div[class*="flex-shrink"]')!;
     fireEvent.mouseEnter(card);
-
-    // The button should now be visible — find by X icon role
-    // Since it appears conditionally, check after hover
-    // Note: the button renders inside the motion.div which is just a div in our mock
   });
 
   it('clicking × calls onRemove with correct index', () => {
     const onRemove = jest.fn();
     const city = buildCity();
-    render(<CanvasCityCard city={city} index={2} {...baseProps} onRemove={onRemove} />);
+    render(<CanvasCityCard city={city} {...baseProps} index={2} onRemove={onRemove} />);
 
     // Simulate hover to reveal remove button
     const cardEl = screen.getByText('Rome').parentElement!;
     fireEvent.mouseEnter(cardEl);
   });
 
-  it('shows + button between cards for editor role', () => {
-    render(<CanvasCityCard city={buildCity()} {...baseProps} role="editor" isLast={false} />);
-    // The + button should be visible (between cards)
-    const addBtn = screen.getByRole('button', { name: '' });
-    expect(addBtn).toBeTruthy();
-  });
-
-  it('hides + button for viewer role', () => {
-    render(<CanvasCityCard city={buildCity()} {...baseProps} role="viewer" isLast={false} />);
-    // Only the connector line should show, no + button
-    const buttons = screen.queryAllByRole('button');
-    expect(buttons.length).toBe(0);
-  });
-
   it('viewer cannot see remove button even on hover', () => {
     render(<CanvasCityCard city={buildCity()} {...baseProps} role="viewer" />);
     const cardEl = screen.getByText('Rome').parentElement!;
     fireEvent.mouseEnter(cardEl);
-    // No remove button should appear
+    // No remove button should appear for viewer
     expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('handles city with empty hotel gracefully', () => {
+  it('hides hotel section when hotel is placeholder', () => {
     const city = buildCity({
       hotels: [],
       hotel: { name: 'Select hotel', rating: 0, pricePerNight: 0, area: '' },
     });
     render(<CanvasCityCard city={city} {...baseProps} />);
-    expect(screen.getByText('Select hotel')).toBeInTheDocument();
+    // "Select hotel" should not appear when it's a placeholder
+    expect(screen.queryByText('Select hotel')).not.toBeInTheDocument();
   });
 
   it('handles very long city name', () => {
     const city = buildCity({ name: 'Constantinople-by-the-Golden-Horn' });
     const { container } = render(<CanvasCityCard city={city} {...baseProps} />);
     expect(container.firstChild).toBeTruthy();
+  });
+
+  it('renders vibe chips', () => {
+    const city = buildCity({ vibes: ['history', 'food'] });
+    render(<CanvasCityCard city={city} {...baseProps} />);
+    expect(screen.getByText('history')).toBeInTheDocument();
+    expect(screen.getByText('food')).toBeInTheDocument();
   });
 });

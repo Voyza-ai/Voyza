@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, MapPin, Users, Calendar, Plane } from 'lucide-react';
+import { Trash2, MapPin, Users, Calendar, Plane, Plus } from 'lucide-react';
 import Navbar from '@/components/shared/Navbar';
 import ProtectedRoute from '@/components/shared/ProtectedRoute';
 import { getAuthHeader } from '@/lib/supabase';
@@ -85,7 +85,17 @@ function HistoryPageInner() {
     <main className="min-h-screen" style={{ background: '#f0f4f8' }}>
       <Navbar />
       <div className="pt-20 px-6 pb-10 max-w-5xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">My Trips</h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold text-gray-900">My Trips</h1>
+          <button
+            onClick={() => router.push('/plan')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all hover:brightness-110"
+            style={{ background: '#2563eb' }}
+          >
+            <Plus size={14} />
+            New Trip
+          </button>
+        </div>
 
         {loading && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
