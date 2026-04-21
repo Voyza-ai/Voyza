@@ -1140,9 +1140,16 @@ export default function PlanningChat() {
           ? Math.max(40, Math.floor((totalBudget * 0.4) / totalNights))
           : undefined;
 
-      // Step 3: Fetch hotels for each city, respecting the nightly cap
+      // Step 3: Fetch hotels for each city. Booking.com (via RapidAPI free
+      // tier) rate-limits parallel calls — 4 simultaneous requests often
+      // have one or two come back empty, causing the UI to render "$0/night".
+      // We throttle to HOTEL_CONCURRENCY requests at a time. Combined with
+      // the backend's 429-retry, this prevents silent empty hotels for
+      // multi-city trips.
       setFindTripStatus('Finding hotels...');
-      const hotelPromises = trip.cities.map(async (city) => {
+      const HOTEL_CONCURRENCY = 2;
+
+      const fetchOne = async (city: (typeof trip.cities)[number]) => {
         try {
           const results = await searchHotels({
             city: city.name,
@@ -1180,9 +1187,15 @@ export default function PlanningChat() {
           // Hotel search failure is non-fatal
         }
         return null;
-      });
+      };
 
-      const hotelResults = await Promise.all(hotelPromises);
+      // Simple concurrency limiter: walk cities in fixed-size batches.
+      const hotelResults: Array<Awaited<ReturnType<typeof fetchOne>>> = [];
+      for (let i = 0; i < trip.cities.length; i += HOTEL_CONCURRENCY) {
+        const batch = trip.cities.slice(i, i + HOTEL_CONCURRENCY);
+        const batchResults = await Promise.all(batch.map(fetchOne));
+        hotelResults.push(...batchResults);
+      }
       hotelResults.forEach((hotelResult, idx) => {
         if (hotelResult) {
           trip.cities[idx] = { ...trip.cities[idx], ...hotelResult };
