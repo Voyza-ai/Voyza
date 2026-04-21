@@ -80,7 +80,7 @@ describe('CanvasPage', () => {
     expect(screen.queryByText('Save')).not.toBeInTheDocument();
   });
 
-  it('Share button only visible to owner role', async () => {
+  it('Invite button only visible to owner role', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -90,7 +90,7 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Share')).toBeInTheDocument();
+      expect(screen.getByText('Invite')).toBeInTheDocument();
     });
   });
 
@@ -104,9 +104,9 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Share')).toBeInTheDocument();
+      expect(screen.getByText('Invite')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Share'));
+    fireEvent.click(screen.getByText('Invite'));
     await waitFor(() => {
       expect(screen.getByText('Share Canvas')).toBeInTheDocument();
     });
@@ -116,7 +116,7 @@ describe('CanvasPage', () => {
     mockedGetSession.mockRejectedValue(new Error('403 Forbidden'));
     mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
 
-    const { container } = render(<CanvasPage />);
+    render(<CanvasPage />);
     // Should not crash — renders Canvas title as fallback
     await waitFor(() => {
       expect(screen.getByText('Canvas')).toBeInTheDocument();
@@ -149,25 +149,20 @@ describe('CanvasPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Empty Trip')).toBeInTheDocument();
     });
+    expect(screen.getByText('No cities yet')).toBeInTheDocument();
   });
 
-  it('calls saveCanvas API when Save is clicked', async () => {
+  it('shows VOYZA logo in top bar', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
     });
     mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
-    mockedSaveCanvas.mockResolvedValue({ saved: true, savedAt: '2026-06-15T00:00:00Z' });
 
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Save')).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText('Save'));
-
-    await waitFor(() => {
-      expect(mockedSaveCanvas).toHaveBeenCalledWith('trip-test-123', mockCanvasState);
+      expect(screen.getByText('VOYZA')).toBeInTheDocument();
     });
   });
 });

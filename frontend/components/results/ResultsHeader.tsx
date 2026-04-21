@@ -1,9 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Calendar, Users, TrendingDown, Sparkles } from 'lucide-react';
+import { Calendar, Users, TrendingDown, Sparkles, Save, Check } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
+import { saveTrip } from '@/lib/api';
+import { useAuthStore } from '@/store/authStore';
+import { useTripStore } from '@/store/tripStore';
+import LoginModal from '@/components/shared/LoginModal';
 
 type ResultsHeaderProps = {
   trip: Trip;
@@ -44,6 +48,38 @@ function useCountUp(target: number, duration = 1200) {
 }
 
 export default function ResultsHeader({ trip }: ResultsHeaderProps) {
+  const user = useAuthStore((s) => s.user);
+  const setTrip = useTripStore((s) => s.setTrip);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  // Trip is "already saved" only if it has a real UUID from Supabase (not a mock id)
+  const alreadySaved = !!trip.id && !trip.id.startsWith('mock');
+  const [saved, setSaved] = useState(false);
+
+  const handleSaveTrip = async () => {
+    if (!user) {
+      setShowLoginModal(true);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const result = await saveTrip({
+        title: trip.title,
+        travelers: trip.travelers,
+        totalCost: liveTripTotal(trip),
+        savings: trip.savings,
+        cities: trip.cities,
+      });
+      // Update the trip in store with the saved ID
+      setTrip({ ...trip, id: result.tripId });
+      setSaved(true);
+    } catch {
+      // handle error silently
+    } finally {
+      setSaving(false);
+    }
+  };
   const startDate = trip.cities[0]?.dates.arrival;
   const endDate = trip.cities[trip.cities.length - 1]?.dates.departure;
   const totalNights = startDate && endDate
@@ -64,11 +100,11 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const animatedTotal = useCountUp(liveTotal);
 
   return (
-    <div className="px-8 pt-5 pb-0">
-      <div className="flex items-start justify-between gap-6 flex-wrap">
-        {/* Left: label + inline meta, then title below */}
-        <div className="flex-1 min-w-[280px]">
-          <div className="flex items-center gap-3 flex-wrap text-xs mb-2">
+    <div className="px-8 pt-3 pb-0">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        {/* Left: meta + title stacked tight */}
+        <div className="min-w-0">
+          <div className="flex items-center gap-3 flex-wrap text-xs mb-0.5">
             <div className="flex items-center gap-2 text-[#2e6bc4] uppercase tracking-[0.18em] font-medium">
               <Sparkles size={12} />
               <span>Optimized itinerary</span>
@@ -91,53 +127,76 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
             <span className="text-gray-400">·</span>
             <span className="text-gray-500">{trip.cities.length} stops</span>
           </div>
-          <h1 className="text-[30px] leading-tight font-semibold text-gray-900">
+          <h1 className="text-[22px] leading-tight font-semibold text-gray-900 truncate">
             {trip.title}
           </h1>
         </div>
 
-        {/* Right: cost summary */}
-        <div className="flex items-stretch gap-3">
+        {/* Right: cost cards + save button */}
+        <div className="flex items-center gap-2 flex-shrink-0">
           {/* Total cost */}
           <div
-            className="flex flex-col justify-center px-5 py-3 rounded-2xl border backdrop-blur-md min-w-[140px]"
+            className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
             style={{
               background: 'linear-gradient(180deg, rgba(79,142,247,0.12) 0%, rgba(79,142,247,0.04) 100%)',
               borderColor: 'rgba(79,142,247,0.30)',
             }}
           >
-            <div className="text-[#4f8ef7]/70 text-[10px] uppercase tracking-wider mb-1">
+            <div className="text-[#4f8ef7]/70 text-[9px] uppercase tracking-wider">
               Total trip
             </div>
-            <div className="text-[#4f8ef7] text-2xl font-semibold leading-none tabular-nums">
+            <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
               ${animatedTotal.toLocaleString()}
             </div>
-            <div className="text-[#4f8ef7]/55 text-[11px] mt-1.5">
-              ${perPerson.toLocaleString()} per person
+            <div className="text-[#4f8ef7]/55 text-[9px]">
+              ${perPerson.toLocaleString()} /person
             </div>
           </div>
 
           {/* Savings */}
           <div
-            className="flex flex-col justify-center px-5 py-3 rounded-2xl border backdrop-blur-md min-w-[140px]"
+            className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
             style={{
               background: 'linear-gradient(180deg, rgba(52,211,153,0.08) 0%, rgba(52,211,153,0.02) 100%)',
               borderColor: 'rgba(52,211,153,0.25)',
             }}
           >
-            <div className="flex items-center gap-1.5 text-[#22c088]/70 text-[10px] uppercase tracking-wider mb-1">
-              <TrendingDown size={10} />
+            <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
+              <TrendingDown size={9} />
               <span>You save</span>
             </div>
-            <div className="text-[#22c088] text-2xl font-semibold leading-none tabular-nums">
+            <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
               ${animatedSavings.toLocaleString()}
             </div>
-            <div className="text-[#22c088]/50 text-[11px] mt-1.5">
+            <div className="text-[#22c088]/50 text-[9px]">
               vs default routing
             </div>
           </div>
+
+          {/* Save Trip button — only shown for unsaved trips */}
+          {!alreadySaved && (
+            <button
+              onClick={handleSaveTrip}
+              disabled={saving || saved}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium transition-all hover:brightness-105 disabled:opacity-60"
+              style={{
+                background: saved ? '#f0fdf4' : '#2563eb',
+                borderColor: saved ? '#bbf7d0' : '#2563eb',
+                color: saved ? '#16a34a' : '#ffffff',
+              }}
+            >
+              {saved ? <Check size={13} /> : <Save size={13} />}
+              {saving ? 'Saving...' : saved ? 'Saved' : 'Save Trip'}
+            </button>
+          )}
         </div>
       </div>
+
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onSuccess={handleSaveTrip}
+      />
     </div>
   );
 }

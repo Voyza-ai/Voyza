@@ -158,7 +158,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
         `}</style>
 
         <motion.div
-          className="flex items-start px-12 pt-3 pb-12 min-w-max gap-6"
+          className="flex items-start px-12 pt-3 pb-8 min-w-max gap-6"
           initial="hidden"
           animate="visible"
           variants={{

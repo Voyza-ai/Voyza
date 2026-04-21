@@ -219,9 +219,10 @@ export async function editPlan(params: {
 }
 
 // ─── Canvas API ──────────────────────────────────────────────
-export async function getCanvasSession(tripId: string) {
+export async function getCanvasSession(tripId: string, cities?: any[]) {
   return apiFetch<{ session: any; role: string }>(`/api/canvas/${tripId}/session`, {
     method: 'POST',
+    body: JSON.stringify(cities ? { cities } : {}),
   });
 }
 
