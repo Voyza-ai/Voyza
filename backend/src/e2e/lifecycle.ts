@@ -184,6 +184,14 @@ async function main() {
       Array.isArray(memberList.body.members) && memberList.body.members.length >= 2,
       'at least owner + collab in members list',
     );
+    // Enriched shape: every accepted member now carries email.
+    const ownerMember = memberList.body.members.find((m: any) => m.userId === owner.id);
+    const collabMember = memberList.body.members.find((m: any) => m.userId === collab.id);
+    assert(ownerMember?.email === owner.email, 'owner member row has email', ownerMember);
+    assert(collabMember?.email === collab.email, 'collab member row has email', collabMember);
+    assert('fullName' in (ownerMember ?? {}), 'owner member row exposes fullName field');
+    assert('avatarUrl' in (ownerMember ?? {}), 'owner member row exposes avatarUrl field');
+    assert(ownerMember?.pending === false, 'accepted members have pending=false');
 
     // ─── 5. Transfer ownership ─────────────────────────────
     console.log('\n5. POST /trips/:id/transfer-ownership');

@@ -558,7 +558,15 @@ router.get(
 );
 
 // ─── GET /api/canvas/:tripId/members ─────────────────────────
-// List all collaborators on a trip. Readable by any group member.
+// List all collaborators on a trip, enriched with email + display
+// name + avatar so the frontend can actually render a member list
+// (transfer-ownership picker, canvas presence chips, etc.). Readable
+// by any group member.
+//
+// Enrichment strategy: for each row that has a `user_id` (accepted
+// invites), batch-lookup auth.users (for email) + user_profiles (for
+// name + avatar). Rows that are still pending invites (no user_id yet)
+// just expose `invited_email` — there's no accepted user to enrich.
 router.get(
   '/:tripId/members',
   asyncHandler(async (req, res) => {
@@ -569,13 +577,61 @@ router.get(
     if (!role) throw new AppError(403, 'Not a member of this trip');
 
     const supabase = getSupabase();
-    const { data: members } = await supabase
+    const { data: rows } = await supabase
       .from('group_members')
       .select('id, user_id, invited_email, role, accepted_at, created_at')
       .eq('trip_id', tripId)
       .order('created_at', { ascending: true });
 
-    res.json({ members: members ?? [] });
+    const members = rows ?? [];
+    const userIds = Array.from(
+      new Set(members.map((m: any) => m.user_id).filter(Boolean) as string[]),
+    );
+
+    // Batch-fetch profile rows in a single query. Service-role has
+    // access regardless of RLS, so we get email/name for anyone on
+    // the trip without per-row round-trips.
+    let profilesById: Record<string, { fullName: string | null; avatarUrl: string | null }> = {};
+    let emailsById: Record<string, string | null> = {};
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', userIds);
+      for (const p of profiles ?? []) {
+        profilesById[p.id] = { fullName: p.full_name ?? null, avatarUrl: p.avatar_url ?? null };
+      }
+
+      // auth.users is only accessible via the admin API, not a normal
+      // query — iterate getUserById for each member. Cheap: typical
+      // trip has <10 collaborators, and each call is a single
+      // indexed lookup on the service side.
+      await Promise.all(
+        userIds.map(async (uid) => {
+          const { data } = await supabase.auth.admin.getUserById(uid);
+          emailsById[uid] = data?.user?.email ?? null;
+        }),
+      );
+    }
+
+    const enriched = members.map((m: any) => {
+      const profile = m.user_id ? profilesById[m.user_id] : undefined;
+      return {
+        id: m.id,
+        userId: m.user_id,
+        role: m.role,
+        acceptedAt: m.accepted_at,
+        createdAt: m.created_at,
+        // For pending invites (no user_id yet) expose invited_email only.
+        // For accepted members expose their real auth.users email.
+        email: m.user_id ? emailsById[m.user_id] ?? null : m.invited_email ?? null,
+        fullName: profile?.fullName ?? null,
+        avatarUrl: profile?.avatarUrl ?? null,
+        pending: !m.accepted_at,
+      };
+    });
+
+    res.json({ members: enriched });
   }),
 );
 
