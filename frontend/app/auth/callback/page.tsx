@@ -43,7 +43,22 @@ function AuthCallbackInner() {
         }
         setSession(data.session);
         setUser(data.user);
-        router.push('/history');
+
+        // Return the user to where they were before the OAuth bounce.
+        // LoginModal stashes the pre-OAuth location in sessionStorage.
+        // Fall back to /history for users who arrived at callback
+        // without a return-to set (e.g. direct sign-up link).
+        let returnTo = '/history';
+        try {
+          const saved = sessionStorage.getItem('voyza.oauth_return_to');
+          if (saved && saved.startsWith('/')) {
+            returnTo = saved;
+          }
+          sessionStorage.removeItem('voyza.oauth_return_to');
+        } catch {
+          // sessionStorage unavailable (SSR, privacy mode) — use default.
+        }
+        router.push(returnTo);
       });
   }, [searchParams, router, setUser, setSession]);
 

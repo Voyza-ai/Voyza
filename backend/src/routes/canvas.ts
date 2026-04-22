@@ -5,6 +5,7 @@ import { AppError } from '../middleware/error';
 import { getSupabase } from '../services/supabase';
 import { compareLeg } from '../services/compareLeg';
 import { env } from '../config/env';
+import { parseDurationMinutes } from '../utils/duration';
 
 const router = Router();
 
@@ -242,7 +243,13 @@ router.post(
         departure_date: city.dates?.departure || null,
         color_index: city.colorIndex ?? idx,
         position: idx,
+        // Legacy single hotel column + new ranked list so the user's
+        // picked hotel and their other 4 options both survive a save.
         hotel: city.hotel ?? null,
+        hotels: Array.isArray(city.hotels) ? city.hotels : (city.hotel ? [city.hotel] : []),
+        selected_hotel_index: typeof city.selectedHotelIndex === 'number' ? city.selectedHotelIndex : 0,
+        custom_hotel: city.customHotel ?? null,
+        vibes: Array.isArray(city.vibes) ? city.vibes : [],
         activities: city.activities ?? [],
         restaurants: city.restaurants ?? [],
         schedule: city.schedule ?? {},
@@ -320,15 +327,32 @@ router.post(
               mode: t.mode ?? 'flight',
               operator: t.operator ?? '',
               price: t.price ?? 0,
-              duration_minutes: t.duration ? parseInt(t.duration) || 0 : 0,
+              // parseDurationMinutes handles "3h 37m" → 217 etc. The old
+              // parseInt("3h 37m") returned 3, which is why durations
+              // on saved trips showed as single-digit minutes.
+              duration_minutes: parseDurationMinutes(t.duration),
               depart_time: t.departTime ?? null,
               arrive_time: t.arriveTime ?? null,
+              depart_date: t.departDate ?? null,
+              layovers: typeof t.layovers === 'number' ? t.layovers : null,
+              stops: typeof t.stops === 'number' ? t.stops : null,
+              currency: t.currency ?? 'USD',
+              carrier_code: t.carrierCode ?? null,
+              flight_number: t.flightNumber ?? t.trainNumber ?? null,
+              alternatives: Array.isArray(t.alternatives) ? t.alternatives : null,
               booking_url: t.bookingUrl ?? null,
             });
           }
         }
         if (transportRows.length > 0) {
-          await supabase.from('transports').insert(transportRows);
+          const { error: transportError } = await supabase
+            .from('transports')
+            .insert(transportRows);
+          if (transportError) {
+            console.error('[canvas save] Failed to insert transports:', transportError.message, {
+              sample: transportRows[0],
+            });
+          }
         }
       }
     }
@@ -530,6 +554,113 @@ router.get(
     }
 
     res.redirect(`${env.FRONTEND_URL}/results?trip=${member.trip_id}&canvas=true`);
+  }),
+);
+
+// ─── GET /api/canvas/:tripId/members ─────────────────────────
+// List all collaborators on a trip. Readable by any group member.
+router.get(
+  '/:tripId/members',
+  asyncHandler(async (req, res) => {
+    const user = await getUserFromToken(req.headers.authorization);
+    if (!user) throw new AppError(401, 'Authentication required');
+    const tripId = req.params.tripId as string;
+    const role = await getMemberRole(tripId, user.id);
+    if (!role) throw new AppError(403, 'Not a member of this trip');
+
+    const supabase = getSupabase();
+    const { data: members } = await supabase
+      .from('group_members')
+      .select('id, user_id, invited_email, role, accepted_at, created_at')
+      .eq('trip_id', tripId)
+      .order('created_at', { ascending: true });
+
+    res.json({ members: members ?? [] });
+  }),
+);
+
+// ─── PATCH /api/canvas/:tripId/members/:memberId ─────────────
+// Owner-only: change a collaborator's role (e.g. promote viewer → editor).
+const patchMemberSchema = z.object({
+  role: z.enum(['editor', 'suggester', 'viewer']),
+});
+
+router.patch(
+  '/:tripId/members/:memberId',
+  asyncHandler(async (req, res) => {
+    const user = await getUserFromToken(req.headers.authorization);
+    if (!user) throw new AppError(401, 'Authentication required');
+    const { tripId, memberId } = req.params as { tripId: string; memberId: string };
+    const role = await getMemberRole(tripId, user.id);
+    if (role !== 'owner') throw new AppError(403, 'Only the trip owner can change member roles');
+
+    const body = patchMemberSchema.parse(req.body);
+    const supabase = getSupabase();
+
+    // Safety: don't let the owner accidentally demote themselves through
+    // this endpoint. They'd lose owner access with no way to restore it.
+    const { data: target } = await supabase
+      .from('group_members')
+      .select('role, user_id')
+      .eq('id', memberId)
+      .eq('trip_id', tripId)
+      .single();
+    if (!target) throw new AppError(404, 'Member not found');
+    if (target.role === 'owner') {
+      throw new AppError(400, 'Cannot change the owner role; transfer ownership first');
+    }
+
+    const { data, error } = await supabase
+      .from('group_members')
+      .update({ role: body.role })
+      .eq('id', memberId)
+      .eq('trip_id', tripId)
+      .select()
+      .single();
+    if (error) throw new AppError(500, error.message);
+
+    res.json({ member: data });
+  }),
+);
+
+// ─── DELETE /api/canvas/:tripId/members/:memberId ────────────
+// Remove a collaborator. Owner can remove anyone (except themselves).
+// A collaborator can also remove themselves (equivalent to "leave trip").
+router.delete(
+  '/:tripId/members/:memberId',
+  asyncHandler(async (req, res) => {
+    const user = await getUserFromToken(req.headers.authorization);
+    if (!user) throw new AppError(401, 'Authentication required');
+    const { tripId, memberId } = req.params as { tripId: string; memberId: string };
+    const supabase = getSupabase();
+
+    const { data: target } = await supabase
+      .from('group_members')
+      .select('user_id, role')
+      .eq('id', memberId)
+      .eq('trip_id', tripId)
+      .single();
+    if (!target) throw new AppError(404, 'Member not found');
+
+    const requesterRole = await getMemberRole(tripId, user.id);
+    const removingSelf = target.user_id === user.id;
+
+    // Allowed: owner removing anyone (except themselves) OR user removing themselves.
+    if (!removingSelf && requesterRole !== 'owner') {
+      throw new AppError(403, 'Only the owner can remove other members');
+    }
+    if (removingSelf && target.role === 'owner') {
+      throw new AppError(400, "Owner can't leave their own trip; transfer ownership or delete the trip instead");
+    }
+
+    const { error } = await supabase
+      .from('group_members')
+      .delete()
+      .eq('id', memberId)
+      .eq('trip_id', tripId);
+    if (error) throw new AppError(500, error.message);
+
+    res.json({ success: true });
   }),
 );
 
