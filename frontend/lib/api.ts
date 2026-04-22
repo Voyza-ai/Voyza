@@ -344,6 +344,13 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
       totalCost: trip.totalCost,
       savingsVsAlternative: trip.savings,
       cities: trip.cities,
+      // New optional fields — backend accepts nullable/undefined for each.
+      // Sending everything so the full trip survives a save/reload cycle.
+      budget: trip.budget ?? null,
+      budgetPerPerson: trip.budgetPerPerson ?? null,
+      vibe: trip.vibe ?? null,
+      startDate: trip.startDate ?? trip.cities?.[0]?.dates?.arrival ?? null,
+      dateShiftSuggestion: trip.dateShiftSuggestion ?? null,
     }),
   });
 }
@@ -358,6 +365,96 @@ export async function getTrip(tripId: string): Promise<any> {
 
 export async function deleteTrip(tripId: string): Promise<{ success: boolean }> {
   return apiFetch<{ success: boolean }>(`/api/trips/${tripId}`, {
+    method: 'DELETE',
+  });
+}
+
+// Partial trip update — rename, change status, update budget/vibe, etc.
+// City/transport edits still go through the canvas save endpoint.
+export type PatchTripBody = {
+  title?: string;
+  status?: 'active' | 'completed' | 'archived';
+  travelers?: number;
+  totalCost?: number;
+  savingsVsAlternative?: number;
+  budget?: number | null;
+  budgetPerPerson?: boolean | null;
+  vibe?: string | null;
+  startDate?: string | null;
+  dateShiftSuggestion?: any;
+};
+
+export async function updateTrip(tripId: string, patch: PatchTripBody): Promise<{ trip: any }> {
+  return apiFetch<{ trip: any }>(`/api/trips/${tripId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+// ─── User profile CRUD ──────────────────────────────────────
+export type UserProfile = {
+  id: string;
+  email: string;
+  emailConfirmed?: boolean;
+  createdAt?: string;
+  fullName: string | null;
+  avatarUrl: string | null;
+  isPremium: boolean;
+  preferences: {
+    homeAirport?: string;
+    homeCity?: string;
+    preferredCurrency?: string;
+    defaultTravelers?: number;
+    emailNotifications?: boolean;
+  };
+};
+
+export async function getCurrentUser(): Promise<UserProfile> {
+  return apiFetch<UserProfile>('/api/users/me');
+}
+
+export async function updateCurrentUser(
+  patch: Partial<Pick<UserProfile, 'fullName' | 'avatarUrl' | 'preferences'>>,
+): Promise<UserProfile> {
+  return apiFetch<UserProfile>('/api/users/me', {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteCurrentUser(): Promise<{ success: boolean; deletedUserId: string }> {
+  return apiFetch<{ success: boolean; deletedUserId: string }>('/api/users/me', {
+    method: 'DELETE',
+  });
+}
+
+// ─── Trip collaboration members ─────────────────────────────
+export type TripMember = {
+  id: string;
+  user_id: string | null;
+  invited_email: string | null;
+  role: 'owner' | 'editor' | 'suggester' | 'viewer';
+  accepted_at: string | null;
+  created_at: string;
+};
+
+export async function listTripMembers(tripId: string): Promise<{ members: TripMember[] }> {
+  return apiFetch<{ members: TripMember[] }>(`/api/canvas/${tripId}/members`);
+}
+
+export async function updateMemberRole(
+  tripId: string,
+  memberId: string,
+  role: 'editor' | 'suggester' | 'viewer',
+): Promise<{ member: TripMember }> {
+  return apiFetch<{ member: TripMember }>(`/api/canvas/${tripId}/members/${memberId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function removeMember(tripId: string, memberId: string): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(`/api/canvas/${tripId}/members/${memberId}`, {
     method: 'DELETE',
   });
 }

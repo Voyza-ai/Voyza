@@ -64,15 +64,24 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
 
     setSaving(true);
     try {
-      const result = await saveTrip({
-        title: trip.title,
-        travelers: trip.travelers,
-        totalCost: liveTripTotal(trip),
-        savings: trip.savings,
-        cities: trip.cities,
-      });
-      // Update the trip in store with the saved ID
+      // Pass the whole trip through so new fields (budget, vibe,
+      // dateShiftSuggestion, etc.) flow to the backend — saveTrip in api.ts
+      // handles the field-by-field mapping.
+      const result = await saveTrip({ ...trip, totalCost: liveTripTotal(trip) });
+
+      // Update the store with the saved id so the results page now
+      // trusts Zustand when its tripId query param matches.
       setTrip({ ...trip, id: result.tripId });
+
+      // Update the browser URL to include ?tripId=<id> without triggering
+      // a re-navigation. This makes the trip shareable/bookmarkable and
+      // lets the "Edit in canvas" button work on first click.
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('tripId', result.tripId);
+        window.history.replaceState({}, '', url.toString());
+      }
+
       setSaved(true);
     } catch {
       // handle error silently
