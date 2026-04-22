@@ -23,43 +23,70 @@ function AuthCallbackInner() {
   const setSession = useAuthStore((s) => s.setSession);
 
   useEffect(() => {
-    const code = searchParams.get('code');
-    if (!code) {
-      setError('No verification code found in URL');
-      return;
-    }
-
     if (!supabase) {
       setError('Authentication is not configured');
       return;
     }
 
-    supabase.auth
-      .exchangeCodeForSession(code)
-      .then(({ data, error: authError }) => {
+    // Post-OAuth flow. There's a subtle race with Supabase's client:
+    // `createClient` defaults to `detectSessionInUrl: true`, which means
+    // the client auto-parses `?code=...` on page load, exchanges it,
+    // persists the session, and clears the query string — all before
+    // our React effect runs. So by the time we check searchParams, the
+    // code is already gone even though sign-in actually succeeded.
+    //
+    // Strategy:
+    //   1. Ask the client for the current session. If auto-detect did
+    //      its thing, we already have one — just redirect.
+    //   2. If no session yet, the URL may still contain a `?code=` that
+    //      auto-detect hasn't processed (slower devices, StrictMode
+    //      double-mount, etc.) — try a manual exchange.
+    //   3. Only fall through to an error if both fail.
+    const finish = (session: any, user: any) => {
+      setSession(session);
+      setUser(user);
+      let returnTo = '/history';
+      try {
+        const saved = sessionStorage.getItem('voyza.oauth_return_to');
+        if (saved && saved.startsWith('/')) returnTo = saved;
+        sessionStorage.removeItem('voyza.oauth_return_to');
+      } catch {
+        // sessionStorage unavailable (SSR, privacy mode) — use default.
+      }
+      router.push(returnTo);
+    };
+
+    (async () => {
+      // 1. Did auto-detect already capture the session?
+      const { data: existing } = await supabase.auth.getSession();
+      if (existing?.session) {
+        finish(existing.session, existing.session.user);
+        return;
+      }
+
+      // 2. Fallback: manual exchange if the code is still in the URL.
+      const code = searchParams.get('code');
+      if (code) {
+        const { data, error: authError } = await supabase.auth.exchangeCodeForSession(code);
         if (authError) {
           setError(authError.message);
           return;
         }
-        setSession(data.session);
-        setUser(data.user);
+        finish(data.session, data.user);
+        return;
+      }
 
-        // Return the user to where they were before the OAuth bounce.
-        // LoginModal stashes the pre-OAuth location in sessionStorage.
-        // Fall back to /history for users who arrived at callback
-        // without a return-to set (e.g. direct sign-up link).
-        let returnTo = '/history';
-        try {
-          const saved = sessionStorage.getItem('voyza.oauth_return_to');
-          if (saved && saved.startsWith('/')) {
-            returnTo = saved;
-          }
-          sessionStorage.removeItem('voyza.oauth_return_to');
-        } catch {
-          // sessionStorage unavailable (SSR, privacy mode) — use default.
-        }
-        router.push(returnTo);
-      });
+      // 3. No session, no code — something upstream went wrong. Wait
+      //    one tick for any in-flight auto-detect to land, then retry
+      //    getSession once before giving up.
+      await new Promise((r) => setTimeout(r, 500));
+      const { data: retry } = await supabase.auth.getSession();
+      if (retry?.session) {
+        finish(retry.session, retry.session.user);
+        return;
+      }
+      setError('No verification code found in URL. Please try signing in again.');
+    })();
   }, [searchParams, router, setUser, setSession]);
 
   return (
