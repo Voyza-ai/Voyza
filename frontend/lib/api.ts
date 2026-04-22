@@ -216,12 +216,63 @@ export async function interpretPlan(params: {
   });
 }
 
-// ─── Plan Edit ───────────────────────────────────────────────
+// ─── Plan Edit (legacy — kept for tests; new code uses planChat) ─
 export async function editPlan(params: {
   message: string;
   currentTrip: any;
 }): Promise<any> {
-  return apiFetch('/api/plan/edit', {
+  // Route through the new /chat endpoint but preserve the old return
+  // shape so the existing AIChatPanel fallback path keeps working until
+  // the refactor lands.
+  return apiFetch('/api/plan/chat', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+// ─── Voyza AI chat ───────────────────────────────────────────
+// Send a message to the trip's AI assistant. Response is either a
+// plain-text answer or a proposal the user can Accept/Reject.
+export type ChatTurn = { role: 'user' | 'assistant'; content: string };
+
+export type ChatProposalDiff = {
+  city: string;
+  oldArrival: string | null;
+  newArrival: string;
+  oldDeparture: string | null;
+  newDeparture: string;
+};
+
+export type ChatProposal = {
+  /** date_shift → pin/min_days (dates move); transport_window → constraint stored, no date shift */
+  kind: 'date_shift' | 'transport_window';
+  toolName: 'pin_city_dates' | 'set_min_days' | 'set_transport_window';
+  toolInput: any;
+  diff: ChatProposalDiff[];
+  proposedConstraints: any;
+  /** The full new trip shape ready to swap into Zustand on Accept. */
+  proposedTrip: any;
+};
+
+export type ChatResponse =
+  | { type: 'answer'; reply: string }
+  | { type: 'proposal'; reply: string; proposal: ChatProposal };
+
+export async function planChat(params: {
+  message: string;
+  currentTrip: any;
+  history?: ChatTurn[];
+}): Promise<ChatResponse> {
+  return apiFetch<ChatResponse>('/api/plan/chat', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function planChatSuggestions(params: {
+  currentTrip: any;
+}): Promise<{ suggestions: string[] }> {
+  return apiFetch<{ suggestions: string[] }>('/api/plan/chat-suggestions', {
     method: 'POST',
     body: JSON.stringify(params),
   });

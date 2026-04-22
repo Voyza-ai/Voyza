@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import {
+  applyDateConstraints,
+  mergeConstraints,
+  TripConstraints,
+} from '../services/constraints';
 
 const router = Router();
 
@@ -311,46 +316,448 @@ router.post(
   }),
 );
 
-// ─── POST /api/plan/edit ─────────────────────────────────────
-const editSchema = z.object({
-  message: z.string().min(1),
-  currentTrip: z.any(),
+// ─── POST /api/plan/chat ─────────────────────────────────────
+//
+// The Voyza AI chat endpoint. Replaces the old /edit (which returned a
+// freeform JSON patch that the frontend never actually applied).
+//
+// Claude gets the full trip + existing constraints + conversation
+// history, and picks ONE tool to call:
+//   - answer_only(text) → plain Q&A, no trip mutation
+//   - pin_city_dates(city, arrival, departure) → lock a city
+//   - set_min_days(city, minNights) → guarantee minimum stay
+//   - set_transport_window(from, to, earliest/latest depart/arrive) →
+//     constrain when a leg can run
+//
+// For the three constraint tools we build a "proposal":
+//   - Merge the new constraint onto trip.constraints
+//   - Apply date-bearing constraints (pin + min_days) to recompute city
+//     dates — this is what produces the Accept-or-Reject diff card
+//   - Return { type: 'proposal', reply, proposal: {...} } — nothing is
+//     persisted until the user clicks Accept and the frontend calls
+//     PATCH /api/trips/:id (or leaves it in memory until Save)
+//
+// transport_windows are stored on Accept but not yet applied (would
+// require compareLeg to accept time filters — tracked in ROADMAP).
+const historyMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
 });
 
+const chatSchema = z.object({
+  message: z.string().min(1),
+  currentTrip: z.any(),
+  /**
+   * Prior conversation for multi-turn context ("Make Barcelona cheaper" →
+   * AI gives 2 options → "do the first one" needs history). Last item in
+   * the array must NOT be the current message; that goes in `message`.
+   */
+  history: z.array(historyMessageSchema).optional(),
+});
+
+/**
+ * Claude tool definitions. The `input_schema` fields here double as
+ * validation — we trust that Claude's structured tool-use output matches
+ * the declared shape. Tool names are snake_case to match Anthropic's
+ * naming convention in examples.
+ */
+const CHAT_TOOLS = [
+  {
+    name: 'answer_only',
+    description:
+      'Use when the user is asking a question, seeking an explanation, or making small talk — NOT requesting a change to the trip. Examples: "Why is this trip cheaper?", "Why this order of cities?", "What\'s the weather like in Rome in March?".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        answer: {
+          type: 'string',
+          description:
+            'The direct answer to the user, written in the voice of a helpful travel planner. 2-4 sentences, concrete, references specific cities/prices/legs from the trip when relevant.',
+        },
+      },
+      required: ['answer'],
+    },
+  },
+  {
+    name: 'pin_city_dates',
+    description:
+      'Lock a city to specific dates. Use when the user says things like "I need to be in Rome March 5-10", "keep me in Tokyo for April 2-7", "schedule Paris for the 15th to 18th". Other cities will be shifted around the pin.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        city: { type: 'string', description: 'Exact city name as it appears in the trip.' },
+        arrival: { type: 'string', description: 'YYYY-MM-DD arrival date.' },
+        departure: { type: 'string', description: 'YYYY-MM-DD departure date.' },
+        explanation: {
+          type: 'string',
+          description: 'One-sentence explanation for the user about what you\'re pinning and why.',
+        },
+      },
+      required: ['city', 'arrival', 'departure', 'explanation'],
+    },
+  },
+  {
+    name: 'set_min_days',
+    description:
+      'Guarantee a minimum number of nights in a city. Use when user says "at least 3 days in Tokyo", "give me 4 nights in Rome minimum", "don\'t rush Florence".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        city: { type: 'string', description: 'Exact city name as it appears in the trip.' },
+        minNights: { type: 'number', description: 'Minimum number of nights required.' },
+        explanation: {
+          type: 'string',
+          description: 'One-sentence explanation for the user.',
+        },
+      },
+      required: ['city', 'minNights', 'explanation'],
+    },
+  },
+  {
+    name: 'set_transport_window',
+    description:
+      'Constrain the departure/arrival time of a specific leg between two cities. Use for "no flights before 5pm", "need to land by 3pm", "don\'t leave before noon", etc. Pass null for any bound the user didn\'t specify.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        from: { type: 'string', description: 'Origin city (must match trip).' },
+        to: { type: 'string', description: 'Destination city (must match trip).' },
+        earliestDepart: {
+          type: ['string', 'null'],
+          description: 'HH:MM 24-hour earliest departure, or null.',
+        },
+        latestDepart: {
+          type: ['string', 'null'],
+          description: 'HH:MM 24-hour latest departure, or null.',
+        },
+        earliestArrive: {
+          type: ['string', 'null'],
+          description: 'HH:MM 24-hour earliest arrival, or null.',
+        },
+        latestArrive: {
+          type: ['string', 'null'],
+          description: 'HH:MM 24-hour latest arrival, or null.',
+        },
+        explanation: {
+          type: 'string',
+          description: 'One-sentence explanation for the user.',
+        },
+      },
+      required: ['from', 'to', 'explanation'],
+    },
+  },
+];
+
+/**
+ * Compact a trip into the minimum context Claude needs to reason about
+ * edits. We strip raw flight payloads, hotel rankings, etc. — Claude
+ * doesn't need them for pin/min-days/window decisions and including
+ * them burns a lot of tokens.
+ */
+function summarizeTripForChat(trip: any): any {
+  const cities = (trip.cities ?? []).map((c: any, idx: number) => ({
+    position: idx,
+    name: c.name,
+    country: c.country ?? null,
+    arrival: c.dates?.arrival ?? c.arrival_date ?? null,
+    departure: c.dates?.departure ?? c.departure_date ?? null,
+    hotel: c.hotel?.name ?? null,
+    hotelNightly: c.hotel?.pricePerNight ?? null,
+    transportOut: c.transportOut
+      ? {
+          mode: c.transportOut.mode,
+          operator: c.transportOut.operator,
+          price: c.transportOut.price,
+          duration: c.transportOut.duration,
+          departTime: c.transportOut.departTime ?? null,
+          arriveTime: c.transportOut.arriveTime ?? null,
+        }
+      : null,
+  }));
+  return {
+    title: trip.title,
+    travelers: trip.travelers,
+    totalCost: trip.totalCost ?? trip.total_cost,
+    vibe: trip.vibe ?? null,
+    budget: trip.budget ?? null,
+    cities,
+    existingConstraints: trip.constraints ?? {},
+  };
+}
+
 router.post(
-  '/edit',
+  '/chat',
   asyncHandler(async (req, res) => {
-    const { message, currentTrip } = editSchema.parse(req.body);
+    const { message, currentTrip, history } = chatSchema.parse(req.body);
     const anthropic = getAnthropicSafe();
 
-    if (anthropic) {
-      const { DEFAULT_MODEL } = require('../services/anthropic');
-      const response = await anthropic.messages.create({
-        model: DEFAULT_MODEL,
-        max_tokens: 2048,
-        system: `You are a travel trip editor. Given a trip and a user message, return a JSON patch to apply. Actions: add_city, remove_city, swap_hotel, change_dates, reorder, no_change. Format: { action, data, message }. Respond with ONLY the JSON object, no markdown fences, no explanation.`,
-        messages: [
-          {
-            role: 'user',
-            content: `Trip: ${JSON.stringify(currentTrip)}\n\nUser request: "${message}"`,
-          },
-        ],
+    if (!anthropic) {
+      return res.json({
+        type: 'answer',
+        reply:
+          "I'm offline right now — the Anthropic API key isn't configured on the server. Ask your admin to set ANTHROPIC_API_KEY.",
       });
-
-      const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
-      const parsed = extractJson(rawText);
-      if (parsed) return res.json(parsed);
-      return res.json({ action: 'no_change', message: rawText });
     }
 
-    // Mock
+    const { DEFAULT_MODEL } = require('../services/anthropic');
+
+    const tripSummary = summarizeTripForChat(currentTrip);
+
+    // Build the messages array: prior history, then the new user message.
+    // We don't prepend the trip — it goes in the system prompt so Claude
+    // sees it as persistent context rather than a turn in the conversation.
+    const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    for (const turn of history ?? []) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+    messages.push({ role: 'user', content: message });
+
+    const systemPrompt = `You are Voyza AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
+
+You have access to four tools:
+1. answer_only — for questions, explanations, small talk.
+2. pin_city_dates — when the user wants a city locked to specific dates.
+3. set_min_days — when the user wants a minimum stay in a city.
+4. set_transport_window — when the user constrains when a specific leg can run.
+
+ALWAYS pick exactly one tool per turn. Favor answer_only when the user is asking, explaining, or being vague. Pick a constraint tool ONLY when the user clearly wants to change the trip.
+
+If the user references a city that isn't in the trip, answer_only and ask them to clarify — do NOT invent a pin.
+
+Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them.
+
+TRIP CONTEXT (read-only):
+${JSON.stringify(tripSummary, null, 2)}
+`;
+
+    let response;
+    try {
+      response = await anthropic.messages.create({
+        model: DEFAULT_MODEL,
+        max_tokens: 1024,
+        system: systemPrompt,
+        tools: CHAT_TOOLS as any,
+        messages,
+      });
+    } catch (err: any) {
+      logger.warn('plan/chat Claude call failed', { message: err?.message });
+      return res.json({
+        type: 'answer',
+        reply:
+          "Sorry — I hit an error reaching the AI. Please try again in a moment. If it keeps happening, let us know.",
+      });
+    }
+
+    // Find the tool_use block in Claude's response.
+    const toolUse = response.content.find((b: any) => b.type === 'tool_use') as any;
+    if (!toolUse) {
+      // Claude decided to respond as text instead of calling a tool. Use the
+      // text block as the answer so the user still gets something.
+      const textBlock = response.content.find((b: any) => b.type === 'text') as any;
+      return res.json({
+        type: 'answer',
+        reply: textBlock?.text ?? "I'm not sure how to help with that — could you rephrase?",
+      });
+    }
+
+    const toolName = toolUse.name as string;
+    const toolInput = toolUse.input as any;
+
+    // --- answer_only: plain text response
+    if (toolName === 'answer_only') {
+      return res.json({
+        type: 'answer',
+        reply: toolInput.answer,
+      });
+    }
+
+    // --- Constraint tools: build a proposal the frontend can preview.
+    const existingConstraints: TripConstraints = currentTrip.constraints ?? {};
+    let constraintUpdate: TripConstraints = {};
+    let replyText = toolInput.explanation ?? 'I have a proposed change for you.';
+
+    if (toolName === 'pin_city_dates') {
+      // Validate the city actually exists in the trip.
+      const match = (currentTrip.cities ?? []).find(
+        (c: any) => c.name.toLowerCase() === String(toolInput.city).toLowerCase(),
+      );
+      if (!match) {
+        return res.json({
+          type: 'answer',
+          reply: `I couldn\'t find "${toolInput.city}" in your trip. Did you mean one of: ${(currentTrip.cities ?? [])
+            .map((c: any) => c.name)
+            .join(', ')}?`,
+        });
+      }
+      constraintUpdate = {
+        pinned_cities: [
+          { city: match.name, arrival: toolInput.arrival, departure: toolInput.departure },
+        ],
+      };
+    } else if (toolName === 'set_min_days') {
+      const match = (currentTrip.cities ?? []).find(
+        (c: any) => c.name.toLowerCase() === String(toolInput.city).toLowerCase(),
+      );
+      if (!match) {
+        return res.json({
+          type: 'answer',
+          reply: `I couldn\'t find "${toolInput.city}" in your trip.`,
+        });
+      }
+      constraintUpdate = {
+        min_days: [{ city: match.name, minNights: Number(toolInput.minNights) }],
+      };
+    } else if (toolName === 'set_transport_window') {
+      constraintUpdate = {
+        transport_windows: [
+          {
+            from: String(toolInput.from),
+            to: String(toolInput.to),
+            earliestDepart: toolInput.earliestDepart ?? null,
+            latestDepart: toolInput.latestDepart ?? null,
+            earliestArrive: toolInput.earliestArrive ?? null,
+            latestArrive: toolInput.latestArrive ?? null,
+          },
+        ],
+      };
+    }
+
+    const proposedConstraints = mergeConstraints(existingConstraints, constraintUpdate);
+
+    // For date-bearing constraints, compute new city dates + a diff.
+    // The frontend works in { dates: { arrival, departure } } shape, but
+    // applyDateConstraints operates on { arrival_date, departure_date }
+    // so we normalize both directions.
+    const dbShapeCities = (currentTrip.cities ?? []).map((c: any) => ({
+      name: c.name,
+      arrival_date: c.dates?.arrival ?? c.arrival_date ?? null,
+      departure_date: c.dates?.departure ?? c.departure_date ?? null,
+    }));
+    const { cities: newCities, diff } = applyDateConstraints(dbShapeCities, proposedConstraints);
+
+    // Rebuild a frontend-shaped trip with the new dates, preserving
+    // everything else the user had (hotels, activities, transports…).
+    const proposedTrip = {
+      ...currentTrip,
+      constraints: proposedConstraints,
+      cities: (currentTrip.cities ?? []).map((c: any, i: number) => ({
+        ...c,
+        dates: {
+          arrival: newCities[i].arrival_date,
+          departure: newCities[i].departure_date,
+        },
+      })),
+    };
+
+    // Transport-window changes don't visibly shift dates, so add a tag so
+    // the frontend can render a different kind of card ("Saved constraint:
+    // no flights from Rome before 5pm") vs the full date-shift diff.
+    const proposalKind =
+      toolName === 'set_transport_window' ? 'transport_window' : 'date_shift';
+
     return res.json({
-      action: 'no_change',
-      message: 'AI editing requires Anthropic API key',
-      _mock: true,
+      type: 'proposal',
+      reply: replyText,
+      proposal: {
+        kind: proposalKind,
+        toolName,
+        toolInput,
+        diff,
+        proposedConstraints,
+        proposedTrip,
+      },
     });
   }),
 );
+
+// ─── POST /api/plan/chat-suggestions ─────────────────────────
+// Returns 4 trip-specific suggested prompts for the chat UI. Called once
+// on panel mount. Uses a single small Claude call (~300 tokens) so the
+// prompts feel tailored to THIS trip rather than generic placeholders.
+const chatSuggestionsSchema = z.object({ currentTrip: z.any() });
+
+router.post(
+  '/chat-suggestions',
+  asyncHandler(async (req, res) => {
+    const { currentTrip } = chatSuggestionsSchema.parse(req.body);
+    const anthropic = getAnthropicSafe();
+
+    // Fallback list if AI is unavailable — still trip-aware via simple
+    // heuristics so the chip set never feels empty.
+    const fallback = buildFallbackSuggestions(currentTrip);
+
+    if (!anthropic) {
+      return res.json({ suggestions: fallback });
+    }
+
+    const { DEFAULT_MODEL } = require('../services/anthropic');
+    const summary = summarizeTripForChat(currentTrip);
+
+    try {
+      const response = await anthropic.messages.create({
+        model: DEFAULT_MODEL,
+        max_tokens: 400,
+        system: `You generate 4 short, specific, trip-tailored prompt suggestions that the user could click to start a conversation with Voyza AI about their itinerary. Each suggestion:
+- Is under 40 characters
+- References a specific city, leg, or feature of THIS trip (not generic)
+- Is a question or a request the user might realistically have
+- Covers a mix: one "why" question (ordering/pricing), one cost-cutting request, one constraint/timing request, one enhancement (activity/swap)
+
+Return ONLY a JSON array of 4 strings, no prose, no markdown fences.`,
+        messages: [
+          { role: 'user', content: `Trip:\n${JSON.stringify(summary, null, 2)}` },
+        ],
+      });
+
+      const text = response.content?.[0]?.type === 'text' ? (response.content[0] as any).text : '';
+      const parsed = extractJson(text);
+      if (Array.isArray(parsed) && parsed.every((s) => typeof s === 'string') && parsed.length >= 3) {
+        // Trim to 4, pad with fallback if fewer than 4.
+        const trimmed = parsed.slice(0, 4).map((s: string) => s.slice(0, 60));
+        while (trimmed.length < 4) trimmed.push(fallback[trimmed.length]);
+        return res.json({ suggestions: trimmed });
+      }
+    } catch (err: any) {
+      logger.warn('chat-suggestions Claude call failed', { message: err?.message });
+    }
+
+    return res.json({ suggestions: fallback });
+  }),
+);
+
+/**
+ * Rule-based fallback for dynamic prompts when the AI call fails or
+ * no API key is configured. Still trip-aware — picks cities/legs out
+ * of the trip so it doesn't feel hardcoded.
+ */
+function buildFallbackSuggestions(trip: any): string[] {
+  const cities = (trip.cities ?? []).map((c: any) => c.name);
+  if (cities.length === 0) {
+    return [
+      'Why this trip order?',
+      'How can I save money?',
+      'Add a rest day',
+      'Swap a city',
+    ];
+  }
+  // Most expensive city by hotel nightly rate (cheap heuristic).
+  let expensiveCity = cities[0];
+  let maxRate = 0;
+  for (const c of trip.cities ?? []) {
+    const rate = c.hotel?.pricePerNight ?? 0;
+    if (rate > maxRate) {
+      maxRate = rate;
+      expensiveCity = c.name;
+    }
+  }
+  const firstCity = cities[0];
+  return [
+    `Why this order of cities?`,
+    `Make ${expensiveCity} cheaper`,
+    `Pin ${firstCity} to specific dates`,
+    `Add a day in ${cities[cities.length - 1]}`,
+  ].slice(0, 4);
+}
 
 // ─── POST /api/plan/activities ───────────────────────────────
 // AI-picks (Claude) returns 5 activity names + short reason per city.
