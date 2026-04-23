@@ -243,20 +243,61 @@ export type ChatProposalDiff = {
   newDeparture: string;
 };
 
+/** One concrete flight/train option for the leg-options proposal card. */
+export type LegOption = {
+  mode: 'flight' | 'train';
+  operator: string;
+  flightNumber?: string | null;
+  price: number;
+  currency: string;
+  /** HH:MM local time. */
+  departTime: string | null;
+  arriveTime: string | null;
+  duration: string;
+  durationMinutes: number;
+  stops?: number;
+  bookingUrl?: string | null;
+  priceDelta: number;
+};
+
+/**
+ * Proposal card = user needs to Accept/Reject a set of trip-wide changes.
+ * Currently used only for date-bearing tools (pin_city_dates, set_min_days)
+ * because those move several cities at once and we don't want to apply
+ * without confirmation.
+ *
+ * Transport changes (show_transport_options, set_transport_window) use a
+ * different pattern: type='leg_refresh'. See ChatResponse below.
+ */
 export type ChatProposal = {
-  /** date_shift → pin/min_days (dates move); transport_window → constraint stored, no date shift */
-  kind: 'date_shift' | 'transport_window';
-  toolName: 'pin_city_dates' | 'set_min_days' | 'set_transport_window';
+  kind: 'date_shift';
+  toolName: 'pin_city_dates' | 'set_min_days';
   toolInput: any;
   diff: ChatProposalDiff[];
   proposedConstraints: any;
-  /** The full new trip shape ready to swap into Zustand on Accept. */
   proposedTrip: any;
+};
+
+/**
+ * Leg-refresh response — the chat updated the transport options for a
+ * specific leg. The frontend directly overwrites
+ * trip.cities[i].transport.alternatives and swaps the main transport
+ * to the cheapest of the new options. No Accept/Reject — the user picks
+ * a different one by clicking on the transport card itself.
+ */
+export type LegRefresh = {
+  fromCity: string;
+  toCity: string;
+  date: string;
+  options: LegOption[];
+  totalFound: number;
+  updatedConstraints: any;
 };
 
 export type ChatResponse =
   | { type: 'answer'; reply: string }
-  | { type: 'proposal'; reply: string; proposal: ChatProposal };
+  | { type: 'proposal'; reply: string; proposal: ChatProposal }
+  | { type: 'leg_refresh'; reply: string; refresh: LegRefresh };
 
 export async function planChat(params: {
   message: string;

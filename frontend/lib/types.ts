@@ -134,6 +134,21 @@ export type Trip = {
   };
   createdAt?: string;
   ownerId?: string;
+  /** User-set constraints (pinned dates, transport windows, min stays)
+   *  collected via the Voyza AI chat. Persisted to the trip so future
+   *  re-optimizations honor them. Shape matches backend TripConstraints. */
+  constraints?: {
+    pinned_cities?: Array<{ city: string; arrival: string; departure: string }>;
+    min_days?: Array<{ city: string; minNights: number }>;
+    transport_windows?: Array<{
+      from: string;
+      to: string;
+      earliestDepart?: string | null;
+      latestDepart?: string | null;
+      earliestArrive?: string | null;
+      latestArrive?: string | null;
+    }>;
+  };
 };
 
 export type PlanningAnswers = {

@@ -3,12 +3,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Sparkles, Check, X, Clock } from 'lucide-react';
-import { Trip } from '@/lib/types';
+import { Trip, Transport } from '@/lib/types';
 import {
   planChat,
   planChatSuggestions,
   ChatProposal,
   ChatTurn,
+  LegOption,
+  LegRefresh,
 } from '@/lib/api';
 import { useTripStore } from '@/store/tripStore';
 
@@ -16,7 +18,7 @@ type Message = {
   id: number;
   role: 'user' | 'ai';
   content: string;
-  /** Present on AI messages that carry a proposal card. */
+  /** Present on AI messages that carry a proposal card (date_shift only). */
   proposal?: ChatProposal;
   /** UI state for proposal cards so Accept/Reject hide the buttons. */
   proposalState?: 'pending' | 'accepted' | 'rejected';
@@ -27,16 +29,15 @@ type AIChatPanelProps = {
 };
 
 /**
- * Rule-based fallback suggestions used ONLY if the backend call fails
- * (offline, rate limit). Normally the backend returns Claude-tailored
- * prompts on mount. Kept trip-aware so the chip row never looks generic.
+ * Rule-based fallback suggestions used ONLY if the backend call fails.
+ * Normally the backend returns Claude-tailored prompts on mount. Kept
+ * trip-aware so the chip row never looks generic.
  */
 function fallbackSuggestions(trip: Trip): string[] {
   const cities = trip.cities.map((c) => c.name);
   if (cities.length === 0) return ['Why this order?', 'How can I save money?', 'Add a rest day', 'Swap a city'];
   const first = cities[0];
   const last = cities[cities.length - 1];
-  // Most expensive city by hotel rate.
   let expensive = first;
   let max = 0;
   for (const c of trip.cities) {
@@ -59,12 +60,85 @@ function fmt(iso: string | null | undefined): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+/**
+ * Map a LegOption from the chat API into the Transport shape the
+ * flowchart's Connector already renders. Keeps the data flow simple:
+ * chat returns options → we convert → push into the city's transportOut
+ * (alternatives array + main), and the UI reacts.
+ */
+function legOptionToTransport(opt: LegOption, fromCity: string, toCity: string, date: string): Transport {
+  return {
+    mode: opt.mode,
+    operator: opt.operator,
+    duration: opt.duration,
+    price: opt.price,
+    from: fromCity,
+    to: toCity,
+    departTime: opt.departTime ?? undefined,
+    arriveTime: opt.arriveTime ?? undefined,
+    departDate: date,
+    layovers: opt.stops ?? 0,
+    bookingUrl: opt.bookingUrl ?? undefined,
+    flightNumber: opt.mode === 'flight' ? (opt.flightNumber ?? undefined) : undefined,
+    trainNumber: opt.mode === 'train' ? (opt.flightNumber ?? undefined) : undefined,
+  };
+}
+
+/**
+ * Apply a LegRefresh to the current trip: find the matching leg by
+ * city names, set the cheapest new option as the main transport, stash
+ * the rest as alternatives. Also mirrors the new transport onto the
+ * destination city's transportIn so the flowchart's Connector stays
+ * in sync on both ends.
+ *
+ * Returns a new Trip object (does not mutate the input).
+ */
+function applyLegRefreshToTrip(trip: Trip, refresh: LegRefresh): Trip {
+  const fromIdx = trip.cities.findIndex(
+    (c) => c.name.toLowerCase() === refresh.fromCity.toLowerCase(),
+  );
+  const toIdx = trip.cities.findIndex(
+    (c) => c.name.toLowerCase() === refresh.toCity.toLowerCase(),
+  );
+  if (fromIdx < 0 || toIdx < 0) return trip;
+
+  const [cheapest, ...rest] = refresh.options;
+  if (!cheapest) return trip;
+
+  const mainTransport = legOptionToTransport(
+    cheapest,
+    refresh.fromCity,
+    refresh.toCity,
+    refresh.date,
+  );
+  const altTransports = rest.map((o) =>
+    legOptionToTransport(o, refresh.fromCity, refresh.toCity, refresh.date),
+  );
+  mainTransport.alternatives = altTransports;
+
+  const nextCities = trip.cities.map((c, i) => {
+    if (i === fromIdx) {
+      return { ...c, transportOut: mainTransport };
+    }
+    if (i === toIdx) {
+      // transportIn mirrors (without its own nested alternatives — the
+      // origin city owns the alternatives list).
+      const { alternatives: _alts, ...flat } = mainTransport;
+      return { ...c, transportIn: flat };
+    }
+    return c;
+  });
+
+  return {
+    ...trip,
+    constraints: refresh.updatedConstraints ?? trip.constraints,
+    cities: nextCities,
+  } as Trip;
+}
+
 export default function AIChatPanel({ trip }: AIChatPanelProps) {
   const setTrip = useTripStore((s) => s.setTrip);
 
-  // Conversation history — sent to the backend each turn for multi-turn
-  // context. Excludes proposal cards themselves (the backend only cares
-  // about text). We derive it from `messages` at send time.
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 0,
@@ -79,8 +153,6 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
   const idRef = useRef(1);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Fetch tailored suggestions once on mount. If it fails, the fallback
-  // (already set as initial state) stays put — never leave the UI blank.
   useEffect(() => {
     let cancelled = false;
     planChatSuggestions({ currentTrip: trip })
@@ -97,7 +169,6 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
     return () => {
       cancelled = true;
     };
-    // Only re-fetch if the trip identity changes — not every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trip.cities.length, trip.cities[0]?.name]);
 
@@ -113,9 +184,7 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
 
     const userMsg: Message = { id: idRef.current++, role: 'user', content: trimmed };
 
-    // Build history from the current messages state BEFORE appending the
-    // user's turn. We send only plain text turns — proposal cards are UI
-    // state, not conversational content.
+    // Build history from current text messages only (proposal cards are UI state).
     const history: ChatTurn[] = messages
       .filter((m) => !m.proposal)
       .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
@@ -126,15 +195,36 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
 
     try {
       const result = await planChat({ message: trimmed, currentTrip: trip, history });
-      const aiMsg: Message = {
-        id: idRef.current++,
-        role: 'ai',
-        content: result.reply,
-        proposal: result.type === 'proposal' ? result.proposal : undefined,
-        proposalState: result.type === 'proposal' ? 'pending' : undefined,
-      };
-      setMessages((prev) => [...prev, aiMsg]);
-    } catch (err: any) {
+
+      if (result.type === 'leg_refresh') {
+        // The chat wants to update the flowchart transport card directly —
+        // no inline card, just a summary + the card shows new options.
+        const currentTrip = useTripStore.getState().currentTrip;
+        if (currentTrip) {
+          setTrip(applyLegRefreshToTrip(currentTrip, result.refresh));
+        }
+        setMessages((prev) => [
+          ...prev,
+          { id: idRef.current++, role: 'ai', content: result.reply },
+        ]);
+      } else if (result.type === 'proposal') {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: idRef.current++,
+            role: 'ai',
+            content: result.reply,
+            proposal: result.proposal,
+            proposalState: 'pending',
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { id: idRef.current++, role: 'ai', content: result.reply },
+        ]);
+      }
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
@@ -146,23 +236,23 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
     } finally {
       setIsTyping(false);
     }
-  }, [isTyping, trip, messages]);
+  }, [isTyping, trip, messages, setTrip]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     handleSend(input);
   };
 
-  // Accept a proposal: swap the in-memory trip in the Zustand store.
-  // Per product spec, this does NOT hit the DB — the existing Save
-  // button on the results page owns persistence.
-  const acceptProposal = (messageId: number, proposal: ChatProposal) => {
-    setTrip(proposal.proposedTrip as Trip);
-    setMessages((prev) =>
-      prev.map((m) =>
+  const acceptProposal = (messageId: number) => {
+    setMessages((prev) => {
+      const msg = prev.find((m) => m.id === messageId);
+      if (!msg?.proposal) return prev;
+      // date_shift is the only proposal kind now — apply the prebuilt trip.
+      setTrip(msg.proposal.proposedTrip as Trip);
+      return prev.map((m) =>
         m.id === messageId ? { ...m, proposalState: 'accepted' } : m,
-      ),
-    );
+      );
+    });
   };
 
   const rejectProposal = (messageId: number) => {
@@ -211,7 +301,6 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
               transition={{ duration: 0.25, ease: 'easeOut' }}
               className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
             >
-              {/* Text bubble */}
               <div
                 className={`max-w-[88%] px-3.5 py-2.5 rounded-2xl text-[13px] leading-relaxed whitespace-pre-wrap ${
                   msg.role === 'user' ? 'text-gray-900 rounded-br-md' : 'text-gray-700 rounded-bl-md'
@@ -224,14 +313,14 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
                 {msg.content}
               </div>
 
-              {/* Proposal card — rendered under the bubble when the AI is
-                  proposing a trip change. Accept swaps the Zustand trip;
-                  Reject dismisses the card but keeps the chat going. */}
-              {msg.proposal && (
-                <ProposalCard
+              {/* Proposal card — only for date_shift (pin/min-days).
+                  Transport changes now refresh the flowchart card directly
+                  and don't render an inline card here. */}
+              {msg.proposal && msg.proposal.kind === 'date_shift' && (
+                <DateShiftProposalCard
                   proposal={msg.proposal}
                   state={msg.proposalState ?? 'pending'}
-                  onAccept={() => acceptProposal(msg.id, msg.proposal!)}
+                  onAccept={() => acceptProposal(msg.id)}
                   onReject={() => rejectProposal(msg.id)}
                 />
               )}
@@ -264,7 +353,7 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
         </AnimatePresence>
       </div>
 
-      {/* Suggested prompts — shown only while the user hasn't engaged yet */}
+      {/* Suggested prompts */}
       {messages.length <= 1 && (
         <div className="px-5 pb-3 flex flex-wrap gap-1.5">
           {suggestions.map((prompt) => (
@@ -315,21 +404,24 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
   );
 }
 
-// ─── Proposal card ───────────────────────────────────────────
-// Shown inline in the chat after an AI message that proposes a trip
-// change. Two flavors:
-//   - kind='date_shift': lists every city whose dates moved (the diff).
-//   - kind='transport_window': summarizes the constraint being saved.
-// Accept/Reject buttons stay visible until the user picks one, then the
-// card swaps to a confirmation stub ("Applied" / "Dismissed").
-type ProposalCardProps = {
-  proposal: ChatProposal;
+// ─── Date-shift proposal card ───────────────────────────────
+// Only rendered for pin_city_dates / set_min_days. These move multiple
+// cities at once, so we keep the Accept/Reject gate. Transport changes
+// (set_transport_window / show_transport_options) bypass this entirely
+// and update the flowchart card directly via leg_refresh.
+type DateShiftProposalCardProps = {
+  proposal: Extract<ChatProposal, { kind: 'date_shift' }>;
   state: 'pending' | 'accepted' | 'rejected';
   onAccept: () => void;
   onReject: () => void;
 };
 
-function ProposalCard({ proposal, state, onAccept, onReject }: ProposalCardProps) {
+function DateShiftProposalCard({
+  proposal,
+  state,
+  onAccept,
+  onReject,
+}: DateShiftProposalCardProps) {
   const isPending = state === 'pending';
   const isAccepted = state === 'accepted';
 
@@ -348,13 +440,13 @@ function ProposalCard({ proposal, state, onAccept, onReject }: ProposalCardProps
     >
       <div className="px-4 py-3 flex items-center gap-2 border-b border-gray-100">
         <Clock size={14} style={{ color: '#2e6bc4' }} />
-        <div className="text-[12px] font-medium text-gray-900">
-          {proposal.kind === 'date_shift' ? 'Proposed date change' : 'Proposed constraint'}
-        </div>
+        <div className="text-[12px] font-medium text-gray-900">Proposed date change</div>
       </div>
 
       <div className="px-4 py-3">
-        {proposal.kind === 'date_shift' ? (
+        {proposal.diff.length === 0 ? (
+          <div className="text-[12px] text-gray-500">No date changes — constraint saved.</div>
+        ) : (
           <div className="flex flex-col gap-1.5">
             {proposal.diff.map((d) => (
               <div key={d.city} className="flex items-center text-[12px]">
@@ -368,12 +460,7 @@ function ProposalCard({ proposal, state, onAccept, onReject }: ProposalCardProps
                 </div>
               </div>
             ))}
-            {proposal.diff.length === 0 && (
-              <div className="text-[12px] text-gray-500">No date changes — constraint saved.</div>
-            )}
           </div>
-        ) : (
-          <TransportWindowSummary proposal={proposal} />
         )}
       </div>
 
@@ -406,25 +493,5 @@ function ProposalCard({ proposal, state, onAccept, onReject }: ProposalCardProps
         </div>
       )}
     </motion.div>
-  );
-}
-
-function TransportWindowSummary({ proposal }: { proposal: ChatProposal }) {
-  const i = proposal.toolInput ?? {};
-  const bits: string[] = [];
-  if (i.earliestDepart) bits.push(`depart ≥ ${i.earliestDepart}`);
-  if (i.latestDepart) bits.push(`depart ≤ ${i.latestDepart}`);
-  if (i.earliestArrive) bits.push(`arrive ≥ ${i.earliestArrive}`);
-  if (i.latestArrive) bits.push(`arrive ≤ ${i.latestArrive}`);
-  return (
-    <div className="text-[12px] text-gray-700 leading-relaxed">
-      <div className="font-medium text-gray-900">
-        {i.from} → {i.to}
-      </div>
-      <div className="mt-0.5">{bits.join(' · ') || 'No time bounds'}</div>
-      <div className="mt-2 text-[11px] text-gray-500">
-        Saved to this trip. Applied the next time we re-pick this leg.
-      </div>
-    </div>
   );
 }

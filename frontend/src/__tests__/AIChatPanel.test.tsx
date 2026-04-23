@@ -160,6 +160,60 @@ describe('AIChatPanel', () => {
     );
   });
 
+  it('applies leg_refresh directly to the trip without rendering a card', async () => {
+    // New behavior: transport queries return type=leg_refresh. Frontend
+    // immediately updates the trip's transport{Out,In}.alternatives and
+    // posts a summary bubble. No inline card, no Accept/Reject — the user
+    // clicks on the flowchart Connector card to pick a different option.
+    mockedPlanChat.mockResolvedValue({
+      type: 'leg_refresh',
+      reply: 'Found 12, showing the top 4 for Rome → Florence.',
+      refresh: {
+        fromCity: 'Rome',
+        toCity: 'Florence',
+        date: '2026-06-04',
+        totalFound: 12,
+        updatedConstraints: {},
+        options: [
+          { mode: 'train', operator: 'Trenitalia', price: 23, currency: 'USD', departTime: '05:10', arriveTime: '06:46', duration: '1h 36m', durationMinutes: 96, priceDelta: -162 },
+          { mode: 'train', operator: 'Italo', price: 42, currency: 'USD', departTime: '09:00', arriveTime: '10:30', duration: '1h 30m', durationMinutes: 90, priceDelta: -143 },
+          { mode: 'flight', operator: 'AF1203', price: 185, currency: 'USD', departTime: '18:00', arriveTime: '19:20', duration: '1h 20m', durationMinutes: 80, priceDelta: 0 },
+          { mode: 'flight', operator: 'AZ567', price: 210, currency: 'USD', departTime: '20:00', arriveTime: '21:25', duration: '1h 25m', durationMinutes: 85, priceDelta: 25 },
+        ],
+      },
+    });
+
+    const tripWithRomeFlo = buildTrip({
+      cities: [
+        { name: 'Rome', country: 'IT', transportIn: { mode: 'flight', operator: 'start', duration: '', price: 0 }, transportOut: { mode: 'flight', operator: 'current', duration: '1h', price: 185 } } as any,
+        { name: 'Florence', country: 'IT', transportIn: { mode: 'flight', operator: 'current', duration: '1h', price: 185 }, transportOut: { mode: 'flight', operator: 'end', duration: '', price: 0 } } as any,
+      ] as any,
+    });
+    useTripStore.setState({ currentTrip: tripWithRomeFlo });
+
+    render(<AIChatPanel trip={tripWithRomeFlo} />);
+    const input = screen.getByPlaceholderText('Ask about your trip...');
+    fireEvent.change(input, { target: { value: 'Show me cheaper options Rome to Florence' } });
+    fireEvent.submit(input.closest('form')!);
+
+    // Chat bubble shows the summary.
+    await waitFor(() => {
+      expect(screen.getByText(/Found 12, showing the top 4/i)).toBeInTheDocument();
+    });
+
+    // Zustand trip was mutated: transportOut of Rome has 3 alternatives
+    // (the cheapest option became main, the other 3 became alternatives).
+    const after = useTripStore.getState().currentTrip;
+    expect(after?.cities[0].transportOut.operator).toBe('Trenitalia');
+    expect(after?.cities[0].transportOut.alternatives?.length).toBe(3);
+    // Florence's transportIn mirrors the new main.
+    expect(after?.cities[1].transportIn.operator).toBe('Trenitalia');
+
+    // No inline card rendered.
+    expect(screen.queryByText(/Accept/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Reject/)).not.toBeInTheDocument();
+  });
+
   it('Reject leaves the trip untouched and shows dismissed state', async () => {
     const originalTrip = buildTrip({ totalCost: 1234 });
     useTripStore.setState({ currentTrip: originalTrip });

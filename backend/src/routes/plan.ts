@@ -8,6 +8,8 @@ import {
   mergeConstraints,
   TripConstraints,
 } from '../services/constraints';
+import { searchLegOptions, LegOption } from '../services/legOptions';
+import { getCityCountry } from '../data/cityCountries';
 
 const router = Router();
 
@@ -416,12 +418,12 @@ const CHAT_TOOLS = [
   {
     name: 'set_transport_window',
     description:
-      'Constrain the departure/arrival time of a specific leg between two cities. Use for "no flights before 5pm", "need to land by 3pm", "don\'t leave before noon", etc. Pass null for any bound the user didn\'t specify.',
+      'Constrain the departure/arrival time of a specific leg between two cities. Use ONLY when the user specifies a time bound: "no flights before 5pm", "need to land by 3pm", "don\'t leave before noon". Pass null for any bound the user didn\'t specify. Do NOT use this for "show me more flights" or "what are my options" — use show_transport_options for those.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        from: { type: 'string', description: 'Origin city (must match trip).' },
-        to: { type: 'string', description: 'Destination city (must match trip).' },
+        from: { type: 'string', description: 'Origin city (must match a city in the trip).' },
+        to: { type: 'string', description: 'Destination city (must match a city in the trip).' },
         earliestDepart: {
           type: ['string', 'null'],
           description: 'HH:MM 24-hour earliest departure, or null.',
@@ -441,6 +443,23 @@ const CHAT_TOOLS = [
         explanation: {
           type: 'string',
           description: 'One-sentence explanation for the user.',
+        },
+      },
+      required: ['from', 'to', 'explanation'],
+    },
+  },
+  {
+    name: 'show_transport_options',
+    description:
+      'Refresh the transport card for a specific leg with the top 4 cheapest flight/train options — no time constraint. Use when the user asks "are there more flights?", "show me trains from X to Y", "what are my options from A to B", "can I take a train instead?", "find me cheaper options". REQUIRES both `from` and `to` to be specified. If the user is vague about which leg (e.g. "are there more flights?" in a multi-leg trip), DO NOT call this tool — use answer_only to ask which leg first.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        from: { type: 'string', description: 'Origin city (must match a city in the trip).' },
+        to: { type: 'string', description: 'Destination city (must match a city in the trip).' },
+        explanation: {
+          type: 'string',
+          description: 'One-sentence explanation like "Here are the cheapest options for Rome → Florence".',
         },
       },
       required: ['from', 'to', 'explanation'],
@@ -514,15 +533,28 @@ router.post(
 
     const systemPrompt = `You are Voyza AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
 
-You have access to four tools:
-1. answer_only — for questions, explanations, small talk.
+You have five tools:
+1. answer_only — for plain questions, explanations, small talk, AND for clarifying questions when the user's request is ambiguous about which leg.
 2. pin_city_dates — when the user wants a city locked to specific dates.
 3. set_min_days — when the user wants a minimum stay in a city.
-4. set_transport_window — when the user constrains when a specific leg can run.
+4. set_transport_window — when the user gives a TIME BOUND on a specific leg ("no flights before 5pm", "arrive by 3pm").
+5. show_transport_options — when the user wants to SEE alternatives for a specific leg without a time constraint ("are there more flights?", "show me trains", "what are my options?", "is there a cheaper way?").
 
-ALWAYS pick exactly one tool per turn. Favor answer_only when the user is asking, explaining, or being vague. Pick a constraint tool ONLY when the user clearly wants to change the trip.
+ALWAYS pick exactly one tool per turn.
 
-If the user references a city that isn't in the trip, answer_only and ask them to clarify — do NOT invent a pin.
+CRITICAL: Many trips have multiple legs (e.g. City A → City B → City C has TWO legs). When the user asks about flights/trains/transport without specifying WHICH leg:
+  - If there's only ONE leg in the trip, just use that one.
+  - If there are MULTIPLE legs and the user didn't specify, use answer_only to ask which leg (e.g. "Which leg — Venice → Rome or Rome → Florence?"). Do NOT guess.
+  - If the user names the from/to cities directly ("Rome to Florence"), use the matching tool.
+
+Decision guide:
+- User asks about times/bounds → set_transport_window
+- User asks for alternatives / more options / cheaper → show_transport_options
+- User asks a general question, wants explanation, or their request is ambiguous → answer_only
+- User wants to lock a city to specific dates → pin_city_dates
+- User wants more time in a city → set_min_days
+
+If the user references a city that isn't in the trip, answer_only and ask them to clarify — do NOT invent a pin or window.
 
 Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them.
 
@@ -576,8 +608,156 @@ ${JSON.stringify(tripSummary, null, 2)}
     let constraintUpdate: TripConstraints = {};
     let replyText = toolInput.explanation ?? 'I have a proposed change for you.';
 
+    // --- Leg-refresh tools: set_transport_window (with time bounds) and
+    //     show_transport_options (no bounds). Both re-search the specified
+    //     leg and return a leg_refresh response. The frontend uses that
+    //     response to overwrite the matching transport's `alternatives`
+    //     directly on the flowchart — no inline card in chat. Chat just
+    //     shows a one-line summary ("Found 12, showing top 4").
+    //
+    //     set_transport_window ALSO persists the constraint so future
+    //     re-optimizations honor the time bound.
+    if (toolName === 'set_transport_window' || toolName === 'show_transport_options') {
+      const fromLower = String(toolInput.from).toLowerCase();
+      const toLower = String(toolInput.to).toLowerCase();
+      const fromCity = (currentTrip.cities ?? []).find(
+        (c: any) => c.name.toLowerCase() === fromLower,
+      );
+      const toCity = (currentTrip.cities ?? []).find(
+        (c: any) => c.name.toLowerCase() === toLower,
+      );
+      if (!fromCity || !toCity) {
+        return res.json({
+          type: 'answer',
+          reply: `I couldn\'t find a ${toolInput.from} → ${toolInput.to} flight or train in your trip.`,
+        });
+      }
+
+      const travelDate =
+        fromCity.dates?.departure ?? fromCity.departure_date ?? null;
+      if (!travelDate) {
+        return res.json({
+          type: 'answer',
+          reply: `I need a departure date for ${fromCity.name} before I can find matching options.`,
+        });
+      }
+
+      const currentTransport = fromCity.transportOut ?? null;
+      const currentPrice = currentTransport?.price ?? 0;
+
+      // Only set_transport_window has a window; show_transport_options
+      // passes no bounds (we still use the same search path).
+      const window =
+        toolName === 'set_transport_window'
+          ? {
+              earliestDepart: toolInput.earliestDepart ?? null,
+              latestDepart: toolInput.latestDepart ?? null,
+              earliestArrive: toolInput.earliestArrive ?? null,
+              latestArrive: toolInput.latestArrive ?? null,
+            }
+          : undefined;
+
+      const legSearch = await searchLegOptions({
+        from: fromCity.name,
+        to: toCity.name,
+        date: travelDate,
+        travelers: currentTrip.travelers ?? 1,
+        fromCountry: fromCity.country ?? getCityCountry(fromCity.name),
+        toCountry: toCity.country ?? getCityCountry(toCity.name),
+        window,
+        currentPrice,
+        // Top 4 for the card; we also return totalFound so the summary
+        // can say "found 12, showing top 4".
+        limit: 4,
+      });
+
+      // Count the total matches (pre-limit) so the chat summary can be
+      // honest about "found 12, showing top 4". We re-run without a limit
+      // only when a window is present (otherwise it's not useful).
+      let totalFound = legSearch.options.length;
+      if (window) {
+        const unlimited = await searchLegOptions({
+          from: fromCity.name,
+          to: toCity.name,
+          date: travelDate,
+          travelers: currentTrip.travelers ?? 1,
+          fromCountry: fromCity.country ?? getCityCountry(fromCity.name),
+          toCountry: toCity.country ?? getCityCountry(toCity.name),
+          window,
+          currentPrice,
+          limit: 100,
+        }).catch(() => null);
+        if (unlimited) totalFound = unlimited.options.length;
+      }
+
+      // No matches → answer_only with context.
+      if (!legSearch.hasMatches) {
+        const bounds = window ? describeWindow(window) : '';
+        const conflict =
+          window && legSearch.windowFilteredAll
+            ? `No flights or trains from ${fromCity.name} to ${toCity.name} match ${bounds}. Want me to relax the window, or pick a different departure date?`
+            : `I couldn\'t find any flights or trains from ${fromCity.name} to ${toCity.name} on ${travelDate}. Try another date.`;
+        return res.json({ type: 'answer', reply: conflict });
+      }
+
+      // Build a one-line summary for the chat bubble.
+      const shownCount = legSearch.options.length;
+      const cheapest = legSearch.options[0];
+      const summaryBits: string[] = [];
+      const foundCountPhrase =
+        totalFound > shownCount
+          ? `Found ${totalFound}, showing the top ${shownCount}`
+          : `Found ${shownCount} option${shownCount === 1 ? '' : 's'}`;
+      summaryBits.push(`${foundCountPhrase} for ${fromCity.name} → ${toCity.name}`);
+      if (window) {
+        const windowPhrase = describeWindow(window);
+        if (windowPhrase) summaryBits.push(windowPhrase);
+      }
+      const delta = cheapest.priceDelta;
+      if (currentPrice > 0 && delta < 0) {
+        summaryBits.push(`cheapest saves $${Math.abs(delta).toFixed(0)}`);
+      } else if (currentPrice > 0 && delta > 0) {
+        summaryBits.push(`cheapest is +$${delta.toFixed(0)}`);
+      }
+      const summary =
+        summaryBits.join(' — ') + '. Pick one on the transport card to use it.';
+
+      // If this was set_transport_window, persist the intent on the trip
+      // so future re-optimizations honor the bound.
+      let updatedConstraints = existingConstraints;
+      if (toolName === 'set_transport_window' && window) {
+        const constraintUpdate: TripConstraints = {
+          transport_windows: [
+            {
+              from: fromCity.name,
+              to: toCity.name,
+              earliestDepart: window.earliestDepart,
+              latestDepart: window.latestDepart,
+              earliestArrive: window.earliestArrive,
+              latestArrive: window.latestArrive,
+            },
+          ],
+        };
+        updatedConstraints = mergeConstraints(existingConstraints, constraintUpdate);
+      }
+
+      return res.json({
+        type: 'leg_refresh',
+        reply: summary,
+        refresh: {
+          fromCity: fromCity.name,
+          toCity: toCity.name,
+          date: travelDate,
+          options: legSearch.options,
+          totalFound,
+          updatedConstraints,
+        },
+      });
+    }
+
+    // --- Date-bearing tools: pin_city_dates, set_min_days. These
+    //     compute a new set of city dates + a visual diff.
     if (toolName === 'pin_city_dates') {
-      // Validate the city actually exists in the trip.
       const match = (currentTrip.cities ?? []).find(
         (c: any) => c.name.toLowerCase() === String(toolInput.city).toLowerCase(),
       );
@@ -607,27 +787,10 @@ ${JSON.stringify(tripSummary, null, 2)}
       constraintUpdate = {
         min_days: [{ city: match.name, minNights: Number(toolInput.minNights) }],
       };
-    } else if (toolName === 'set_transport_window') {
-      constraintUpdate = {
-        transport_windows: [
-          {
-            from: String(toolInput.from),
-            to: String(toolInput.to),
-            earliestDepart: toolInput.earliestDepart ?? null,
-            latestDepart: toolInput.latestDepart ?? null,
-            earliestArrive: toolInput.earliestArrive ?? null,
-            latestArrive: toolInput.latestArrive ?? null,
-          },
-        ],
-      };
     }
 
     const proposedConstraints = mergeConstraints(existingConstraints, constraintUpdate);
 
-    // For date-bearing constraints, compute new city dates + a diff.
-    // The frontend works in { dates: { arrival, departure } } shape, but
-    // applyDateConstraints operates on { arrival_date, departure_date }
-    // so we normalize both directions.
     const dbShapeCities = (currentTrip.cities ?? []).map((c: any) => ({
       name: c.name,
       arrival_date: c.dates?.arrival ?? c.arrival_date ?? null,
@@ -635,8 +798,6 @@ ${JSON.stringify(tripSummary, null, 2)}
     }));
     const { cities: newCities, diff } = applyDateConstraints(dbShapeCities, proposedConstraints);
 
-    // Rebuild a frontend-shaped trip with the new dates, preserving
-    // everything else the user had (hotels, activities, transports…).
     const proposedTrip = {
       ...currentTrip,
       constraints: proposedConstraints,
@@ -649,17 +810,11 @@ ${JSON.stringify(tripSummary, null, 2)}
       })),
     };
 
-    // Transport-window changes don't visibly shift dates, so add a tag so
-    // the frontend can render a different kind of card ("Saved constraint:
-    // no flights from Rome before 5pm") vs the full date-shift diff.
-    const proposalKind =
-      toolName === 'set_transport_window' ? 'transport_window' : 'date_shift';
-
     return res.json({
       type: 'proposal',
       reply: replyText,
       proposal: {
-        kind: proposalKind,
+        kind: 'date_shift',
         toolName,
         toolInput,
         diff,
@@ -669,6 +824,31 @@ ${JSON.stringify(tripSummary, null, 2)}
     });
   }),
 );
+
+/**
+ * Human-readable phrase describing a time window, e.g.
+ * "arriving before 14:00" or "departing between 17:00 and 22:00".
+ * Returns an empty string if the window has no active bounds.
+ */
+function describeWindow(w: {
+  earliestDepart?: string | null;
+  latestDepart?: string | null;
+  earliestArrive?: string | null;
+  latestArrive?: string | null;
+}): string {
+  const bits: string[] = [];
+  if (w.earliestDepart && w.latestDepart)
+    bits.push(`departing between ${w.earliestDepart} and ${w.latestDepart}`);
+  else if (w.earliestDepart) bits.push(`departing after ${w.earliestDepart}`);
+  else if (w.latestDepart) bits.push(`departing before ${w.latestDepart}`);
+
+  if (w.earliestArrive && w.latestArrive)
+    bits.push(`arriving between ${w.earliestArrive} and ${w.latestArrive}`);
+  else if (w.earliestArrive) bits.push(`arriving after ${w.earliestArrive}`);
+  else if (w.latestArrive) bits.push(`arriving before ${w.latestArrive}`);
+
+  return bits.join(', ');
+}
 
 // ─── POST /api/plan/chat-suggestions ─────────────────────────
 // Returns 4 trip-specific suggested prompts for the chat UI. Called once

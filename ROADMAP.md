@@ -45,9 +45,46 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ---
 
-## 🚧 In-flight (this branch: `feat/db-persistence`)
+## 🚧 In-flight (this branch: `feat/voyza-ai-chat`)
 
-### DB persistence — core (done, tested, not yet committed)
+### Voyza AI chat v1 — constraint proposals (committed: 784e671)
+- [x] Schema: `trips.constraints` jsonb
+- [x] Backend `POST /api/plan/chat` with Claude tool-use (answer_only, pin_city_dates, set_min_days, set_transport_window)
+- [x] Backend `POST /api/plan/chat-suggestions` — trip-specific dynamic prompts
+- [x] `services/constraints.ts` — `applyDateConstraints` + `mergeConstraints` helpers
+- [x] Frontend `AIChatPanel` rebuild: multi-turn history, proposal cards, Accept/Reject
+- [x] E2E + unit tests pass (129/129)
+
+### Leg options (in-flight, staged not committed)
+- [x] `services/legOptions.ts` — `searchLegOptions(window?, limit)` with HH:MM filter
+- [x] `set_transport_window` now returns real alternatives instead of just saving
+- [x] `LegOption` type + `leg_options` proposal kind
+- [ ] **Re-architect: chat refreshes the flowchart transport card, no inline card** (next commit)
+- [ ] Replace inline multi-option card pattern with card-refresh summary
+- [ ] Add `show_transport_options` tool (no window — just show alternatives)
+- [ ] Add clarifying-question flow for ambiguous "which leg?" queries
+
+### Home anchor / origin model (next, foundational)
+- [ ] Schema: `trips.origin_city`, `trips.origin_airports jsonb`, `trips.return_to_home bool`
+- [ ] User profile: `preferences.homeCity`, `preferences.homeAirports`
+- [ ] Planning flow: "Where are you flying from?" step (auto-fill from profile, ask for confirmation)
+- [ ] Planning flow: "One-way or round-trip?" step
+- [ ] Optimizer: accept origin, test ALL destination permutations (home stays fixed)
+- [ ] `searchLegOptions` called for home→first and last→home legs
+- [ ] Frontend: render "Home" card at start (and end if round-trip) on flowchart
+- [ ] Multi-airport search: top 3 closest airports per origin city (NYC → JFK/LGA/EWR, etc.)
+- [ ] Backfill: existing trips without `origin_city` need manual fill-in or a migration default
+
+### Top-4 options per leg (depends on home anchor)
+- [ ] Swap `compareLeg()` → `searchLegOptions(limit: 4)` in trip-generation path
+- [ ] Frontend: populate all 4 into `transport.alternatives`
+- [ ] Connector UI: already renders N alternatives — confirm it handles 4 cleanly
+
+---
+
+## 📦 Previously shipped (ordered recent → older)
+
+### DB persistence (merged in PR #1)
 - [x] Schema migration: `trips` (+5 cols), `cities` (+4), `transports` (+10)
 - [x] Fix `duration_minutes` bug (`parseInt("3h 37m") = 3` → proper parser)
 - [x] POST `/api/trips` writes all new columns
@@ -136,11 +173,14 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 - [ ] Seller-of-travel compliance research (varies by US state, UK ATOL, etc.)
 - [ ] Booking confirmation email + itinerary PDF
 
-### Feature: Origin city / single-destination flights
-- [ ] Add `origin` field to planning flow (place/vibe/budget paths all ask)
-- [ ] `user_profiles.preferences.homeCity` / `homeAirport` auto-fills origin
-- [ ] Single-destination trips now include origin→destination flight leg
-- [ ] Optimizer treats origin as city[0] with no hotel, only outbound transport
+### Feature: Origin / home anchor — REPLACED by "Home anchor / origin model" in In-flight section above. This older spec is superseded.
+- [x] Moved up into in-flight work (expanded to include full permutations, multi-airport, round-trip, home card on flowchart)
+
+### Feature: Voyza AI — edits beyond current scope
+Tasks deferred from the current chat work:
+
+- [ ] **Planning-phase conversational revision** (task 4): during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
+- [ ] **Post-results add/remove/replace cities** (task 5): new tools on `/api/plan/chat` — `add_city(city, afterCity?)`, `remove_city(city)`, `replace_city(old, new)`. Backend rebuilds trip with new city's hotel + transports. Shows diff card for Accept/Reject.
 
 ### Feature: Ownership transfer UX
 - [ ] Frontend flow: owner picks a collaborator (or invites one) to transfer to
@@ -191,6 +231,9 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 - [ ] Intent picker animation timing on rapid interactions (currently fixed via StrictMode refs, watch for regressions)
 - [ ] Canvas → Back → Flights gone — partially fixed by DB persistence work (pending full verification)
 - [ ] Canvas save silently drops transports — FIXED in feat/db-persistence
+- [ ] Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice). No back button, no edit-previous-message. Partial workaround exists via city picker's "+ another city" but it's awkward. Full fix = task 4 (planning-phase conversational revision).
+- [ ] AI chat: "are there more flights?" returns an answer-only response instead of showing options. Fix: new `show_transport_options` tool + clarifying "which leg?" routing.
+- [ ] AI chat: transport-window proposal card says "Applied the next time we re-pick this leg" — dev-speak the user doesn't understand. Will go away when we switch to card-refresh pattern.
 
 ## 🏗️ Infrastructure / ops
 
