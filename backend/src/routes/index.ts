@@ -61,6 +61,15 @@ const optimizeSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   travelers: z.number().int().positive().default(1),
   budget: z.number().positive().optional(),
+  /** Home city the user is flying from. When present, we test full city
+   *  permutations, add home→first_city to each, and (if returnToHome)
+   *  last_city→home. Absent = legacy behavior (fixed first, no home legs). */
+  origin: z.string().min(1).optional(),
+  /** Origin IATA codes. Prefilled from the originAirports.ts lookup on
+   *  the frontend. Passed through verbatim. */
+  originAirports: z.array(z.string().min(3).max(4)).optional(),
+  /** Round-trip (true) or one-way (false). Defaults to true. */
+  returnToHome: z.boolean().optional(),
 });
 
 router.post(

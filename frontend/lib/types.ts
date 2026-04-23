@@ -149,6 +149,38 @@ export type Trip = {
       latestArrive?: string | null;
     }>;
   };
+  /** Home anchor — where the user is flying from. When set, the flowchart
+   *  renders a "Home" card at the start (and end if returnToHome). The
+   *  outboundLeg/returnLeg transports describe the home→first_city and
+   *  last_city→home flights. Absent for pre-home-anchor trips — those
+   *  render without a home card (graceful degradation). */
+  origin?: {
+    city: string;
+    airports: string[];
+    outboundLeg?: HomeLeg | null;
+    returnLeg?: HomeLeg | null;
+  };
+  returnToHome?: boolean;
+};
+
+/**
+ * Home-anchor leg — the flight between the origin city and a destination.
+ * Stored separately from Transport because it doesn't participate in the
+ * destination city chain (no hotel, no activities — just an anchor).
+ */
+export type HomeLeg = {
+  originAirport: string;
+  destAirport: string;
+  price: number;
+  currency: string;
+  durationMinutes: number;
+  operator: string;
+  carrierCode: string;
+  departTime: string | null;
+  arriveTime: string | null;
+  departDate: string;
+  stops: number;
+  bookingUrl: string | null;
 };
 
 export type PlanningAnswers = {
@@ -161,6 +193,16 @@ export type PlanningAnswers = {
   budgetPerPerson?: boolean;
   extraNotes?: string;
   rawInput?: string;
+  /** Home anchor — the city the user is flying from. Required for
+   *  optimizer to compute the home→first_city leg and test full
+   *  destination permutations. */
+  origin?: string;
+  /** Top-N IATA codes for the origin city (pre-filled from the lookup).
+   *  Backend uses these to search flights across multiple airports in
+   *  parallel when the origin is a multi-airport metro. */
+  originAirports?: string[];
+  /** Round-trip (true) or one-way (false). Default true. */
+  returnToHome?: boolean;
 };
 
 export type GroupMember = {

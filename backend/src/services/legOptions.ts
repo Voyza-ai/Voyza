@@ -55,6 +55,15 @@ type SearchParams = {
   currentPrice?: number;
   /** How many options to return (total, split across flights + trains). Default 5. */
   limit?: number;
+  /**
+   * Optional: explicit origin airport IATA codes to search from in parallel.
+   * When the origin is a multi-airport city (NYC → JFK/LGA/EWR), pass all 3
+   * here — we'll search each in parallel and merge results. When omitted we
+   * fall back to getIataCode(from) which returns a single airport.
+   * Destination is always single-airport (no multi-airport logic on the
+   * destination side for now).
+   */
+  fromAirports?: string[];
 };
 
 /**
@@ -185,23 +194,47 @@ export async function searchLegOptions(
     window,
     currentPrice = 0,
     limit = 5,
+    fromAirports,
   } = params;
 
   // Kick both API calls off in parallel; tolerate each failing
   // independently so a flight outage doesn't eat the train results.
+  //
+  // Flight search branches on multi-airport: when caller passes
+  // fromAirports = [JFK, LGA, EWR], we fire 3 parallel searches and
+  // merge. For every other case we resolve a single IATA via
+  // getIataCode(). Train search is always single-city (no concept of
+  // multiple origin "airports" for trains).
   const [flights, trains] = await Promise.all([
     (async () => {
       try {
-        const [originIata, destIata] = await Promise.all([
-          getIataCode(from),
-          getIataCode(to),
-        ]);
-        return await searchFlights({
-          origin: originIata,
-          destination: destIata,
-          date,
-          travelers,
-        });
+        const destIata = await getIataCode(to);
+        const origins =
+          fromAirports && fromAirports.length > 0
+            ? fromAirports
+            : [await getIataCode(from)];
+
+        // One searchFlights call per origin airport; results merged.
+        // Individual origin failures (e.g. LGA has no offers but JFK does)
+        // are tolerated — we keep whatever returned.
+        const resultsPerOrigin = await Promise.all(
+          origins.map((originIata) =>
+            searchFlights({
+              origin: originIata,
+              destination: destIata,
+              date,
+              travelers,
+            }).catch((err) => {
+              logger.warn('searchLegOptions: one origin failed', {
+                origin: originIata,
+                to,
+                message: err?.message,
+              });
+              return [] as FlightOffer[];
+            }),
+          ),
+        );
+        return resultsPerOrigin.flat();
       } catch (err) {
         logger.warn('searchLegOptions: flight search failed', {
           from,

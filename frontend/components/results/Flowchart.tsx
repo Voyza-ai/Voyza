@@ -2,8 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, PenSquare } from 'lucide-react';
-import { Trip } from '@/lib/types';
+import { ChevronLeft, ChevronRight, PenSquare, Home } from 'lucide-react';
+import { Trip, HomeLeg } from '@/lib/types';
 import Link from 'next/link';
 import CityCard from './CityCard';
 import CityActivitiesCard from './CityActivitiesCard';
@@ -15,6 +15,16 @@ import Connector from './Connector';
  * full city column (main + sub-card) is much taller.
  */
 const MAIN_CARD_HEIGHT = 320;
+/**
+ * Approximate height of a full city column (CityCard + small spacer +
+ * CityActivitiesCard). Measured from the rendered flowchart — city
+ * columns for a typical trip are ~440px tall. We size the HomeCard
+ * to match so its adjacent Connector's self-center lands at the same
+ * Y position as connectors between real cities. If activities lists
+ * grow much taller this may need a small tweak, but 440 is the
+ * average-case pixel position that lines everything up.
+ */
+const HOME_COLUMN_HEIGHT = 500;
 
 type FlowchartProps = {
   trip: Trip;
@@ -166,6 +176,50 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
             visible: { transition: { staggerChildren: 0.12 } },
           }}
         >
+          {/* Leading home card + outbound leg. HomeCard and its Connector
+              share ONE stretched motion.div — same pattern as city
+              columns below — so Connector's self-center lands at the
+              same Y position as between-city connectors.
+              cityIndex = -1 is a sentinel so nothing downstream
+              mistakes it for a real trip city. */}
+          {trip.origin?.city && (
+            <motion.div
+              className="flex items-stretch"
+              variants={{
+                hidden: { opacity: 0, y: 24 },
+                visible: { opacity: 1, y: 0, transition: { duration: 0.45 } },
+              }}
+            >
+              <HomeCard
+                city={trip.origin.city}
+                airports={trip.origin.airports}
+                label="Home"
+              />
+              {trip.origin.outboundLeg && (
+                <div className="flex items-center flex-shrink-0 mx-2">
+                  <Connector
+                    transport={homeLegToTransport(
+                      trip.origin.outboundLeg,
+                      trip.origin.city,
+                      trip.cities[0]?.name ?? '',
+                    )}
+                    index={-1}
+                    cityIndex={-1}
+                    isExpanded={openConnectors.has(-1)}
+                    onToggle={() =>
+                      setOpenConnectors((curr) => {
+                        const next = new Set(curr);
+                        if (next.has(-1)) next.delete(-1);
+                        else next.add(-1);
+                        return next;
+                      })
+                    }
+                  />
+                </div>
+              )}
+            </motion.div>
+          )}
+
           {trip.cities.map((city, idx) => {
             const hasSub =
               city.activities.length > 0 || city.restaurants.length > 0;
@@ -252,6 +306,48 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
               </motion.div>
             );
           })}
+
+          {/* Trailing return leg + "Back home" card. Same motion.div
+              shape as outbound: Connector first, then HomeCard, in one
+              stretched container. cityIndex = -2 keeps its expanded
+              state separate from outbound. */}
+          {trip.origin?.city && trip.returnToHome && (
+            <motion.div
+              className="flex items-stretch"
+              variants={{
+                hidden: { opacity: 0, y: 24 },
+                visible: { opacity: 1, y: 0, transition: { duration: 0.45 } },
+              }}
+            >
+              {trip.origin.returnLeg && (
+                <div className="flex items-center flex-shrink-0 mx-2">
+                  <Connector
+                    transport={homeLegToTransport(
+                      trip.origin.returnLeg,
+                      trip.cities[trip.cities.length - 1]?.name ?? '',
+                      trip.origin.city,
+                    )}
+                    index={-2}
+                    cityIndex={-2}
+                    isExpanded={openConnectors.has(-2)}
+                    onToggle={() =>
+                      setOpenConnectors((curr) => {
+                        const next = new Set(curr);
+                        if (next.has(-2)) next.delete(-2);
+                        else next.add(-2);
+                        return next;
+                      })
+                    }
+                  />
+                </div>
+              )}
+              <HomeCard
+                city={trip.origin.city}
+                airports={trip.origin.airports}
+                label="Back home"
+              />
+            </motion.div>
+          )}
         </motion.div>
       </div>
 
@@ -262,3 +358,105 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
     </div>
   );
 }
+
+// ─── Home anchor cards ──────────────────────────────────────
+// Small pills that bracket the itinerary on the flowchart. Intentionally
+// visually different from CityCard (narrower, single-color, "Home" icon)
+// so the user knows this isn't a destination they're visiting — it's
+// their starting/ending point.
+function HomeCard({
+  city,
+  airports,
+  label,
+}: {
+  city: string;
+  airports: string[];
+  label: string;
+}) {
+  return (
+    <div
+      className="flex-shrink-0 w-[180px] rounded-2xl border-2 overflow-hidden flex flex-col"
+      style={{
+        background: 'linear-gradient(180deg, #eef3fb 0%, #dde7f5 100%)',
+        borderColor: '#2e6bc4',
+        // Match the full city-column height (CityCard + activities card +
+        // spacer) so the adjacent Connector's self-center lands at the
+        // same Y position as between-city connectors.
+        minHeight: HOME_COLUMN_HEIGHT,
+      }}
+    >
+      <div
+        className="px-4 py-2 flex items-center gap-2"
+        style={{ background: '#2e6bc4', color: 'white' }}
+      >
+        <Home size={14} />
+        <div className="text-[11px] uppercase tracking-wider font-semibold">{label}</div>
+      </div>
+      <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 gap-3">
+        <div className="text-[18px] font-semibold text-gray-900 text-center leading-tight">
+          {city}
+        </div>
+        {airports.length > 0 && (
+          <div
+            className="text-[11px] font-mono uppercase tracking-wider text-gray-600 text-center"
+            title={`Searching ${airports.join(', ')}`}
+          >
+            {airports.slice(0, 3).join(' · ')}
+          </div>
+        )}
+        <div className="text-[10px] text-gray-500 text-center mt-2">
+          {label === 'Home' ? 'Starting point' : 'Returning here'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Convert a HomeLeg (flight from/to the user's origin airports) into
+ * the Transport shape <Connector /> renders. Both collapsed-pill and
+ * expanded-card views work without modification because Connector
+ * doesn't care whether a transport connects two real cities or a
+ * home-anchor to a real city.
+ *
+ * `fromCity` / `toCity` here are the human-readable city names — the
+ * Connector's "EXPANDED" view displays these on the depart/arrive
+ * blocks alongside the IATA codes. For an outbound leg: fromCity =
+ * origin ("New York"), toCity = first destination. For a return leg
+ * it's reversed.
+ *
+ * Alternatives are left unset — home legs don't have the flight-vs-
+ * train swap list that between-city legs do. Connector gracefully
+ * hides the "Other options" section when alternatives is empty.
+ */
+function homeLegToTransport(leg: HomeLeg, fromCity: string, toCity: string): any {
+  const mins = leg.durationMinutes ?? 0;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const durationStr =
+    mins > 0 ? (h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`) : '';
+
+  return {
+    mode: 'flight',
+    operator: leg.operator || leg.carrierCode || 'Flight',
+    duration: durationStr,
+    price: Number(leg.price ?? 0),
+    // Connector reads from/to for the expanded card's route row.
+    // We put the city names here and the IATA codes go into the
+    // station fields so the UI shows both.
+    from: fromCity,
+    to: toCity,
+    fromStation: leg.originAirport,
+    toStation: leg.destAirport,
+    departTime: leg.departTime ?? undefined,
+    arriveTime: leg.arriveTime ?? undefined,
+    departDate: leg.departDate,
+    layovers: leg.stops ?? 0,
+    stops: leg.stops ?? 0,
+    currency: leg.currency ?? 'USD',
+    carrierCode: leg.carrierCode ?? undefined,
+    flightNumber: leg.carrierCode ?? undefined,
+    bookingUrl: leg.bookingUrl ?? undefined,
+  };
+}
+

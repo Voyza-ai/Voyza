@@ -116,6 +116,21 @@ export function buildTripFromDb(
   // Strip the internal _dbId before sending to client.
   for (const c of frontendCities) delete c._dbId;
 
+  // Home anchor: if the trip was saved with an origin city, surface it
+  // on the read shape. originAirports defaults to empty array; the
+  // frontend falls back to getOriginAirports() lookup if needed.
+  // outboundLeg/returnLeg are the stored flight details (operator,
+  // price, depart/arrive times) so the home-leg pill can re-render on
+  // reload without re-querying Duffel.
+  const origin = trip.origin_city
+    ? {
+        city: trip.origin_city,
+        airports: Array.isArray(trip.origin_airports) ? trip.origin_airports : [],
+        outboundLeg: trip.outbound_leg ?? null,
+        returnLeg: trip.return_leg ?? null,
+      }
+    : undefined;
+
   return {
     id: trip.id,
     title: trip.title,
@@ -132,5 +147,8 @@ export function buildTripFromDb(
     savingsTips: [],
     createdAt: trip.created_at ?? undefined,
     ownerId: trip.user_id ?? undefined,
+    origin,
+    returnToHome: typeof trip.return_to_home === 'boolean' ? trip.return_to_home : true,
+    constraints: trip.constraints ?? undefined,
   };
 }

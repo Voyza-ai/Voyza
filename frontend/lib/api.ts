@@ -145,6 +145,9 @@ export type OptimizeResult = {
   dates: Record<string, { arrival: string; departure: string }>;
   /** Present when shifting the trip by ±1 or ±2 days saves meaningful money. */
   dateShiftSuggestion?: DateShiftSuggestion;
+  /** Home anchor legs. Present when `origin` was passed to the request. */
+  outboundLeg?: import('./types').HomeLeg | null;
+  returnLeg?: import('./types').HomeLeg | null;
 };
 
 export async function optimizeTrip(params: {
@@ -152,6 +155,15 @@ export async function optimizeTrip(params: {
   startDate: string;
   travelers?: number;
   budget?: number;
+  /** Home anchor — city the user is flying from (e.g. "New York"). When
+   *  present, the backend tests full destination permutations and adds
+   *  home→first_city (+ optional last_city→home) to every route. */
+  origin?: string;
+  /** IATA codes for the origin city. Fill from getOriginAirports() on
+   *  the frontend, or from user preferences. */
+  originAirports?: string[];
+  /** Round-trip (true) or one-way (false). Defaults to true on server. */
+  returnToHome?: boolean;
 }): Promise<OptimizeResult> {
   return apiFetch<OptimizeResult>('/api/optimize', {
     method: 'POST',
@@ -443,6 +455,15 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
       vibe: trip.vibe ?? null,
       startDate: trip.startDate ?? trip.cities?.[0]?.dates?.arrival ?? null,
       dateShiftSuggestion: trip.dateShiftSuggestion ?? null,
+      // Home anchor — optional. Old trips save with null/empty and just
+      // render without a home card on reload (graceful).
+      originCity: trip.origin?.city ?? null,
+      originAirports: trip.origin?.airports ?? null,
+      returnToHome: typeof trip.returnToHome === 'boolean' ? trip.returnToHome : null,
+      // Flight detail for the pill between Home and first/last city.
+      // Without these, the pill disappears after reload.
+      outboundLeg: trip.origin?.outboundLeg ?? null,
+      returnLeg: trip.origin?.returnLeg ?? null,
     }),
   });
 }

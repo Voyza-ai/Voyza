@@ -15,7 +15,7 @@ import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
 
-type StepType = 'intent' | 'text' | 'vibes' | 'dates' | 'travelers' | 'budget' | 'notes';
+type StepType = 'intent' | 'text' | 'vibes' | 'dates' | 'travelers' | 'budget' | 'notes' | 'origin' | 'roundtrip';
 
 type Step = {
   id: string;
@@ -25,9 +25,21 @@ type Step = {
   placeholder?: string;
 };
 
+// Two NEW steps added to every path:
+//   - origin: "Where are you flying from?" — required so we can compute
+//     the home→first_city flight and test all destination permutations.
+//     Auto-fills from user profile if set (they confirm and move on).
+//   - roundtrip: "One-way or round-trip?" — determines if we add a
+//     last_city→home leg.
+// Placed AFTER destinations + dates so the AI can extract origin from
+// the raw input if the user mentioned it (e.g. "NYC to Rome"), then we
+// can skip-if-answered. If absent, we ask explicitly.
+
 // Place path: user knows where they want to go
 const PLACE_STEPS: Step[] = [
   { id: 'destination', question: "Where are you dreaming of going?", type: 'text', placeholder: 'Type a destination...' },
+  { id: 'origin', question: "Where are you flying from?", type: 'origin', placeholder: 'e.g. New York' },
+  { id: 'roundtrip', question: "One-way or round-trip?", type: 'roundtrip' },
   { id: 'vibe', question: "What's the vibe you're going for?", type: 'vibes' },
   { id: 'dates', question: "When are you thinking?", type: 'dates', skippable: true },
   { id: 'travelers', question: "How many people?", type: 'travelers' },
@@ -38,6 +50,8 @@ const PLACE_STEPS: Step[] = [
 // Vibe path: user wants to explore based on a feeling
 const VIBE_STEPS: Step[] = [
   { id: 'vibe', question: "What vibe are you chasing?", type: 'vibes' },
+  { id: 'origin', question: "Where are you flying from?", type: 'origin', placeholder: 'e.g. New York' },
+  { id: 'roundtrip', question: "One-way or round-trip?", type: 'roundtrip' },
   { id: 'dates', question: "When are you thinking?", type: 'dates', skippable: true },
   { id: 'travelers', question: "How many people?", type: 'travelers' },
   { id: 'budget', question: "What's your budget looking like?", type: 'budget', skippable: true },
@@ -47,6 +61,8 @@ const VIBE_STEPS: Step[] = [
 // Budget path: user leads with what they can spend
 const BUDGET_STEPS: Step[] = [
   { id: 'budget', question: "What's your total budget for this trip?", type: 'budget' },
+  { id: 'origin', question: "Where are you flying from?", type: 'origin', placeholder: 'e.g. New York' },
+  { id: 'roundtrip', question: "One-way or round-trip?", type: 'roundtrip' },
   { id: 'dates', question: "When are you thinking?", type: 'dates', skippable: true },
   { id: 'travelers', question: "How many people?", type: 'travelers' },
   { id: 'vibe', question: "Any vibe in mind, or totally open?", type: 'vibes', skippable: true },
@@ -407,6 +423,16 @@ export default function PlanningChat() {
       }
     } else if (step.id === 'notes') {
       setAnswer('extraNotes', value);
+    } else if (step.id === 'origin') {
+      // Origin is a simple city-name text input. Pre-fill airports from
+      // the lookup table so the optimizer can do multi-airport search
+      // without another round-trip. When the city isn't in the lookup,
+      // send empty airports — backend falls back to single-IATA via
+      // getIataCode().
+      const { getOriginAirports } = await import('@/lib/originAirports');
+      const airports = getOriginAirports(value);
+      setAnswer('origin', value);
+      setAnswer('originAirports', airports);
     }
 
     advanceToNextStep(currentStepIndex);
@@ -436,6 +462,20 @@ export default function PlanningChat() {
       if (parsed.budget && !answers.budget) setAnswer('budget', parsed.budget);
       if (typeof parsed.budgetPerPerson === 'boolean' && answers.budgetPerPerson === undefined) {
         setAnswer('budgetPerPerson', parsed.budgetPerPerson);
+      }
+      // Home anchor: AI can extract origin ("flying from NYC") and
+      // returnToHome ("round-trip") from the same one-shot sentence, so
+      // users don't need to go through separate guided steps when they
+      // typed everything at once. We also pre-fill the airports from the
+      // lookup table so the optimizer gets multi-airport search
+      // automatically for NYC/London/Tokyo/etc.
+      if (parsed.origin && !answers.origin) {
+        setAnswer('origin', parsed.origin);
+        const { getOriginAirports } = await import('@/lib/originAirports');
+        setAnswer('originAirports', getOriginAirports(parsed.origin));
+      }
+      if (typeof parsed.returnToHome === 'boolean' && answers.returnToHome === undefined) {
+        setAnswer('returnToHome', parsed.returnToHome);
       }
       // Dates: AI's absolute value first, then fall back to parsing the raw
       // chat text for relative phrases ("next week") so we don't re-ask.
@@ -557,6 +597,18 @@ export default function PlanningChat() {
     setMessages((prev) => [
       ...prev,
       { id: nextId(), role: 'user', content: perPerson ? 'Per person' : 'Total for the trip' },
+    ]);
+    advanceToNextStep(currentStepIndex);
+  };
+
+  // Round-trip vs one-way. Round-trip is the common case so it's the
+  // first button visually. Setting false skips the last_city→home leg
+  // in the optimizer.
+  const handleRoundTripSelect = (roundTrip: boolean) => {
+    setAnswer('returnToHome', roundTrip);
+    setMessages((prev) => [
+      ...prev,
+      { id: nextId(), role: 'user', content: roundTrip ? 'Round-trip' : 'One-way' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -683,6 +735,18 @@ export default function PlanningChat() {
       cities[i].transportOut = cities[i + 1].transportIn;
     }
 
+    // Home anchor: if the user gave an origin, attach it so the flowchart
+    // renders a home card at the start (and end, if returnToHome). The
+    // backend already computed outboundLeg / returnLeg on the result.
+    const origin = answers.origin
+      ? {
+          city: answers.origin,
+          airports: answers.originAirports ?? [],
+          outboundLeg: result.outboundLeg ?? null,
+          returnLeg: result.returnLeg ?? null,
+        }
+      : undefined;
+
     return {
       title: cities.map((c) => c.name).join(' → '),
       status: 'planning',
@@ -692,6 +756,8 @@ export default function PlanningChat() {
       cities,
       savingsTips: [],
       dateShiftSuggestion: result.dateShiftSuggestion,
+      origin,
+      returnToHome: answers.returnToHome ?? true,
     };
   };
 
@@ -945,10 +1011,30 @@ export default function PlanningChat() {
     const hasDates = answers.dateRange?.start || parsed?.dates?.start;
     const hasTravelers = typeof answers.travelers === 'number' || typeof parsed?.travelers === 'number';
     const hasBudget = typeof answers.budget === 'number' || typeof parsed?.budget === 'number';
+    const hasOrigin = !!(answers.origin || parsed?.origin);
+    const hasRoundTrip =
+      typeof answers.returnToHome === 'boolean' ||
+      typeof parsed?.returnToHome === 'boolean';
     const travelersAmbiguous = parsed?.travelersAmbiguous === true && hasTravelers;
     const budgetPerPersonKnown =
       typeof answers.budgetPerPerson === 'boolean' ||
       typeof parsed?.budgetPerPerson === 'boolean';
+
+    // Home anchor — ask for origin + round-trip if the AI couldn't pull
+    // them from the raw input. Origin is first because it affects the
+    // optimizer's permutation testing and home-leg flight search; without
+    // it we'd fall back to the legacy "fixed first city" behavior.
+    if (!hasOrigin) {
+      missing.push({
+        id: 'origin',
+        question: 'Where are you flying from?',
+        type: 'origin',
+        placeholder: 'e.g. New York',
+      });
+    }
+    if (!hasRoundTrip) {
+      missing.push({ id: 'roundtrip', question: 'One-way or round-trip?', type: 'roundtrip' });
+    }
 
     if (!hasTravelers) {
       missing.push({ id: 'travelers', question: 'How many people total, including you?', type: 'travelers' });
@@ -1116,6 +1202,12 @@ export default function PlanningChat() {
           startDate,
           travelers,
           budget: totalBudget,
+          // Pass origin through so backend runs full-permutation
+          // optimization AND computes home→first_city (+ optional
+          // last_city→home) legs.
+          origin: answers.origin ?? undefined,
+          originAirports: answers.originAirports ?? undefined,
+          returnToHome: answers.returnToHome ?? true,
         });
 
         trip = buildTripFromOptimize(result, travelers);
@@ -1429,6 +1521,8 @@ export default function PlanningChat() {
       case 'travelers': return 'Or type how many people, e.g. "4"';
       case 'budget':  return 'Or type your budget, e.g. "$1500"';
       case 'notes':   return currentStep.placeholder || 'Anything else?';
+      case 'origin':  return currentStep.placeholder || 'Where are you flying from?';
+      case 'roundtrip': return 'Or type "round-trip" or "one-way"';
       default:        return 'Type a message...';
     }
   })();
@@ -1457,8 +1551,20 @@ export default function PlanningChat() {
     switch (currentStep.type) {
       case 'text':
       case 'notes':
+      case 'origin':
+        // Origin uses the same free-text input path as destination/notes;
+        // handleTextSubmit dispatches on step.id to store it correctly.
         handleTextSubmit();
         return;
+      case 'roundtrip': {
+        // Allow the user to just type "one way" or "round trip" as text
+        // even though the primary UI is the two-button picker above.
+        const v = value.toLowerCase();
+        const isOneWay = v.includes('one') || v.includes('1-way') || v.includes('one-way');
+        handleRoundTripSelect(!isOneWay);
+        setTextInput('');
+        return;
+      }
       case 'vibes':
         handleVibeSelect(value);
         setTextInput('');
@@ -1674,6 +1780,29 @@ export default function PlanningChat() {
                   >
                     <span className="text-[15px] font-medium">Total for the trip</span>
                     <span className="text-white/40 text-[12px]">Combined for everyone</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Round-trip / one-way picker — binary toggle, same style
+                  as the Per-person / Total picker above. */}
+              {currentStep.type === 'roundtrip' && (
+                <div className="flex gap-3 w-full">
+                  <button
+                    onClick={() => handleRoundTripSelect(true)}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                  >
+                    <span className="text-[15px] font-medium">Round-trip</span>
+                    <span className="text-white/40 text-[12px]">Return to where I started</span>
+                  </button>
+                  <button
+                    onClick={() => handleRoundTripSelect(false)}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                  >
+                    <span className="text-[15px] font-medium">One-way</span>
+                    <span className="text-white/40 text-[12px]">No return flight needed</span>
                   </button>
                 </div>
               )}

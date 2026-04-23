@@ -148,6 +148,8 @@ Return JSON with:
 - budget (number or null) — ONLY if user mentioned a budget amount. If unstated, return null.
 - budgetPerPerson (boolean or null) — true if user explicitly said "per person" / "each". false if user said "total" / "altogether" / "for the trip". null if budget unclear or not given.
 - vibe (string or null) — ONLY if user mentioned a vibe/feeling (e.g. "beach", "adventure", "culture"). If unstated, return null. Do NOT infer from the destination.
+- origin (string or null) — the city the user is flying FROM (their home or starting point). Parse phrases like "from NYC", "flying out of London", "I'm in Tokyo", "leaving from San Francisco". Return the plain city name (not the IATA code). Null if the user didn't mention where they're coming from.
+- returnToHome (boolean or null) — true if the user said "round-trip", "return trip", "RT", or mentioned coming back. false if they said "one-way", "just going there", or implied not returning. Null if they didn't mention it.
 - needsCitySelection (boolean) — true if any destination was a country name rather than a specific city`,
         messages: [
           {
