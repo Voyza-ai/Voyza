@@ -47,42 +47,61 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ## 🚧 In-flight (this branch: `feat/voyza-ai-chat`)
 
-### Voyza AI chat v1 — constraint proposals (committed: 784e671)
-- [x] Schema: `trips.constraints` jsonb
-- [x] Backend `POST /api/plan/chat` with Claude tool-use (answer_only, pin_city_dates, set_min_days, set_transport_window)
-- [x] Backend `POST /api/plan/chat-suggestions` — trip-specific dynamic prompts
-- [x] `services/constraints.ts` — `applyDateConstraints` + `mergeConstraints` helpers
-- [x] Frontend `AIChatPanel` rebuild: multi-turn history, proposal cards, Accept/Reject
-- [x] E2E + unit tests pass (129/129)
+All major work on this branch is committed and pushed. See the
+"Previously shipped" section below for the full breakdown. Branch
+currently has 4 commits, not yet merged to `claude_code_backend`:
 
-### Leg options (in-flight, staged not committed)
-- [x] `services/legOptions.ts` — `searchLegOptions(window?, limit)` with HH:MM filter
-- [x] `set_transport_window` now returns real alternatives instead of just saving
-- [x] `LegOption` type + `leg_options` proposal kind
-- [ ] **Re-architect: chat refreshes the flowchart transport card, no inline card** (next commit)
-- [ ] Replace inline multi-option card pattern with card-refresh summary
-- [ ] Add `show_transport_options` tool (no window — just show alternatives)
-- [ ] Add clarifying-question flow for ambiguous "which leg?" queries
+```
+d4007d9  polish: fixed-size transport pills + home card refinements
+984a553  feat: home anchor — origin, multi-airport, full permutations, round-trip
+1704365  feat: AI chat refreshes flowchart transport card (leg_refresh)
+0fbbd20  feat: Voyza AI chat with trip-aware prompts + constraint proposals
+```
 
-### Home anchor / origin model (next, foundational)
-- [ ] Schema: `trips.origin_city`, `trips.origin_airports jsonb`, `trips.return_to_home bool`
-- [ ] User profile: `preferences.homeCity`, `preferences.homeAirports`
-- [ ] Planning flow: "Where are you flying from?" step (auto-fill from profile, ask for confirmation)
-- [ ] Planning flow: "One-way or round-trip?" step
-- [ ] Optimizer: accept origin, test ALL destination permutations (home stays fixed)
-- [ ] `searchLegOptions` called for home→first and last→home legs
-- [ ] Frontend: render "Home" card at start (and end if round-trip) on flowchart
-- [ ] Multi-airport search: top 3 closest airports per origin city (NYC → JFK/LGA/EWR, etc.)
-- [ ] Backfill: existing trips without `origin_city` need manual fill-in or a migration default
-
-### Top-4 options per leg (depends on home anchor)
-- [ ] Swap `compareLeg()` → `searchLegOptions(limit: 4)` in trip-generation path
-- [ ] Frontend: populate all 4 into `transport.alternatives`
-- [ ] Connector UI: already renders N alternatives — confirm it handles 4 cleanly
+Remaining on the branch:
+- [ ] Top-4 options per between-city leg (swap `compareLeg()` →
+  `searchLegOptions(limit: 4)` in `scoreRoute`). Home legs already
+  use searchLegOptions; this extends it to inter-city legs so every
+  Connector card has 4 alternatives out of the box.
+- [ ] Backfill UI for pre-home-anchor trips without `origin_city`
+  (old trips render without a home card — graceful but unsettable).
 
 ---
 
 ## 📦 Previously shipped (ordered recent → older)
+
+### Voyza AI chat + home anchor (on `feat/voyza-ai-chat`, not yet merged)
+
+Voyza AI chat v1 — constraint proposals (0fbbd20)
+- [x] Schema: `trips.constraints` jsonb
+- [x] `POST /api/plan/chat` with Claude tool-use (answer_only, pin_city_dates, set_min_days, set_transport_window)
+- [x] `POST /api/plan/chat-suggestions` — trip-specific dynamic prompts
+- [x] `services/constraints.ts` — `applyDateConstraints` + `mergeConstraints`
+- [x] `AIChatPanel` rebuild: multi-turn history, date-shift proposal cards, Accept/Reject
+- [x] 129/129 frontend tests pass
+
+Leg options — card-refresh pattern (1704365)
+- [x] `services/legOptions.ts` — `searchLegOptions(window?, limit)` with HH:MM filter + multi-origin fan-out
+- [x] `show_transport_options` tool (no window — just show alternatives)
+- [x] Clarifying-question flow for ambiguous multi-leg queries ("which leg — Venice→Rome or Rome→Florence?")
+- [x] Chat `leg_refresh` response — updates the flowchart's Connector alternatives directly, no inline card in chat
+- [x] `Trip.constraints` type on frontend
+
+Home anchor / origin model (984a553 + d4007d9)
+- [x] Schema: `trips.origin_city`, `trips.origin_airports jsonb`, `trips.return_to_home bool`, `trips.outbound_leg jsonb`, `trips.return_leg jsonb`
+- [x] Planning flow: "Where are you flying from?" + "One-way or round-trip?" steps across all three paths (place/vibe/budget)
+- [x] Chat-mode `/api/plan/interpret` extracts `origin` + `returnToHome` from one-shot natural input
+- [x] `buildRemainingSteps` asks origin + roundtrip if AI missed them
+- [x] Optimizer tests FULL destination permutations when origin is set (no more fixed-first hack)
+- [x] `searchHomeFlights` bidirectional multi-airport search (home airport fan-out for outbound, destination airport fan-out for return)
+- [x] Perf: estimate pass uses 1 airport; full fan-out only for winner's `buildHomeLeg`
+- [x] Multi-airport lookup: top-3 airports for ~55 metros (NYC, London, Tokyo, etc.)
+- [x] HomeCard + HomeLegPill via Connector reuse — identical styling to between-city pills
+- [x] Alignment: HomeCard + Connector share one `flex items-stretch` motion.div; parent row uses items-stretch
+- [x] `airportNames.ts` — IATA → human-readable airport lookup
+- [x] Fixed-size transport pills (120×64) with placeholder rows so every Connector is dimensionally uniform
+- [x] Trip persistence: origin_city, origin_airports, return_to_home, outbound_leg, return_leg all survive save/reload
+- [x] Graceful degradation: trips without origin render unchanged
 
 ### DB persistence (merged in PR #1)
 - [x] Schema migration: `trips` (+5 cols), `cities` (+4), `transports` (+10)
@@ -173,9 +192,6 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 - [ ] Seller-of-travel compliance research (varies by US state, UK ATOL, etc.)
 - [ ] Booking confirmation email + itinerary PDF
 
-### Feature: Origin / home anchor — REPLACED by "Home anchor / origin model" in In-flight section above. This older spec is superseded.
-- [x] Moved up into in-flight work (expanded to include full permutations, multi-airport, round-trip, home card on flowchart)
-
 ### Feature: Voyza AI — edits beyond current scope
 Tasks deferred from the current chat work:
 
@@ -232,8 +248,8 @@ Tasks deferred from the current chat work:
 - [ ] Canvas → Back → Flights gone — partially fixed by DB persistence work (pending full verification)
 - [ ] Canvas save silently drops transports — FIXED in feat/db-persistence
 - [ ] Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice). No back button, no edit-previous-message. Partial workaround exists via city picker's "+ another city" but it's awkward. Full fix = task 4 (planning-phase conversational revision).
-- [ ] AI chat: "are there more flights?" returns an answer-only response instead of showing options. Fix: new `show_transport_options` tool + clarifying "which leg?" routing.
-- [ ] AI chat: transport-window proposal card says "Applied the next time we re-pick this leg" — dev-speak the user doesn't understand. Will go away when we switch to card-refresh pattern.
+- [x] ~~AI chat: "are there more flights?" returns an answer-only response instead of showing options~~ — FIXED in 1704365 (leg_refresh + `show_transport_options` tool + clarifying "which leg?" routing).
+- [x] ~~AI chat: transport-window proposal card says "Applied the next time we re-pick this leg"~~ — FIXED in 1704365 (card-refresh pattern replaces the inline card entirely).
 
 ## 🏗️ Infrastructure / ops
 
@@ -268,3 +284,15 @@ Trip patterns are the product's long-term value:
 - Most-cloned itineraries as a quality signal
 
 All of this works on anonymous user buckets. No PII needed.
+
+### Home anchor model (decided Apr 23, 2026)
+Every trip has a persistent "home" — the city + airports the user flies
+from. Previously the first destination was treated as the implicit
+starting point, which forced the optimizer to fix `cities[0]` and
+ignore half the permutations. With home anchor:
+
+- **Trip shape:** `trip.origin = { city, airports, outboundLeg, returnLeg }` + `trip.returnToHome: boolean`
+- **Optimizer:** tests ALL `n!` permutations of destinations (home stays anchored), adds `home → cities[0]` outbound leg cost + optional `cities[n-1] → home` return leg cost to every candidate
+- **Multi-airport:** origin cities are matched against a 55-city lookup (NYC → JFK/LGA/EWR, London → LHR/LGW/STN, Tokyo → HND/NRT, etc.). Flight search fans out across all origin airports in parallel; cheapest wins
+- **Perf:** estimate pass uses only the first airport per origin (cheap permutation ranking); full multi-airport fan-out runs only for the winning permutation's `buildHomeLeg`. Cuts API calls ~3x vs. a naive implementation
+- **Graceful degradation:** trips saved before this change render without the home card — no migration needed
