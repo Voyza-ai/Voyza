@@ -8,23 +8,39 @@ import Link from 'next/link';
 import CityCard from './CityCard';
 import CityActivitiesCard from './CityActivitiesCard';
 import Connector from './Connector';
+import { getAirportName } from '@/lib/airportNames';
 
 /**
- * Approximate height of the main CityCard. We use this to vertically center
- * the horizontal Connector (flight/train) on the main card region, since the
- * full city column (main + sub-card) is much taller.
+ * Kept as a constant because some downstream calculations use it,
+ * but the alignment strategy no longer hinges on it. Alignment works
+ * like this: the parent scroll container uses items-stretch, so
+ * every row (city column + connector, or home card + connector)
+ * stretches to the tallest row's height. Within each row, both
+ * children also use items-stretch so they fill that height. The
+ * connector and home-card inner content use items-center so they
+ * sit at the EXACT vertical middle of every row — which is the same
+ * Y across the entire flowchart, regardless of how tall individual
+ * activity columns get.
  */
 const MAIN_CARD_HEIGHT = 320;
 /**
- * Approximate height of a full city column (CityCard + small spacer +
- * CityActivitiesCard). Measured from the rendered flowchart — city
- * columns for a typical trip are ~440px tall. We size the HomeCard
- * to match so its adjacent Connector's self-center lands at the same
- * Y position as connectors between real cities. If activities lists
- * grow much taller this may need a small tweak, but 440 is the
- * average-case pixel position that lines everything up.
+ * HomeCard dimensions. Slightly smaller than a CityCard (which is
+ * 300×~320) so the home anchors read as "bookends" rather than full
+ * destinations. Still large enough to surface the specific airport,
+ * date, and time for the leg that touches home.
  */
-const HOME_COLUMN_HEIGHT = 500;
+const HOME_CARD_WIDTH = 260;
+const HOME_CARD_HEIGHT = 280;
+/**
+ * Flat red palette for the home-anchor cards. Matches the pastel
+ * theme in `cityColors.ts` — solid background, darker text color,
+ * mid-tone border. No gradient; same visual language as CityCard.
+ */
+const HOME_COLOR = {
+  bg: '#FDE2E2',
+  text: '#7C1A1A',
+  border: '#F0B8B8',
+};
 
 type FlowchartProps = {
   trip: Trip;
@@ -168,7 +184,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
         `}</style>
 
         <motion.div
-          className="flex items-start px-12 pt-3 pb-8 min-w-max gap-6"
+          className="flex items-stretch px-12 pt-3 pb-8 min-w-max gap-6"
           initial="hidden"
           animate="visible"
           variants={{
@@ -194,6 +210,8 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                 city={trip.origin.city}
                 airports={trip.origin.airports}
                 label="Home"
+                direction="outbound"
+                leg={trip.origin.outboundLeg ?? null}
               />
               {trip.origin.outboundLeg && (
                 <div className="flex items-center flex-shrink-0 mx-2">
@@ -284,7 +302,13 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                   )}
                 </div>
 
-                {/* Connector to next city — vertically centered on the whole city column (main + sub) */}
+                {/* Connector to next city — stretches to the row's
+                    full height (parent uses items-stretch), then
+                    centers its content vertically. Since the parent
+                    scroll container also uses items-stretch, every
+                    row has the same height = tallest city column,
+                    so every connector's vertical center lands at the
+                    same Y on the flowchart. */}
                 {idx < trip.cities.length - 1 && (
                   <div className="flex items-center flex-shrink-0 mx-2">
                     <Connector
@@ -345,6 +369,8 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                 city={trip.origin.city}
                 airports={trip.origin.airports}
                 label="Back home"
+                direction="inbound"
+                leg={trip.origin.returnLeg ?? null}
               />
             </motion.div>
           )}
@@ -360,56 +386,153 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
 }
 
 // ─── Home anchor cards ──────────────────────────────────────
-// Small pills that bracket the itinerary on the flowchart. Intentionally
-// visually different from CityCard (narrower, single-color, "Home" icon)
-// so the user knows this isn't a destination they're visiting — it's
-// their starting/ending point.
+// Anchors that bracket the itinerary. Same visual language as a
+// CityCard but slightly smaller and red — these aren't destinations
+// the user is visiting, they're the bookends of the trip. The card
+// surfaces the SPECIFIC airport, date, and time for the leg that
+// touches home:
+//   outbound → origin airport + depart date/time (leaving home)
+//   inbound  → destination airport (home) + arrival date/time
+// Terminal/gate info is omitted because our current flight data
+// source doesn't return it; if we upgrade to Amadeus/Duffel we'll
+// surface it here too.
 function HomeCard({
   city,
   airports,
   label,
+  direction,
+  leg,
 }: {
   city: string;
   airports: string[];
   label: string;
+  direction: 'outbound' | 'inbound';
+  leg: HomeLeg | null;
 }) {
+  // Pick the airport IATA on the HOME side of this leg. Outbound
+  // leaves from home (originAirport). Inbound arrives at home
+  // (destAirport). Fall back to the first configured airport when
+  // there's no leg yet (pre-price trip state).
+  const iata =
+    (direction === 'outbound' ? leg?.originAirport : leg?.destAirport) ||
+    airports[0] ||
+    '';
+  const airportName = getAirportName(iata);
+
+  const dateIso = leg?.departDate;
+  const dateLabel = dateIso ? formatHomeDate(dateIso) : null;
+  const time = direction === 'outbound' ? leg?.departTime : leg?.arriveTime;
+  const timeLabel = direction === 'outbound' ? 'Depart' : 'Arrive';
+
   return (
-    <div
-      className="flex-shrink-0 w-[180px] rounded-2xl border-2 overflow-hidden flex flex-col"
-      style={{
-        background: 'linear-gradient(180deg, #eef3fb 0%, #dde7f5 100%)',
-        borderColor: '#2e6bc4',
-        // Match the full city-column height (CityCard + activities card +
-        // spacer) so the adjacent Connector's self-center lands at the
-        // same Y position as between-city connectors.
-        minHeight: HOME_COLUMN_HEIGHT,
-      }}
-    >
+    <div className="flex-shrink-0 flex items-center justify-center">
       <div
-        className="px-4 py-2 flex items-center gap-2"
-        style={{ background: '#2e6bc4', color: 'white' }}
+        className="rounded-3xl border-2 overflow-hidden flex flex-col"
+        style={{
+          width: HOME_CARD_WIDTH,
+          height: HOME_CARD_HEIGHT,
+          background: HOME_COLOR.bg,
+          borderColor: HOME_COLOR.border,
+        }}
       >
-        <Home size={14} />
-        <div className="text-[11px] uppercase tracking-wider font-semibold">{label}</div>
-      </div>
-      <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 gap-3">
-        <div className="text-[18px] font-semibold text-gray-900 text-center leading-tight">
-          {city}
+        <div
+          className="px-4 py-2 flex items-center gap-2"
+          style={{ background: HOME_COLOR.text, color: 'white' }}
+        >
+          <Home size={14} />
+          <div className="text-[11px] uppercase tracking-wider font-semibold">{label}</div>
         </div>
-        {airports.length > 0 && (
+
+        <div className="flex-1 flex flex-col px-4 py-4 gap-3">
+          {/* City */}
           <div
-            className="text-[11px] font-mono uppercase tracking-wider text-gray-600 text-center"
-            title={`Searching ${airports.join(', ')}`}
+            className="text-[20px] font-semibold text-center leading-tight"
+            style={{ color: HOME_COLOR.text }}
           >
-            {airports.slice(0, 3).join(' · ')}
+            {city}
           </div>
-        )}
-        <div className="text-[10px] text-gray-500 text-center mt-2">
-          {label === 'Home' ? 'Starting point' : 'Returning here'}
+
+          {/* Airport name + IATA */}
+          {(airportName || iata) && (
+            <div className="flex flex-col items-center gap-0.5">
+              {airportName && (
+                <div
+                  className="text-[12px] font-medium text-center leading-tight"
+                  style={{ color: `${HOME_COLOR.text}cc` }}
+                >
+                  {airportName}
+                </div>
+              )}
+              {iata && (
+                <div
+                  className="text-[10px] font-mono uppercase tracking-wider"
+                  style={{ color: `${HOME_COLOR.text}99` }}
+                >
+                  {iata}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Date + time */}
+          <div
+            className="mt-auto flex items-center justify-between gap-2 pt-2 border-t"
+            style={{ borderColor: `${HOME_COLOR.text}26` }}
+          >
+            <div className="flex flex-col">
+              <div
+                className="text-[9px] uppercase tracking-wider"
+                style={{ color: `${HOME_COLOR.text}88` }}
+              >
+                Date
+              </div>
+              <div
+                className="text-[11px] font-medium tabular-nums"
+                style={{ color: HOME_COLOR.text }}
+              >
+                {dateLabel || '—'}
+              </div>
+            </div>
+            <div className="flex flex-col items-end">
+              <div
+                className="text-[9px] uppercase tracking-wider"
+                style={{ color: `${HOME_COLOR.text}88` }}
+              >
+                {timeLabel}
+              </div>
+              <div
+                className="text-[11px] font-mono font-semibold tabular-nums"
+                style={{ color: HOME_COLOR.text }}
+              >
+                {time || '—:—'}
+              </div>
+            </div>
+          </div>
+
+          {/* All configured airports — small hint if there's more than one */}
+          {airports.length > 1 && (
+            <div
+              className="text-[9px] uppercase tracking-wider text-center"
+              style={{ color: `${HOME_COLOR.text}88` }}
+              title={`Also searched: ${airports.filter((a) => a !== iata).join(', ')}`}
+            >
+              +{airports.length - 1} more airport{airports.length - 1 > 1 ? 's' : ''}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * Format an ISO date (YYYY-MM-DD) in a compact way for the home
+ * card's footer row. Example: "May 24" / "Wed · May 24".
+ */
+function formatHomeDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const date = new Date(y, (m || 1) - 1, d || 1);
+  return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 /**
