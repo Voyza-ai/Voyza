@@ -145,6 +145,9 @@ export type OptimizeResult = {
   dates: Record<string, { arrival: string; departure: string }>;
   /** Present when shifting the trip by ±1 or ±2 days saves meaningful money. */
   dateShiftSuggestion?: DateShiftSuggestion;
+  /** Home anchor legs. Present when `origin` was passed to the request. */
+  outboundLeg?: import('./types').HomeLeg | null;
+  returnLeg?: import('./types').HomeLeg | null;
 };
 
 export async function optimizeTrip(params: {
@@ -152,6 +155,15 @@ export async function optimizeTrip(params: {
   startDate: string;
   travelers?: number;
   budget?: number;
+  /** Home anchor — city the user is flying from (e.g. "New York"). When
+   *  present, the backend tests full destination permutations and adds
+   *  home→first_city (+ optional last_city→home) to every route. */
+  origin?: string;
+  /** IATA codes for the origin city. Fill from getOriginAirports() on
+   *  the frontend, or from user preferences. */
+  originAirports?: string[];
+  /** Round-trip (true) or one-way (false). Defaults to true on server. */
+  returnToHome?: boolean;
 }): Promise<OptimizeResult> {
   return apiFetch<OptimizeResult>('/api/optimize', {
     method: 'POST',
@@ -216,12 +228,104 @@ export async function interpretPlan(params: {
   });
 }
 
-// ─── Plan Edit ───────────────────────────────────────────────
+// ─── Plan Edit (legacy — kept for tests; new code uses planChat) ─
 export async function editPlan(params: {
   message: string;
   currentTrip: any;
 }): Promise<any> {
-  return apiFetch('/api/plan/edit', {
+  // Route through the new /chat endpoint but preserve the old return
+  // shape so the existing AIChatPanel fallback path keeps working until
+  // the refactor lands.
+  return apiFetch('/api/plan/chat', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+// ─── Voyza AI chat ───────────────────────────────────────────
+// Send a message to the trip's AI assistant. Response is either a
+// plain-text answer or a proposal the user can Accept/Reject.
+export type ChatTurn = { role: 'user' | 'assistant'; content: string };
+
+export type ChatProposalDiff = {
+  city: string;
+  oldArrival: string | null;
+  newArrival: string;
+  oldDeparture: string | null;
+  newDeparture: string;
+};
+
+/** One concrete flight/train option for the leg-options proposal card. */
+export type LegOption = {
+  mode: 'flight' | 'train';
+  operator: string;
+  flightNumber?: string | null;
+  price: number;
+  currency: string;
+  /** HH:MM local time. */
+  departTime: string | null;
+  arriveTime: string | null;
+  duration: string;
+  durationMinutes: number;
+  stops?: number;
+  bookingUrl?: string | null;
+  priceDelta: number;
+};
+
+/**
+ * Proposal card = user needs to Accept/Reject a set of trip-wide changes.
+ * Currently used only for date-bearing tools (pin_city_dates, set_min_days)
+ * because those move several cities at once and we don't want to apply
+ * without confirmation.
+ *
+ * Transport changes (show_transport_options, set_transport_window) use a
+ * different pattern: type='leg_refresh'. See ChatResponse below.
+ */
+export type ChatProposal = {
+  kind: 'date_shift';
+  toolName: 'pin_city_dates' | 'set_min_days';
+  toolInput: any;
+  diff: ChatProposalDiff[];
+  proposedConstraints: any;
+  proposedTrip: any;
+};
+
+/**
+ * Leg-refresh response — the chat updated the transport options for a
+ * specific leg. The frontend directly overwrites
+ * trip.cities[i].transport.alternatives and swaps the main transport
+ * to the cheapest of the new options. No Accept/Reject — the user picks
+ * a different one by clicking on the transport card itself.
+ */
+export type LegRefresh = {
+  fromCity: string;
+  toCity: string;
+  date: string;
+  options: LegOption[];
+  totalFound: number;
+  updatedConstraints: any;
+};
+
+export type ChatResponse =
+  | { type: 'answer'; reply: string }
+  | { type: 'proposal'; reply: string; proposal: ChatProposal }
+  | { type: 'leg_refresh'; reply: string; refresh: LegRefresh };
+
+export async function planChat(params: {
+  message: string;
+  currentTrip: any;
+  history?: ChatTurn[];
+}): Promise<ChatResponse> {
+  return apiFetch<ChatResponse>('/api/plan/chat', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function planChatSuggestions(params: {
+  currentTrip: any;
+}): Promise<{ suggestions: string[] }> {
+  return apiFetch<{ suggestions: string[] }>('/api/plan/chat-suggestions', {
     method: 'POST',
     body: JSON.stringify(params),
   });
@@ -344,6 +448,22 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
       totalCost: trip.totalCost,
       savingsVsAlternative: trip.savings,
       cities: trip.cities,
+      // New optional fields — backend accepts nullable/undefined for each.
+      // Sending everything so the full trip survives a save/reload cycle.
+      budget: trip.budget ?? null,
+      budgetPerPerson: trip.budgetPerPerson ?? null,
+      vibe: trip.vibe ?? null,
+      startDate: trip.startDate ?? trip.cities?.[0]?.dates?.arrival ?? null,
+      dateShiftSuggestion: trip.dateShiftSuggestion ?? null,
+      // Home anchor — optional. Old trips save with null/empty and just
+      // render without a home card on reload (graceful).
+      originCity: trip.origin?.city ?? null,
+      originAirports: trip.origin?.airports ?? null,
+      returnToHome: typeof trip.returnToHome === 'boolean' ? trip.returnToHome : null,
+      // Flight detail for the pill between Home and first/last city.
+      // Without these, the pill disappears after reload.
+      outboundLeg: trip.origin?.outboundLeg ?? null,
+      returnLeg: trip.origin?.returnLeg ?? null,
     }),
   });
 }
@@ -358,6 +478,96 @@ export async function getTrip(tripId: string): Promise<any> {
 
 export async function deleteTrip(tripId: string): Promise<{ success: boolean }> {
   return apiFetch<{ success: boolean }>(`/api/trips/${tripId}`, {
+    method: 'DELETE',
+  });
+}
+
+// Partial trip update — rename, change status, update budget/vibe, etc.
+// City/transport edits still go through the canvas save endpoint.
+export type PatchTripBody = {
+  title?: string;
+  status?: 'active' | 'completed' | 'archived';
+  travelers?: number;
+  totalCost?: number;
+  savingsVsAlternative?: number;
+  budget?: number | null;
+  budgetPerPerson?: boolean | null;
+  vibe?: string | null;
+  startDate?: string | null;
+  dateShiftSuggestion?: any;
+};
+
+export async function updateTrip(tripId: string, patch: PatchTripBody): Promise<{ trip: any }> {
+  return apiFetch<{ trip: any }>(`/api/trips/${tripId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+// ─── User profile CRUD ──────────────────────────────────────
+export type UserProfile = {
+  id: string;
+  email: string;
+  emailConfirmed?: boolean;
+  createdAt?: string;
+  fullName: string | null;
+  avatarUrl: string | null;
+  isPremium: boolean;
+  preferences: {
+    homeAirport?: string;
+    homeCity?: string;
+    preferredCurrency?: string;
+    defaultTravelers?: number;
+    emailNotifications?: boolean;
+  };
+};
+
+export async function getCurrentUser(): Promise<UserProfile> {
+  return apiFetch<UserProfile>('/api/users/me');
+}
+
+export async function updateCurrentUser(
+  patch: Partial<Pick<UserProfile, 'fullName' | 'avatarUrl' | 'preferences'>>,
+): Promise<UserProfile> {
+  return apiFetch<UserProfile>('/api/users/me', {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteCurrentUser(): Promise<{ success: boolean; deletedUserId: string }> {
+  return apiFetch<{ success: boolean; deletedUserId: string }>('/api/users/me', {
+    method: 'DELETE',
+  });
+}
+
+// ─── Trip collaboration members ─────────────────────────────
+export type TripMember = {
+  id: string;
+  user_id: string | null;
+  invited_email: string | null;
+  role: 'owner' | 'editor' | 'suggester' | 'viewer';
+  accepted_at: string | null;
+  created_at: string;
+};
+
+export async function listTripMembers(tripId: string): Promise<{ members: TripMember[] }> {
+  return apiFetch<{ members: TripMember[] }>(`/api/canvas/${tripId}/members`);
+}
+
+export async function updateMemberRole(
+  tripId: string,
+  memberId: string,
+  role: 'editor' | 'suggester' | 'viewer',
+): Promise<{ member: TripMember }> {
+  return apiFetch<{ member: TripMember }>(`/api/canvas/${tripId}/members/${memberId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function removeMember(tripId: string, memberId: string): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(`/api/canvas/${tripId}/members/${memberId}`, {
     method: 'DELETE',
   });
 }

@@ -79,7 +79,11 @@ export default function Connector({ transport, cityIndex, isExpanded, onToggle }
       } relative`}
     >
       {!isExpanded ? (
-        /* COLLAPSED — dashed line → pill → dashed line layout */
+        /* COLLAPSED — dashed line → pill → dashed line layout.
+           Every transport card has identical dimensions regardless of
+           mode or data completeness — only the icon differs. This
+           keeps the dashed segments at the same Y position across all
+           connectors on the flowchart. */
         <div className="flex items-center w-full">
           {/* Left dashed segment */}
           <motion.div
@@ -92,13 +96,14 @@ export default function Connector({ transport, cityIndex, isExpanded, onToggle }
             }}
           />
 
-          {/* Center pill — clickable */}
+          {/* Center pill — clickable. Fixed width + height so every
+              connector pill is the same size. */}
           <button
             onClick={(e) => {
               e.stopPropagation();
               onToggle();
             }}
-            className="relative z-10 flex flex-col items-center gap-1.5 outline-none transition-transform duration-150 hover:scale-[1.04] active:scale-[0.97] mx-2"
+            className="relative z-10 flex flex-col items-center gap-1.5 outline-none transition-transform duration-150 hover:scale-[1.04] active:scale-[0.97] mx-2 w-[120px]"
             aria-label="Show travel details"
           >
             {/* Icon badge */}
@@ -112,23 +117,24 @@ export default function Connector({ transport, cityIndex, isExpanded, onToggle }
               <Icon size={16} style={{ color: accentColor }} />
             </div>
 
-            {/* Info pill */}
+            {/* Info pill — fixed height so pills are identical even
+                when departTime/arriveTime are missing. We always
+                render all three rows and fall back to placeholders
+                when data is absent. */}
             <div
-              className="flex flex-col items-center px-3 py-1.5 rounded-xl border"
+              className="flex flex-col items-center justify-center px-3 py-1.5 rounded-xl border w-full h-[64px]"
               style={{
                 background: `${accentColor}25`,
                 borderColor: `${accentColor}55`,
               }}
             >
-              <div className="text-gray-900 text-[13px] font-bold">${transport.price}</div>
-              <div className="text-gray-600 text-[10px] mt-0.5">{transport.duration}</div>
-              {transport.departTime && transport.arriveTime && (
-                <div className="text-gray-700 text-[10px] mt-1 flex items-center gap-1 font-mono">
-                  <span>{transport.departTime}</span>
-                  <ArrowRight size={8} className="text-gray-500" />
-                  <span>{transport.arriveTime}</span>
-                </div>
-              )}
+              <div className="text-gray-900 text-[13px] font-bold leading-none">${transport.price}</div>
+              <div className="text-gray-600 text-[10px] mt-1 leading-none">{transport.duration || '—'}</div>
+              <div className="text-gray-700 text-[10px] mt-1.5 flex items-center gap-1 font-mono leading-none">
+                <span>{transport.departTime || '—:—'}</span>
+                <ArrowRight size={8} className="text-gray-500" />
+                <span>{transport.arriveTime || '—:—'}</span>
+              </div>
             </div>
 
             <div className="text-[9px] uppercase tracking-wider text-gray-500">

@@ -71,14 +71,20 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
     // Save first, then open canvas
     setSaving(true);
     try {
-      const result = await saveTrip({
-        title: trip.title,
-        travelers: trip.travelers,
-        totalCost: liveTripTotal(trip),
-        savings: trip.savings,
-        cities: trip.cities,
-      });
+      // Pass the whole trip through so new fields (budget, vibe,
+      // dateShiftSuggestion, etc.) flow to the backend.
+      const result = await saveTrip({ ...trip, totalCost: liveTripTotal(trip) });
+
       setTrip({ ...trip, id: result.tripId });
+
+      // Update the browser URL so the trip is bookmarkable
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('tripId', result.tripId);
+        window.history.replaceState({}, '', url.toString());
+      }
+
+      // Open canvas after saving
       window.open(`/canvas/${result.tripId}`, '_blank');
     } catch {
       // handle error silently

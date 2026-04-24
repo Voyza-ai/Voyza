@@ -101,15 +101,27 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     });
 
     const url = `https://booking-com.p.rapidapi.com/v1/hotels/search?${searchParams}`;
-    const res = await fetch(url, {
-      headers: {
-        'X-RapidAPI-Key': env.RAPIDAPI_KEY,
-        'X-RapidAPI-Host': 'booking-com.p.rapidapi.com',
-      },
-    });
 
-    if (!res.ok) {
-      logger.warn('Booking.com search API error', { status: res.status });
+    // Retry with exponential backoff on 429 (RapidAPI free-tier rate limit).
+    // Without this, parallel hotel fetches for multi-city trips silently
+    // return empty results for whichever city happened to land during a
+    // throttled moment — surfacing as "$0/night, ★0" in the UI.
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      res = await fetch(url, {
+        headers: {
+          'X-RapidAPI-Key': env.RAPIDAPI_KEY,
+          'X-RapidAPI-Host': 'booking-com.p.rapidapi.com',
+        },
+      });
+      if (res.status !== 429) break;
+      const delay = 300 * Math.pow(2, attempt); // 300ms, 600ms, 1200ms
+      logger.warn('Booking.com 429 — retrying', { attempt: attempt + 1, delay, city });
+      await new Promise((r) => setTimeout(r, delay));
+    }
+
+    if (!res || !res.ok) {
+      logger.warn('Booking.com search API error', { status: res?.status, city });
       return [];
     }
 

@@ -1,7 +1,9 @@
 import { compareLeg, LegComparison } from './compareLeg';
-import { getIataCode } from './flights';
+import { getIataCode, searchFlights } from './flights';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
+import { searchLegOptions } from './legOptions';
+import { getOriginAirports } from '../data/originAirports';
 
 type CityInput = {
   name: string;
@@ -37,6 +39,30 @@ export type DateShiftSuggestion = {
   savings: number;
 };
 
+/**
+ * Home-anchor leg — what the user flies to get from their origin city
+ * to the first destination (outbound) or back from the last destination
+ * (return). Stored alongside routes so the frontend can render a "Home"
+ * card at the start (and end, for round-trips) of the flowchart.
+ */
+export type HomeLeg = {
+  /** IATA of the origin airport that won the multi-airport comparison. */
+  originAirport: string;
+  /** IATA of the destination airport (first city, or the origin if returning). */
+  destAirport: string;
+  /** Cheapest price across all searched origin airports. */
+  price: number;
+  currency: string;
+  durationMinutes: number;
+  operator: string;
+  carrierCode: string;
+  departTime: string | null;
+  arriveTime: string | null;
+  departDate: string;
+  stops: number;
+  bookingUrl: string | null;
+};
+
 export type OptimizeResult = {
   routes: OptimizedRoute[];
   bestRoute: OptimizedRoute;
@@ -45,6 +71,18 @@ export type OptimizeResult = {
   dates: Record<string, { arrival: string; departure: string }>;
   /** Present only when a nearby date offset saves meaningful money. */
   dateShiftSuggestion?: DateShiftSuggestion;
+  /**
+   * Home → first_city transport. Present when `origin` was provided.
+   * Null when the first-city search failed (e.g. no flights found from
+   * any origin airport — frontend renders the home card but marks the
+   * outbound as "search failed" rather than hiding it).
+   */
+  outboundLeg?: HomeLeg | null;
+  /**
+   * last_city → home transport. Present only when `returnToHome: true`
+   * AND the return search succeeded.
+   */
+  returnLeg?: HomeLeg | null;
 };
 
 type OptimizeParams = {
@@ -52,6 +90,23 @@ type OptimizeParams = {
   startDate: string;
   travelers: number;
   budget?: number;
+  /**
+   * User's home city. When set, we:
+   *   1. Test ALL destination permutations (no more fixed-first hack)
+   *   2. Add a home → first_city leg to each permutation's total cost
+   *   3. If returnToHome, add a last_city → home leg too
+   *   4. Return outboundLeg and optionally returnLeg on the result
+   */
+  origin?: string;
+  /**
+   * IATA codes for the origin city. 1-3 entries. When the origin is a
+   * multi-airport city (e.g. NYC → JFK/LGA/EWR), we search all in
+   * parallel and pick the cheapest. Populated on the frontend from the
+   * originAirports.ts lookup or the user's saved preference.
+   */
+  originAirports?: string[];
+  /** Round-trip if true, one-way if false. Default true. */
+  returnToHome?: boolean;
 };
 
 const NIGHTS_PER_CITY = 2;
@@ -286,12 +341,173 @@ async function findDateShiftSuggestion(
   };
 }
 
+/**
+ * Multi-airport flight search for a home leg. Handles both directions:
+ *
+ *   OUTBOUND (reverse=false):  originAirports[] → tripCity
+ *     → fan out across origin airports, search each to the single
+ *       destination IATA, merge + pick cheapest.
+ *
+ *   RETURN   (reverse=true):   tripCity → originAirports[]
+ *     → fan out across home airports as destinations, search each from
+ *       the single origin (the trip city), merge + pick cheapest.
+ *
+ * Home legs are always flights (trains don't do transatlantic / home→
+ * overseas), so we skip searchTrains entirely here. Returns the cheapest
+ * matching flight along with its actual origin + destination IATA so
+ * the UI can display "JFK → FCO" correctly.
+ */
+async function searchHomeFlights(params: {
+  originAirports: string[];
+  tripCity: string;
+  date: string;
+  travelers: number;
+  reverse: boolean;
+}): Promise<{
+  price: number;
+  currency: string;
+  durationMinutes: number;
+  operator: string;
+  carrierCode: string;
+  departTime: string | null;
+  arriveTime: string | null;
+  stops: number;
+  bookingUrl: string | null;
+  originAirport: string;
+  destAirport: string;
+} | null> {
+  const { originAirports, tripCity, date, travelers, reverse } = params;
+  if (originAirports.length === 0) return null;
+
+  let cityIata: string;
+  try {
+    cityIata = await getIataCode(tripCity);
+  } catch {
+    return null;
+  }
+
+  // One search per home airport, in parallel. Each search's orientation
+  // is determined by `reverse`: for outbound the home airport is the
+  // origin; for return it's the destination.
+  const perAirport = await Promise.all(
+    originAirports.map(async (homeAirport) => {
+      const origin = reverse ? cityIata : homeAirport;
+      const destination = reverse ? homeAirport : cityIata;
+      try {
+        const offers = await searchFlights({ origin, destination, date, travelers });
+        return offers.map((o: any) => ({
+          offer: o,
+          homeAirport,
+        }));
+      } catch {
+        return [];
+      }
+    }),
+  );
+  const all = perAirport.flat();
+  if (all.length === 0) return null;
+  all.sort((a, b) => (a.offer.price ?? Infinity) - (b.offer.price ?? Infinity));
+  const cheapest = all[0];
+
+  const o = cheapest.offer;
+  // Format departure/arrival times to HH:MM (same helper pattern used
+  // elsewhere; inlined here to avoid pulling in legOptions formatters).
+  const fmtTime = (iso: string | null | undefined): string | null => {
+    if (!iso) return null;
+    const hhmm = iso.split('T')[1]?.slice(0, 5);
+    return hhmm ?? null;
+  };
+
+  return {
+    price: Number(o.price ?? 0),
+    currency: o.currency ?? 'USD',
+    durationMinutes: Number(o.durationMinutes ?? 0),
+    operator: o.carrier ?? '',
+    carrierCode: o.carrierCode ?? '',
+    departTime: fmtTime(o.departure),
+    arriveTime: fmtTime(o.arrival),
+    stops: Number(o.stops ?? 0),
+    bookingUrl: o.bookingUrl ?? null,
+    originAirport: reverse ? cityIata : cheapest.homeAirport,
+    destAirport: reverse ? cheapest.homeAirport : cityIata,
+  };
+}
+
+/**
+ * Cheap estimate for permutation scoring — price only, no offer details.
+ *
+ * Performance note: originally this did full multi-airport fan-out per
+ * permutation per leg, which meant a 3-city trip with NYC origin made
+ * ~60 flight searches JUST for ranking permutations (before the final
+ * buildHomeLeg). That was blowing past the frontend fetch timeout.
+ *
+ * Now we only search the FIRST origin airport here (cheap signal —
+ * whichever permutation has the cheapest "JFK → X" is likely also
+ * cheapest for LGA/EWR). The full multi-airport fan-out is reserved
+ * for buildHomeLeg on just the winning permutation. Drops the total
+ * call count by ~3x for multi-airport origins like NYC/LHR/Tokyo.
+ */
+async function estimateHomeLegCost(params: {
+  originAirports: string[];
+  destinationCity: string;
+  date: string;
+  travelers: number;
+  reverse?: boolean;
+}): Promise<number> {
+  const found = await searchHomeFlights({
+    originAirports: params.originAirports.slice(0, 1),
+    tripCity: params.destinationCity,
+    date: params.date,
+    travelers: params.travelers,
+    reverse: params.reverse ?? false,
+  });
+  return found?.price ?? 0;
+}
+
+/**
+ * Rebuild the full HomeLeg for the winning route's outbound/return.
+ * Returns null on any failure so the trip still builds — the UI just
+ * renders the home card without the detail line.
+ */
+async function buildHomeLeg(params: {
+  originAirports: string[];
+  destinationCity: string;
+  date: string;
+  travelers: number;
+  reverse?: boolean;
+}): Promise<HomeLeg | null> {
+  const found = await searchHomeFlights({
+    originAirports: params.originAirports,
+    tripCity: params.destinationCity,
+    date: params.date,
+    travelers: params.travelers,
+    reverse: params.reverse ?? false,
+  });
+  if (!found) return null;
+  return {
+    originAirport: found.originAirport,
+    destAirport: found.destAirport,
+    price: found.price,
+    currency: found.currency,
+    durationMinutes: found.durationMinutes,
+    operator: found.operator,
+    carrierCode: found.carrierCode,
+    departTime: found.departTime,
+    arriveTime: found.arriveTime,
+    departDate: params.date,
+    stops: found.stops,
+    bookingUrl: found.bookingUrl,
+  };
+}
+
 export async function optimize(params: OptimizeParams): Promise<OptimizeResult> {
-  const { cities, startDate, travelers } = params;
+  const { cities, startDate, travelers, origin, originAirports, returnToHome = true } = params;
 
   if (cities.length < 2) {
     throw new Error('Need at least 2 cities to optimize');
   }
+
+  const hasOrigin = !!origin && origin.trim().length > 0;
 
   // Step 1: resolve IATA codes in parallel
   const iataCodes: Record<string, string> = {};
@@ -307,14 +523,47 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
 
   const cityMap = new Map(cities.map((c) => [c.name, c]));
 
-  // Step 2: generate candidate orderings
+  // Resolve origin airports: caller may pass explicit list (from
+  // originAirports.ts lookup or user prefs); otherwise we look up the
+  // multi-airport map, and fall back to a single getIataCode result
+  // if the city isn't a multi-airport metro.
+  let resolvedOriginAirports: string[] = [];
+  if (hasOrigin) {
+    if (originAirports && originAirports.length > 0) {
+      resolvedOriginAirports = originAirports;
+    } else {
+      const lookup = getOriginAirports(origin!);
+      if (lookup.length > 0) {
+        resolvedOriginAirports = lookup;
+      } else {
+        try {
+          const single = await getIataCode(origin!);
+          resolvedOriginAirports = [single];
+        } catch {
+          logger.warn('Could not resolve origin IATA', { origin });
+        }
+      }
+    }
+  }
+
+  // Step 2: generate candidate orderings.
+  //
+  // When we have a real origin, "first city" is no longer a hack —
+  // it's just whatever destination is closest/cheapest after flying in
+  // from home. So we test FULL permutations of all destinations (no
+  // fixed-first). When there's no origin, we keep the legacy behavior
+  // (first city fixed) so existing behavior is preserved.
   let orderings: string[][];
 
   if (cities.length <= 5) {
-    // Full permutations with the first city fixed (user-picked starting city).
-    const rest = cities.slice(1);
-    const perms = getPermutations(rest);
-    orderings = perms.map((p) => [cities[0].name, ...p.map((c) => c.name)]);
+    if (hasOrigin) {
+      // Full permutations of all N destinations.
+      orderings = getPermutations(cities).map((p) => p.map((c) => c.name));
+    } else {
+      const rest = cities.slice(1);
+      const perms = getPermutations(rest);
+      orderings = perms.map((p) => [cities[0].name, ...p.map((c) => c.name)]);
+    }
 
     // Apply the country-clustering filter: reject any ordering that bounces
     // between countries (e.g. JP → CN → JP → CN). Only keep clustered ones.
@@ -322,9 +571,6 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     if (clustered.length > 0) {
       orderings = clustered;
     } else {
-      // Defensive: if the filter somehow rejected everything (shouldn't
-      // happen when the first city stays fixed and countries are consistent),
-      // fall back to unfiltered orderings rather than crashing.
       logger.warn('Country clustering filter removed all orderings — falling back');
     }
   } else {
@@ -339,9 +585,48 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     orderings = seeds.map((seed) => nearestNeighborRoute(cities, seed, simpleDistFn));
   }
 
-  // Step 3: score each permutation (per-leg dates inside scoreRoute)
+  // Step 3: score each permutation.
+  //
+  // When we have an origin, each permutation's total cost must include
+  // the home→first_city outbound leg. We compute that lazily per
+  // candidate below (it depends on which city ends up first, so it's
+  // different across permutations). The return leg (last_city→home) is
+  // added similarly when returnToHome=true.
   const routes = await Promise.all(
-    orderings.map((ordering) => scoreRoute(ordering, startDate, travelers, cityMap)),
+    orderings.map(async (ordering) => {
+      const baseRoute = await scoreRoute(ordering, startDate, travelers, cityMap);
+      if (!hasOrigin) return baseRoute;
+
+      // Outbound leg: home → first destination, on the trip's start date.
+      const outboundCost = await estimateHomeLegCost({
+        originAirports: resolvedOriginAirports,
+        destinationCity: ordering[0],
+        date: clampToFuture(startDate),
+        travelers,
+      });
+
+      // Return leg: last destination → home. Uses the departure date of
+      // the last city (when they'd be leaving it to go home).
+      let returnCost = 0;
+      if (returnToHome) {
+        const lastIdx = ordering.length - 1;
+        const lastCityDepartDate = clampToFuture(
+          addDays(startDate, (lastIdx + 1) * NIGHTS_PER_CITY),
+        );
+        returnCost = await estimateHomeLegCost({
+          originAirports: resolvedOriginAirports,
+          destinationCity: ordering[lastIdx],
+          date: lastCityDepartDate,
+          travelers,
+          reverse: true, // last_city → home, not home → last_city
+        });
+      }
+
+      return {
+        ...baseRoute,
+        totalCost: baseRoute.totalCost + outboundCost + returnCost,
+      };
+    }),
   );
 
   // Step 4: sort by totalCost, keep top 3
@@ -385,6 +670,31 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     logger.warn('Date-shift probe failed (non-fatal)', { message: err?.message });
   }
 
+  // Step 8: build full HomeLeg objects for the winning route. We only
+  // do this for the WINNING permutation (not all of them) to keep the
+  // round-trip of API calls bounded. Already-cached searches from the
+  // scoring pass mean these are typically fast.
+  let outboundLeg: HomeLeg | null = null;
+  let returnLeg: HomeLeg | null = null;
+  if (hasOrigin && resolvedOriginAirports.length > 0) {
+    outboundLeg = await buildHomeLeg({
+      originAirports: resolvedOriginAirports,
+      destinationCity: bestOrdering[0],
+      date: clampToFuture(startDate),
+      travelers,
+    });
+    if (returnToHome) {
+      const lastIdx = bestOrdering.length - 1;
+      returnLeg = await buildHomeLeg({
+        originAirports: resolvedOriginAirports,
+        destinationCity: bestOrdering[lastIdx],
+        date: clampToFuture(addDays(startDate, (lastIdx + 1) * NIGHTS_PER_CITY)),
+        travelers,
+        reverse: true,
+      });
+    }
+  }
+
   return {
     routes: topRoutes,
     bestRoute: topRoutes[0],
@@ -392,5 +702,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     iataCodes,
     dates,
     dateShiftSuggestion,
+    outboundLeg,
+    returnLeg,
   };
 }

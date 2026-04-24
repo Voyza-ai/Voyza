@@ -46,7 +46,19 @@ function ResultsPageInner() {
     // Wait for auth to be ready before fetching protected routes
     if (isAuthLoading) return;
 
-    // If a tripId is provided, fetch fresh data from the backend (once)
+    // If a tripId is provided AND the store already has that exact trip
+    // (freshly planned, or previously loaded), skip the refetch. Before
+    // this guard we unconditionally re-hydrated from the DB, which wiped
+    // the rich in-memory flight data whenever a trip was planned but
+    // not yet persisted — the "flights gone after visiting canvas" bug.
+    if (tripId && currentTrip?.id === tripId) {
+      return;
+    }
+
+    // If a tripId is provided and we don't have it in the store, fetch
+    // fresh data from the backend (once). The backend now returns a
+    // complete Trip shape (hotels[], alternatives, all new columns) so
+    // we can setTrip() the payload directly with minimal reshaping.
     if (tripId) {
       if (fetchedRef.current) return;
       fetchedRef.current = true;
@@ -65,14 +77,31 @@ function ResultsPageInner() {
 
       fetchTrip()
         .then((data) => {
-          const tripData = data.trip ?? data;
+          // Backend now returns `data.trip` as the fully-assembled Trip —
+          // hotels[], transports merged into each city's transportIn/Out,
+          // budget/vibe/dateShiftSuggestion at the top level. No client-side
+          // reshaping needed. We still fall back to the old reshape path
+          // if the backend is an older deploy without buildTripFromDb.
+          const fullTrip = data.trip;
+          if (fullTrip && Array.isArray(fullTrip.cities) && fullTrip.cities[0]?.transportIn) {
+            setTrip(fullTrip);
+            setLoading(false);
+            return;
+          }
+
+          // Legacy fallback: reshape flat DB rows (pre-migration backends).
+          const tripData = fullTrip ?? data;
           const dbCities = data.cities ?? [];
           const dbTransports = data.transports ?? [];
-
-          // Transform DB city rows into frontend City shape
           const emptyTransport: Transport = { mode: 'flight', operator: '', duration: '', price: 0 };
           const cities: City[] = dbCities.map((c: any, idx: number) => {
-            const hotel = c.hotel ?? { name: '', rating: 0, pricePerNight: 0, area: '' };
+            const hotelsArr = Array.isArray(c.hotels) && c.hotels.length > 0
+              ? c.hotels
+              : c.hotel ? [c.hotel] : [];
+            const selectedIdx = typeof c.selected_hotel_index === 'number'
+              ? Math.max(0, Math.min(c.selected_hotel_index, Math.max(0, hotelsArr.length - 1)))
+              : 0;
+            const hotel = hotelsArr[selectedIdx] ?? c.hotel ?? { name: '', rating: 0, pricePerNight: 0, area: '' };
             // Generate placeholder activities for cities that have none
             const activities = (c.activities && c.activities.length > 0)
               ? c.activities
@@ -97,46 +126,48 @@ function ResultsPageInner() {
               country: c.country ?? '',
               dates: { arrival: c.arrival_date ?? '', departure: c.departure_date ?? '' },
               hotel,
-              hotels: [hotel],
-              selectedHotelIndex: 0,
+              hotels: hotelsArr,
+              selectedHotelIndex: selectedIdx,
+              customHotel: c.custom_hotel ?? undefined,
               activities,
               restaurants,
-              vibes: [],
+              vibes: c.vibes ?? [],
               colorIndex: c.color_index ?? idx,
               schedule: c.schedule ?? {},
               transportIn: emptyTransport,
               transportOut: emptyTransport,
             };
           });
-
-          // Attach transport data
           for (const t of dbTransports) {
             const fromIdx = dbCities.findIndex((c: any) => c.id === t.from_city_id);
             const toIdx = dbCities.findIndex((c: any) => c.id === t.to_city_id);
+            const mins = t.duration_minutes ?? t.journey_time_minutes ?? 0;
             const transport: Transport = {
               mode: (t.mode ?? 'flight') as 'flight' | 'train',
               operator: t.operator ?? '',
-              duration: t.duration_minutes ? `${Math.floor(t.duration_minutes / 60)}h ${t.duration_minutes % 60}m` : '',
+              duration: mins ? `${Math.floor(mins / 60)}h ${mins % 60}m` : '',
               price: t.price ?? 0,
               from: fromIdx >= 0 ? cities[fromIdx].name : '',
               to: toIdx >= 0 ? cities[toIdx].name : '',
               departTime: t.depart_time ?? '',
               arriveTime: t.arrive_time ?? '',
+              alternatives: Array.isArray(t.alternatives) ? t.alternatives : undefined,
               bookingUrl: t.booking_url ?? '',
             };
             if (fromIdx >= 0) cities[fromIdx].transportOut = transport;
             if (toIdx >= 0) cities[toIdx].transportIn = transport;
           }
-
           setTrip({
             id: tripData.id,
             title: tripData.title,
             status: tripData.status ?? 'planning',
-            totalCost: tripData.total_cost ?? 0,
-            savings: tripData.savings_vs_alternative ?? 0,
+            totalCost: Number(tripData.total_cost ?? tripData.totalCost ?? 0),
+            savings: Number(tripData.savings_vs_alternative ?? tripData.savings ?? 0),
             travelers: tripData.travelers ?? 1,
+            budget: tripData.budget != null ? Number(tripData.budget) : undefined,
             cities,
             savingsTips: [],
+            dateShiftSuggestion: tripData.date_shift_suggestion ?? tripData.dateShiftSuggestion ?? undefined,
           });
           setLoading(false);
         })
@@ -152,7 +183,7 @@ function ResultsPageInner() {
 
     // No trip anywhere — redirect to planning
     router.push('/plan');
-  }, [tripId, isAuthLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tripId, isAuthLoading, currentTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Enrich cities with real hotel data if hotels[] is empty
   const updateCity = useTripStore((s) => s.updateCity);

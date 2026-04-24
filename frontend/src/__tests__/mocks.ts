@@ -98,7 +98,11 @@ jest.mock('@/lib/api', () => ({
   compareLeg: jest.fn().mockResolvedValue(null),
   suggestDestinations: jest.fn().mockResolvedValue([]),
   interpretPlan: jest.fn().mockResolvedValue({}),
-  editPlan: jest.fn().mockResolvedValue({ message: 'Done', trip: null }),
+  editPlan: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
+  planChat: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
+  planChatSuggestions: jest.fn().mockResolvedValue({
+    suggestions: ['Why this order of cities?', 'Make Barcelona cheaper', 'Pin Rome to dates', 'Add a day'],
+  }),
   getCanvasSession: jest.fn().mockResolvedValue({ session: { state: null }, role: 'viewer' }),
   saveCanvas: jest.fn().mockResolvedValue({ saved: true, savedAt: new Date().toISOString() }),
   getCanvasSuggestions: jest.fn().mockResolvedValue({ suggestions: [] }),
