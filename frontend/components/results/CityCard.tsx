@@ -48,14 +48,16 @@ export default function CityCard({
   onClick,
 }: CityCardProps) {
   const color = getCityColor(city.colorIndex ?? index);
-  const arrival = formatDate(city.dates.arrival);
-  const departure = formatDate(city.dates.departure);
-  const nights = Math.round(
-    (parseLocal(city.dates.departure).getTime() - parseLocal(city.dates.arrival).getTime()) /
-      (1000 * 60 * 60 * 24)
-  );
+  const arrival = city.dates.arrival ? formatDate(city.dates.arrival) : '';
+  const departure = city.dates.departure ? formatDate(city.dates.departure) : '';
+  const nights = (city.dates.arrival && city.dates.departure)
+    ? Math.round(
+        (parseLocal(city.dates.departure).getTime() - parseLocal(city.dates.arrival).getTime()) /
+          (1000 * 60 * 60 * 24)
+      )
+    : 0;
   const eff = effectiveHotel(city);
-  const stayTotal = Math.round(eff.total);
+  const stayTotal = isNaN(eff.total) ? 0 : Math.round(eff.total);
 
   return (
     <motion.div

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Calendar, Users, TrendingDown, Sparkles, Save, Check } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Calendar, Users, TrendingDown, Sparkles, PenSquare } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { saveTrip } from '@/lib/api';
@@ -48,20 +49,26 @@ function useCountUp(target: number, duration = 1200) {
 }
 
 export default function ResultsHeader({ trip }: ResultsHeaderProps) {
+  const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const setTrip = useTripStore((s) => s.setTrip);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [saving, setSaving] = useState(false);
-  // Trip is "already saved" only if it has a real UUID from Supabase (not a mock id)
   const alreadySaved = !!trip.id && !trip.id.startsWith('mock');
-  const [saved, setSaved] = useState(false);
 
-  const handleSaveTrip = async () => {
+  const handleEditInCanvas = async () => {
     if (!user) {
       setShowLoginModal(true);
       return;
     }
 
+    // If already saved, go straight to canvas
+    if (alreadySaved) {
+      window.open(`/canvas/${trip.id}`, '_blank');
+      return;
+    }
+
+    // Save first, then open canvas
     setSaving(true);
     try {
       const result = await saveTrip({
@@ -71,9 +78,8 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
         savings: trip.savings,
         cities: trip.cities,
       });
-      // Update the trip in store with the saved ID
       setTrip({ ...trip, id: result.tripId });
-      setSaved(true);
+      window.open(`/canvas/${result.tripId}`, '_blank');
     } catch {
       // handle error silently
     } finally {
@@ -173,29 +179,23 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
             </div>
           </div>
 
-          {/* Save Trip button — only shown for unsaved trips */}
-          {!alreadySaved && (
-            <button
-              onClick={handleSaveTrip}
-              disabled={saving || saved}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium transition-all hover:brightness-105 disabled:opacity-60"
-              style={{
-                background: saved ? '#f0fdf4' : '#2563eb',
-                borderColor: saved ? '#bbf7d0' : '#2563eb',
-                color: saved ? '#16a34a' : '#ffffff',
-              }}
-            >
-              {saved ? <Check size={13} /> : <Save size={13} />}
-              {saving ? 'Saving...' : saved ? 'Saved' : 'Save Trip'}
-            </button>
-          )}
+          {/* Edit in Canvas — saves trip first if needed */}
+          <button
+            onClick={handleEditInCanvas}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
+            style={{ background: '#2563eb', borderColor: '#2563eb' }}
+          >
+            <PenSquare size={13} />
+            {saving ? 'Saving...' : 'Edit in Canvas'}
+          </button>
         </div>
       </div>
 
       <LoginModal
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
-        onSuccess={handleSaveTrip}
+        onSuccess={handleEditInCanvas}
       />
     </div>
   );

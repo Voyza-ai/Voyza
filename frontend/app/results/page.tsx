@@ -73,6 +73,25 @@ function ResultsPageInner() {
           const emptyTransport: Transport = { mode: 'flight', operator: '', duration: '', price: 0 };
           const cities: City[] = dbCities.map((c: any, idx: number) => {
             const hotel = c.hotel ?? { name: '', rating: 0, pricePerNight: 0, area: '' };
+            // Generate placeholder activities for cities that have none
+            const activities = (c.activities && c.activities.length > 0)
+              ? c.activities
+              : [
+                  `Explore ${c.name} old town`,
+                  `Local food tour in ${c.name}`,
+                  `${c.name} main museum`,
+                  `Walking tour of ${c.name}`,
+                  `${c.name} scenic viewpoint`,
+                ];
+            const restaurants = (c.restaurants && c.restaurants.length > 0)
+              ? c.restaurants
+              : [
+                  { name: `${c.name} neighborhood trattoria`, cuisine: 'Local', priceRange: '$$' },
+                  { name: `${c.name} casual lunch cafe`, cuisine: 'Cafe', priceRange: '$' },
+                  { name: `${c.name} fine dining`, cuisine: 'International', priceRange: '$$$' },
+                  { name: `${c.name} street food market`, cuisine: 'Street Food', priceRange: '$' },
+                  { name: `${c.name} rooftop bar & grill`, cuisine: 'Bar & Grill', priceRange: '$$' },
+                ];
             return {
               name: c.name,
               country: c.country ?? '',
@@ -80,8 +99,8 @@ function ResultsPageInner() {
               hotel,
               hotels: [hotel],
               selectedHotelIndex: 0,
-              activities: c.activities ?? [],
-              restaurants: c.restaurants ?? [],
+              activities,
+              restaurants,
               vibes: [],
               colorIndex: c.color_index ?? idx,
               schedule: c.schedule ?? {},

@@ -42,17 +42,33 @@ type DayCell = {
 export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
   const [selectedDay, setSelectedDay] = useState<DayCell | null>(null);
 
-  // Compute trip span
-  const start = parseLocal(trip.cities[0].dates.arrival);
-  const end = parseLocal(trip.cities[trip.cities.length - 1].dates.departure);
+  // Filter to cities with valid dates for calendar rendering
+  const datedCities = trip.cities.filter(
+    (c) => c.dates.arrival && c.dates.departure && c.dates.arrival.includes('-') && c.dates.departure.includes('-'),
+  );
+
+  // If no cities have dates, show a message
+  if (datedCities.length === 0) {
+    return (
+      <div className="px-8 py-20 text-center text-gray-400 text-sm">
+        No dates available yet — add dates to your cities to see the calendar view.
+      </div>
+    );
+  }
+
+  // Compute trip span from cities that actually have dates
+  const start = parseLocal(datedCities[0].dates.arrival);
+  const end = parseLocal(datedCities[datedCities.length - 1].dates.departure);
 
   // Build a map of date -> city
   const dateToCity = new Map<string, { city: City; index: number }>();
   trip.cities.forEach((city, index) => {
+    if (!city.dates.arrival || !city.dates.departure || !city.dates.arrival.includes('-') || !city.dates.departure.includes('-')) return;
     const arr = parseLocal(city.dates.arrival);
     const dep = parseLocal(city.dates.departure);
     // A city "occupies" arrival up to (but not including) departure date
     const days = daysBetween(arr, dep);
+    if (days <= 0 || isNaN(days)) return;
     for (let i = 0; i < days; i++) {
       const d = new Date(arr);
       d.setDate(arr.getDate() + i);
@@ -161,9 +177,8 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                 <div className="flex flex-wrap gap-2">
                   {trip.cities.map((city, i) => {
                     const cColor = getCityColor(city.colorIndex ?? i);
-                    const arr = parseLocal(city.dates.arrival);
-                    const dep = parseLocal(city.dates.departure);
-                    const nights = daysBetween(arr, dep);
+                    const hasDates = city.dates.arrival && city.dates.departure && city.dates.arrival.includes('-') && city.dates.departure.includes('-');
+                    const nights = hasDates ? daysBetween(parseLocal(city.dates.arrival), parseLocal(city.dates.departure)) : 0;
                     return (
                       <button
                         key={i}
@@ -182,7 +197,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                           {city.name}
                         </span>
                         <span className="text-gray-400 text-[10px]">
-                          {nights} {nights === 1 ? 'night' : 'nights'}
+                          {hasDates ? `${nights} ${nights === 1 ? 'night' : 'nights'}` : 'no dates'}
                         </span>
                       </button>
                     );
