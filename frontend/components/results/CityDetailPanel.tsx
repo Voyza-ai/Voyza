@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { Trip, Hotel, Transport } from '@/lib/types';
 import { useTripStore } from '@/store/tripStore';
-import { effectiveHotel } from '@/lib/tripTotals';
+import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
 import { nightsBetween } from '@/lib/hotelScore';
 import { getCityColor, CITY_COLORS } from '@/lib/cityColors';
 import { VIBE_LABEL } from '@/lib/cityTheme';
@@ -66,6 +66,7 @@ export default function CityDetailPanel({
   const setCustomHotel = useTripStore((s) => s.setCustomHotel);
   const clearCustomHotel = useTripStore((s) => s.clearCustomHotel);
   const setCityColor = useTripStore((s) => s.setCityColor);
+  const priceMode = useTripStore((s) => s.priceMode);
 
   const city = trip.cities[cityIndex];
   const color = getCityColor(city.colorIndex ?? cityIndex);
@@ -80,9 +81,10 @@ export default function CityDetailPanel({
   // Room calculation: prefer 1 room for the whole group unless maxGuests is set
   const guestsPerRoom = selectedHotel?.maxGuests;
   const roomsNeeded = guestsPerRoom ? Math.ceil(trip.travelers / guestsPerRoom) : 1;
-  const stayRoom = Math.round(eff.roomSubtotal * roomsNeeded);
-  const stayTaxes = Math.round(eff.taxesSubtotal * roomsNeeded);
-  const stayTotal = Math.round(eff.total * roomsNeeded);
+  const stayRoom = displayAmount(eff.roomSubtotal * roomsNeeded, priceMode, trip.travelers);
+  const stayTaxes = displayAmount(eff.taxesSubtotal * roomsNeeded, priceMode, trip.travelers);
+  const stayTotal = displayAmount(eff.total * roomsNeeded, priceMode, trip.travelers);
+  const stayPerNight = displayAmount(eff.pricePerNight, priceMode, trip.travelers);
   const hasTaxes = stayTaxes > 0;
 
   const canPrev = cityIndex > 0;
@@ -266,7 +268,7 @@ export default function CityDetailPanel({
                     style={{ color: `${color.text}88` }}
                   >
                     <div className="flex justify-between w-full">
-                      <span>Room · ${Math.round(eff.pricePerNight)} × {nights} {nights === 1 ? 'night' : 'nights'}{roomsNeeded > 1 && ` × ${roomsNeeded} rooms`}</span>
+                      <span>Room · ${stayPerNight.toLocaleString()} × {nights} {nights === 1 ? 'night' : 'nights'}{roomsNeeded > 1 && ` × ${roomsNeeded} rooms`}</span>
                       <span>${stayRoom.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between w-full">
@@ -472,9 +474,14 @@ function HotelRow({
   color: { bg: string; text: string; border: string; name: string };
   onSelect: () => void;
 }) {
-  const taxes = (hotel.taxesPerNight ?? 0) * nights;
-  const room = hotel.pricePerNight * nights;
-  const total = room + taxes;
+  const priceMode = useTripStore((s) => s.priceMode);
+  const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
+  const taxesGroup = (hotel.taxesPerNight ?? 0) * nights;
+  const roomGroup = hotel.pricePerNight * nights;
+  const totalGroup = roomGroup + taxesGroup;
+  const taxes = displayAmount(taxesGroup, priceMode, travelers);
+  const total = displayAmount(totalGroup, priceMode, travelers);
+  const perNight = displayAmount(hotel.pricePerNight, priceMode, travelers);
   const isTop = rank === 0;
 
   const accent = color.text;
@@ -548,7 +555,7 @@ function HotelRow({
                 <>
                   <span style={{ color: `${accent}50` }}>·</span>
                   <span style={{ color: `${accent}70` }}>
-                    incl. ${Math.round(taxes).toLocaleString()} taxes
+                    incl. ${taxes.toLocaleString()} taxes
                   </span>
                 </>
               )}
@@ -557,10 +564,10 @@ function HotelRow({
         </div>
         <div className="text-right flex-shrink-0">
           <div className="text-sm font-semibold tabular-nums" style={{ color: color.text }}>
-            ${Math.round(total).toLocaleString()}
+            ${total.toLocaleString()}
           </div>
           <div className="text-[11px] tabular-nums" style={{ color: `${accent}70` }}>
-            ${hotel.pricePerNight}/night
+            ${perNight.toLocaleString()}/night
           </div>
         </div>
       </div>
@@ -771,6 +778,7 @@ function HotelDetail({
   travelers: number;
   color: { bg: string; text: string; border: string; name: string };
 }) {
+  const priceMode = useTripStore((s) => s.priceMode);
   if (!hotel) {
     return (
       <div className="flex items-center justify-center h-full" style={{ color: `${color.text}70` }}>
@@ -784,10 +792,17 @@ function HotelDetail({
   const guestsPerRoom = hotel.maxGuests;
   const roomsNeeded = guestsPerRoom ? Math.ceil(travelers / guestsPerRoom) : 1;
   const guestsPerRoomActual = roomsNeeded > 1 ? Math.ceil(travelers / roomsNeeded) : travelers;
-  const taxes = (hotel.taxesPerNight ?? 0) * nights * roomsNeeded;
-  const room = hotel.pricePerNight * nights * roomsNeeded;
-  const total = room + taxes;
-  const perPerson = travelers > 1 ? Math.round(total / travelers) : null;
+  const taxesGroup = (hotel.taxesPerNight ?? 0) * nights * roomsNeeded;
+  const roomGroup = hotel.pricePerNight * nights * roomsNeeded;
+  const totalGroup = roomGroup + taxesGroup;
+  const taxes = displayAmount(taxesGroup, priceMode, travelers);
+  const room = displayAmount(roomGroup, priceMode, travelers);
+  const total = displayAmount(totalGroup, priceMode, travelers);
+  const perNight = displayAmount(hotel.pricePerNight, priceMode, travelers);
+  // The explanatory "per person" footer is only useful when the main figures
+  // are group totals — when the toggle is already in per-person mode, hide it.
+  const perPerson =
+    priceMode === 'total' && travelers > 1 ? Math.round(totalGroup / travelers) : null;
 
   return (
     <div className="flex flex-col justify-between h-full gap-4">
@@ -883,20 +898,20 @@ function HotelDetail({
         >
           <div className="flex justify-between text-[13px]" style={{ color: `${accent}cc` }}>
             <span>
-              ${hotel.pricePerNight}/night × {nights} {nights === 1 ? 'night' : 'nights'}{roomsNeeded > 1 && ` × ${roomsNeeded} rooms`}
+              ${perNight.toLocaleString()}/night × {nights} {nights === 1 ? 'night' : 'nights'}{roomsNeeded > 1 && ` × ${roomsNeeded} rooms`}
             </span>
             <span className="font-medium tabular-nums" style={{ color: accent }}>${room.toLocaleString()}</span>
           </div>
           {taxes > 0 && (
             <div className="flex justify-between text-[13px]" style={{ color: `${accent}cc` }}>
               <span>Taxes &amp; fees{roomsNeeded > 1 && ` (${roomsNeeded} rooms)`}</span>
-              <span className="font-medium tabular-nums" style={{ color: accent }}>${Math.round(taxes).toLocaleString()}</span>
+              <span className="font-medium tabular-nums" style={{ color: accent }}>${taxes.toLocaleString()}</span>
             </div>
           )}
           <div className="h-[2px] rounded-full my-1" style={{ background: color.border }} />
           <div className="flex justify-between items-baseline">
-            <span className="text-[13px] font-semibold" style={{ color: accent }}>Total</span>
-            <span className="text-lg font-bold tabular-nums" style={{ color: accent }}>${Math.round(total).toLocaleString()}</span>
+            <span className="text-[13px] font-semibold" style={{ color: accent }}>{priceMode === 'perPerson' ? 'Per person' : 'Total'}</span>
+            <span className="text-lg font-bold tabular-nums" style={{ color: accent }}>${total.toLocaleString()}</span>
           </div>
           {perPerson && (
             <div className="flex justify-between text-[12px] mt-0.5" style={{ color: `${accent}88` }}>

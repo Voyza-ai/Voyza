@@ -3,6 +3,8 @@
 import { motion } from 'framer-motion';
 import { TrendingDown, X } from 'lucide-react';
 import { useState } from 'react';
+import { useTripStore } from '@/store/tripStore';
+import { displayAmount } from '@/lib/tripTotals';
 
 type DateShiftBannerProps = {
   suggestion: {
@@ -31,9 +33,12 @@ const formatDate = (iso: string) => {
  */
 export default function DateShiftBanner({ suggestion }: DateShiftBannerProps) {
   const [dismissed, setDismissed] = useState(false);
+  const priceMode = useTripStore((s) => s.priceMode);
+  const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
   if (dismissed) return null;
 
   const { dayOffset, newStartDate, savings } = suggestion;
+  const savingsDisplay = displayAmount(savings, priceMode, travelers);
   const direction = dayOffset < 0 ? 'earlier' : 'later';
   const days = Math.abs(dayOffset);
   const dayWord = days === 1 ? 'day' : 'days';
@@ -66,7 +71,7 @@ export default function DateShiftBanner({ suggestion }: DateShiftBannerProps) {
           </span>
           <span className="text-gray-500">({formatDate(newStartDate)})</span>
           <span className="text-gray-700">
-            would save about <strong className="text-[#22c088]">${Math.round(savings).toLocaleString()}</strong>.
+            would save about <strong className="text-[#22c088]">${savingsDisplay.toLocaleString()}</strong>{priceMode === 'perPerson' ? ' /person' : ''}.
           </span>
         </div>
 

@@ -99,14 +99,28 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
     : 0;
 
   const liveTotal = liveTripTotal(trip);
-  const perPerson = Math.round(liveTotal / Math.max(1, trip.travelers));
+  const travelers = Math.max(1, trip.travelers);
   // Savings tracks the delta vs the original baseline (totalCost - savings was the
   // pre-optimized baseline). When the user picks a more expensive hotel the
   // savings shrink in lockstep so the comparison stays honest.
   const baseline = trip.totalCost + trip.savings;
   const liveSavings = Math.max(0, baseline - liveTotal);
-  const animatedSavings = useCountUp(liveSavings);
-  const animatedTotal = useCountUp(liveTotal);
+
+  // Per-person vs total display toggle is global (read from tripStore) so
+  // every price across the results page — flights, hotels, transit, savings —
+  // flips together with the header pill.
+  const priceMode = useTripStore((s) => s.priceMode);
+  const setPriceMode = useTripStore((s) => s.setPriceMode);
+  const displayedTotal =
+    priceMode === 'total' ? liveTotal : Math.round(liveTotal / travelers);
+  const displayedSavings =
+    priceMode === 'total' ? liveSavings : Math.round(liveSavings / travelers);
+  const animatedTotal = useCountUp(displayedTotal);
+  const animatedSavings = useCountUp(displayedSavings);
+  // Subtitle shows the alternate framing so both numbers are visible at a glance.
+  const altTotal =
+    priceMode === 'total' ? Math.round(liveTotal / travelers) : liveTotal;
+  const showToggle = travelers > 1;
 
   return (
     <div className="px-8 pt-3 pb-0">
@@ -141,8 +155,44 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
           </h1>
         </div>
 
-        {/* Right: cost cards + save button */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Right: toggle stacked above cost cards + save button */}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {/* Total / Per-person pill toggle — sits above the cards so it doesn't widen the row */}
+          {showToggle && (
+            <div
+              className="flex items-center p-0.5 rounded-full border bg-white/80"
+              style={{ borderColor: 'rgba(79,142,247,0.25)' }}
+              role="tablist"
+              aria-label="Price view"
+            >
+              <button
+                role="tab"
+                aria-selected={priceMode === 'total'}
+                onClick={() => setPriceMode('total')}
+                className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                style={{
+                  background: priceMode === 'total' ? '#4f8ef7' : 'transparent',
+                  color: priceMode === 'total' ? '#ffffff' : '#4f8ef7',
+                }}
+              >
+                Total
+              </button>
+              <button
+                role="tab"
+                aria-selected={priceMode === 'perPerson'}
+                onClick={() => setPriceMode('perPerson')}
+                className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                style={{
+                  background: priceMode === 'perPerson' ? '#4f8ef7' : 'transparent',
+                  color: priceMode === 'perPerson' ? '#ffffff' : '#4f8ef7',
+                }}
+              >
+                Per person
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
           {/* Total cost */}
           <div
             className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
@@ -152,14 +202,16 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
             }}
           >
             <div className="text-[#4f8ef7]/70 text-[9px] uppercase tracking-wider">
-              Total trip
+              {priceMode === 'total' ? 'Total trip' : 'Per person'}
             </div>
             <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
               ${animatedTotal.toLocaleString()}
             </div>
-            <div className="text-[#4f8ef7]/55 text-[9px]">
-              ${perPerson.toLocaleString()} /person
-            </div>
+            {showToggle && (
+              <div className="text-[#4f8ef7]/55 text-[9px]">
+                ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
+              </div>
+            )}
           </div>
 
           {/* Savings */}
@@ -198,6 +250,7 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
               {saving ? 'Saving...' : saved ? 'Saved' : 'Save Trip'}
             </button>
           )}
+          </div>
         </div>
       </div>
 

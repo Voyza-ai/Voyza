@@ -3,11 +3,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, PenSquare, Home } from 'lucide-react';
-import { Trip, HomeLeg } from '@/lib/types';
+import { Trip, HomeLeg, Transport } from '@/lib/types';
 import Link from 'next/link';
 import CityCard from './CityCard';
 import CityActivitiesCard from './CityActivitiesCard';
 import Connector from './Connector';
+import { useTripStore } from '@/store/tripStore';
 import { getAirportName } from '@/lib/airportNames';
 
 /**
@@ -49,6 +50,7 @@ type FlowchartProps = {
 };
 
 export default function Flowchart({ trip, onCityClick, onActivitiesClick }: FlowchartProps) {
+  const setHomeLegAlternative = useTripStore((s) => s.setHomeLegAlternative);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   // Sub-card hover is independent from main card hover — each card is its
   // own object even though they're visually linked.
@@ -232,6 +234,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                         return next;
                       })
                     }
+                    onPickAlternative={(altIdx) =>
+                      setHomeLegAlternative('outbound', altIdx)
+                    }
                   />
                 </div>
               )}
@@ -361,6 +366,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                         else next.add(-2);
                         return next;
                       })
+                    }
+                    onPickAlternative={(altIdx) =>
+                      setHomeLegAlternative('return', altIdx)
                     }
                   />
                 </div>
@@ -552,34 +560,38 @@ function formatHomeDate(iso: string): string {
  * train swap list that between-city legs do. Connector gracefully
  * hides the "Other options" section when alternatives is empty.
  */
-function homeLegToTransport(leg: HomeLeg, fromCity: string, toCity: string): any {
-  const mins = leg.durationMinutes ?? 0;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  const durationStr =
-    mins > 0 ? (h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`) : '';
-
-  return {
-    mode: 'flight',
-    operator: leg.operator || leg.carrierCode || 'Flight',
-    duration: durationStr,
-    price: Number(leg.price ?? 0),
-    // Connector reads from/to for the expanded card's route row.
-    // We put the city names here and the IATA codes go into the
-    // station fields so the UI shows both.
-    from: fromCity,
-    to: toCity,
-    fromStation: leg.originAirport,
-    toStation: leg.destAirport,
-    departTime: leg.departTime ?? undefined,
-    arriveTime: leg.arriveTime ?? undefined,
-    departDate: leg.departDate,
-    layovers: leg.stops ?? 0,
-    stops: leg.stops ?? 0,
-    currency: leg.currency ?? 'USD',
-    carrierCode: leg.carrierCode ?? undefined,
-    flightNumber: leg.carrierCode ?? undefined,
-    bookingUrl: leg.bookingUrl ?? undefined,
+function homeLegToTransport(leg: HomeLeg, fromCity: string, toCity: string): Transport {
+  const fmt = (mins: number) => {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return mins > 0 ? (h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`) : '';
   };
+
+  const baseFrom = (
+    src: HomeLeg | Omit<HomeLeg, 'alternatives'>,
+    f: string,
+    t: string,
+  ): Transport => ({
+    mode: 'flight',
+    operator: src.operator || src.carrierCode || 'Flight',
+    duration: fmt(src.durationMinutes ?? 0),
+    price: Number(src.price ?? 0),
+    from: f,
+    to: t,
+    fromStation: src.originAirport,
+    toStation: src.destAirport,
+    departTime: src.departTime ?? undefined,
+    arriveTime: src.arriveTime ?? undefined,
+    departDate: src.departDate,
+    layovers: src.stops ?? 0,
+    flightNumber: src.carrierCode ?? undefined,
+    bookingUrl: src.bookingUrl ?? undefined,
+  });
+
+  const main = baseFrom(leg, fromCity, toCity);
+  if (leg.alternatives && leg.alternatives.length > 0) {
+    main.alternatives = leg.alternatives.map((a) => baseFrom(a, fromCity, toCity));
+  }
+  return main;
 }
 

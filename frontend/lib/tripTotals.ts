@@ -74,9 +74,30 @@ export function hotelsTotal(trip: Trip): number {
   }, 0);
 }
 
-/** Sum of all transport costs (transportOut for each city). */
+/**
+ * Sum of all transport costs:
+ *   - `transportOut` for each non-last city (inter-city legs)
+ *   - `trip.origin.outboundLeg` if present (home → first city)
+ *   - `trip.origin.returnLeg` if present (last city → home)
+ *
+ * Home legs are stored on `trip.origin`, not on the cities' transport
+ * fields, so a trip with origin set would otherwise undersum here. This
+ * was the bug behind the "header total doesn't match the leg prices"
+ * issue — single-city vibe trips reported $0 transport because no city
+ * had a transportOut to sum.
+ */
 export function transportTotal(trip: Trip): number {
-  return trip.cities.reduce((sum, c) => sum + (c.transportOut?.price ?? 0), 0);
+  let sum = trip.cities.reduce(
+    (s, c) => s + (c.transportOut?.price ?? 0),
+    0,
+  );
+  if (trip.origin?.outboundLeg) {
+    sum += Number(trip.origin.outboundLeg.price ?? 0);
+  }
+  if (trip.origin?.returnLeg) {
+    sum += Number(trip.origin.returnLeg.price ?? 0);
+  }
+  return sum;
 }
 
 /**
@@ -92,4 +113,24 @@ export function transportTotal(trip: Trip): number {
  */
 export function liveTripTotal(trip: Trip): number {
   return Math.round(hotelsTotal(trip) + transportTotal(trip));
+}
+
+/**
+ * Convert a stored group-total amount into the value to actually render
+ * based on the user's priceMode toggle. Every price on the results page
+ * (flights, hotels, transit, totals, savings) is stored as a group total —
+ * 'perPerson' simply divides by `travelers`. Centralized here so the
+ * formula stays consistent; if a future price needs different framing
+ * (e.g. already-per-person), branch at the call site instead of changing
+ * this helper.
+ */
+export function displayAmount(
+  amount: number,
+  priceMode: 'total' | 'perPerson',
+  travelers: number,
+): number {
+  if (priceMode === 'perPerson' && travelers > 0) {
+    return Math.round(amount / travelers);
+  }
+  return Math.round(amount);
 }

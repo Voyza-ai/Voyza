@@ -19,6 +19,14 @@ export type Transport = {
   trainNumber?: string;
   /** Alternative departures the user can swap to (other times / modes). */
   alternatives?: Transport[];
+  /**
+   * Set when neither a flight nor a train could be found for this leg
+   * (Duffel returned no offers AND the rail provider returned nothing).
+   * The Connector renders a "no direct option found" card with a
+   * Rome2Rio fallback link instead of an empty $0 pill. Different from
+   * "we haven't searched yet" — this means we tried and got nothing.
+   */
+  unavailable?: boolean;
 };
 
 export type Hotel = {
@@ -134,6 +142,13 @@ export type Trip = {
   };
   createdAt?: string;
   ownerId?: string;
+  /**
+   * Set on vibe-first trips when Claude flags that bumping the user's
+   * budget would unlock better destinations. The results page reads
+   * this to render a "Want to up your budget?" banner. Null/absent when
+   * the user is already at a comfortable budget for the vibe + origin.
+   */
+  vibeTierUp?: VibeTierUpSuggestion | null;
   /** User-set constraints (pinned dates, transport windows, min stays)
    *  collected via the Voyza AI chat. Persisted to the trip so future
    *  re-optimizations honor them. Shape matches backend TripConstraints. */
@@ -167,6 +182,10 @@ export type Trip = {
  * Home-anchor leg — the flight between the origin city and a destination.
  * Stored separately from Transport because it doesn't participate in the
  * destination city chain (no hotel, no activities — just an anchor).
+ *
+ * Mirrors backend `HomeLeg` in services/optimizer.ts. Top-4 alternatives
+ * (different carrier / time / airport) ride on `alternatives` so the
+ * flowchart can offer a swap without re-searching.
  */
 export type HomeLeg = {
   originAirport: string;
@@ -181,6 +200,7 @@ export type HomeLeg = {
   departDate: string;
   stops: number;
   bookingUrl: string | null;
+  alternatives?: Omit<HomeLeg, 'alternatives'>[];
 };
 
 export type PlanningAnswers = {
@@ -193,7 +213,7 @@ export type PlanningAnswers = {
   budgetPerPerson?: boolean;
   extraNotes?: string;
   rawInput?: string;
-  /** Home anchor — the city the user is flying from. Required for
+  /** Home anchor — the city the user is starting from. Required for
    *  optimizer to compute the home→first_city leg and test full
    *  destination permutations. */
   origin?: string;
@@ -203,6 +223,72 @@ export type PlanningAnswers = {
   originAirports?: string[];
   /** Round-trip (true) or one-way (false). Default true. */
   returnToHome?: boolean;
+  /**
+   * Which of the three planning modes the user is in. Set when they
+   * pick an intent card on the opening question. Previously the mode
+   * was inferred from which step array was active — making it an
+   * explicit field so validation, the Find-my-trip handler, and
+   * analytics can all branch on it without re-inferring.
+   *
+   *   - 'destination' : user named specific cities ("Rome and Florence")
+   *   - 'vibe'        : user described a feeling ("adventure", "beachy")
+   *                     → destinations get AI-suggested at Find-my-trip
+   *   - 'budget'      : user led with an amount
+   */
+  planningMode?: 'destination' | 'vibe' | 'budget';
+  /**
+   * All suggestions Claude returned for a vibe-first trip. We store
+   * the full list (not just the picked one) so a future "here are 3
+   * options, pick one" UI can render without a re-call to Claude.
+   * Also powers analytics on pick-accuracy.
+   */
+  vibeSuggestions?: VibeDestinationSuggestion[];
+  /**
+   * Index into `vibeSuggestions` of the currently-chosen destination.
+   * Defaults to 0 (the top-ranked suggestion). Once we add a picker
+   * UI, user choice updates this.
+   */
+  vibeSuggestionIndex?: number;
+  /**
+   * Total nights for the trip. Set explicitly when the user picks a
+   * presets ("3-4", "5-7", "8-10", "11+", custom) — only asked when
+   * dateRange is vague ("next month", "this summer"). When dateRange
+   * has concrete start + end ISO dates, nights is derived from the
+   * range automatically and the explicit step is skipped. Passed to
+   * the optimizer to distribute across cities (replaces the previous
+   * hardcoded 2-nights-per-city default).
+   */
+  nights?: number;
+};
+
+/**
+ * Shape mirrors the backend `DestinationSuggestion` in
+ * `services/destinationSuggester.ts`. Kept in lockstep — if backend
+ * evolves the schema, update here too.
+ */
+/**
+ * "If you bump your budget by $X, here's what opens up" — shown as a
+ * banner on the results page when Claude detects the user is one tier
+ * below dramatically better destinations. Mirrors backend
+ * `TierUpSuggestion`.
+ */
+export type VibeTierUpSuggestion = {
+  min_budget_increase_per_person_usd: number;
+  new_budget_per_person_usd: number;
+  destination_examples: string[];
+  why_worth_it: string;
+};
+
+export type VibeDestinationSuggestion = {
+  destination_city: string;
+  destination_country: string;
+  iata_code: string;
+  why_it_fits_vibe: string;
+  estimated_total_cost_per_person_usd: { low: number; high: number };
+  best_months_to_visit: string[];
+  transport_recommendation: 'flight' | 'train' | 'mixed';
+  tradeoff_or_caveat: string | null;
+  confidence: 'high' | 'medium' | 'low';
 };
 
 export type GroupMember = {

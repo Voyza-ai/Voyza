@@ -13,6 +13,7 @@ import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import DateShiftBanner from '@/components/results/DateShiftBanner';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
+import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, getTrip } from '@/lib/api';
 import { Hotel, City, Transport } from '@/lib/types';
 import { useAuthStore } from '@/store/authStore';
@@ -251,6 +252,9 @@ function ResultsPageInner() {
           <ResultsHeader trip={currentTrip} />
           {typeof currentTrip.budget === 'number' && (
             <BudgetOverBanner budget={currentTrip.budget} totalCost={currentTrip.totalCost} />
+          )}
+          {currentTrip.vibeTierUp && (
+            <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
           )}
           {currentTrip.dateShiftSuggestion && (
             <DateShiftBanner suggestion={currentTrip.dateShiftSuggestion} />

@@ -164,6 +164,11 @@ export async function optimizeTrip(params: {
   originAirports?: string[];
   /** Round-trip (true) or one-way (false). Defaults to true on server. */
   returnToHome?: boolean;
+  /**
+   * Total trip nights. Distributed across cities by the optimizer.
+   * When omitted the backend uses 2 nights per city as the default.
+   */
+  totalNights?: number;
 }): Promise<OptimizeResult> {
   return apiFetch<OptimizeResult>('/api/optimize', {
     method: 'POST',
@@ -215,6 +220,53 @@ export async function suggestDestinations(params: {
     },
   );
   return data.destinations;
+}
+
+// ─── Suggest destinations for a vibe-first trip ──────────────
+// Different from `suggestDestinations` above — this endpoint is the
+// *primary* way destinations get chosen when the user picks
+// "I'm chasing a vibe" on the opening question. Returns a richer
+// schema (why it fits, cost range, best months, caveats) so the UI
+// can render a pickable card list later. Cached 7 days server-side.
+
+import type { VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
+
+export type SuggestDestinationsForVibeResult = {
+  suggestions: VibeDestinationSuggestion[];
+  reasoning_summary: string;
+  /**
+   * Optional "if you bump your budget by $X, here's what opens up"
+   * hint. Present when Claude detects the user is one tier below
+   * dramatically more aspirational options. Surfaced as a banner /
+   * chat message on the results page so the user can choose to up
+   * their budget or stick with the cheaper trip.
+   */
+  tier_up_suggestion: VibeTierUpSuggestion | null;
+  meta: {
+    cacheHit: boolean;
+    attempts: number;
+    parseSuccess: boolean;
+    fallbackUsed: boolean;
+    durationMs: number;
+  };
+};
+
+export async function suggestDestinationsForVibe(params: {
+  vibe: string;
+  origin: string;
+  budgetPerPerson: number;
+  travelWindow: string;
+  partySize: number;
+  tripType: 'one-way' | 'round-trip';
+  extras?: string;
+}): Promise<SuggestDestinationsForVibeResult> {
+  return apiFetch<SuggestDestinationsForVibeResult>(
+    '/api/plan/suggest-for-vibe',
+    {
+      method: 'POST',
+      body: JSON.stringify(params),
+    },
+  );
 }
 
 // ─── Plan Interpret ──────────────────────────────────────────
@@ -306,10 +358,44 @@ export type LegRefresh = {
   updatedConstraints: any;
 };
 
+/**
+ * One-mode summary inside a ModeComparison — just enough fields for the
+ * inline side-by-side card. Not used to mutate trip state.
+ */
+export type ModeComparisonOption = {
+  mode: 'flight' | 'train';
+  operator: string;
+  price: number;
+  currency: string;
+  duration: string;
+  durationMinutes: number;
+  stops?: number;
+  bookingUrl?: string | null;
+};
+
+/**
+ * Side-by-side flight vs train comparison for a single leg. Triggered
+ * by the `compare_modes` tool when the user is curious about the OTHER
+ * mode without committing to a card change yet.
+ */
+export type ModeComparison = {
+  fromCity: string;
+  toCity: string;
+  date: string;
+  flight: ModeComparisonOption | null;
+  train: ModeComparisonOption | null;
+  cheapest: 'flight' | 'train' | 'same' | 'unavailable';
+  fastest: 'flight' | 'train' | 'same' | 'unavailable';
+  recommendation: 'flight' | 'train' | 'unavailable';
+  priceDifference: number;
+  timeDifference: number;
+};
+
 export type ChatResponse =
   | { type: 'answer'; reply: string }
   | { type: 'proposal'; reply: string; proposal: ChatProposal }
-  | { type: 'leg_refresh'; reply: string; refresh: LegRefresh };
+  | { type: 'leg_refresh'; reply: string; refresh: LegRefresh }
+  | { type: 'mode_comparison'; reply: string; comparison: ModeComparison };
 
 export async function planChat(params: {
   message: string;

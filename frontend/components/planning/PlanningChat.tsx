@@ -7,15 +7,17 @@ import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { interpretPlan, optimizeTrip, searchHotels, searchActivities, searchRestaurants, suggestDestinations, OptimizeResult, ActivitySuggestion, RestaurantSuggestion } from '@/lib/api';
-import { Trip, City, Transport, ScheduledEvent, Restaurant } from '@/lib/types';
+import { Trip, City, Transport, ScheduledEvent, Restaurant, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
+import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput } from '@/lib/parseDate';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
+import NightsPicker from './NightsPicker';
 
-type StepType = 'intent' | 'text' | 'vibes' | 'dates' | 'travelers' | 'budget' | 'notes' | 'origin' | 'roundtrip';
+type StepType = 'intent' | 'text' | 'vibes' | 'dates' | 'travelers' | 'budget' | 'notes' | 'origin' | 'roundtrip' | 'nights';
 
 type Step = {
   id: string;
@@ -26,7 +28,7 @@ type Step = {
 };
 
 // Two NEW steps added to every path:
-//   - origin: "Where are you flying from?" — required so we can compute
+//   - origin: "Where are you starting from?" — required so we can compute
 //     the home→first_city flight and test all destination permutations.
 //     Auto-fills from user profile if set (they confirm and move on).
 //   - roundtrip: "One-way or round-trip?" — determines if we add a
@@ -38,10 +40,11 @@ type Step = {
 // Place path: user knows where they want to go
 const PLACE_STEPS: Step[] = [
   { id: 'destination', question: "Where are you dreaming of going?", type: 'text', placeholder: 'Type a destination...' },
-  { id: 'origin', question: "Where are you flying from?", type: 'origin', placeholder: 'e.g. New York' },
+  { id: 'origin', question: "Where are you starting from?", type: 'origin', placeholder: 'e.g. New York' },
   { id: 'roundtrip', question: "One-way or round-trip?", type: 'roundtrip' },
   { id: 'vibe', question: "What's the vibe you're going for?", type: 'vibes' },
   { id: 'dates', question: "When are you thinking?", type: 'dates', skippable: true },
+  { id: 'nights', question: "How many nights total?", type: 'nights', skippable: true },
   { id: 'travelers', question: "How many people?", type: 'travelers' },
   { id: 'budget', question: "What's your budget looking like?", type: 'budget', skippable: true },
   { id: 'notes', question: "Anything else I should know?", type: 'notes', skippable: true, placeholder: 'E.g. "I want to avoid long layovers"' },
@@ -50,9 +53,10 @@ const PLACE_STEPS: Step[] = [
 // Vibe path: user wants to explore based on a feeling
 const VIBE_STEPS: Step[] = [
   { id: 'vibe', question: "What vibe are you chasing?", type: 'vibes' },
-  { id: 'origin', question: "Where are you flying from?", type: 'origin', placeholder: 'e.g. New York' },
+  { id: 'origin', question: "Where are you starting from?", type: 'origin', placeholder: 'e.g. New York' },
   { id: 'roundtrip', question: "One-way or round-trip?", type: 'roundtrip' },
   { id: 'dates', question: "When are you thinking?", type: 'dates', skippable: true },
+  { id: 'nights', question: "How many nights total?", type: 'nights', skippable: true },
   { id: 'travelers', question: "How many people?", type: 'travelers' },
   { id: 'budget', question: "What's your budget looking like?", type: 'budget', skippable: true },
   { id: 'notes', question: "Anything else I should know?", type: 'notes', skippable: true, placeholder: 'E.g. "Somewhere warm with good food"' },
@@ -61,9 +65,10 @@ const VIBE_STEPS: Step[] = [
 // Budget path: user leads with what they can spend
 const BUDGET_STEPS: Step[] = [
   { id: 'budget', question: "What's your total budget for this trip?", type: 'budget' },
-  { id: 'origin', question: "Where are you flying from?", type: 'origin', placeholder: 'e.g. New York' },
+  { id: 'origin', question: "Where are you starting from?", type: 'origin', placeholder: 'e.g. New York' },
   { id: 'roundtrip', question: "One-way or round-trip?", type: 'roundtrip' },
   { id: 'dates', question: "When are you thinking?", type: 'dates', skippable: true },
+  { id: 'nights', question: "How many nights total?", type: 'nights', skippable: true },
   { id: 'travelers', question: "How many people?", type: 'travelers' },
   { id: 'vibe', question: "Any vibe in mind, or totally open?", type: 'vibes', skippable: true },
   { id: 'notes', question: "Anything else I should know?", type: 'notes', skippable: true, placeholder: 'E.g. "Europe preferred" or "beach access a must"' },
@@ -208,6 +213,12 @@ export default function PlanningChat() {
     if (selectedIntent === 'chat') {
       setIntent('chat');
       setChatMode(true);
+      // Chat-mode inputs always name a destination (or the AI extracts
+      // one from the raw text). Treat it as the destination-first mode
+      // for downstream validation + routing purposes. If we later
+      // support "vibe-chat" (user describes a feeling in free text
+      // without naming a city), add a parser that flips this to 'vibe'.
+      setAnswer('planningMode', 'destination');
 
       setMessages((prev) => [
         ...prev,
@@ -226,6 +237,17 @@ export default function PlanningChat() {
 
     // Guided paths
     setIntent(selectedIntent);
+
+    // Record the planning mode as an explicit answer field so the
+    // Find-my-trip handler + validation can branch on it without
+    // re-inferring from the active step array. Mode = 'destination'
+    // for the "I have a place" intent, otherwise the literal intent.
+    const modeMap: Record<string, 'destination' | 'vibe' | 'budget'> = {
+      place: 'destination',
+      vibe: 'vibe',
+      budget: 'budget',
+    };
+    setAnswer('planningMode', modeMap[selectedIntent]);
 
     const labels: Record<string, string> = {
       place: 'I have a place in mind',
@@ -271,6 +293,22 @@ export default function PlanningChat() {
   // Find the next step whose answer isn't already in the store — so that if
   // the AI extracted budget/vibe/travelers from the user's destination text
   // we don't re-ask questions we already know the answers to.
+  /**
+   * True when a date range has both ISO start and end (concrete enough
+   * to derive a duration without asking). False for vague picks like
+   * "Next month" / "I'm flexible" where dateRange.start holds the
+   * label and end is empty — those need an explicit nights step.
+   */
+  const hasConcreteDateRange = (a: PlanningAnswers): boolean => {
+    const r = a.dateRange;
+    if (!r?.start || !r?.end) return false;
+    if (a.flexible === true) return false;
+    const iso = /^\d{4}-\d{2}-\d{2}$/;
+    if (!iso.test(r.start) || !iso.test(r.end)) return false;
+    const ms = new Date(r.end).getTime() - new Date(r.start).getTime();
+    return ms > 0;
+  };
+
   const isStepAlreadyAnswered = (stepId: string): boolean => {
     switch (stepId) {
       case 'vibe':     return !!answers.vibe;
@@ -278,6 +316,11 @@ export default function PlanningChat() {
       case 'travelers': return typeof answers.travelers === 'number';
       case 'budget':   return typeof answers.budget === 'number';
       case 'budgetPerPerson': return typeof answers.budgetPerPerson === 'boolean';
+      // Skip the "How many nights?" step if either:
+      //   - the user gave concrete start + end dates (we derive nights
+      //     from the range), OR
+      //   - they already explicitly answered the nights question.
+      case 'nights':   return typeof answers.nights === 'number' || hasConcreteDateRange(answers);
       default:         return false;
     }
   };
@@ -290,6 +333,31 @@ export default function PlanningChat() {
     }
 
     if (nextIndex >= steps.length) {
+      // Race-fix: validate BEFORE emitting the "Perfect" success message.
+      // Previously "Perfect — I've got everything" always fired here, then
+      // if Find-my-trip later failed we'd show BOTH "Perfect" and "Sorry,
+      // I ran into a problem" on the same screen — deeply confusing.
+      // Now we check whether we actually have everything the handler
+      // needs for the current planning mode. If not, we silently advance
+      // no further (the user sees the last real question, not a false
+      // success). Validation itself is mode-aware (see validateTripInputs).
+      const errors = validateTripInputs(answers);
+      if (errors.length > 0) {
+        // Validation failed — don't emit "Perfect". The user will see the
+        // preceding step's question; once they fill it we'll re-advance.
+        // We surface a gentle hint so they know what's missing.
+        setTimeout(() => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: nextId(),
+              role: 'assistant',
+              content: `Almost there — I still need: ${errors.join(', ')}.`,
+            },
+          ]);
+        }, 300);
+        return;
+      }
       setIsComplete(true);
       setTimeout(() => {
         setMessages((prev) => [
@@ -307,6 +375,54 @@ export default function PlanningChat() {
         { id: nextId(), role: 'assistant', content: steps[nextIndex].question, stepId: steps[nextIndex].id },
       ]);
     }, 600);
+  };
+
+  /**
+   * Mode-aware validator. Each planning mode has a different minimum
+   * set of fields required before we can generate a trip. CRITICAL:
+   * this list must match what the downstream code actually needs —
+   * being too strict breaks existing flows (e.g. dates is skippable
+   * in destination mode, so requiring it here blocks "Perfect" for
+   * users who skip the date picker).
+   *
+   *   destination : destinations + origin + travelers
+   *   vibe        : vibe + origin + budget + dates + travelers
+   *                 (per spec — vibe mode's AI suggestion needs all
+   *                  five to return useful destinations)
+   *   budget      : budget + origin + travelers
+   *
+   * Returns an array of human-readable error strings. Empty array
+   * means valid. Called from both advanceToNextStep (for the race
+   * fix) and handleFindTrip (last-chance check before API calls).
+   */
+  const validateTripInputs = (a: PlanningAnswers): string[] => {
+    const mode = a.planningMode ?? 'destination';
+    const errors: string[] = [];
+
+    // Common to all modes — origin and travelers are always needed
+    // downstream (for flight search + hotel room count).
+    if (!a.origin || !a.origin.trim()) errors.push('a starting city');
+    if (typeof a.travelers !== 'number' || a.travelers < 1) errors.push('how many people');
+
+    if (mode === 'destination') {
+      if (!a.destinations || a.destinations.length === 0) {
+        errors.push('at least one destination city');
+      }
+      // dates + budget + vibe are all skippable in PLACE_STEPS — leave
+      // them optional so users who click Skip still reach "Perfect".
+    } else if (mode === 'vibe') {
+      // Per spec: vibe, origin, budget, travelWindow, partySize are
+      // all required before we can call suggestDestinationsForVibe.
+      if (!a.vibe || !a.vibe.trim()) errors.push('a vibe');
+      if (typeof a.budget !== 'number' || a.budget <= 0) errors.push('a budget');
+      if (!a.dateRange?.start) errors.push('travel dates');
+      // Destination is intentionally NOT required — AI suggests one.
+    } else if (mode === 'budget') {
+      if (typeof a.budget !== 'number' || a.budget <= 0) errors.push('a budget');
+      // dates + vibe optional in BUDGET_STEPS.
+    }
+
+    return errors;
   };
 
   // Guided text submit (destination, notes)
@@ -463,7 +579,7 @@ export default function PlanningChat() {
       if (typeof parsed.budgetPerPerson === 'boolean' && answers.budgetPerPerson === undefined) {
         setAnswer('budgetPerPerson', parsed.budgetPerPerson);
       }
-      // Home anchor: AI can extract origin ("flying from NYC") and
+      // Home anchor: AI can extract origin ("starting from NYC") and
       // returnToHome ("round-trip") from the same one-shot sentence, so
       // users don't need to go through separate guided steps when they
       // typed everything at once. We also pre-fill the airports from the
@@ -564,9 +680,34 @@ export default function PlanningChat() {
   const handleDatesSelect = (start: string, end: string, flexible: boolean) => {
     setAnswer('dateRange', { start, end });
     setAnswer('flexible', flexible);
+    // If both ends are concrete ISO dates, derive nights right here so
+    // the nights step auto-skips downstream. (parseDateInput in chat-mode
+    // submit may not produce a usable end, so this only fires when the
+    // user picked specific dates from the picker / typed a real range.)
+    const iso = /^\d{4}-\d{2}-\d{2}$/;
+    if (!flexible && iso.test(start) && iso.test(end) && start !== end) {
+      const ms = new Date(end).getTime() - new Date(start).getTime();
+      const nights = Math.max(1, Math.round(ms / 86_400_000));
+      setAnswer('nights', nights);
+    }
     setMessages((prev) => [
       ...prev,
       { id: nextId(), role: 'user', content: start },
+    ]);
+    advanceToNextStep(currentStepIndex);
+  };
+
+  /**
+   * Apply a nights selection. Triggered either from the inline
+   * NightsPicker or by typing a number in the chat bar when the
+   * current step is `nights`. Always coerced to a positive integer.
+   */
+  const handleNightsSelect = (nights: number) => {
+    const n = Math.max(1, Math.round(nights));
+    setAnswer('nights', n);
+    setMessages((prev) => [
+      ...prev,
+      { id: nextId(), role: 'user', content: `${n} night${n === 1 ? '' : 's'}`, stepId: 'nights' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -575,7 +716,7 @@ export default function PlanningChat() {
     setAnswer('travelers', count);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: count === 1 ? 'Just me' : `${count} people` },
+      { id: nextId(), role: 'user', content: count === 1 ? 'Just me' : `${count} people`, stepId: 'travelers' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -608,9 +749,67 @@ export default function PlanningChat() {
     setAnswer('returnToHome', roundTrip);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: roundTrip ? 'Round-trip' : 'One-way' },
+      { id: nextId(), role: 'user', content: roundTrip ? 'Round-trip' : 'One-way', stepId: 'roundtrip' },
     ]);
     advanceToNextStep(currentStepIndex);
+  };
+
+  /**
+   * Re-extract a structured answer from a picker-driven message that
+   * the user just edited inline. Without this, editing a bubble that
+   * said "Just me" to "3 people" only changed the displayed text — the
+   * underlying `answers.travelers` stayed at 1, so the optimizer was
+   * built with the stale value. We tag picker replies with `stepId` so
+   * we know which answer to update; this helper re-parses the new text
+   * for the supported step types and writes back via setAnswer.
+   *
+   * Returns true if the edit was successfully extracted (and answers
+   * were updated). False means we couldn't parse — caller can warn or
+   * fall back to letting the bubble drift out of sync (current behavior
+   * for step types we don't yet handle: dates, budget, vibes, intent).
+   */
+  const reExtractAnswerFromEdit = (stepId: string | undefined, text: string): boolean => {
+    if (!stepId) return false;
+    const t = text.trim().toLowerCase();
+    if (!t) return false;
+
+    if (stepId === 'travelers') {
+      // "just me" / "solo" → 1
+      if (/^(just\s+me|solo|me|alone)$/.test(t)) {
+        setAnswer('travelers', 1);
+        return true;
+      }
+      // First number in the string: "3", "3 people", "3 of us", "group of 4"
+      const match = t.match(/\d+/);
+      if (match) {
+        const n = Math.max(1, parseInt(match[0], 10));
+        setAnswer('travelers', n);
+        return true;
+      }
+      return false;
+    }
+
+    if (stepId === 'nights') {
+      const match = t.match(/\d+/);
+      if (match) {
+        const n = Math.max(1, parseInt(match[0], 10));
+        setAnswer('nights', n);
+        return true;
+      }
+      // "two weeks" / "weekend" / "long weekend" — common informal phrasings
+      if (/two\s*weeks?|14\s*nights?/.test(t)) { setAnswer('nights', 14); return true; }
+      if (/long\s*weekend/.test(t)) { setAnswer('nights', 4); return true; }
+      if (/weekend/.test(t)) { setAnswer('nights', 3); return true; }
+      return false;
+    }
+
+    if (stepId === 'roundtrip') {
+      if (/round/.test(t)) { setAnswer('returnToHome', true); return true; }
+      if (/one[\s-]?way/.test(t)) { setAnswer('returnToHome', false); return true; }
+      return false;
+    }
+
+    return false;
   };
 
   const handleSkip = () => {
@@ -633,20 +832,68 @@ export default function PlanningChat() {
       price: 0,
     };
 
-    // Helper: extract a Transport from an optimizer leg's comparison data
+    // Helper: convert one LegOption (the unified shape from
+    // searchLegOptions) into a Transport. Used for both the main
+    // transport on the leg's "from" city and any alternatives stored
+    // alongside it.
+    const optionToTransport = (
+      opt: any,
+      fromCity: string,
+      toCity: string,
+    ): Transport => ({
+      mode: opt.mode,
+      operator: opt.operator ?? '',
+      duration: opt.duration ?? '',
+      price: opt.price ?? 0,
+      from: fromCity,
+      to: toCity,
+      departTime: opt.departTime ?? undefined,
+      arriveTime: opt.arriveTime ?? undefined,
+      layovers: opt.mode === 'flight' ? (opt.stops ?? 0) : 0,
+      bookingUrl: opt.bookingUrl ?? undefined,
+      flightNumber: opt.mode === 'flight' ? (opt.flightNumber ?? undefined) : undefined,
+    });
+
+    // Helper: extract a Transport from an optimizer leg.
+    //
+    // Two data shapes are supported:
+    //   - leg.options (preferred): unified LegOption[] from
+    //     searchLegOptions, populated for the winning route. Contains
+    //     up to 4 sorted-by-price alternatives across both modes.
+    //   - leg.comparison (legacy): { flightOption, trainOption,
+    //     recommendation } from compareLeg. Used as a fallback when
+    //     enrichment didn't run (e.g. error paths, single-mode legs).
+    //
+    // Always builds: main = cheapest (options[0] or recommended), with
+    // remaining options[1..] (or the non-recommended mode) attached as
+    // alternatives so the Connector card can offer them as one-click
+    // swaps.
     const legToTransport = (leg: any, fromCity: string, toCity: string): Transport => {
+      // Preferred path: top-4 options array.
+      if (Array.isArray(leg?.options) && leg.options.length > 0) {
+        const [main, ...rest] = leg.options;
+        const mainTransport = optionToTransport(main, fromCity, toCity);
+        mainTransport.alternatives = rest.map((opt: any) =>
+          optionToTransport(opt, fromCity, toCity),
+        );
+        return mainTransport;
+      }
+
+      // Fallback path: legacy comparison shape (flightOption + trainOption).
       const comp = leg?.comparison;
-      if (!comp) return { ...emptyTransport, from: fromCity, to: toCity };
+      // No comparison at all (enrichment crashed before getting here): mark
+      // unavailable so the user sees an explicit "no transport" card rather
+      // than an empty $0 pill.
+      if (!comp) return { ...emptyTransport, from: fromCity, to: toCity, unavailable: true };
 
       const rec = comp.recommendation; // 'flight' | 'train' | 'unavailable'
       const flight = comp.flightOption;
       const train = comp.trainOption;
-
-      // Pick the recommended option, fall back to whichever exists
       const useFlight = rec === 'flight' || (!train && flight);
       const picked = useFlight ? flight : train;
-
-      if (!picked) return { ...emptyTransport, from: fromCity, to: toCity };
+      // Both upstreams returned nothing (Duffel found no offers AND the rail
+      // provider had no coverage). Surface to the UI explicitly.
+      if (!picked) return { ...emptyTransport, from: fromCity, to: toCity, unavailable: true };
 
       const mode: 'flight' | 'train' = useFlight ? 'flight' : 'train';
       const durationMin = picked.durationMinutes ?? 0;
@@ -655,15 +902,17 @@ export default function PlanningChat() {
       const durationStr = hours > 0
         ? `${hours}h ${mins > 0 ? `${mins}m` : ''}`
         : `${mins}m`;
-
-      // Parse departure/arrival times from ISO strings
       const departIso = picked.departure ?? '';
       const arriveIso = picked.arrival ?? '';
-      const departTime = departIso ? new Date(departIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : undefined;
-      const arriveTime = arriveIso ? new Date(arriveIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : undefined;
+      const departTime = departIso
+        ? new Date(departIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        : undefined;
+      const arriveTime = arriveIso
+        ? new Date(arriveIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        : undefined;
       const departDate = departIso ? departIso.split('T')[0] : undefined;
 
-      // Build alternatives from the non-recommended option
+      // Build alternatives from the non-recommended option (legacy 1-alt path).
       const alternatives: Transport[] = [];
       const other = useFlight ? train : flight;
       if (other && other.price != null) {
@@ -680,8 +929,12 @@ export default function PlanningChat() {
           price: other.price ?? 0,
           from: fromCity,
           to: toCity,
-          departTime: otherDepartIso ? new Date(otherDepartIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : undefined,
-          arriveTime: otherArriveIso ? new Date(otherArriveIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : undefined,
+          departTime: otherDepartIso
+            ? new Date(otherDepartIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+            : undefined,
+          arriveTime: otherArriveIso
+            ? new Date(otherArriveIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+            : undefined,
           bookingUrl: other.bookingUrl || undefined,
         });
       }
@@ -1027,7 +1280,7 @@ export default function PlanningChat() {
     if (!hasOrigin) {
       missing.push({
         id: 'origin',
-        question: 'Where are you flying from?',
+        question: 'Where are you starting from?',
         type: 'origin',
         placeholder: 'e.g. New York',
       });
@@ -1162,56 +1415,52 @@ export default function PlanningChat() {
 
       let trip: Trip;
 
-      // Optimizer needs ≥2 cities. For single-city trips, build the trip
-      // directly without routing (just hotel + dates).
-      if (parsed.destinations.length < 2) {
-        const cityName = parsed.destinations[0];
-        const arrival = startDate;
-        const departureDate = new Date(startDate);
-        departureDate.setDate(departureDate.getDate() + 3);
-        const departure = departureDate.toISOString().split('T')[0];
+      // Always route through optimizeTrip — even for single-city trips
+      // (typical of vibe-first flows, e.g. "Reykjavik for adventure").
+      // The backend now accepts min(1) city when origin is set, so the
+      // home→first_city + last_city→home legs get built correctly.
+      //
+      // Previously we had a single-city fork that skipped the optimizer
+      // entirely and produced a bare trip with no transport. That meant
+      // users who started in NYC and picked one destination saw no home
+      // card and a $0 transport cost. Fixed by removing the fork.
+      setFindTripStatus('Finding the best routes...');
 
-        trip = {
-          title: cityName,
-          status: 'planning',
-          totalCost: 0,
-          savings: 0,
-          travelers,
-          cities: [
-            {
-              name: cityName,
-              country: '',
-              dates: { arrival, departure },
-              transportIn: { mode: 'flight', operator: '', duration: '', price: 0 },
-              transportOut: { mode: 'flight', operator: '', duration: '', price: 0 },
-              hotel: { name: '', rating: 0, pricePerNight: 0, area: '' },
-              hotels: [],
-              selectedHotelIndex: 0,
-              activities: [],
-              restaurants: [],
-              vibes: [],
-            },
-          ],
-          savingsTips: [],
-        };
-      } else {
-        // Step 2: Optimize route
-        setFindTripStatus('Finding the best routes...');
-        const result = await optimizeTrip({
-          cities: parsed.destinations.map((d: string) => ({ name: d })),
-          startDate,
-          travelers,
-          budget: totalBudget,
-          // Pass origin through so backend runs full-permutation
-          // optimization AND computes home→first_city (+ optional
-          // last_city→home) legs.
-          origin: answers.origin ?? undefined,
-          originAirports: answers.originAirports ?? undefined,
-          returnToHome: answers.returnToHome ?? true,
-        });
-
-        trip = buildTripFromOptimize(result, travelers);
+      // Resolve total nights for the optimizer:
+      //   1. answers.nights (set explicitly via NightsPicker)
+      //   2. derive from concrete date range (start ↔ end ISO dates)
+      //   3. omit (backend uses 2-nights-per-city default)
+      //
+      // Hierarchy matters because some flows set both — if the user
+      // picked dates AND nights, prefer their explicit nights pick.
+      let totalNightsForOptimize: number | undefined;
+      if (typeof answers.nights === 'number' && answers.nights > 0) {
+        totalNightsForOptimize = answers.nights;
+      } else if (answers.dateRange?.start && answers.dateRange?.end) {
+        const iso = /^\d{4}-\d{2}-\d{2}$/;
+        if (iso.test(answers.dateRange.start) && iso.test(answers.dateRange.end)) {
+          const ms =
+            new Date(answers.dateRange.end).getTime() -
+            new Date(answers.dateRange.start).getTime();
+          if (ms > 0) totalNightsForOptimize = Math.max(1, Math.round(ms / 86_400_000));
+        }
       }
+
+      const result = await optimizeTrip({
+        cities: parsed.destinations.map((d: string) => ({ name: d })),
+        startDate,
+        travelers,
+        budget: totalBudget,
+        // Pass origin through so backend runs full-permutation
+        // optimization AND computes home→first_city (+ optional
+        // last_city→home) legs.
+        origin: answers.origin ?? undefined,
+        originAirports: answers.originAirports ?? undefined,
+        returnToHome: answers.returnToHome ?? true,
+        totalNights: totalNightsForOptimize,
+      });
+
+      trip = buildTripFromOptimize(result, travelers);
 
       // Compute a per-night hotel cap from the total budget.
       // Rule of thumb: hotels get ~40% of the total trip budget. For a
@@ -1350,6 +1599,13 @@ export default function PlanningChat() {
         trip.budget = totalBudget;
       }
 
+      // Vibe-first only: attach Claude's "bump your budget by $X" hint
+      // when present so the results page can render a banner. Caller
+      // passes this in via parsed.vibeTierUp; absent for non-vibe flows.
+      if (parsed.vibeTierUp) {
+        trip.vibeTierUp = parsed.vibeTierUp;
+      }
+
       setTrip(trip);
       router.push('/results');
     } catch (err: unknown) {
@@ -1389,6 +1645,90 @@ export default function PlanningChat() {
     setFindTripError(null);
 
     try {
+      // Last-chance validation — catches anyone who reached the "Find
+      // my trip" button through a non-standard path (e.g. chat mode
+      // that skipped steps). The advanceToNextStep race guard already
+      // prevents "Perfect" from appearing without valid inputs, but
+      // this double-checks before any expensive API work.
+      const validationErrors = validateTripInputs(answers);
+      if (validationErrors.length > 0) {
+        throw new Error(`Missing: ${validationErrors.join(', ')}`);
+      }
+
+      const mode = answers.planningMode ?? 'destination';
+
+      // VIBE MODE — the destination comes from Claude, not the user.
+      // Call /api/plan/suggest-for-vibe, store ALL 3-5 suggestions
+      // (safeguard so a future "pick one" UI doesn't need a re-call),
+      // and proceed with the top-ranked one.
+      //
+      // UI decision: we auto-pick the top-ranked suggestion for now
+      // rather than rendering a picker card. Rationale:
+      //   - Claude already ranks by fit; auto-picking preserves the
+      //     conversational flow (no extra tap for the happy path)
+      //   - The full list is stored in answers.vibeSuggestions, so
+      //     adding a "Here's 3-5 options, pick one" card later is pure
+      //     additive UI — no re-architecture
+      //   - If the auto-pick is wrong, the AI chat on the results page
+      //     can swap destinations once that tool ships (see ROADMAP
+      //     "Post-results add/remove/replace cities")
+      // Reconsider this when real user data comes in on pick-accuracy.
+      if (mode === 'vibe' && (answers.destinations?.length ?? 0) === 0) {
+        setFindTripStatus('Finding destinations that match your vibe...');
+        const result = await suggestDestinationsForVibe({
+          vibe: answers.vibe!,
+          origin: answers.origin!,
+          budgetPerPerson: answers.budgetPerPerson
+            ? answers.budget!
+            // If user gave a total budget for a group, convert to per-person
+            // for the prompt (Claude reasons about per-person costs).
+            : Math.round(answers.budget! / Math.max(1, answers.travelers ?? 1)),
+          travelWindow: answers.dateRange
+            ? `${answers.dateRange.start} to ${answers.dateRange.end}`
+            : 'flexible',
+          partySize: answers.travelers!,
+          tripType: answers.returnToHome === false ? 'one-way' : 'round-trip',
+          extras: answers.extraNotes,
+        });
+
+        // No suggestions — Claude ran + fallback empty (non-Adventure
+        // vibe). Surface the reasoning_summary as the user-visible
+        // error rather than a generic "try again".
+        if (!result.suggestions.length) {
+          throw new Error(result.reasoning_summary);
+        }
+
+        // Save all suggestions for the future picker UI + analytics.
+        setAnswer('vibeSuggestions', result.suggestions);
+        setAnswer('vibeSuggestionIndex', 0);
+
+        const topPick = result.suggestions[0];
+        setAnswer('destinations', [topPick.destination_city]);
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextId(),
+            role: 'assistant',
+            content: `Based on your vibe, I'm building a trip to ${topPick.destination_city}, ${topPick.destination_country}. ${topPick.why_it_fits_vibe}`,
+          },
+        ]);
+
+        await runOptimizeAndBuild({
+          destinations: [topPick.destination_city],
+          travelers: answers.travelers ?? 1,
+          budget: answers.budget,
+          dates: answers.dateRange
+            ? { start: answers.dateRange.start, end: answers.dateRange.end }
+            : undefined,
+          vibe: answers.vibe,
+          // Carry the budget-bump hint through to the trip so the
+          // results page can surface it as a banner.
+          vibeTierUp: result.tier_up_suggestion,
+        });
+        return;
+      }
+
       // If destinations are already locked in (from the early interpret call
       // during the destination step, or from chat mode), skip the second
       // interpret call and go straight to optimize.
@@ -1521,8 +1861,9 @@ export default function PlanningChat() {
       case 'travelers': return 'Or type how many people, e.g. "4"';
       case 'budget':  return 'Or type your budget, e.g. "$1500"';
       case 'notes':   return currentStep.placeholder || 'Anything else?';
-      case 'origin':  return currentStep.placeholder || 'Where are you flying from?';
+      case 'origin':  return currentStep.placeholder || 'Where are you starting from?';
       case 'roundtrip': return 'Or type "round-trip" or "one-way"';
+      case 'nights': return 'Or type a number, e.g. "7"';
       default:        return 'Type a message...';
     }
   })();
@@ -1583,6 +1924,26 @@ export default function PlanningChat() {
         const match = value.match(/\d+/);
         const count = match ? Math.min(parseInt(match[0], 10), 99) : 1;
         handleTravelersSelect(count || 1);
+        setTextInput('');
+        return;
+      }
+      case 'nights': {
+        // Accept "7", "10 nights", "two weeks" → 14, "a week" → 7. Numeric
+        // input wins; otherwise look for word→number patterns. Fall back
+        // to 7 (a typical week-long trip) if nothing matches.
+        const lower = value.toLowerCase();
+        const numMatch = lower.match(/\d+/);
+        let n = numMatch ? parseInt(numMatch[0], 10) : 0;
+        if (!n) {
+          if (/\bweek\b/.test(lower)) n = 7;
+          else if (/two\s*weeks|2\s*weeks|fortnight/.test(lower)) n = 14;
+          else if (/weekend/.test(lower)) n = 3;
+          else n = 7; // sensible default
+        }
+        // Clamp to a reasonable range so freeform "1000 nights" doesn't
+        // flow into the optimizer and confuse downstream date math.
+        n = Math.max(1, Math.min(n, 90));
+        handleNightsSelect(n);
         setTextInput('');
         return;
       }
@@ -1655,6 +2016,7 @@ export default function PlanningChat() {
                                 m.id === msg.id ? { ...m, content: trimmed } : m
                               )
                             );
+                            reExtractAnswerFromEdit(msg.stepId, trimmed);
                           }
                           setEditingMsgId(null);
                         }
@@ -1682,6 +2044,7 @@ export default function PlanningChat() {
                                 m.id === msg.id ? { ...m, content: trimmed } : m
                               )
                             );
+                            reExtractAnswerFromEdit(msg.stepId, trimmed);
                           }
                           setEditingMsgId(null);
                         }}
@@ -1756,6 +2119,9 @@ export default function PlanningChat() {
               )}
               {currentStep.type === 'dates' && (
                 <DatePicker onSelect={handleDatesSelect} onSkip={handleSkip} />
+              )}
+              {currentStep.type === 'nights' && (
+                <NightsPicker onSelect={handleNightsSelect} onSkip={currentStep.skippable ? handleSkip : undefined} />
               )}
               {currentStep.type === 'travelers' && (
                 <TravelersPicker onSelect={handleTravelersSelect} />

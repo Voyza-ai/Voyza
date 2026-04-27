@@ -12,7 +12,7 @@ import {
 import { City } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { getVibeColor, VIBE_LABEL } from '@/lib/cityTheme';
-import { effectiveHotel } from '@/lib/tripTotals';
+import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
 import { useTripStore } from '@/store/tripStore';
 
 type CityCardProps = {
@@ -54,8 +54,10 @@ export default function CityCard({
     (parseLocal(city.dates.departure).getTime() - parseLocal(city.dates.arrival).getTime()) /
       (1000 * 60 * 60 * 24)
   );
+  const priceMode = useTripStore((s) => s.priceMode);
+  const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
   const eff = effectiveHotel(city);
-  const stayTotal = Math.round(eff.total);
+  const stayTotal = displayAmount(eff.total, priceMode, travelers);
 
   return (
     <motion.div
@@ -172,7 +174,10 @@ export default function CityCard({
 
 function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: number; color: { bg: string; text: string; border: string; name: string } }) {
   const cycleHotel = useTripStore((s) => s.cycleHotel);
+  const priceMode = useTripStore((s) => s.priceMode);
+  const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
   const eff = effectiveHotel(city);
+  const perNight = displayAmount(eff.pricePerNight, priceMode, travelers);
   const isCustom = eff.isCustom;
   const ranked = !isCustom && city.hotels.length > 1;
   const [slideDir, setSlideDir] = useState<1 | -1>(1);
@@ -269,7 +274,7 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
                 </div>
               )}
               <div className="text-xs mt-0.5 font-medium" style={{ color: `${color.text}aa` }}>
-                ${Math.round(eff.pricePerNight)}/night
+                ${perNight.toLocaleString()}/night
               </div>
             </div>
           </div>

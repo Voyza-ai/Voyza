@@ -9,21 +9,12 @@ import {
   TripConstraints,
 } from '../services/constraints';
 import { searchLegOptions, LegOption } from '../services/legOptions';
+import { compareLeg } from '../services/compareLeg';
 import { getCityCountry } from '../data/cityCountries';
 
-const router = Router();
+import { getAnthropicSafe } from '../services/anthropic';
 
-// Lazy Anthropic client getter — returns null if key not set or placeholder
-function getAnthropicSafe() {
-  const key = env.ANTHROPIC_API_KEY;
-  if (!key || key === 'your_anthropic_api_key' || key.startsWith('your_')) return null;
-  try {
-    const { getAnthropic } = require('../services/anthropic');
-    return getAnthropic();
-  } catch {
-    return null;
-  }
-}
+const router = Router();
 
 /**
  * Extract a JSON object/array from free-form AI output. Handles:
@@ -211,7 +202,41 @@ Return JSON with:
   }),
 );
 
+// ─── POST /api/plan/suggest-for-vibe ─────────────────────────
+//
+// Vibe-first flow: user picks "I'm chasing a vibe" on the opening
+// question, the planner collects vibe + origin + budget + window +
+// party size, and THIS endpoint returns 3-5 real destinations that fit.
+//
+// Thin HTTP wrapper over `services/destinationSuggester.ts`. The
+// service owns caching, retry, fallback, and structured logging — we
+// just validate the incoming shape and pass it through.
+const suggestForVibeSchema = z.object({
+  vibe: z.string().min(1),
+  origin: z.string().min(1),
+  budgetPerPerson: z.number().positive(),
+  travelWindow: z.string().min(1),
+  partySize: z.number().int().positive(),
+  tripType: z.enum(['one-way', 'round-trip']),
+  extras: z.string().optional(),
+});
+
+router.post(
+  '/suggest-for-vibe',
+  asyncHandler(async (req, res) => {
+    const input = suggestForVibeSchema.parse(req.body);
+    const { suggestDestinationsForVibe } = await import(
+      '../services/destinationSuggester'
+    );
+    const result = await suggestDestinationsForVibe(input);
+    res.json(result);
+  }),
+);
+
 // ─── POST /api/plan/suggest-destinations ─────────────────────
+// Legacy heuristic + Claude-reranker used by the destination-first
+// flow when the user's text is vague. Kept for backward compat;
+// vibe-first paths should call /suggest-for-vibe instead.
 const suggestSchema = z.object({
   budget: z.number().optional(),
   vibe: z.string().optional(),
@@ -467,6 +492,23 @@ const CHAT_TOOLS = [
       required: ['from', 'to', 'explanation'],
     },
   },
+  {
+    name: 'compare_modes',
+    description:
+      'Surface a side-by-side flight-vs-train comparison for a specific leg. Use when the user is curious about the OTHER mode without committing to a card change yet — "are there any flights?" (when the leg currently uses train), "what about trains?" (when leg uses flight), "is it cheaper to fly or take the train?", "compare flight and train". Returns BOTH cheapest flight AND cheapest train side-by-side so the user can decide. Use this BEFORE show_transport_options when the user is exploring; use show_transport_options when they explicitly want to switch.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        from: { type: 'string', description: 'Origin city (must match a city in the trip).' },
+        to: { type: 'string', description: 'Destination city (must match a city in the trip).' },
+        explanation: {
+          type: 'string',
+          description: 'One-sentence framing like "Here\'s flight vs train for Rome → Florence — flights save 4 hours but cost $80 more."',
+        },
+      },
+      required: ['from', 'to', 'explanation'],
+    },
+  },
 ];
 
 /**
@@ -535,12 +577,13 @@ router.post(
 
     const systemPrompt = `You are Voyza AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
 
-You have five tools:
+You have six tools:
 1. answer_only — for plain questions, explanations, small talk, AND for clarifying questions when the user's request is ambiguous about which leg.
 2. pin_city_dates — when the user wants a city locked to specific dates.
 3. set_min_days — when the user wants a minimum stay in a city.
 4. set_transport_window — when the user gives a TIME BOUND on a specific leg ("no flights before 5pm", "arrive by 3pm").
-5. show_transport_options — when the user wants to SEE alternatives for a specific leg without a time constraint ("are there more flights?", "show me trains", "what are my options?", "is there a cheaper way?").
+5. show_transport_options — when the user wants to SWAP transport for a specific leg ("show me cheaper flights", "find me other options"). Updates the card with top-4 mixed-mode options.
+6. compare_modes — when the user is CURIOUS about the OTHER mode without committing yet ("are there any flights?" when the leg uses train, "what about trains?" when leg uses flight, "is it cheaper to fly?"). Returns flight + train side-by-side so the user can decide.
 
 ALWAYS pick exactly one tool per turn.
 
@@ -551,7 +594,8 @@ CRITICAL: Many trips have multiple legs (e.g. City A → City B → City C has T
 
 Decision guide:
 - User asks about times/bounds → set_transport_window
-- User asks for alternatives / more options / cheaper → show_transport_options
+- User is curious about the OTHER mode (flight vs train) for the same leg → compare_modes
+- User wants to swap to alternatives / more options / cheaper → show_transport_options
 - User asks a general question, wants explanation, or their request is ambiguous → answer_only
 - User wants to lock a city to specific dates → pin_city_dates
 - User wants more time in a city → set_min_days
@@ -609,6 +653,102 @@ ${JSON.stringify(tripSummary, null, 2)}
     const existingConstraints: TripConstraints = currentTrip.constraints ?? {};
     let constraintUpdate: TripConstraints = {};
     let replyText = toolInput.explanation ?? 'I have a proposed change for you.';
+
+    // --- compare_modes: side-by-side flight vs train for one leg.
+    //     Informational only — does NOT mutate the trip. Frontend renders
+    //     a small comparison card inline in chat. The user can then ask
+    //     to switch (which routes through show_transport_options) or
+    //     accept the current pick.
+    if (toolName === 'compare_modes') {
+      const fromLower = String(toolInput.from).toLowerCase();
+      const toLower = String(toolInput.to).toLowerCase();
+      const fromCity = (currentTrip.cities ?? []).find(
+        (c: any) => c.name.toLowerCase() === fromLower,
+      );
+      const toCity = (currentTrip.cities ?? []).find(
+        (c: any) => c.name.toLowerCase() === toLower,
+      );
+      if (!fromCity || !toCity) {
+        return res.json({
+          type: 'answer',
+          reply: `I couldn\'t find a ${toolInput.from} → ${toolInput.to} leg in your trip.`,
+        });
+      }
+
+      const travelDate =
+        fromCity.dates?.departure ?? fromCity.departure_date ?? null;
+      if (!travelDate) {
+        return res.json({
+          type: 'answer',
+          reply: `I need a departure date for ${fromCity.name} before I can compare options.`,
+        });
+      }
+
+      const cmp = await compareLeg({
+        origin: fromCity.name,
+        destination: toCity.name,
+        date: travelDate,
+        travelers: currentTrip.travelers ?? 1,
+        originCountry: fromCity.country ?? getCityCountry(fromCity.name),
+        destinationCountry: toCity.country ?? getCityCountry(toCity.name),
+      }).catch(() => null);
+
+      if (!cmp || (!cmp.flightOption && !cmp.trainOption)) {
+        return res.json({
+          type: 'answer',
+          reply: `I couldn\'t find any flight or train options for ${fromCity.name} → ${toCity.name} on ${travelDate}.`,
+        });
+      }
+
+      const fmtDuration = (mins: number) => {
+        if (!mins || !Number.isFinite(mins)) return '—';
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        return m > 0 ? `${h}h ${m}m` : `${h}h`;
+      };
+
+      const flightSummary = cmp.flightOption
+        ? {
+            mode: 'flight' as const,
+            operator: cmp.flightOption.carrier,
+            price: cmp.flightOption.price,
+            currency: cmp.flightOption.currency,
+            duration: fmtDuration(cmp.flightOption.durationMinutes),
+            durationMinutes: cmp.flightOption.durationMinutes,
+            stops: cmp.flightOption.stops,
+            bookingUrl: cmp.flightOption.bookingUrl ?? null,
+          }
+        : null;
+
+      const trainSummary = cmp.trainOption
+        ? {
+            mode: 'train' as const,
+            operator: cmp.trainOption.operator,
+            price: cmp.trainOption.price ?? 0,
+            currency: cmp.trainOption.currency ?? 'USD',
+            duration: fmtDuration(cmp.trainOption.durationMinutes),
+            durationMinutes: cmp.trainOption.durationMinutes,
+            bookingUrl: cmp.trainOption.bookingUrl ?? null,
+          }
+        : null;
+
+      return res.json({
+        type: 'mode_comparison',
+        reply: toolInput.explanation ?? `Here\'s flight vs train for ${fromCity.name} → ${toCity.name}.`,
+        comparison: {
+          fromCity: fromCity.name,
+          toCity: toCity.name,
+          date: travelDate,
+          flight: flightSummary,
+          train: trainSummary,
+          cheapest: cmp.cheapest,
+          fastest: cmp.fastest,
+          recommendation: cmp.recommendation,
+          priceDifference: cmp.priceDifference,
+          timeDifference: cmp.timeDifference,
+        },
+      });
+    }
 
     // --- Leg-refresh tools: set_transport_window (with time bounds) and
     //     show_transport_options (no bounds). Both re-search the specified

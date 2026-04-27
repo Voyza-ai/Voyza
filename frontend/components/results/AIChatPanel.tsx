@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Sparkles, Check, X, Clock } from 'lucide-react';
+import { Send, Sparkles, Check, X, Clock, Plane, TrainFront, ArrowRight } from 'lucide-react';
 import { Trip, Transport } from '@/lib/types';
 import {
   planChat,
@@ -11,6 +11,7 @@ import {
   ChatTurn,
   LegOption,
   LegRefresh,
+  ModeComparison,
 } from '@/lib/api';
 import { useTripStore } from '@/store/tripStore';
 
@@ -22,6 +23,8 @@ type Message = {
   proposal?: ChatProposal;
   /** UI state for proposal cards so Accept/Reject hide the buttons. */
   proposalState?: 'pending' | 'accepted' | 'rejected';
+  /** Present on AI messages that carry an inline flight-vs-train comparison. */
+  comparison?: ModeComparison;
 };
 
 type AIChatPanelProps = {
@@ -207,6 +210,19 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
           ...prev,
           { id: idRef.current++, role: 'ai', content: result.reply },
         ]);
+      } else if (result.type === 'mode_comparison') {
+        // Inline side-by-side card. No trip mutation — the user can
+        // click "Show on card" to switch, which re-prompts the chat
+        // with show_transport_options for the actual swap.
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: idRef.current++,
+            role: 'ai',
+            content: result.reply,
+            comparison: result.comparison,
+          },
+        ]);
       } else if (result.type === 'proposal') {
         setMessages((prev) => [
           ...prev,
@@ -322,6 +338,21 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
                   state={msg.proposalState ?? 'pending'}
                   onAccept={() => acceptProposal(msg.id)}
                   onReject={() => rejectProposal(msg.id)}
+                />
+              )}
+
+              {/* Inline flight-vs-train comparison card. Informational —
+                  the "Show on card" button asks chat to switch which fires
+                  show_transport_options under the hood. */}
+              {msg.comparison && (
+                <ModeComparisonCard
+                  comparison={msg.comparison}
+                  onSwitch={(mode) => {
+                    const c = msg.comparison!;
+                    handleSend(
+                      `Switch ${c.fromCity} → ${c.toCity} to ${mode === 'flight' ? 'flights' : 'trains'}.`,
+                    );
+                  }}
                 />
               )}
             </motion.div>
@@ -493,5 +524,134 @@ function DateShiftProposalCard({
         </div>
       )}
     </motion.div>
+  );
+}
+
+// ─── Mode-comparison card (flight vs train, inline in chat) ─────
+// Triggered by Claude's `compare_modes` tool. Read-only summary of
+// best flight + best train side-by-side. Each side has a "Switch to
+// this" button that re-prompts the chat with a show_transport_options
+// request — the user opts into the actual trip mutation.
+type ModeComparisonCardProps = {
+  comparison: ModeComparison;
+  onSwitch: (mode: 'flight' | 'train') => void;
+};
+
+function ModeComparisonCard({ comparison, onSwitch }: ModeComparisonCardProps) {
+  const { flight, train, recommendation, cheapest, fastest } = comparison;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.1, duration: 0.25 }}
+      className="mt-2 max-w-[88%] w-full"
+      style={{
+        background: 'white',
+        border: '1px solid rgba(46,107,196,0.25)',
+        borderRadius: 14,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+      }}
+    >
+      <div className="px-4 py-3 flex items-center gap-2 border-b border-gray-100">
+        <ArrowRight size={14} style={{ color: '#2e6bc4' }} />
+        <div className="text-[12px] font-medium text-gray-900">
+          {comparison.fromCity} → {comparison.toCity}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-0">
+        <ModeCell
+          label="Flight"
+          icon={<Plane size={13} />}
+          option={flight}
+          isCheapest={cheapest === 'flight'}
+          isFastest={fastest === 'flight'}
+          isRecommended={recommendation === 'flight'}
+          onClick={() => onSwitch('flight')}
+        />
+        <div className="border-l border-gray-100" />
+        <ModeCell
+          label="Train"
+          icon={<TrainFront size={13} />}
+          option={train}
+          isCheapest={cheapest === 'train'}
+          isFastest={fastest === 'train'}
+          isRecommended={recommendation === 'train'}
+          onClick={() => onSwitch('train')}
+        />
+      </div>
+    </motion.div>
+  );
+}
+
+type ModeCellProps = {
+  label: string;
+  icon: React.ReactNode;
+  option: ModeComparison['flight'];
+  isCheapest: boolean;
+  isFastest: boolean;
+  isRecommended: boolean;
+  onClick: () => void;
+};
+
+function ModeCell({
+  label,
+  icon,
+  option,
+  isCheapest,
+  isFastest,
+  isRecommended,
+  onClick,
+}: ModeCellProps) {
+  if (!option) {
+    return (
+      <div className="px-3 py-3 col-span-1 flex flex-col items-start gap-1">
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
+          {icon}
+          {label}
+        </div>
+        <div className="text-[12px] text-gray-400 italic">No options found</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3 py-3 col-span-1 flex flex-col items-start gap-1.5">
+      <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+        {icon}
+        {label}
+        {isRecommended && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+            style={{ background: 'rgba(46,107,196,0.12)', color: '#2e6bc4' }}
+          >
+            Best pick
+          </span>
+        )}
+      </div>
+      <div className="text-[14px] font-semibold text-gray-900">
+        ${Math.round(option.price).toLocaleString()}
+        {isCheapest && (
+          <span className="ml-1 text-[10px] text-emerald-600 font-medium">cheapest</span>
+        )}
+      </div>
+      <div className="text-[11px] text-gray-500">
+        {option.duration}
+        {isFastest && <span className="ml-1 text-emerald-600 font-medium">fastest</span>}
+      </div>
+      <div className="text-[11px] text-gray-400 truncate w-full">{option.operator}</div>
+      <button
+        onClick={onClick}
+        className="mt-1 text-[11px] font-medium px-2 py-1 rounded-md transition"
+        style={{
+          background: 'rgba(46,107,196,0.08)',
+          color: '#2e6bc4',
+          border: '1px solid rgba(46,107,196,0.2)',
+        }}
+      >
+        Switch to {label.toLowerCase()}
+      </button>
+    </div>
   );
 }

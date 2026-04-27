@@ -229,6 +229,22 @@ for long-tail queries like "adventure trips from NYC under $1500".
 - [ ] Seller-of-travel compliance research (varies by US state, UK ATOL, etc.)
 - [ ] Booking confirmation email + itinerary PDF
 
+### Feature: Running trip summary on the conversation page
+A floating "trip card" on the conversation page that updates as the
+user answers each question — shows what's been collected so far in a
+clean, readable summary. Helps the user see their inputs accumulating
+before the final "Find my trip" click.
+
+- [ ] Component: small card above the chat input bar (Option 3 from
+  design discussion). Doesn't show until the first answer.
+- [ ] Updates per answer: appends new facts in natural language
+  (e.g. "Adventure trip from NYC · 2 people · $3k budget · June 15-22")
+- [ ] Smart formatting: combines fields into readable phrases rather
+  than a bullet list (e.g. "$3k budget per person · 7 nights" not
+  "budget: 3000\nnights: 7")
+- [ ] Inline editable: clicking a fact lets user revise (deferred —
+  the AI chat can already revise; UI affordance later)
+
 ### Feature: Voyza AI — edits beyond current scope
 Tasks deferred from the current chat work:
 
@@ -271,6 +287,14 @@ Tasks deferred from the current chat work:
 ### Feature: LCC flight coverage gap
 - [ ] Add Amadeus Self-Service as secondary flight source
 - [ ] Flag Duffel-missing LCCs (Southwest, Ryanair) in results with "also check X" disclaimer
+
+### Feature: Calendar reacts to transport changes (calendar view just like flowchart view)
+- [ ] Tag auto-generated travel events ("head to airport" / flight / arrive) with an `auto` flag on `ScheduledEvent`
+- [ ] DayPlanner reconciles tagged events from current `transportIn`/`transportOut` on each open
+- [ ] Live update while planner is open if user swaps a flight on the flowchart
+- [ ] Restaurants, activities, and user-added events stay untouched
+- [ ] Decide: snap user-edited transport blocks back to new flight times, or honor manual edits
+- [ ] Affected dates: arrival day (uses `transportIn`) and departure day (uses `transportOut`)
 
 ---
 
