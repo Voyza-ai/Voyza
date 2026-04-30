@@ -10,6 +10,8 @@ import { interpretPlan, optimizeTrip, searchHotels, searchActivities, searchRest
 import { Trip, City, Transport, ScheduledEvent, Restaurant, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
 import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput } from '@/lib/parseDate';
+import { parseLocal, toIso } from '@/lib/dateHelpers';
+import { buildDayTransportContext } from '@/lib/dayScheduleDefaults';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import DatePicker from './DatePicker';
@@ -1035,16 +1037,25 @@ export default function PlanningChat() {
   const buildScheduleFromActivities = (
     activities: ActivitySuggestion[],
     restaurants: RestaurantSuggestion[],
-    arrivalISO: string,
-    departureISO: string,
+    city: City,
+    cityIndex: number,
+    trip: Trip,
   ): Record<string, ScheduledEvent[]> => {
     const schedule: Record<string, ScheduledEvent[]> = {};
-    const arrival = new Date(arrivalISO);
-    const departure = new Date(departureISO);
-    const dayCount = Math.max(
+    // parseLocal avoids the UTC-vs-local-midnight off-by-one that bare
+    // `new Date('YYYY-MM-DD')` produces in west-of-UTC timezones.
+    const arrival = parseLocal(city.dates.arrival);
+    const departure = parseLocal(city.dates.departure);
+    const stayDays = Math.max(
       1,
       Math.ceil((departure.getTime() - arrival.getTime()) / (1000 * 60 * 60 * 24)),
     );
+    // The fly-home day (cities[last].departure) doesn't belong to any
+    // city's stay, but the home-return transport blocks need to live
+    // somewhere — extend the loop by one day for the last city so its
+    // schedule covers that final morning.
+    const isLastCity = cityIndex === trip.cities.length - 1;
+    const dayCount = isLastCity ? stayDays + 1 : stayDays;
 
     // Activity buckets by time-of-day
     const actBuckets = {
@@ -1143,9 +1154,25 @@ export default function PlanningChat() {
     for (let dayIdx = 0; dayIdx < dayCount; dayIdx++) {
       const dayDate = new Date(arrival);
       dayDate.setDate(dayDate.getDate() + dayIdx);
-      const dateKey = dayDate.toISOString().split('T')[0];
-      const events: ScheduledEvent[] = [];
+      // Local-time ISO (toIso) so the home-return day lands on the
+      // actual calendar date the user departs, regardless of timezone.
+      const dateKey = toIso(dayDate);
+
+      // Resolve transport blocks + activity window for this day before
+      // placing anything else. Transport is the hard constraint — flights
+      // can't move — so we render it first and clamp the activity slots
+      // to the window the helper returns.
+      const transportCtx = buildDayTransportContext(city, dateKey, trip, cityIndex);
+      const events: ScheduledEvent[] = [...transportCtx.events];
       let cursor = 0;
+
+      // Clamp a slot definition to the day's activity window so e.g. a
+      // late arrival pushes the breakfast slot into oblivion (clamped
+      // start > clamped end → tryPlace returns null cleanly).
+      const clampSlot = (s: [number, number]): [number, number] => [
+        Math.max(s[0], transportCtx.windowStart),
+        Math.min(s[1], transportCtx.windowEnd),
+      ];
 
       const push = (result: { event: ScheduledEvent; cursor: number } | null) => {
         if (result) {
@@ -1156,42 +1183,59 @@ export default function PlanningChat() {
 
       // Breakfast — 45 min
       const bk = takeRestaurant('breakfast');
-      if (bk) push(tryPlace(cursor, SLOT.breakfast[0], SLOT.breakfast[1], 45, makeMealEvent(bk)));
+      if (bk) {
+        const [s, e] = clampSlot(SLOT.breakfast);
+        push(tryPlace(cursor, s, e, 45, makeMealEvent(bk)));
+      }
 
       // Morning activity — AI duration capped to 2h by the slot
       const morningAct = actBuckets.morning.shift();
       if (morningAct) {
         const dur = Math.round((morningAct.durationHours ?? 2) * 60);
-        push(tryPlace(cursor, SLOT.morning[0], SLOT.morning[1], dur, makeActivityEvent(morningAct)));
+        const [s, e] = clampSlot(SLOT.morning);
+        push(tryPlace(cursor, s, e, dur, makeActivityEvent(morningAct)));
       }
 
       // Lunch — 90 min, won't start before cursor (so a morning activity
       // that ran long naturally bumps lunch later or skips it entirely)
       const ln = takeRestaurant('lunch');
-      if (ln) push(tryPlace(cursor, SLOT.lunch[0], SLOT.lunch[1], 90, makeMealEvent(ln)));
+      if (ln) {
+        const [s, e] = clampSlot(SLOT.lunch);
+        push(tryPlace(cursor, s, e, 90, makeMealEvent(ln)));
+      }
 
       // Afternoon activity
       const afternoonAct = actBuckets.afternoon.shift();
       if (afternoonAct) {
         const dur = Math.round((afternoonAct.durationHours ?? 3) * 60);
-        push(tryPlace(cursor, SLOT.afternoon[0], SLOT.afternoon[1], dur, makeActivityEvent(afternoonAct)));
+        const [s, e] = clampSlot(SLOT.afternoon);
+        push(tryPlace(cursor, s, e, dur, makeActivityEvent(afternoonAct)));
       }
 
       // Dinner — 120 min
       const dn = takeRestaurant('dinner');
-      if (dn) push(tryPlace(cursor, SLOT.dinner[0], SLOT.dinner[1], 120, makeMealEvent(dn)));
+      if (dn) {
+        const [s, e] = clampSlot(SLOT.dinner);
+        push(tryPlace(cursor, s, e, 120, makeMealEvent(dn)));
+      }
 
       // Evening activity. If we have a dinner, put the activity in the
       // post-dinner slot. If no dinner, use the dinner slot for the activity.
       const eveningAct = actBuckets.evening.shift();
       if (eveningAct) {
         const dur = Math.round((eveningAct.durationHours ?? 2) * 60);
-        if (dn) {
-          push(tryPlace(cursor, SLOT.lateEve[0], SLOT.lateEve[1], dur, makeActivityEvent(eveningAct)));
-        } else {
-          push(tryPlace(cursor, SLOT.dinner[0], SLOT.dinner[1], dur, makeActivityEvent(eveningAct)));
-        }
+        const slot = dn ? SLOT.lateEve : SLOT.dinner;
+        const [s, e] = clampSlot(slot);
+        push(tryPlace(cursor, s, e, dur, makeActivityEvent(eveningAct)));
       }
+
+      // Sort once at the end so transport blocks (which were prepended
+      // before activities) interleave correctly by start time.
+      events.sort((a, b) => {
+        const am = a.startTime.split(':').map(Number);
+        const bm = b.startTime.split(':').map(Number);
+        return (am[0] * 60 + am[1]) - (bm[0] * 60 + bm[1]);
+      });
 
       if (events.length > 0) schedule[dateKey] = events;
     }
@@ -1582,14 +1626,19 @@ export default function PlanningChat() {
             }),
           );
         }
-        if (activities.length > 0 || restaurants.length > 0) {
-          trip.cities[idx].schedule = buildScheduleFromActivities(
-            activities,
-            restaurants,
-            trip.cities[idx].dates.arrival,
-            trip.cities[idx].dates.departure,
-          );
-        }
+        // Always rebuild the schedule, even if the AI returned no
+        // activities/restaurants, so home-anchor transport blocks (head-to
+        // airport, flight, arrive-at) still land on day 1 and the home-
+        // return day. Without this, vibe-first single-city trips with no
+        // activity suggestions had empty schedules and the flight events
+        // disappeared from both the Schedule view and the modal.
+        trip.cities[idx].schedule = buildScheduleFromActivities(
+          activities,
+          restaurants,
+          trip.cities[idx],
+          idx,
+          trip,
+        );
       });
 
       // Attach the user's (normalized) total-trip budget so the results

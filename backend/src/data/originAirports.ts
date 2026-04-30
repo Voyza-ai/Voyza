@@ -115,9 +115,19 @@ function normalize(name: string): string {
  */
 export function getOriginAirports(cityName: string, max: number = 3): string[] {
   const normalized = normalize(cityName);
-  const list = MULTI_AIRPORT_CITIES[normalized];
-  if (!list) return [];
-  return list.slice(0, max);
+  const direct = MULTI_AIRPORT_CITIES[normalized];
+  if (direct) return direct.slice(0, max);
+  // Fallback: AI parsers commonly produce "<City> City" (e.g. New York
+  // → "New York City", Quezon → "Quezon City"). When the bare suffix
+  // didn't match, retry without the trailing " city" so the canonical
+  // short form gets a hit. Direct lookup runs first so "mexico city"
+  // is unaffected (it's already a key).
+  if (normalized.endsWith(' city')) {
+    const stripped = normalized.slice(0, -' city'.length);
+    const list = MULTI_AIRPORT_CITIES[stripped];
+    if (list) return list.slice(0, max);
+  }
+  return [];
 }
 
 /**

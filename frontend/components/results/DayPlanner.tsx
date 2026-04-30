@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Trip, City, ScheduledEvent } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
+import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
 import { useTripStore } from '@/store/tripStore';
 
 type DayPlannerProps = {
@@ -71,172 +72,6 @@ const CATEGORY_ICONS: Record<string, typeof MapPin> = {
 let _idCounter = 0;
 const newId = () => `evt-${Date.now()}-${++_idCounter}`;
 
-/**
- * Pre-departure buffer (minutes before scheduled departure) the user
- * needs to leave for the airport/station. Padded enough to clear
- * security/check-in for flights, modest for rail.
- */
-const BUFFER_MIN: Record<string, number> = {
-  flight: 120,
-  train: 30,
-  bus: 15,
-};
-
-/** Strip station/platform suffixes for cleaner one-line titles. */
-const shortStation = (s?: string) =>
-  s ? s.split(',')[0].split('—')[0].split('–')[0].trim() : '';
-
-/** Build default schedule for a day from the city's activities & transports */
-function buildDefaultSchedule(
-  city: City,
-  date: string,
-  trip: Trip,
-): ScheduledEvent[] {
-  const events: ScheduledEvent[] = [];
-  const isArrival = city.dates.arrival === date;
-  const isDeparture = city.dates.departure === date;
-
-  // Inbound — itinerise the leg that brought the user here. Three blocks:
-  //   1. "Head to {fromStation}" — pre-travel buffer at the previous location
-  //   2. "{mode} {fromStation} → {toStation}" — the actual travel time
-  //   3. "Arrive at {toStation}" — short marker at arriveTime
-  // Falls back gracefully when station / time fields are missing.
-  if (isArrival && city.transportIn.arriveTime) {
-    const t = city.transportIn;
-    const arrMins = timeToMinutes(t.arriveTime!);
-    const departMins = t.departTime ? timeToMinutes(t.departTime) : null;
-    const buffer = BUFFER_MIN[t.mode] ?? 60;
-    const fromShort = shortStation(t.fromStation) || (t.mode === 'flight' ? 'the airport' : 'the station');
-    const toShort = shortStation(t.toStation) || city.name;
-
-    if (departMins !== null) {
-      const headStart = Math.max(0, departMins - buffer);
-      events.push({
-        id: newId(),
-        title: `Head to ${fromShort}`,
-        startTime: minutesToTime(headStart),
-        endTime: minutesToTime(departMins),
-        category: 'transport',
-        notes: t.mode === 'flight' ? 'Allow 2h for check-in & security' : undefined,
-      });
-      events.push({
-        id: newId(),
-        title: `${t.mode === 'flight' ? 'Flight' : t.mode === 'train' ? 'Train' : 'Bus'} ${fromShort} → ${toShort}`,
-        startTime: t.departTime!,
-        endTime: t.arriveTime!,
-        category: 'transport',
-        notes: t.duration || undefined,
-      });
-    }
-
-    events.push({
-      id: newId(),
-      title: `Arrive at ${toShort}`,
-      startTime: t.arriveTime!,
-      endTime: minutesToTime(Math.min(arrMins + 15, 24 * 60)),
-      category: 'transport',
-    });
-  }
-
-  // Outbound — same shape as inbound but for the leg leaving this city.
-  if (isDeparture && city.transportOut.departTime) {
-    const t = city.transportOut;
-    const depMins = timeToMinutes(t.departTime!);
-    const buffer = BUFFER_MIN[t.mode] ?? 60;
-    const fromShort = shortStation(t.fromStation) || (t.mode === 'flight' ? 'the airport' : 'the station');
-    const toShort = shortStation(t.toStation) || (t.to ?? 'destination');
-    const headStart = Math.max(0, depMins - buffer);
-
-    events.push({
-      id: newId(),
-      title: `Head to ${fromShort}`,
-      startTime: minutesToTime(headStart),
-      endTime: t.departTime!,
-      category: 'transport',
-      notes: t.mode === 'flight' ? 'Allow 2h for check-in & security' : undefined,
-    });
-
-    const endTime = t.arriveTime ?? minutesToTime(Math.min(depMins + 60, 24 * 60));
-    events.push({
-      id: newId(),
-      title: `${t.mode === 'flight' ? 'Flight' : t.mode === 'train' ? 'Train' : 'Bus'} ${fromShort} → ${toShort}`,
-      startTime: t.departTime!,
-      endTime,
-      category: 'transport',
-      notes: t.duration || undefined,
-    });
-  }
-
-  // Spread activities across the day (avoid transport times)
-  const busyRanges = events.map((e) => [
-    timeToMinutes(e.startTime),
-    timeToMinutes(e.endTime),
-  ]);
-
-  // Default activity window
-  let startSlot = isArrival ? timeToMinutes(city.transportIn.arriveTime || '10:00') + 60 : 9 * 60;
-  const endSlot = isDeparture ? timeToMinutes(city.transportOut.departTime || '18:00') - 60 : 21 * 60;
-  const availableMinutes = endSlot - startSlot;
-
-  if (city.activities.length > 0 && availableMinutes > 0) {
-    const slotDuration = Math.min(
-      90,
-      Math.floor(availableMinutes / city.activities.length)
-    );
-    city.activities.forEach((a) => {
-      if (startSlot + slotDuration > endSlot) return;
-      // Check if this overlaps a busy range
-      const overlaps = busyRanges.some(
-        ([bStart, bEnd]) => startSlot < bEnd && startSlot + slotDuration > bStart
-      );
-      if (overlaps) {
-        const overlap = busyRanges.find(
-          ([bStart, bEnd]) => startSlot < bEnd && startSlot + slotDuration > bStart
-        );
-        if (overlap) startSlot = overlap[1] + 15;
-      }
-      if (startSlot + slotDuration > endSlot) return;
-      events.push({
-        id: newId(),
-        title: a,
-        startTime: minutesToTime(startSlot),
-        endTime: minutesToTime(startSlot + slotDuration),
-        category: 'activity',
-      });
-      startSlot += slotDuration + 15; // 15 min gap
-    });
-  }
-
-  // Add restaurants
-  const lunchTime = 12 * 60 + 30;
-  const dinnerTime = 19 * 60 + 30;
-  city.restaurants.slice(0, 2).forEach((r, i) => {
-    const time = i === 0 ? lunchTime : dinnerTime;
-    const overlaps = [...events, ...busyRanges.map(([s, e]) => ({ startTime: minutesToTime(s), endTime: minutesToTime(e) }))].some((ev) => {
-      if ('startTime' in ev && typeof ev.startTime === 'string') {
-        const eStart = timeToMinutes(ev.startTime);
-        const eEnd = timeToMinutes(ev.endTime as string);
-        return time < eEnd && time + 60 > eStart;
-      }
-      return false;
-    });
-    if (!overlaps) {
-      events.push({
-        id: newId(),
-        title: r.name,
-        startTime: minutesToTime(time),
-        endTime: minutesToTime(time + 60),
-        category: 'restaurant',
-        notes: `${r.cuisine} · ${r.priceRange}`,
-      });
-    }
-  });
-
-  // Sort by start time
-  events.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-  return events;
-}
-
 export default function DayPlanner({
   trip,
   date,
@@ -258,7 +93,7 @@ export default function DayPlanner({
 
   useEffect(() => {
     if (!initialized && !existingSchedule) {
-      const defaults = buildDefaultSchedule(city, date, trip);
+      const defaults = buildDefaultSchedule(city, date, trip, cityIndex);
       setDaySchedule(cityIndex, date, defaults);
       setInitialized(true);
     } else {

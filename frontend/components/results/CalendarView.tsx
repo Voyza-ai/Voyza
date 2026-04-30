@@ -5,27 +5,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Plane, TrainFront, Moon } from 'lucide-react';
 import { Trip, City, TransportMode } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
+import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
 import DayPlanner from './DayPlanner';
 
 type CalendarViewProps = {
   trip: Trip;
   onCityClick?: (cityIndex: number) => void;
 };
-
-const parseLocal = (iso: string) => {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
-};
-
-const toIso = (d: Date) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
-
-const daysBetween = (a: Date, b: Date) =>
-  Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 
 type DayCell = {
   date: Date;
