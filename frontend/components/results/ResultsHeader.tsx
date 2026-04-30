@@ -64,6 +64,13 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
 
     // If already saved, go straight to canvas
     if (alreadySaved) {
+      // Store origin data in localStorage so the canvas tab can read it
+      if (trip.origin) {
+        localStorage.setItem(`voyza-origin-${trip.id}`, JSON.stringify({
+          origin: trip.origin,
+          returnToHome: trip.returnToHome ?? true,
+        }));
+      }
       window.open(`/canvas/${trip.id}`, '_blank');
       return;
     }
@@ -84,7 +91,13 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
         window.history.replaceState({}, '', url.toString());
       }
 
-      // Open canvas after saving
+      // Store origin data in localStorage so the canvas tab can read it
+      if (trip.origin) {
+        localStorage.setItem(`voyza-origin-${result.tripId}`, JSON.stringify({
+          origin: trip.origin,
+          returnToHome: trip.returnToHome ?? true,
+        }));
+      }
       window.open(`/canvas/${result.tripId}`, '_blank');
     } catch {
       // handle error silently
