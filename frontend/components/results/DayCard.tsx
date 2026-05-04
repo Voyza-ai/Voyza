@@ -19,14 +19,12 @@ import { parseLocal } from '@/lib/dateHelpers';
  * without page scroll.
  *
  * Inside the card, the body is `overflow-y: auto` over a full 0–24h
- * grid. The user mouse-wheels / touchpad-scrolls inside the card to
- * reveal pre-dawn or after-11-PM hours. Default scroll position is
- * ~7 AM so typical morning events render visible without manual scroll.
+ * grid. Default scroll position is one hour before the day's earliest
+ * event so pre-dawn travel events land in view automatically.
  *
  * Click model is a single step: clicking anywhere on the card (or on
- * any event block) fires `onOpenEditor`, and the parent opens the
- * `DayPlanner` modal. No focus / two-step state — the modal IS the
- * active-interaction signal.
+ * any event block) fires `onOpenEditor` and the parent opens the
+ * `DayPlanner` modal.
  */
 type DayCardProps = {
   date: string; // ISO YYYY-MM-DD
@@ -36,9 +34,7 @@ type DayCardProps = {
   /**
    * Transport mode for the day's primary travel event, when the user
    * is on the move on this date. Drives the small flight/train icon in
-   * the header. Null on stationary days (no travel — just spent in
-   * a city). Computed by the parent (`ScheduleView`) so this component
-   * stays a pure presenter.
+   * the header. Null on stationary days.
    */
   travelMode?: TransportMode | null;
   onOpenEditor: () => void;
