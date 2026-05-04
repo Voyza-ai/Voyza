@@ -233,6 +233,28 @@ router.post(
 
     // Apply canvas changes to live trip tables
     if (state.cities && Array.isArray(state.cities)) {
+      // Auto-generate activities and restaurants for cities that have none
+      for (const city of state.cities) {
+        if ((!city.activities || city.activities.length === 0) && city.name) {
+          city.activities = [
+            `Explore ${city.name} old town`,
+            `Local food tour in ${city.name}`,
+            `${city.name} main museum`,
+            `Walking tour of ${city.name}`,
+            `${city.name} scenic viewpoint`,
+          ];
+        }
+        if ((!city.restaurants || city.restaurants.length === 0) && city.name) {
+          city.restaurants = [
+            { name: `${city.name} neighborhood trattoria`, cuisine: 'Local', priceRange: '$$' },
+            { name: `${city.name} casual lunch cafe`, cuisine: 'Cafe', priceRange: '$' },
+            { name: `${city.name} fine dining`, cuisine: 'International', priceRange: '$$$' },
+            { name: `${city.name} street food market`, cuisine: 'Street Food', priceRange: '$' },
+            { name: `${city.name} rooftop bar & grill`, cuisine: 'Bar & Grill', priceRange: '$$' },
+          ];
+        }
+      }
+
       // Delete existing cities and reinsert with correct DB column names
       await supabase.from('cities').delete().eq('trip_id', tripId);
       const cityRows = state.cities.map((city: any, idx: number) => ({

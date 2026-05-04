@@ -40,8 +40,10 @@ export function rankHotels(hotels: Hotel[]): Hotel[] {
 
 /** Number of nights between two ISO yyyy-mm-dd dates (local). */
 export function nightsBetween(arrival: string, departure: string): number {
+  if (!arrival || !departure) return 0;
   const [ay, am, ad] = arrival.split('-').map(Number);
   const [dy, dm, dd] = departure.split('-').map(Number);
+  if (isNaN(ay) || isNaN(dy)) return 0;
   const a = new Date(ay, am - 1, ad).getTime();
   const d = new Date(dy, dm - 1, dd).getTime();
   return Math.max(0, Math.round((d - a) / (1000 * 60 * 60 * 24)));
