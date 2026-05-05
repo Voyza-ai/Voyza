@@ -38,6 +38,15 @@ const createTripSchema = z.object({
     })
     .nullable()
     .optional(),
+
+  // Home anchor / origin fields (new)
+  originCity: z.string().nullable().optional(),
+  originAirports: z.array(z.string()).nullable().optional(),
+  returnToHome: z.boolean().nullable().optional(),
+  // Optional HomeLeg blobs — accept-any because shape is internal and
+  // we don't want to break if the frontend sends an extra field.
+  outboundLeg: z.any().nullable().optional(),
+  returnLeg: z.any().nullable().optional(),
 });
 
 router.post(
@@ -63,6 +72,11 @@ router.post(
         vibe: body.vibe ?? null,
         start_date: body.startDate ?? null,
         date_shift_suggestion: body.dateShiftSuggestion ?? null,
+        origin_city: body.originCity ?? null,
+        origin_airports: body.originAirports ?? [],
+        return_to_home: body.returnToHome ?? true,
+        outbound_leg: body.outboundLeg ?? null,
+        return_leg: body.returnLeg ?? null,
       })
       .select()
       .single();

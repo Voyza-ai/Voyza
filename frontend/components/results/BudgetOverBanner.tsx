@@ -3,6 +3,8 @@
 import { motion } from 'framer-motion';
 import { AlertTriangle, X } from 'lucide-react';
 import { useState } from 'react';
+import { useTripStore } from '@/store/tripStore';
+import { displayAmount } from '@/lib/tripTotals';
 
 type BudgetOverBannerProps = {
   budget: number;
@@ -21,8 +23,14 @@ type BudgetOverBannerProps = {
  */
 export default function BudgetOverBanner({ budget, totalCost }: BudgetOverBannerProps) {
   const [dismissed, setDismissed] = useState(false);
+  const priceMode = useTripStore((s) => s.priceMode);
+  const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
   const overage = totalCost - budget;
+  // Threshold check uses raw group amounts so the banner appears/disappears
+  // identically regardless of toggle — only the displayed numbers flip.
   const overagePct = budget > 0 ? overage / budget : 0;
+  const overageDisplay = displayAmount(overage, priceMode, travelers);
+  const budgetDisplay = displayAmount(budget, priceMode, travelers);
 
   // Don't render at all if we're within budget (or trivially over it).
   if (dismissed) return null;
@@ -52,9 +60,9 @@ export default function BudgetOverBanner({ budget, totalCost }: BudgetOverBanner
 
         <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap text-[13px]">
           <span className="text-gray-700">
-            This trip runs <strong className="text-[#f59e0b]">${Math.round(overage).toLocaleString()} over</strong> your
+            This trip runs <strong className="text-[#f59e0b]">${overageDisplay.toLocaleString()} over</strong> your
           </span>
-          <span className="text-gray-500">${Math.round(budget).toLocaleString()} budget.</span>
+          <span className="text-gray-500">${budgetDisplay.toLocaleString()} budget{priceMode === 'perPerson' ? ' /person' : ''}.</span>
           <span className="text-gray-500 italic">Try fewer cities, closer dates, or cheaper hotels to fit.</span>
         </div>
 

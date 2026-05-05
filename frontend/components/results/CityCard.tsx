@@ -12,7 +12,7 @@ import {
 import { City } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { getVibeColor, VIBE_LABEL } from '@/lib/cityTheme';
-import { effectiveHotel } from '@/lib/tripTotals';
+import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
 import { useTripStore } from '@/store/tripStore';
 
 type CityCardProps = {
@@ -48,14 +48,27 @@ export default function CityCard({
   onClick,
 }: CityCardProps) {
   const color = getCityColor(city.colorIndex ?? index);
-  const arrival = formatDate(city.dates.arrival);
-  const departure = formatDate(city.dates.departure);
-  const nights = Math.round(
-    (parseLocal(city.dates.departure).getTime() - parseLocal(city.dates.arrival).getTime()) /
-      (1000 * 60 * 60 * 24)
-  );
+  // Date guards (from backend_gohiltalla) prevent crashes when a city in
+  // the trip has empty arrival/departure dates — happens for cities just
+  // added via canvas before the user picks dates. Empty strings/0 nights
+  // are rendered as placeholders, not throw sites.
+  const arrival = city.dates.arrival ? formatDate(city.dates.arrival) : '';
+  const departure = city.dates.departure ? formatDate(city.dates.departure) : '';
+  const nights = (city.dates.arrival && city.dates.departure)
+    ? Math.round(
+        (parseLocal(city.dates.departure).getTime() - parseLocal(city.dates.arrival).getTime()) /
+          (1000 * 60 * 60 * 24)
+      )
+    : 0;
+  // Total/Per-person price toggle (from feat/voyza-ai-chat → schedule-view).
+  // Stay total is the *display* amount — group total when priceMode==='total',
+  // per-person when 'perPerson'. Wrapped in NaN guard from backend_gohiltalla
+  // so empty-date cities (where effectiveHotel.total may be NaN) render $0
+  // instead of "$NaN".
+  const priceMode = useTripStore((s) => s.priceMode);
+  const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
   const eff = effectiveHotel(city);
-  const stayTotal = Math.round(eff.total);
+  const stayTotal = isNaN(eff.total) ? 0 : displayAmount(eff.total, priceMode, travelers);
 
   return (
     <motion.div
@@ -172,7 +185,10 @@ export default function CityCard({
 
 function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: number; color: { bg: string; text: string; border: string; name: string } }) {
   const cycleHotel = useTripStore((s) => s.cycleHotel);
+  const priceMode = useTripStore((s) => s.priceMode);
+  const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
   const eff = effectiveHotel(city);
+  const perNight = displayAmount(eff.pricePerNight, priceMode, travelers);
   const isCustom = eff.isCustom;
   const ranked = !isCustom && city.hotels.length > 1;
   const [slideDir, setSlideDir] = useState<1 | -1>(1);
@@ -269,7 +285,7 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
                 </div>
               )}
               <div className="text-xs mt-0.5 font-medium" style={{ color: `${color.text}aa` }}>
-                ${Math.round(eff.pricePerNight)}/night
+                ${perNight.toLocaleString()}/night
               </div>
             </div>
           </div>

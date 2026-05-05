@@ -45,9 +45,65 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ---
 
-## 🚧 In-flight (this branch: `feat/db-persistence`)
+## 🚧 In-flight (this branch: `feat/voyza-ai-chat`)
 
-### DB persistence — core (done, tested, not yet committed)
+All major work on this branch is committed and pushed. See the
+"Previously shipped" section below for the full breakdown. Branch
+currently has 4 commits, not yet merged to `claude_code_backend`:
+
+```
+d4007d9  polish: fixed-size transport pills + home card refinements
+984a553  feat: home anchor — origin, multi-airport, full permutations, round-trip
+1704365  feat: AI chat refreshes flowchart transport card (leg_refresh)
+0fbbd20  feat: Voyza AI chat with trip-aware prompts + constraint proposals
+```
+
+Remaining on the branch:
+- [ ] Top-4 options per between-city leg (swap `compareLeg()` →
+  `searchLegOptions(limit: 4)` in `scoreRoute`). Home legs already
+  use searchLegOptions; this extends it to inter-city legs so every
+  Connector card has 4 alternatives out of the box.
+- [ ] Backfill UI for pre-home-anchor trips without `origin_city`
+  (old trips render without a home card — graceful but unsettable).
+
+---
+
+## 📦 Previously shipped (ordered recent → older)
+
+### Voyza AI chat + home anchor (on `feat/voyza-ai-chat`, not yet merged)
+
+Voyza AI chat v1 — constraint proposals (0fbbd20)
+- [x] Schema: `trips.constraints` jsonb
+- [x] `POST /api/plan/chat` with Claude tool-use (answer_only, pin_city_dates, set_min_days, set_transport_window)
+- [x] `POST /api/plan/chat-suggestions` — trip-specific dynamic prompts
+- [x] `services/constraints.ts` — `applyDateConstraints` + `mergeConstraints`
+- [x] `AIChatPanel` rebuild: multi-turn history, date-shift proposal cards, Accept/Reject
+- [x] 129/129 frontend tests pass
+
+Leg options — card-refresh pattern (1704365)
+- [x] `services/legOptions.ts` — `searchLegOptions(window?, limit)` with HH:MM filter + multi-origin fan-out
+- [x] `show_transport_options` tool (no window — just show alternatives)
+- [x] Clarifying-question flow for ambiguous multi-leg queries ("which leg — Venice→Rome or Rome→Florence?")
+- [x] Chat `leg_refresh` response — updates the flowchart's Connector alternatives directly, no inline card in chat
+- [x] `Trip.constraints` type on frontend
+
+Home anchor / origin model (984a553 + d4007d9)
+- [x] Schema: `trips.origin_city`, `trips.origin_airports jsonb`, `trips.return_to_home bool`, `trips.outbound_leg jsonb`, `trips.return_leg jsonb`
+- [x] Planning flow: "Where are you flying from?" + "One-way or round-trip?" steps across all three paths (place/vibe/budget)
+- [x] Chat-mode `/api/plan/interpret` extracts `origin` + `returnToHome` from one-shot natural input
+- [x] `buildRemainingSteps` asks origin + roundtrip if AI missed them
+- [x] Optimizer tests FULL destination permutations when origin is set (no more fixed-first hack)
+- [x] `searchHomeFlights` bidirectional multi-airport search (home airport fan-out for outbound, destination airport fan-out for return)
+- [x] Perf: estimate pass uses 1 airport; full fan-out only for winner's `buildHomeLeg`
+- [x] Multi-airport lookup: top-3 airports for ~55 metros (NYC, London, Tokyo, etc.)
+- [x] HomeCard + HomeLegPill via Connector reuse — identical styling to between-city pills
+- [x] Alignment: HomeCard + Connector share one `flex items-stretch` motion.div; parent row uses items-stretch
+- [x] `airportNames.ts` — IATA → human-readable airport lookup
+- [x] Fixed-size transport pills (120×64) with placeholder rows so every Connector is dimensionally uniform
+- [x] Trip persistence: origin_city, origin_airports, return_to_home, outbound_leg, return_leg all survive save/reload
+- [x] Graceful degradation: trips without origin render unchanged
+
+### DB persistence (merged in PR #1)
 - [x] Schema migration: `trips` (+5 cols), `cities` (+4), `transports` (+10)
 - [x] Fix `duration_minutes` bug (`parseInt("3h 37m") = 3` → proper parser)
 - [x] POST `/api/trips` writes all new columns
@@ -107,12 +163,49 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 - [ ] Unsubscribe link handling
 
 ### Feature: Popular trips / trip discovery
+Note: this is the older "discover real user trips that opted into
+recommendations" feature. Partially superseded by the new "Browse /
+preset trips" feature below, which uses *pre-generated* preset trips
+as the primary discovery surface (with the old "clone this real
+trip" flow as a bonus row).
+
 - [ ] New page: `/explore` or `/popular`
 - [ ] Backend: `GET /api/trips/popular` with filters (vibe, budget, cities)
   - Query: `trips WHERE allow_recommendations = TRUE ORDER BY clone_count DESC`
 - [ ] Clone count stored per trip (incremented on clone)
 - [ ] Tagging / vibe browsing
 - [ ] "Trending this week" ranking
+
+### Feature: Browse / preset trips (3 phases)
+
+The browse surface is where users who don't know what they want land
+first. Unlike the user-generated "Popular" trips above, this is a
+curated catalog of AI-generated preset trips with hero imagery,
+category-level landing pages, and a one-click "Plan a similar trip"
+handoff that re-runs live pricing on the current day.
+
+Goal: be the first page a new user sees — browsable inspiration
+without having to type anything — AND be the SEO surface that ranks
+for long-tail queries like "adventure trips from NYC under $1500".
+
+**Phase 1 — Decide & design (blocks everything else)**
+- [ ] **Taxonomy**: lock the final list of vibes (beach, adventure, culture, romance, family, food+wine, etc.), budget tiers ($, $$, $$$, $$$$), duration buckets (weekend, 1 wk, 2 wk, month), origin regions (US-East, US-West, Europe, Asia). Decide combinatorially how many category pages we support vs. dynamic filters
+- [ ] **Page structure decision**: input-at-top-of-home with browse rows below, OR separate `/browse` page linked from nav. Affects how much the landing page has to do on first paint
+- [ ] **DB schema**: `preset_trips` table — inputs (vibe/budget/duration/origin-region), generated trip JSON, category tag(s), `created_at`, `refresh_status`, `hero_image_url`, `clone_count`, `impression_count`, `view_count`
+- [ ] **Editorial + SEO strategy**: which categories get dedicated landing pages (`/adventure-trips-from-nyc`), category description copy style, trending-row heuristic (last-7-day impressions? clicks? handoff rate?), staff-pick criteria
+- [ ] **SEO plan**: URL shape for category pages, meta tag strategy, sitemap entry, schema.org TravelAction markup
+
+**Phase 2 — Generation pipeline**
+- [ ] **Bulk-generation prompt**: single Claude prompt that takes taxonomy inputs and produces a realistic trip (cities + activities + restaurants + budget estimate). Batch-run across all taxonomy combinations to seed the catalog
+- [ ] **Refresh job**: weekly cron to regenerate pricing on all preset trips (flights/hotels go stale). Separately update a "trending" row from real user impressions + click-through
+- [ ] **Hero image sourcing**: either stock photos keyed by first city, or a separate image-generation pass (decide in Phase 1)
+
+**Phase 3 — User-facing UI**
+- [ ] **Preset trip card**: hero image, title, price range, duration, mini-flowchart preview (just the city sequence, no flight detail), category badge
+- [ ] **Browse row layout**: horizontal scroll by category ("Adventure trips from NYC", "Romance in Europe", "Culture under $2k"), matching the landing-page structure decision
+- [ ] **"Plan a similar trip" handoff**: preset click pre-fills planner answers (origin, destinations, dates, vibe, budget) and immediately runs a fresh `/api/optimize` call with today's prices. User can tweak before saving
+- [ ] **Editorial surfaces**: staff-picks row, trending-this-week row, category landing pages with editorial copy
+- [ ] **SEO implementation**: server-rendered category pages, sitemap generation, canonical URLs, rich snippet markup
 
 ### Feature: Settings page
 - [ ] `/settings` route
@@ -136,11 +229,27 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 - [ ] Seller-of-travel compliance research (varies by US state, UK ATOL, etc.)
 - [ ] Booking confirmation email + itinerary PDF
 
-### Feature: Origin city / single-destination flights
-- [ ] Add `origin` field to planning flow (place/vibe/budget paths all ask)
-- [ ] `user_profiles.preferences.homeCity` / `homeAirport` auto-fills origin
-- [ ] Single-destination trips now include origin→destination flight leg
-- [ ] Optimizer treats origin as city[0] with no hotel, only outbound transport
+### Feature: Running trip summary on the conversation page
+A floating "trip card" on the conversation page that updates as the
+user answers each question — shows what's been collected so far in a
+clean, readable summary. Helps the user see their inputs accumulating
+before the final "Find my trip" click.
+
+- [ ] Component: small card above the chat input bar (Option 3 from
+  design discussion). Doesn't show until the first answer.
+- [ ] Updates per answer: appends new facts in natural language
+  (e.g. "Adventure trip from NYC · 2 people · $3k budget · June 15-22")
+- [ ] Smart formatting: combines fields into readable phrases rather
+  than a bullet list (e.g. "$3k budget per person · 7 nights" not
+  "budget: 3000\nnights: 7")
+- [ ] Inline editable: clicking a fact lets user revise (deferred —
+  the AI chat can already revise; UI affordance later)
+
+### Feature: Voyza AI — edits beyond current scope
+Tasks deferred from the current chat work:
+
+- [ ] **Planning-phase conversational revision** (task 4): during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
+- [ ] **Post-results add/remove/replace cities** (task 5): new tools on `/api/plan/chat` — `add_city(city, afterCity?)`, `remove_city(city)`, `replace_city(old, new)`. Backend rebuilds trip with new city's hotel + transports. Shows diff card for Accept/Reject.
 
 ### Feature: Ownership transfer UX
 - [ ] Frontend flow: owner picks a collaborator (or invites one) to transfer to
@@ -179,6 +288,14 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 - [ ] Add Amadeus Self-Service as secondary flight source
 - [ ] Flag Duffel-missing LCCs (Southwest, Ryanair) in results with "also check X" disclaimer
 
+### Feature: Calendar reacts to transport changes (calendar view just like flowchart view)
+- [ ] Tag auto-generated travel events ("head to airport" / flight / arrive) with an `auto` flag on `ScheduledEvent`
+- [ ] DayPlanner reconciles tagged events from current `transportIn`/`transportOut` on each open
+- [ ] Live update while planner is open if user swaps a flight on the flowchart
+- [ ] Restaurants, activities, and user-added events stay untouched
+- [ ] Decide: snap user-edited transport blocks back to new flight times, or honor manual edits
+- [ ] Affected dates: arrival day (uses `transportIn`) and departure day (uses `transportOut`)
+
 ---
 
 ## 🐛 Bugs / tech debt
@@ -191,6 +308,10 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 - [ ] Intent picker animation timing on rapid interactions (currently fixed via StrictMode refs, watch for regressions)
 - [ ] Canvas → Back → Flights gone — partially fixed by DB persistence work (pending full verification)
 - [ ] Canvas save silently drops transports — FIXED in feat/db-persistence
+- [ ] Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice). No back button, no edit-previous-message. Partial workaround exists via city picker's "+ another city" but it's awkward. Full fix = task 4 (planning-phase conversational revision).
+- [ ] Origin-location lookup misses non-city inputs (states, regions, neighborhoods). User typing "from New Jersey" / "Newark" / "Long Island" / "Connecticut" → AI returns the literal string → `getOriginAirports()` lookup misses → empty `originAirports` → home flight search never runs → schedule view shows no transport blocks for day 1. Already partially fixed for "<City> City" suffix variants (commit `0f24996`). Need: state-name aliases (NJ → EWR or NYC metro, CT → BDL, etc.), region aliases (Long Island → JFK/LGA, Bay Area is already in), and a smarter normalization layer at the AI-parse step that resolves vague locations to canonical metro keys before the lookup table is queried. Affects both `frontend/lib/originAirports.ts` and `backend/src/data/originAirports.ts`.
+- [x] ~~AI chat: "are there more flights?" returns an answer-only response instead of showing options~~ — FIXED in 1704365 (leg_refresh + `show_transport_options` tool + clarifying "which leg?" routing).
+- [x] ~~AI chat: transport-window proposal card says "Applied the next time we re-pick this leg"~~ — FIXED in 1704365 (card-refresh pattern replaces the inline card entirely).
 
 ## 🏗️ Infrastructure / ops
 
@@ -225,3 +346,15 @@ Trip patterns are the product's long-term value:
 - Most-cloned itineraries as a quality signal
 
 All of this works on anonymous user buckets. No PII needed.
+
+### Home anchor model (decided Apr 23, 2026)
+Every trip has a persistent "home" — the city + airports the user flies
+from. Previously the first destination was treated as the implicit
+starting point, which forced the optimizer to fix `cities[0]` and
+ignore half the permutations. With home anchor:
+
+- **Trip shape:** `trip.origin = { city, airports, outboundLeg, returnLeg }` + `trip.returnToHome: boolean`
+- **Optimizer:** tests ALL `n!` permutations of destinations (home stays anchored), adds `home → cities[0]` outbound leg cost + optional `cities[n-1] → home` return leg cost to every candidate
+- **Multi-airport:** origin cities are matched against a 55-city lookup (NYC → JFK/LGA/EWR, London → LHR/LGW/STN, Tokyo → HND/NRT, etc.). Flight search fans out across all origin airports in parallel; cheapest wins
+- **Perf:** estimate pass uses only the first airport per origin (cheap permutation ranking); full multi-airport fan-out runs only for the winning permutation's `buildHomeLeg`. Cuts API calls ~3x vs. a naive implementation
+- **Graceful degradation:** trips saved before this change render without the home card — no migration needed

@@ -57,10 +57,29 @@ const cityItem = z.union([
 ]);
 
 const optimizeSchema = z.object({
-  cities: z.array(cityItem).min(2),
+  // Minimum 1 city — single-destination trips (typical of vibe-first
+  // "I want an adventure" → "Reykjavik") still need to go through
+  // optimize so the home→first_city + last_city→home legs get built.
+  // Previously required 2+ which forced the frontend into a bare
+  // single-city path that skipped all the home-anchor machinery.
+  cities: z.array(cityItem).min(1),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   travelers: z.number().int().positive().default(1),
   budget: z.number().positive().optional(),
+  /** Home city the user is flying from. When present, we test full city
+   *  permutations, add home→first_city to each, and (if returnToHome)
+   *  last_city→home. Absent = legacy behavior (fixed first, no home legs). */
+  origin: z.string().min(1).optional(),
+  /** Origin IATA codes. Prefilled from the originAirports.ts lookup on
+   *  the frontend. Passed through verbatim. */
+  originAirports: z.array(z.string().min(3).max(4)).optional(),
+  /** Round-trip (true) or one-way (false). Defaults to true. */
+  returnToHome: z.boolean().optional(),
+  /**
+   * Total nights for the trip. When omitted the optimizer defaults to
+   * 2 nights per city. When set, distributed evenly across cities.
+   */
+  totalNights: z.number().int().positive().max(180).optional(),
 });
 
 router.post(

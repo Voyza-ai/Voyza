@@ -5,27 +5,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Plane, TrainFront, Moon } from 'lucide-react';
 import { Trip, City, TransportMode } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
+import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
 import DayPlanner from './DayPlanner';
 
 type CalendarViewProps = {
   trip: Trip;
   onCityClick?: (cityIndex: number) => void;
 };
-
-const parseLocal = (iso: string) => {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
-};
-
-const toIso = (d: Date) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
-
-const daysBetween = (a: Date, b: Date) =>
-  Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 
 type DayCell = {
   date: Date;
@@ -36,23 +22,41 @@ type DayCell = {
   isDeparture: boolean;
   /** Mode of the outbound transport on departure days (so we can pick the right icon). */
   departureMode: TransportMode | null;
+  /** Depart time of the leg leaving this city on its departure day (HH:mm). */
+  departureTime: string | null;
   isInMonth: boolean;
 };
 
 export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
   const [selectedDay, setSelectedDay] = useState<DayCell | null>(null);
 
-  // Compute trip span
-  const start = parseLocal(trip.cities[0].dates.arrival);
-  const end = parseLocal(trip.cities[trip.cities.length - 1].dates.departure);
+  // Filter to cities with valid dates for calendar rendering
+  const datedCities = trip.cities.filter(
+    (c) => c.dates.arrival && c.dates.departure && c.dates.arrival.includes('-') && c.dates.departure.includes('-'),
+  );
+
+  // If no cities have dates, show a message
+  if (datedCities.length === 0) {
+    return (
+      <div className="px-8 py-20 text-center text-gray-400 text-sm">
+        No dates available yet — add dates to your cities to see the calendar view.
+      </div>
+    );
+  }
+
+  // Compute trip span from cities that actually have dates
+  const start = parseLocal(datedCities[0].dates.arrival);
+  const end = parseLocal(datedCities[datedCities.length - 1].dates.departure);
 
   // Build a map of date -> city
   const dateToCity = new Map<string, { city: City; index: number }>();
   trip.cities.forEach((city, index) => {
+    if (!city.dates.arrival || !city.dates.departure || !city.dates.arrival.includes('-') || !city.dates.departure.includes('-')) return;
     const arr = parseLocal(city.dates.arrival);
     const dep = parseLocal(city.dates.departure);
     // A city "occupies" arrival up to (but not including) departure date
     const days = daysBetween(arr, dep);
+    if (days <= 0 || isNaN(days)) return;
     for (let i = 0; i < days; i++) {
       const d = new Date(arr);
       d.setDate(arr.getDate() + i);
@@ -86,6 +90,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
         isArrival: false,
         isDeparture: false,
         departureMode: null,
+        departureTime: null,
         isInMonth: false,
       });
     }
@@ -102,6 +107,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
       const departureCity = trip.cities.find((c) => c.dates.departure === iso);
       const isDeparture = !!departureCity;
       const departureMode = departureCity?.transportOut.mode ?? null;
+      const departureTime = departureCity?.transportOut.departTime ?? null;
 
       cells.push({
         date,
@@ -111,6 +117,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
         isArrival,
         isDeparture,
         departureMode,
+        departureTime,
         isInMonth: true,
       });
     }
@@ -128,6 +135,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
         isArrival: false,
         isDeparture: false,
         departureMode: null,
+        departureTime: null,
         isInMonth: false,
       });
     }
@@ -161,9 +169,8 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                 <div className="flex flex-wrap gap-2">
                   {trip.cities.map((city, i) => {
                     const cColor = getCityColor(city.colorIndex ?? i);
-                    const arr = parseLocal(city.dates.arrival);
-                    const dep = parseLocal(city.dates.departure);
-                    const nights = daysBetween(arr, dep);
+                    const hasDates = city.dates.arrival && city.dates.departure && city.dates.arrival.includes('-') && city.dates.departure.includes('-');
+                    const nights = hasDates ? daysBetween(parseLocal(city.dates.arrival), parseLocal(city.dates.departure)) : 0;
                     return (
                       <button
                         key={i}
@@ -182,7 +189,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                           {city.name}
                         </span>
                         <span className="text-gray-400 text-[10px]">
-                          {nights} {nights === 1 ? 'night' : 'nights'}
+                          {hasDates ? `${nights} ${nights === 1 ? 'night' : 'nights'}` : 'no dates'}
                         </span>
                       </button>
                     );
@@ -279,7 +286,9 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                                 <TrainFront size={8} className="text-gray-400" />
                               )}
                               <span className="text-gray-400 text-[9px] font-mono">
-                                {cell.city.transportIn.arriveTime || 'arrive'}
+                                {cell.city.transportIn.departTime && cell.city.transportIn.arriveTime
+                                  ? `${cell.city.transportIn.departTime}→${cell.city.transportIn.arriveTime}`
+                                  : cell.city.transportIn.arriveTime || 'arrive'}
                               </span>
                             </div>
                           ) : (
@@ -288,6 +297,21 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                               <span className="text-gray-400 text-[9px]">night</span>
                             </div>
                           )}
+                        </div>
+                      )}
+
+                      {/* Departure-only cell — last city's outbound flight (e.g. flying home).
+                          City is null because the dep date isn't mapped to any in-trip city. */}
+                      {!cell.city && cell.isDeparture && cell.departureTime && (
+                        <div className="mt-1 flex items-center gap-1">
+                          {cell.departureMode === 'train' ? (
+                            <TrainFront size={8} className="text-gray-400" />
+                          ) : (
+                            <Plane size={8} className="text-gray-400" style={{ transform: 'rotate(45deg)' }} />
+                          )}
+                          <span className="text-gray-400 text-[9px] font-mono">
+                            {cell.departureTime}
+                          </span>
                         </div>
                       )}
                     </motion.button>
@@ -304,17 +328,32 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
         {totalNights} nights · {trip.cities.length} cities · click a day to see its itinerary
       </div>
 
-      {/* Day planner — Google Calendar style */}
+      {/* Day planner — Google Calendar style. The fly-home day has no city
+          mapping (cell.city is null) but is still clickable; resolve it to
+          the departing city so the planner can show the head-to-airport flow. */}
       <AnimatePresence>
-        {selectedDay && selectedDay.city && selectedDay.cityIndex != null && (
-          <DayPlanner
-            trip={trip}
-            date={selectedDay.iso}
-            city={selectedDay.city}
-            cityIndex={selectedDay.cityIndex}
-            onClose={() => setSelectedDay(null)}
-          />
-        )}
+        {(() => {
+          if (!selectedDay) return null;
+          let plannerCity = selectedDay.city;
+          let plannerCityIndex = selectedDay.cityIndex;
+          if ((!plannerCity || plannerCityIndex == null) && selectedDay.isDeparture) {
+            const dep = trip.cities.find((c) => c.dates.departure === selectedDay.iso);
+            if (dep) {
+              plannerCity = dep;
+              plannerCityIndex = trip.cities.indexOf(dep);
+            }
+          }
+          if (!plannerCity || plannerCityIndex == null) return null;
+          return (
+            <DayPlanner
+              trip={trip}
+              date={selectedDay.iso}
+              city={plannerCity}
+              cityIndex={plannerCityIndex}
+              onClose={() => setSelectedDay(null)}
+            />
+          );
+        })()}
       </AnimatePresence>
     </div>
   );

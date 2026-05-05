@@ -4,6 +4,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { AppError } from '../middleware/error';
 import { getSupabase } from '../services/supabase';
 import { compareLeg } from '../services/compareLeg';
+import { searchHotels } from '../services/hotels';
 import { env } from '../config/env';
 import { parseDurationMinutes } from '../utils/duration';
 
@@ -221,20 +222,125 @@ router.post(
 
     const supabase = getSupabase();
 
-    // Update canvas session
-    await supabase
+    // Update canvas session — find existing and update, or insert new
+    const { data: existingSession } = await supabase
       .from('canvas_sessions')
-      .upsert({
-        trip_id: tripId,
-        state,
-        last_saved_by: user.id,
-        saved_at: new Date().toISOString(),
-      });
+      .select('id')
+      .eq('trip_id', tripId)
+      .order('saved_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (existingSession) {
+      // Update existing session
+      await supabase
+        .from('canvas_sessions')
+        .update({
+          state,
+          last_saved_by: user.id,
+          saved_at: new Date().toISOString(),
+        })
+        .eq('id', existingSession.id);
+
+      // Clean up any duplicate sessions for this trip
+      const { data: allSessions } = await supabase
+        .from('canvas_sessions')
+        .select('id')
+        .eq('trip_id', tripId)
+        .neq('id', existingSession.id);
+      if (allSessions && allSessions.length > 0) {
+        for (const s of allSessions) {
+          await supabase.from('canvas_sessions').delete().eq('id', s.id);
+        }
+      }
+    } else {
+      await supabase
+        .from('canvas_sessions')
+        .insert({
+          trip_id: tripId,
+          state,
+          last_saved_by: user.id,
+          saved_at: new Date().toISOString(),
+        });
+    }
 
     // Apply canvas changes to live trip tables
     if (state.cities && Array.isArray(state.cities)) {
-      // Delete existing cities and reinsert with correct DB column names
-      await supabase.from('cities').delete().eq('trip_id', tripId);
+      // Auto-generate activities and restaurants for cities that have none
+      for (const city of state.cities) {
+        if ((!city.activities || city.activities.length === 0) && city.name) {
+          city.activities = [
+            `Explore ${city.name} old town`,
+            `Local food tour in ${city.name}`,
+            `${city.name} main museum`,
+            `Walking tour of ${city.name}`,
+            `${city.name} scenic viewpoint`,
+          ];
+        }
+        if ((!city.restaurants || city.restaurants.length === 0) && city.name) {
+          city.restaurants = [
+            { name: `${city.name} neighborhood trattoria`, cuisine: 'Local', priceRange: '$$' },
+            { name: `${city.name} casual lunch cafe`, cuisine: 'Cafe', priceRange: '$' },
+            { name: `${city.name} fine dining`, cuisine: 'International', priceRange: '$$$' },
+            { name: `${city.name} street food market`, cuisine: 'Street Food', priceRange: '$' },
+            { name: `${city.name} rooftop bar & grill`, cuisine: 'Bar & Grill', priceRange: '$$' },
+          ];
+        }
+      }
+
+      // Fetch hotels for cities that don't have any
+      const hotelPromises: Promise<void>[] = [];
+      for (const city of state.cities) {
+        const hasHotels = (Array.isArray(city.hotels) && city.hotels.length > 0)
+          || (city.hotel && city.hotel.name && city.hotel.name !== 'Select hotel' && city.hotel.pricePerNight > 0);
+        if (!hasHotels && city.name && city.dates?.arrival && city.dates?.departure) {
+          hotelPromises.push(
+            searchHotels({
+              city: city.name,
+              checkin: city.dates.arrival,
+              checkout: city.dates.departure,
+              adults: state.trip?.travelers ?? 1,
+              rooms: 1,
+            })
+              .then((results) => {
+                if (results.length > 0) {
+                  city.hotels = results.map((r) => ({
+                    name: r.name,
+                    rating: r.rating,
+                    pricePerNight: r.pricePerNight,
+                    area: '',
+                    bookingUrl: r.bookingUrl,
+                  }));
+                  city.hotel = city.hotels[0];
+                  city.selectedHotelIndex = 0;
+                  console.log(`[canvas save] Found ${results.length} hotels for ${city.name}`);
+                }
+              })
+              .catch((err) => {
+                console.warn(`[canvas save] Hotel search failed for ${city.name}:`, err?.message);
+              })
+          );
+        }
+      }
+      if (hotelPromises.length > 0) {
+        await Promise.all(hotelPromises);
+      }
+
+      // Delete ALL existing transports first (they have FK to cities)
+      const { data: existingTransports } = await supabase.from('transports').select('id').eq('trip_id', tripId);
+      if (existingTransports && existingTransports.length > 0) {
+        const transportIds = existingTransports.map((t: any) => t.id);
+        await supabase.from('transports').delete().in('id', transportIds);
+      }
+
+      // Delete ALL existing cities by ID (bulk .eq delete has row limits)
+      const { data: existingCities } = await supabase.from('cities').select('id').eq('trip_id', tripId);
+      if (existingCities && existingCities.length > 0) {
+        const cityIds = existingCities.map((c: any) => c.id);
+        const { error: delErr } = await supabase.from('cities').delete().in('id', cityIds);
+        if (delErr) console.error('[canvas save] Failed to delete cities:', delErr.message);
+        else console.log('[canvas save] Deleted', cityIds.length, 'existing cities');
+      }
       const cityRows = state.cities.map((city: any, idx: number) => ({
         trip_id: tripId,
         name: city.name,
@@ -264,8 +370,7 @@ router.post(
         console.log('[canvas save] Inserted', insertedCities.length, 'cities for trip', tripId);
       }
 
-      // Delete existing transports and rebuild
-      await supabase.from('transports').delete().eq('trip_id', tripId);
+      // Rebuild transports (already deleted above)
       if (insertedCities.length > 1) {
         // For consecutive city pairs missing transport, auto-compare flights vs trains
         const updatedCities = [...state.cities];
@@ -273,7 +378,11 @@ router.post(
 
         for (let i = 0; i < updatedCities.length - 1; i++) {
           const t = updatedCities[i].transportOut;
-          if (!t || t.price <= 0) {
+          // Re-compare if: no transport, price is 0, or the destination changed
+          const currentTo = t?.to ?? '';
+          const expectedTo = updatedCities[i + 1]?.name ?? '';
+          const needsCompare = !t || t.price <= 0 || (currentTo && expectedTo && currentTo.toLowerCase() !== expectedTo.toLowerCase());
+          if (needsCompare) {
             const origin = updatedCities[i].name;
             const dest = updatedCities[i + 1].name;
             const date = updatedCities[i].dates?.departure

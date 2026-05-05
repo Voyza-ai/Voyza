@@ -83,7 +83,12 @@ describe('searchFlights', () => {
     expect(offers[0].carrierCode).toBe('LH');
     expect(offers[0].stops).toBe(0);
     expect(offers[0].durationMinutes).toBe(150);
-    expect(offers[0].bookingUrl).toContain('offer_1');
+    // Booking URLs now route to Google Flights (Duffel's offer-redirect
+    // pages 404'd). The URL is built from origin/destination/date, not
+    // the offer ID, so we assert on the Google host instead of `offer_1`.
+    expect(offers[0].bookingUrl).toContain('google.com/travel/flights');
+    expect(offers[0].bookingUrl).toContain('FCO');
+    expect(offers[0].bookingUrl).toContain('FLR');
   });
 
   it('retries on 429 with exponential backoff', async () => {

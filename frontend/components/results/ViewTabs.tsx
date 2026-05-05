@@ -1,9 +1,9 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { GitBranch, Calendar } from 'lucide-react';
+import { GitBranch, Calendar, CalendarRange } from 'lucide-react';
 
-export type ResultsView = 'flowchart' | 'calendar';
+export type ResultsView = 'flowchart' | 'calendar' | 'schedule';
 
 type ViewTabsProps = {
   value: ResultsView;
@@ -13,6 +13,7 @@ type ViewTabsProps = {
 const TABS: { id: ResultsView; label: string; icon: typeof GitBranch }[] = [
   { id: 'flowchart', label: 'Flowchart', icon: GitBranch },
   { id: 'calendar', label: 'Calendar', icon: Calendar },
+  { id: 'schedule', label: 'Schedule', icon: CalendarRange },
 ];
 
 export default function ViewTabs({ value, onChange }: ViewTabsProps) {

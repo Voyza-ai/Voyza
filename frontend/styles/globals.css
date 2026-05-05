@@ -61,6 +61,18 @@ body {
   background: var(--text-tertiary);
 }
 
+/* Hide scrollbars while keeping the element scrollable. Used on the
+   schedule view's day cards + horizontal rail — scroll is functional
+   via mouse-wheel / touchpad / drag, but the bars themselves don't
+   visually clutter the layout. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge / IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Selection */
 ::selection {
   background-color: var(--accent-light);

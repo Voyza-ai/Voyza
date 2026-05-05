@@ -145,6 +145,9 @@ export type OptimizeResult = {
   dates: Record<string, { arrival: string; departure: string }>;
   /** Present when shifting the trip by ±1 or ±2 days saves meaningful money. */
   dateShiftSuggestion?: DateShiftSuggestion;
+  /** Home anchor legs. Present when `origin` was passed to the request. */
+  outboundLeg?: import('./types').HomeLeg | null;
+  returnLeg?: import('./types').HomeLeg | null;
 };
 
 export async function optimizeTrip(params: {
@@ -152,6 +155,20 @@ export async function optimizeTrip(params: {
   startDate: string;
   travelers?: number;
   budget?: number;
+  /** Home anchor — city the user is flying from (e.g. "New York"). When
+   *  present, the backend tests full destination permutations and adds
+   *  home→first_city (+ optional last_city→home) to every route. */
+  origin?: string;
+  /** IATA codes for the origin city. Fill from getOriginAirports() on
+   *  the frontend, or from user preferences. */
+  originAirports?: string[];
+  /** Round-trip (true) or one-way (false). Defaults to true on server. */
+  returnToHome?: boolean;
+  /**
+   * Total trip nights. Distributed across cities by the optimizer.
+   * When omitted the backend uses 2 nights per city as the default.
+   */
+  totalNights?: number;
 }): Promise<OptimizeResult> {
   return apiFetch<OptimizeResult>('/api/optimize', {
     method: 'POST',
@@ -205,6 +222,53 @@ export async function suggestDestinations(params: {
   return data.destinations;
 }
 
+// ─── Suggest destinations for a vibe-first trip ──────────────
+// Different from `suggestDestinations` above — this endpoint is the
+// *primary* way destinations get chosen when the user picks
+// "I'm chasing a vibe" on the opening question. Returns a richer
+// schema (why it fits, cost range, best months, caveats) so the UI
+// can render a pickable card list later. Cached 7 days server-side.
+
+import type { VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
+
+export type SuggestDestinationsForVibeResult = {
+  suggestions: VibeDestinationSuggestion[];
+  reasoning_summary: string;
+  /**
+   * Optional "if you bump your budget by $X, here's what opens up"
+   * hint. Present when Claude detects the user is one tier below
+   * dramatically more aspirational options. Surfaced as a banner /
+   * chat message on the results page so the user can choose to up
+   * their budget or stick with the cheaper trip.
+   */
+  tier_up_suggestion: VibeTierUpSuggestion | null;
+  meta: {
+    cacheHit: boolean;
+    attempts: number;
+    parseSuccess: boolean;
+    fallbackUsed: boolean;
+    durationMs: number;
+  };
+};
+
+export async function suggestDestinationsForVibe(params: {
+  vibe: string;
+  origin: string;
+  budgetPerPerson: number;
+  travelWindow: string;
+  partySize: number;
+  tripType: 'one-way' | 'round-trip';
+  extras?: string;
+}): Promise<SuggestDestinationsForVibeResult> {
+  return apiFetch<SuggestDestinationsForVibeResult>(
+    '/api/plan/suggest-for-vibe',
+    {
+      method: 'POST',
+      body: JSON.stringify(params),
+    },
+  );
+}
+
 // ─── Plan Interpret ──────────────────────────────────────────
 export async function interpretPlan(params: {
   rawInput: string;
@@ -216,12 +280,138 @@ export async function interpretPlan(params: {
   });
 }
 
-// ─── Plan Edit ───────────────────────────────────────────────
+// ─── Plan Edit (legacy — kept for tests; new code uses planChat) ─
 export async function editPlan(params: {
   message: string;
   currentTrip: any;
 }): Promise<any> {
-  return apiFetch('/api/plan/edit', {
+  // Route through the new /chat endpoint but preserve the old return
+  // shape so the existing AIChatPanel fallback path keeps working until
+  // the refactor lands.
+  return apiFetch('/api/plan/chat', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+// ─── Voyza AI chat ───────────────────────────────────────────
+// Send a message to the trip's AI assistant. Response is either a
+// plain-text answer or a proposal the user can Accept/Reject.
+export type ChatTurn = { role: 'user' | 'assistant'; content: string };
+
+export type ChatProposalDiff = {
+  city: string;
+  oldArrival: string | null;
+  newArrival: string;
+  oldDeparture: string | null;
+  newDeparture: string;
+};
+
+/** One concrete flight/train option for the leg-options proposal card. */
+export type LegOption = {
+  mode: 'flight' | 'train';
+  operator: string;
+  flightNumber?: string | null;
+  price: number;
+  currency: string;
+  /** HH:MM local time. */
+  departTime: string | null;
+  arriveTime: string | null;
+  duration: string;
+  durationMinutes: number;
+  stops?: number;
+  bookingUrl?: string | null;
+  priceDelta: number;
+};
+
+/**
+ * Proposal card = user needs to Accept/Reject a set of trip-wide changes.
+ * Currently used only for date-bearing tools (pin_city_dates, set_min_days)
+ * because those move several cities at once and we don't want to apply
+ * without confirmation.
+ *
+ * Transport changes (show_transport_options, set_transport_window) use a
+ * different pattern: type='leg_refresh'. See ChatResponse below.
+ */
+export type ChatProposal = {
+  kind: 'date_shift';
+  toolName: 'pin_city_dates' | 'set_min_days';
+  toolInput: any;
+  diff: ChatProposalDiff[];
+  proposedConstraints: any;
+  proposedTrip: any;
+};
+
+/**
+ * Leg-refresh response — the chat updated the transport options for a
+ * specific leg. The frontend directly overwrites
+ * trip.cities[i].transport.alternatives and swaps the main transport
+ * to the cheapest of the new options. No Accept/Reject — the user picks
+ * a different one by clicking on the transport card itself.
+ */
+export type LegRefresh = {
+  fromCity: string;
+  toCity: string;
+  date: string;
+  options: LegOption[];
+  totalFound: number;
+  updatedConstraints: any;
+};
+
+/**
+ * One-mode summary inside a ModeComparison — just enough fields for the
+ * inline side-by-side card. Not used to mutate trip state.
+ */
+export type ModeComparisonOption = {
+  mode: 'flight' | 'train';
+  operator: string;
+  price: number;
+  currency: string;
+  duration: string;
+  durationMinutes: number;
+  stops?: number;
+  bookingUrl?: string | null;
+};
+
+/**
+ * Side-by-side flight vs train comparison for a single leg. Triggered
+ * by the `compare_modes` tool when the user is curious about the OTHER
+ * mode without committing to a card change yet.
+ */
+export type ModeComparison = {
+  fromCity: string;
+  toCity: string;
+  date: string;
+  flight: ModeComparisonOption | null;
+  train: ModeComparisonOption | null;
+  cheapest: 'flight' | 'train' | 'same' | 'unavailable';
+  fastest: 'flight' | 'train' | 'same' | 'unavailable';
+  recommendation: 'flight' | 'train' | 'unavailable';
+  priceDifference: number;
+  timeDifference: number;
+};
+
+export type ChatResponse =
+  | { type: 'answer'; reply: string }
+  | { type: 'proposal'; reply: string; proposal: ChatProposal }
+  | { type: 'leg_refresh'; reply: string; refresh: LegRefresh }
+  | { type: 'mode_comparison'; reply: string; comparison: ModeComparison };
+
+export async function planChat(params: {
+  message: string;
+  currentTrip: any;
+  history?: ChatTurn[];
+}): Promise<ChatResponse> {
+  return apiFetch<ChatResponse>('/api/plan/chat', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function planChatSuggestions(params: {
+  currentTrip: any;
+}): Promise<{ suggestions: string[] }> {
+  return apiFetch<{ suggestions: string[] }>('/api/plan/chat-suggestions', {
     method: 'POST',
     body: JSON.stringify(params),
   });
@@ -351,6 +541,15 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
       vibe: trip.vibe ?? null,
       startDate: trip.startDate ?? trip.cities?.[0]?.dates?.arrival ?? null,
       dateShiftSuggestion: trip.dateShiftSuggestion ?? null,
+      // Home anchor — optional. Old trips save with null/empty and just
+      // render without a home card on reload (graceful).
+      originCity: trip.origin?.city ?? null,
+      originAirports: trip.origin?.airports ?? null,
+      returnToHome: typeof trip.returnToHome === 'boolean' ? trip.returnToHome : null,
+      // Flight detail for the pill between Home and first/last city.
+      // Without these, the pill disappears after reload.
+      outboundLeg: trip.origin?.outboundLeg ?? null,
+      returnLeg: trip.origin?.returnLeg ?? null,
     }),
   });
 }

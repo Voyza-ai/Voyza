@@ -10,6 +10,8 @@ import {
   X,
 } from 'lucide-react';
 import { Transport } from '@/lib/types';
+import { useTripStore } from '@/store/tripStore';
+import { displayAmount } from '@/lib/tripTotals';
 
 type TransportDetailCardProps = {
   transport: Transport;
@@ -28,6 +30,8 @@ const formatDateLong = (iso?: string) => {
 };
 
 export default function TransportDetailCard({ transport, onClose }: TransportDetailCardProps) {
+  const priceMode = useTripStore((s) => s.priceMode);
+  const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
   const isFlight = transport.mode === 'flight';
   const Icon = isFlight ? Plane : TrainFront;
   const accentColor = isFlight ? '#2e6bc4' : '#22c088';
@@ -207,7 +211,7 @@ export default function TransportDetailCard({ transport, onClose }: TransportDet
       >
         <div>
           <div className="text-gray-600 text-[9px] uppercase tracking-wider">Price</div>
-          <div className="text-gray-900 text-base font-semibold">${transport.price}</div>
+          <div className="text-gray-900 text-base font-semibold">${displayAmount(transport.price, priceMode, travelers).toLocaleString()}</div>
         </div>
         {transport.bookingUrl ? (
           <a

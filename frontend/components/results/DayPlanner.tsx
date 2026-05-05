@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Trip, City, ScheduledEvent } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
+import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
 import { useTripStore } from '@/store/tripStore';
 
 type DayPlannerProps = {
@@ -30,9 +31,7 @@ type DayPlannerProps = {
 
 /* ---- Constants ---- */
 const HOUR_HEIGHT = 64; // px per hour row
-const START_HOUR = 6; // 6 AM
-const END_HOUR = 24; // midnight
-const TOTAL_HOURS = END_HOUR - START_HOUR;
+const END_HOUR = 24; // midnight (full-day grid runs 00:00–24:00)
 
 const timeToMinutes = (t: string) => {
   const [h, m] = t.split(':').map(Number);
@@ -73,110 +72,6 @@ const CATEGORY_ICONS: Record<string, typeof MapPin> = {
 let _idCounter = 0;
 const newId = () => `evt-${Date.now()}-${++_idCounter}`;
 
-/** Build default schedule for a day from the city's activities & transports */
-function buildDefaultSchedule(
-  city: City,
-  date: string,
-  trip: Trip,
-): ScheduledEvent[] {
-  const events: ScheduledEvent[] = [];
-  const isArrival = city.dates.arrival === date;
-  const isDeparture = city.dates.departure === date;
-
-  // Transport in
-  if (isArrival && city.transportIn.arriveTime) {
-    const arrMins = timeToMinutes(city.transportIn.arriveTime);
-    events.push({
-      id: newId(),
-      title: `Arrive in ${city.name}`,
-      startTime: minutesToTime(Math.max(arrMins - 60, 0)),
-      endTime: city.transportIn.arriveTime,
-      category: 'transport',
-    });
-  }
-
-  // Transport out
-  if (isDeparture && city.transportOut.departTime) {
-    const depMins = timeToMinutes(city.transportOut.departTime);
-    events.push({
-      id: newId(),
-      title: `Depart ${city.name}`,
-      startTime: city.transportOut.departTime,
-      endTime: minutesToTime(Math.min(depMins + 60, 24 * 60)),
-      category: 'transport',
-    });
-  }
-
-  // Spread activities across the day (avoid transport times)
-  const busyRanges = events.map((e) => [
-    timeToMinutes(e.startTime),
-    timeToMinutes(e.endTime),
-  ]);
-
-  // Default activity window
-  let startSlot = isArrival ? timeToMinutes(city.transportIn.arriveTime || '10:00') + 60 : 9 * 60;
-  const endSlot = isDeparture ? timeToMinutes(city.transportOut.departTime || '18:00') - 60 : 21 * 60;
-  const availableMinutes = endSlot - startSlot;
-
-  if (city.activities.length > 0 && availableMinutes > 0) {
-    const slotDuration = Math.min(
-      90,
-      Math.floor(availableMinutes / city.activities.length)
-    );
-    city.activities.forEach((a) => {
-      if (startSlot + slotDuration > endSlot) return;
-      // Check if this overlaps a busy range
-      const overlaps = busyRanges.some(
-        ([bStart, bEnd]) => startSlot < bEnd && startSlot + slotDuration > bStart
-      );
-      if (overlaps) {
-        const overlap = busyRanges.find(
-          ([bStart, bEnd]) => startSlot < bEnd && startSlot + slotDuration > bStart
-        );
-        if (overlap) startSlot = overlap[1] + 15;
-      }
-      if (startSlot + slotDuration > endSlot) return;
-      events.push({
-        id: newId(),
-        title: a,
-        startTime: minutesToTime(startSlot),
-        endTime: minutesToTime(startSlot + slotDuration),
-        category: 'activity',
-      });
-      startSlot += slotDuration + 15; // 15 min gap
-    });
-  }
-
-  // Add restaurants
-  const lunchTime = 12 * 60 + 30;
-  const dinnerTime = 19 * 60 + 30;
-  city.restaurants.slice(0, 2).forEach((r, i) => {
-    const time = i === 0 ? lunchTime : dinnerTime;
-    const overlaps = [...events, ...busyRanges.map(([s, e]) => ({ startTime: minutesToTime(s), endTime: minutesToTime(e) }))].some((ev) => {
-      if ('startTime' in ev && typeof ev.startTime === 'string') {
-        const eStart = timeToMinutes(ev.startTime);
-        const eEnd = timeToMinutes(ev.endTime as string);
-        return time < eEnd && time + 60 > eStart;
-      }
-      return false;
-    });
-    if (!overlaps) {
-      events.push({
-        id: newId(),
-        title: r.name,
-        startTime: minutesToTime(time),
-        endTime: minutesToTime(time + 60),
-        category: 'restaurant',
-        notes: `${r.cuisine} · ${r.priceRange}`,
-      });
-    }
-  });
-
-  // Sort by start time
-  events.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-  return events;
-}
-
 export default function DayPlanner({
   trip,
   date,
@@ -198,7 +93,7 @@ export default function DayPlanner({
 
   useEffect(() => {
     if (!initialized && !existingSchedule) {
-      const defaults = buildDefaultSchedule(city, date, trip);
+      const defaults = buildDefaultSchedule(city, date, trip, cityIndex);
       setDaySchedule(cityIndex, date, defaults);
       setInitialized(true);
     } else {
@@ -207,6 +102,12 @@ export default function DayPlanner({
   }, [initialized, existingSchedule, city, date, trip, cityIndex, setDaySchedule]);
 
   const events = city.schedule?.[date] ?? [];
+
+  // Render the full day, midnight to midnight. Lets the user scroll up to
+  // any pre-dawn hour to add an event there, and ensures very early travel
+  // events (e.g. a 4 AM "head to airport") are never clipped.
+  const startHour = 0;
+  const totalHours = END_HOUR - startHour;
 
   // Add new event state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -255,9 +156,9 @@ export default function DayPlanner({
       if (!draggingId || !dragEdge || !gridRef.current) return;
       const rect = gridRef.current.getBoundingClientRect();
       const relY = e.clientY - rect.top;
-      const totalMinutes = (relY / (TOTAL_HOURS * HOUR_HEIGHT)) * TOTAL_HOURS * 60;
-      const snapped = Math.round((totalMinutes + START_HOUR * 60) / 15) * 15;
-      const clamped = Math.max(START_HOUR * 60, Math.min(END_HOUR * 60, snapped));
+      const totalMinutes = (relY / (totalHours * HOUR_HEIGHT)) * totalHours * 60;
+      const snapped = Math.round((totalMinutes + startHour * 60) / 15) * 15;
+      const clamped = Math.max(startHour * 60, Math.min(END_HOUR * 60, snapped));
       const timeStr = minutesToTime(clamped);
 
       const evt = events.find((ev) => ev.id === draggingId);
@@ -273,7 +174,7 @@ export default function DayPlanner({
         }
       }
     },
-    [draggingId, dragEdge, events, cityIndex, date, updateScheduledEvent]
+    [draggingId, dragEdge, events, cityIndex, date, updateScheduledEvent, startHour, totalHours]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -364,11 +265,11 @@ export default function DayPlanner({
           <div
             ref={gridRef}
             className="relative ml-16"
-            style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}
+            style={{ height: totalHours * HOUR_HEIGHT }}
           >
             {/* Hour lines + labels */}
-            {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => {
-              const hour = START_HOUR + i;
+            {Array.from({ length: totalHours + 1 }, (_, i) => {
+              const hour = startHour + i;
               return (
                 <div key={hour} className="absolute left-0 right-0" style={{ top: i * HOUR_HEIGHT }}>
                   <div
@@ -386,8 +287,8 @@ export default function DayPlanner({
             })}
 
             {/* Clickable hour slots */}
-            {Array.from({ length: TOTAL_HOURS }, (_, i) => {
-              const hour = START_HOUR + i;
+            {Array.from({ length: totalHours }, (_, i) => {
+              const hour = startHour + i;
               return (
                 <div
                   key={`slot-${hour}`}
@@ -403,8 +304,8 @@ export default function DayPlanner({
 
             {/* Event blocks */}
             {events.map((evt) => {
-              const startMins = timeToMinutes(evt.startTime) - START_HOUR * 60;
-              const endMins = timeToMinutes(evt.endTime) - START_HOUR * 60;
+              const startMins = timeToMinutes(evt.startTime) - startHour * 60;
+              const endMins = timeToMinutes(evt.endTime) - startHour * 60;
               const top = (startMins / 60) * HOUR_HEIGHT;
               const height = Math.max(((endMins - startMins) / 60) * HOUR_HEIGHT, 24);
 
@@ -490,7 +391,7 @@ export default function DayPlanner({
             })}
 
             {/* Current time indicator (if today) */}
-            <CurrentTimeIndicator accent={accent} />
+            <CurrentTimeIndicator accent={accent} startHour={startHour} />
           </div>
         </div>
 
@@ -595,7 +496,7 @@ export default function DayPlanner({
 }
 
 /* ---- Current time red line (shows only if the date is today) ---- */
-function CurrentTimeIndicator({ accent }: { accent: string }) {
+function CurrentTimeIndicator({ accent, startHour }: { accent: string; startHour: number }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 60_000);
@@ -603,9 +504,9 @@ function CurrentTimeIndicator({ accent }: { accent: string }) {
   }, []);
 
   const mins = now.getHours() * 60 + now.getMinutes();
-  if (mins < START_HOUR * 60 || mins > END_HOUR * 60) return null;
+  if (mins < startHour * 60 || mins > END_HOUR * 60) return null;
 
-  const offset = ((mins - START_HOUR * 60) / 60) * HOUR_HEIGHT;
+  const offset = ((mins - startHour * 60) / 60) * HOUR_HEIGHT;
   return (
     <div className="absolute left-0 right-0 z-30 pointer-events-none" style={{ top: offset }}>
       <div className="flex items-center">

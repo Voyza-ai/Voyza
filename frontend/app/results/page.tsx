@@ -7,12 +7,14 @@ import Navbar from '@/components/shared/Navbar';
 import ResultsHeader from '@/components/results/ResultsHeader';
 import Flowchart from '@/components/results/Flowchart';
 import CalendarView from '@/components/results/CalendarView';
+import ScheduleView from '@/components/results/ScheduleView';
 import ViewTabs, { ResultsView } from '@/components/results/ViewTabs';
 import AIChatPanel from '@/components/results/AIChatPanel';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import DateShiftBanner from '@/components/results/DateShiftBanner';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
+import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, getTrip } from '@/lib/api';
 import { Hotel, City, Transport } from '@/lib/types';
 import { useAuthStore } from '@/store/authStore';
@@ -102,6 +104,25 @@ function ResultsPageInner() {
               ? Math.max(0, Math.min(c.selected_hotel_index, Math.max(0, hotelsArr.length - 1)))
               : 0;
             const hotel = hotelsArr[selectedIdx] ?? c.hotel ?? { name: '', rating: 0, pricePerNight: 0, area: '' };
+            // Generate placeholder activities for cities that have none
+            const activities = (c.activities && c.activities.length > 0)
+              ? c.activities
+              : [
+                  `Explore ${c.name} old town`,
+                  `Local food tour in ${c.name}`,
+                  `${c.name} main museum`,
+                  `Walking tour of ${c.name}`,
+                  `${c.name} scenic viewpoint`,
+                ];
+            const restaurants = (c.restaurants && c.restaurants.length > 0)
+              ? c.restaurants
+              : [
+                  { name: `${c.name} neighborhood trattoria`, cuisine: 'Local', priceRange: '$$' },
+                  { name: `${c.name} casual lunch cafe`, cuisine: 'Cafe', priceRange: '$' },
+                  { name: `${c.name} fine dining`, cuisine: 'International', priceRange: '$$$' },
+                  { name: `${c.name} street food market`, cuisine: 'Street Food', priceRange: '$' },
+                  { name: `${c.name} rooftop bar & grill`, cuisine: 'Bar & Grill', priceRange: '$$' },
+                ];
             return {
               name: c.name,
               country: c.country ?? '',
@@ -110,8 +131,8 @@ function ResultsPageInner() {
               hotels: hotelsArr,
               selectedHotelIndex: selectedIdx,
               customHotel: c.custom_hotel ?? undefined,
-              activities: c.activities ?? [],
-              restaurants: c.restaurants ?? [],
+              activities,
+              restaurants,
               vibes: c.vibes ?? [],
               colorIndex: c.color_index ?? idx,
               schedule: c.schedule ?? {},
@@ -252,6 +273,9 @@ function ResultsPageInner() {
           {typeof currentTrip.budget === 'number' && (
             <BudgetOverBanner budget={currentTrip.budget} totalCost={currentTrip.totalCost} />
           )}
+          {currentTrip.vibeTierUp && (
+            <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
+          )}
           {currentTrip.dateShiftSuggestion && (
             <DateShiftBanner suggestion={currentTrip.dateShiftSuggestion} />
           )}
@@ -289,6 +313,10 @@ function ResultsPageInner() {
               />
             ) : view === 'flowchart' ? (
               <Flowchart trip={currentTrip} onCityClick={handleCityClick} onActivitiesClick={handleActivitiesClick} />
+            ) : view === 'schedule' ? (
+              <div className="h-full min-h-0">
+                <ScheduleView trip={currentTrip} />
+              </div>
             ) : (
               <div className="h-full overflow-y-auto">
                 <CalendarView trip={currentTrip} onCityClick={handleCityClick} />

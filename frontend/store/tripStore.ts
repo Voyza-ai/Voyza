@@ -16,12 +16,21 @@ type TripStore = {
   currentTrip: Trip | null;
   chatHistory: ChatMessage[];
 
+  /**
+   * Display-time toggle for every dollar amount on the results page.
+   * 'total' shows group totals (the actual booking commitment).
+   * 'perPerson' divides by trip.travelers — the framing people use to
+   * gauge affordability. Single-traveler trips never need to flip.
+   */
+  priceMode: 'total' | 'perPerson';
+
   // Actions
   setAnswer: (key: keyof PlanningAnswers, value: unknown) => void;
   nextStep: () => void;
   prevStep: () => void;
   setStep: (step: number) => void;
   setLoading: (loading: boolean) => void;
+  setPriceMode: (mode: 'total' | 'perPerson') => void;
   setTrip: (trip: Trip) => void;
   updateCity: (index: number, city: Partial<City>) => void;
   setSelectedHotel: (cityIndex: number, hotelIndex: number) => void;
@@ -29,6 +38,13 @@ type TripStore = {
   setCustomHotel: (cityIndex: number, custom: CustomHotel) => void;
   clearCustomHotel: (cityIndex: number) => void;
   setTransportOut: (cityIndex: number, alternativeIndex: number) => void;
+  /**
+   * Swap the home-anchor leg's main flight with one of its alternatives.
+   * `direction: 'outbound'` updates trip.origin.outboundLeg, 'return'
+   * updates trip.origin.returnLeg. The currently-selected leg is moved
+   * back into alternatives so the user can re-pick later.
+   */
+  setHomeLegAlternative: (direction: 'outbound' | 'return', alternativeIndex: number) => void;
   setCityColor: (cityIndex: number, colorIndex: number) => void;
   addActivity: (cityIndex: number, activity: string) => void;
   removeActivity: (cityIndex: number, activityIndex: number) => void;
@@ -50,6 +66,7 @@ export const useTripStore = create<TripStore>((set) => ({
   isLoading: false,
   currentTrip: null,
   chatHistory: [],
+  priceMode: 'total',
 
   setAnswer: (key, value) =>
     set((state) => ({ answers: { ...state.answers, [key]: value } })),
@@ -58,6 +75,8 @@ export const useTripStore = create<TripStore>((set) => ({
   prevStep: () => set((state) => ({ currentStep: Math.max(0, state.currentStep - 1) })),
   setStep: (step) => set({ currentStep: step }),
   setLoading: (loading) => set({ isLoading: loading }),
+
+  setPriceMode: (mode) => set({ priceMode: mode }),
 
   setTrip: (trip) => set({ currentTrip: trip }),
 
@@ -148,6 +167,29 @@ export const useTripStore = create<TripStore>((set) => ({
         };
       }
       return { currentTrip: { ...state.currentTrip, cities } };
+    }),
+
+  setHomeLegAlternative: (direction, alternativeIndex) =>
+    set((state) => {
+      if (!state.currentTrip?.origin) return state;
+      const slot = direction === 'outbound' ? 'outboundLeg' : 'returnLeg';
+      const current = state.currentTrip.origin[slot];
+      if (!current) return state;
+      const alts = current.alternatives ?? [];
+      const chosen = alts[alternativeIndex];
+      if (!chosen) return state;
+      // Move current pick into alternatives, pull the chosen one to main.
+      // alternatives entries are Omit<HomeLeg, 'alternatives'> by design.
+      const { alternatives: _curAlts, ...currentFlat } = current;
+      const newAlts = alts.filter((_, i) => i !== alternativeIndex);
+      newAlts.unshift(currentFlat);
+      const newLeg = { ...chosen, alternatives: newAlts };
+      return {
+        currentTrip: {
+          ...state.currentTrip,
+          origin: { ...state.currentTrip.origin, [slot]: newLeg },
+        },
+      };
     }),
 
   setCityColor: (cityIndex, colorIndex) =>
