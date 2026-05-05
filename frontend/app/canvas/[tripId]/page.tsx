@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { Save, Share2, WifiOff, ArrowLeft } from 'lucide-react';
 import CanvasCityCard from '@/components/canvas/CanvasCityCard';
 import CanvasConnector from '@/components/canvas/CanvasConnector';
+import CanvasHomeCard from '@/components/canvas/CanvasHomeCard';
 import SuggestedCitiesPanel from '@/components/canvas/SuggestedCitiesPanel';
 import SuggestionsPanel from '@/components/canvas/SuggestionsPanel';
 import InviteModal from '@/components/canvas/InviteModal';
@@ -28,7 +29,8 @@ export default function CanvasPage() {
   const router = useRouter();
   const tripId = params.tripId as string;
   const user = useAuthStore((s) => s.user);
-  const storeCities = useTripStore((s) => s.currentTrip?.cities);
+  const storeTrip = useTripStore((s) => s.currentTrip);
+  const storeCities = storeTrip?.cities;
 
   const [role, setRole] = useState<string>('viewer');
   const [localState, setLocalState] = useState<any>(null);
@@ -74,8 +76,35 @@ export default function CanvasPage() {
 
         const { session, role: userRole } = await getCanvasSession(tripId, fallbackCities);
         setRole(userRole);
-        setLocalState(session.state);
-        setSavedState(session.state);
+
+        // Inject origin/returnToHome if the DB doesn't have it
+        const sessionState = { ...session.state };
+        if (!sessionState.trip?.origin) {
+          // Try Zustand store first, then localStorage
+          let originData = storeTrip?.origin
+            ? { origin: storeTrip.origin, returnToHome: storeTrip.returnToHome ?? true }
+            : null;
+
+          if (!originData && typeof window !== 'undefined') {
+            try {
+              const stored = localStorage.getItem(`voyza-origin-${tripId}`);
+              if (stored) {
+                originData = JSON.parse(stored);
+              }
+            } catch {}
+          }
+
+          if (originData) {
+            sessionState.trip = {
+              ...(sessionState.trip ?? {}),
+              origin: originData.origin,
+              returnToHome: originData.returnToHome ?? true,
+            };
+          }
+        }
+
+        setLocalState(sessionState);
+        setSavedState(sessionState);
 
         // Load members from session
         if (session.state?.members) {
@@ -129,20 +158,70 @@ export default function CanvasPage() {
     if (!localState?.cities) return;
     const cities = [...localState.cities];
     cities.splice(index, 1);
-    setLocalState({ ...localState, cities });
+    setLocalState({ ...localState, cities: recalcDates(cities) });
+  };
+
+  const recalcDates = (cities: any[]) => {
+    if (cities.length === 0) return cities;
+    // Find the earliest arrival as the chain start
+    let startDate = '';
+    for (const c of cities) {
+      if (c.dates?.arrival && c.dates.arrival.includes('-')) {
+        startDate = c.dates.arrival;
+        break;
+      }
+    }
+    if (!startDate) return cities;
+
+    const toIso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const parseDate = (iso: string) => {
+      const [y, m, d] = iso.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    };
+
+    let cursor = parseDate(startDate);
+    return cities.map((city: any) => {
+      // Compute how many nights this city had
+      let nights = 2; // default
+      if (city.dates?.arrival && city.dates?.departure && city.dates.arrival.includes('-') && city.dates.departure.includes('-')) {
+        const arr = parseDate(city.dates.arrival);
+        const dep = parseDate(city.dates.departure);
+        nights = Math.max(1, Math.round((dep.getTime() - arr.getTime()) / 86400000));
+      }
+      const arrival = toIso(cursor);
+      const dep = new Date(cursor);
+      dep.setDate(dep.getDate() + nights);
+      const departure = toIso(dep);
+      cursor = dep; // next city starts when this one ends
+      return { ...city, dates: { arrival, departure } };
+    });
+  };
+
+  const handleReorder = (newOrder: any[]) => {
+    if (!localState) return;
+    setLocalState({ ...localState, cities: recalcDates(newOrder) });
   };
 
   const handleAddAfter = (index: number) => {
     setAddingAfterIndex(index);
   };
 
-  const handleAddCityConfirm = (cityData: { name: string; country?: string }) => {
+  const handleAddCityConfirm = (cityData: { name: string; country?: string; nights: number }) => {
     if (addingAfterIndex === null || !localState?.cities) return;
     const cities = [...localState.cities];
+
+    // Create new city with placeholder dates — recalcDates will fix them
+    // We set a temporary departure offset so recalcDates knows the night count
+    const toIso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const tempArr = new Date(2000, 0, 1);
+    const tempDep = new Date(2000, 0, 1 + cityData.nights);
+
     const newCity = {
       name: cityData.name,
       country: cityData.country ?? '',
-      dates: { arrival: '', departure: '' },
+      dates: { arrival: toIso(tempArr), departure: toIso(tempDep) },
       hotel: { name: 'Select hotel', rating: 0, pricePerNight: 0, area: '' },
       hotels: [],
       selectedHotelIndex: 0,
@@ -152,7 +231,7 @@ export default function CanvasPage() {
       transportOut: { mode: 'flight', operator: '', duration: '', price: 0 },
     };
     cities.splice(addingAfterIndex + 1, 0, newCity);
-    setLocalState({ ...localState, cities });
+    setLocalState({ ...localState, cities: recalcDates(cities) });
     setAddingAfterIndex(null);
   };
 
@@ -215,8 +294,20 @@ export default function CanvasPage() {
     }
   };
 
+  const handleUpdateOrigin = (updates: { city?: string; airports?: string[] }) => {
+    if (!localState?.trip) return;
+    const currentOrigin = localState.trip.origin ?? { city: '', airports: [] };
+    const newOrigin = { ...currentOrigin, ...updates };
+    setLocalState({
+      ...localState,
+      trip: { ...localState.trip, origin: newOrigin },
+    });
+  };
+
   const cities = localState?.cities ?? [];
   const tripTitle = localState?.trip?.title ?? 'Canvas';
+  const origin = localState?.trip?.origin ?? null;
+  const returnToHome = localState?.trip?.returnToHome ?? false;
   const canEdit = role === 'owner' || role === 'editor';
 
   // User initials for avatar
@@ -384,30 +475,65 @@ export default function CanvasPage() {
             </div>
           )}
 
-          {cities.map((city: any, idx: number) => (
-            <div key={`${city.name}-${idx}`} className="flex items-center">
-              <CanvasCityCard
-                city={city}
-                index={idx}
-                role={role}
-                isLast={idx === cities.length - 1}
-                onRemove={handleRemoveCity}
-                onAddAfter={handleAddAfter}
+          {/* Home card (outbound) */}
+          {origin?.city && cities.length > 0 && (
+            <div className="flex items-center">
+              <CanvasHomeCard origin={origin} direction="outbound" onUpdateOrigin={canEdit ? handleUpdateOrigin : undefined} />
+              <CanvasConnector
+                transport={origin.outboundLeg ? {
+                  mode: 'flight',
+                  price: origin.outboundLeg.price ?? 0,
+                  duration: origin.outboundLeg.durationMinutes
+                    ? `${Math.floor(origin.outboundLeg.durationMinutes / 60)}h ${origin.outboundLeg.durationMinutes % 60}m`
+                    : '',
+                  operator: origin.outboundLeg.operator ?? '',
+                } : null}
+                canEdit={false}
+                onAddCity={() => {}}
               />
-
-              {/* Connector between cards */}
-              {idx < cities.length - 1 && (
-                <CanvasConnector
-                  transport={city.transportOut}
-                  canEdit={canEdit}
-                  onAddCity={() => handleAddAfter(idx)}
-                />
-              )}
             </div>
-          ))}
+          )}
 
-          {/* Trailing add button */}
-          {canEdit && cities.length > 0 && (
+          <Reorder.Group
+            axis="x"
+            values={cities}
+            onReorder={canEdit ? handleReorder : () => {}}
+            className="flex items-center gap-0"
+            as="div"
+          >
+            {cities.map((city: any, idx: number) => (
+              <Reorder.Item
+                key={city.name + '-' + idx}
+                value={city}
+                className="flex items-center"
+                dragListener={canEdit}
+                whileDrag={{ scale: 1.05, zIndex: 50, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}
+                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                as="div"
+              >
+                <CanvasCityCard
+                  city={city}
+                  index={idx}
+                  role={role}
+                  isLast={idx === cities.length - 1}
+                  onRemove={handleRemoveCity}
+                  onAddAfter={handleAddAfter}
+                />
+
+                {/* Connector between cards */}
+                {idx < cities.length - 1 && (
+                  <CanvasConnector
+                    transport={city.transportOut}
+                    canEdit={canEdit}
+                    onAddCity={() => handleAddAfter(idx)}
+                  />
+                )}
+              </Reorder.Item>
+            ))}
+          </Reorder.Group>
+
+          {/* Trailing add button — hidden when Back Home card is showing */}
+          {canEdit && cities.length > 0 && !(origin?.city && returnToHome) && (
             <button
               onClick={() => setAddingAfterIndex(cities.length - 1)}
               className="ml-6 w-12 h-12 rounded-full flex items-center justify-center border-2 border-dashed transition-all hover:scale-110 hover:border-[#2563eb] hover:text-[#2563eb] group"
@@ -415,6 +541,25 @@ export default function CanvasPage() {
             >
               <span className="text-gray-400 text-[22px] group-hover:text-[#2563eb] transition-colors">+</span>
             </button>
+          )}
+
+          {/* Back home card (return) */}
+          {origin?.city && returnToHome && cities.length > 0 && (
+            <div className="flex items-center ml-2">
+              <CanvasConnector
+                transport={origin.returnLeg ? {
+                  mode: 'flight',
+                  price: origin.returnLeg.price ?? 0,
+                  duration: origin.returnLeg.durationMinutes
+                    ? `${Math.floor(origin.returnLeg.durationMinutes / 60)}h ${origin.returnLeg.durationMinutes % 60}m`
+                    : '',
+                  operator: origin.returnLeg.operator ?? '',
+                } : null}
+                canEdit={false}
+                onAddCity={() => {}}
+              />
+              <CanvasHomeCard origin={origin} direction="inbound" onUpdateOrigin={canEdit ? handleUpdateOrigin : undefined} />
+            </div>
           )}
         </div>
       </div>

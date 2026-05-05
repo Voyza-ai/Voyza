@@ -39,9 +39,19 @@ jest.mock('framer-motion', () => {
       },
     },
   );
+  const ReorderGroup = React.forwardRef(({ children, as: Tag = 'div', values, onReorder, ...rest }: any, ref: any) => {
+    const { axis, ...domProps } = rest;
+    return React.createElement(Tag, { ...domProps, ref }, children);
+  });
+  const ReorderItem = React.forwardRef(({ children, as: Tag = 'div', value, dragListener, whileDrag, ...rest }: any, ref: any) => {
+    const { transition, ...domProps } = rest;
+    return React.createElement(Tag, { ...domProps, ref }, children);
+  });
+
   return {
     motion,
     AnimatePresence: ({ children }: any) => children,
+    Reorder: { Group: ReorderGroup, Item: ReorderItem },
     useAnimation: () => ({ start: jest.fn() }),
     useMotionValue: (val: number) => ({ get: () => val, set: jest.fn() }),
   };

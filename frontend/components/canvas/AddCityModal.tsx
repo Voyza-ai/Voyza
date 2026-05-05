@@ -2,33 +2,48 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, MapPin, Loader2 } from 'lucide-react';
+import { Search, MapPin, Loader2, Moon, Minus, Plus, Sparkles } from 'lucide-react';
 import { suggestDestinations, Destination } from '@/lib/api';
 
 type AddCityModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (city: { name: string; country?: string }) => void;
+  onAdd: (city: { name: string; country?: string; nights: number }) => void;
   currentCities: string[];
 };
 
 export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: AddCityModalProps) {
   const [query, setQuery] = useState('');
+  const [nights, setNights] = useState(2);
   const [suggestions, setSuggestions] = useState<Destination[]>([]);
+  const [recommendations, setRecommendations] = useState<Destination[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingRecs, setLoadingRecs] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // Focus input when modal opens
+  // Reset and fetch recommendations when modal opens
   useEffect(() => {
     if (isOpen) {
       setQuery('');
+      setNights(2);
       setSuggestions([]);
       setHasSearched(false);
       setTimeout(() => inputRef.current?.focus(), 100);
+
+      // Fetch recommendations based on current cities
+      if (currentCities.length > 0) {
+        setLoadingRecs(true);
+        suggestDestinations({ currentCities })
+          .then((results) => setRecommendations(results))
+          .catch(() => setRecommendations([]))
+          .finally(() => setLoadingRecs(false));
+      }
+    } else {
+      setRecommendations([]);
     }
-  }, [isOpen]);
+  }, [isOpen, currentCities.join(',')]);
 
   // Debounced search
   const searchCities = useCallback(
@@ -66,16 +81,19 @@ export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: 
 
   const handleSubmit = () => {
     if (!query.trim()) return;
-    onAdd({ name: query.trim() });
+    onAdd({ name: query.trim(), nights });
     setQuery('');
   };
 
-  const handleSelectSuggestion = (dest: Destination) => {
-    onAdd({ name: dest.name });
+  const handleSelectCity = (name: string) => {
+    onAdd({ name, nights });
     setQuery('');
   };
 
   if (!isOpen) return null;
+
+  // Show search results when typing, otherwise show recommendations
+  const showSearchResults = query.length >= 2;
 
   return (
     <AnimatePresence>
@@ -93,7 +111,7 @@ export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: 
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.95, opacity: 0, y: 10 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-[380px] rounded-2xl border shadow-xl overflow-hidden"
+            className="w-[400px] rounded-2xl border shadow-xl overflow-hidden"
             style={{
               background: '#ffffff',
               borderColor: 'rgba(0,0,0,0.08)',
@@ -103,7 +121,7 @@ export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: 
             <div className="px-5 pt-5 pb-3">
               <div className="text-gray-800 text-[15px] font-medium mb-1">Add a city</div>
               <div className="text-gray-400 text-[12px]">
-                Search or type a city name to add it to your trip
+                Search for a city or pick from recommendations
               </div>
             </div>
 
@@ -132,41 +150,125 @@ export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: 
               </div>
             </div>
 
-            {/* Suggestions dropdown */}
-            {suggestions.length > 0 && (
-              <div className="px-3 pb-2 max-h-[240px] overflow-y-auto">
-                {suggestions.map((dest) => (
+            {/* Nights selector */}
+            <div className="px-5 pb-3">
+              <div
+                className="flex items-center justify-between px-3.5 py-2.5 rounded-xl"
+                style={{
+                  background: '#f0f4f8',
+                  border: '1px solid rgba(0,0,0,0.08)',
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <Moon size={13} className="text-gray-400" />
+                  <span className="text-[13px] text-gray-600">Nights</span>
+                </div>
+                <div className="flex items-center gap-2">
                   <button
-                    key={dest.name}
-                    onClick={() => handleSelectSuggestion(dest)}
-                    className="w-full flex items-start gap-3 px-3 py-2.5 rounded-xl text-left hover:bg-gray-50 transition-colors"
+                    onClick={() => setNights(Math.max(1, nights - 1))}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-500 hover:bg-white hover:text-gray-800 transition-colors"
                   >
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
-                      style={{ background: 'rgba(37,99,235,0.08)' }}
-                    >
-                      <MapPin size={12} className="text-[#2563eb]" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-gray-900 text-[13px] font-medium">{dest.name}</div>
-                      <div className="text-gray-400 text-[11px] leading-snug mt-0.5 line-clamp-2">
-                        {dest.reason}
-                      </div>
-                    </div>
-                    <div className="text-gray-400 text-[11px] flex-shrink-0 mt-1">
-                      ~${dest.estimatedCost}
-                    </div>
+                    <Minus size={13} />
                   </button>
-                ))}
+                  <span className="text-[14px] font-semibold text-gray-900 w-6 text-center tabular-nums">
+                    {nights}
+                  </span>
+                  <button
+                    onClick={() => setNights(Math.min(14, nights + 1))}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-500 hover:bg-white hover:text-gray-800 transition-colors"
+                  >
+                    <Plus size={13} />
+                  </button>
+                </div>
               </div>
-            )}
+            </div>
 
-            {/* No results */}
-            {hasSearched && suggestions.length === 0 && query.length >= 2 && !loading && (
-              <div className="px-5 pb-3 text-gray-400 text-[12px] text-center py-4">
-                No suggestions found — press Enter to add "{query}" directly
-              </div>
-            )}
+            {/* Search results OR Recommendations */}
+            <div className="max-h-[260px] overflow-y-auto">
+              {showSearchResults ? (
+                // Search results
+                <>
+                  {suggestions.length > 0 && (
+                    <div className="px-3 pb-2">
+                      {suggestions.map((dest) => (
+                        <button
+                          key={dest.name}
+                          onClick={() => handleSelectCity(dest.name)}
+                          className="w-full flex items-start gap-3 px-3 py-2.5 rounded-xl text-left hover:bg-gray-50 transition-colors"
+                        >
+                          <div
+                            className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+                            style={{ background: 'rgba(37,99,235,0.08)' }}
+                          >
+                            <MapPin size={12} className="text-[#2563eb]" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-gray-900 text-[13px] font-medium">{dest.name}</div>
+                            <div className="text-gray-400 text-[11px] leading-snug mt-0.5 line-clamp-2">
+                              {dest.reason}
+                            </div>
+                          </div>
+                          <div className="text-gray-400 text-[11px] flex-shrink-0 mt-1">
+                            ~${dest.estimatedCost}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {hasSearched && suggestions.length === 0 && !loading && (
+                    <div className="px-5 pb-3 text-gray-400 text-[12px] text-center py-4">
+                      No suggestions found — press Enter to add &ldquo;{query}&rdquo; directly
+                    </div>
+                  )}
+                </>
+              ) : (
+                // Recommendations based on current cities
+                <div className="px-3 pb-2">
+                  {loadingRecs ? (
+                    <div className="flex items-center justify-center gap-2 py-6">
+                      <Loader2 size={14} className="text-gray-400 animate-spin" />
+                      <span className="text-gray-400 text-[12px]">Finding nearby cities...</span>
+                    </div>
+                  ) : recommendations.length > 0 ? (
+                    <>
+                      <div className="flex items-center gap-1.5 px-3 pt-1 pb-2">
+                        <Sparkles size={11} className="text-[#2563eb]" />
+                        <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+                          Recommended near your cities
+                        </span>
+                      </div>
+                      {recommendations.map((dest) => (
+                        <button
+                          key={dest.name}
+                          onClick={() => handleSelectCity(dest.name)}
+                          className="w-full flex items-start gap-3 px-3 py-2.5 rounded-xl text-left hover:bg-gray-50 transition-colors"
+                        >
+                          <div
+                            className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+                            style={{ background: 'rgba(37,99,235,0.08)' }}
+                          >
+                            <MapPin size={12} className="text-[#2563eb]" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-gray-900 text-[13px] font-medium">{dest.name}</div>
+                            <div className="text-gray-400 text-[11px] leading-snug mt-0.5 line-clamp-2">
+                              {dest.reason}
+                            </div>
+                          </div>
+                          <div className="text-gray-400 text-[11px] flex-shrink-0 mt-1">
+                            ~${dest.estimatedCost}
+                          </div>
+                        </button>
+                      ))}
+                    </>
+                  ) : currentCities.length > 0 ? (
+                    <div className="text-gray-400 text-[12px] text-center py-6">
+                      Type a city name to search
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
 
             {/* Action buttons */}
             <div

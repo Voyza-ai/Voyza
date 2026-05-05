@@ -246,19 +246,61 @@ const suggestSchema = z.object({
 
 // Hardcoded popularity map for next-city suggestions
 const POPULAR_NEXT: Record<string, string[]> = {
-  Rome: ['Florence', 'Naples', 'Amalfi', 'Cinque Terre'],
-  Florence: ['Rome', 'Venice', 'Siena', 'Pisa'],
-  Barcelona: ['Madrid', 'Valencia', 'Lisbon', 'Seville'],
-  Paris: ['London', 'Amsterdam', 'Brussels', 'Lyon'],
-  London: ['Paris', 'Edinburgh', 'Amsterdam', 'Dublin'],
-  Amsterdam: ['Brussels', 'Paris', 'Berlin', 'Cologne'],
-  Berlin: ['Prague', 'Munich', 'Amsterdam', 'Vienna'],
-  Prague: ['Vienna', 'Berlin', 'Budapest', 'Krakow'],
-  Vienna: ['Prague', 'Budapest', 'Salzburg', 'Munich'],
-  Lisbon: ['Porto', 'Seville', 'Barcelona', 'Madrid'],
-  Madrid: ['Barcelona', 'Seville', 'Lisbon', 'Valencia'],
-  Athens: ['Santorini', 'Mykonos', 'Istanbul', 'Crete'],
-  Istanbul: ['Athens', 'Cappadocia', 'Antalya', 'Sofia'],
+  // Europe
+  Rome: ['Florence', 'Naples', 'Amalfi', 'Cinque Terre', 'Venice'],
+  Florence: ['Rome', 'Venice', 'Siena', 'Pisa', 'Bologna'],
+  Venice: ['Florence', 'Rome', 'Milan', 'Ljubljana', 'Verona'],
+  Milan: ['Venice', 'Florence', 'Lake Como', 'Turin', 'Genoa'],
+  Naples: ['Rome', 'Amalfi', 'Pompeii', 'Capri', 'Sorrento'],
+  Barcelona: ['Madrid', 'Valencia', 'Lisbon', 'Seville', 'Mallorca'],
+  Paris: ['London', 'Amsterdam', 'Brussels', 'Lyon', 'Nice'],
+  London: ['Paris', 'Edinburgh', 'Amsterdam', 'Dublin', 'Bath'],
+  Amsterdam: ['Brussels', 'Paris', 'Berlin', 'Cologne', 'Rotterdam'],
+  Berlin: ['Prague', 'Munich', 'Amsterdam', 'Vienna', 'Dresden'],
+  Prague: ['Vienna', 'Berlin', 'Budapest', 'Krakow', 'Cesky Krumlov'],
+  Vienna: ['Prague', 'Budapest', 'Salzburg', 'Munich', 'Bratislava'],
+  Lisbon: ['Porto', 'Seville', 'Barcelona', 'Madrid', 'Sintra'],
+  Madrid: ['Barcelona', 'Seville', 'Lisbon', 'Valencia', 'Toledo'],
+  Athens: ['Santorini', 'Mykonos', 'Istanbul', 'Crete', 'Rhodes'],
+  Istanbul: ['Athens', 'Cappadocia', 'Antalya', 'Sofia', 'Tbilisi'],
+  Budapest: ['Prague', 'Vienna', 'Krakow', 'Belgrade', 'Zagreb'],
+  Dublin: ['London', 'Edinburgh', 'Galway', 'Belfast', 'Cork'],
+  Edinburgh: ['London', 'Dublin', 'Glasgow', 'York', 'Inverness'],
+  Zurich: ['Lucerne', 'Interlaken', 'Munich', 'Milan', 'Geneva'],
+  // Japan
+  Tokyo: ['Kyoto', 'Osaka', 'Hakone', 'Nikko', 'Kamakura'],
+  Kyoto: ['Osaka', 'Nara', 'Tokyo', 'Hiroshima', 'Kobe'],
+  Osaka: ['Kyoto', 'Nara', 'Hiroshima', 'Kobe', 'Tokyo'],
+  Hiroshima: ['Osaka', 'Kyoto', 'Miyajima', 'Fukuoka', 'Kobe'],
+  Fukuoka: ['Hiroshima', 'Nagasaki', 'Osaka', 'Beppu', 'Kumamoto'],
+  // Southeast Asia
+  Bangkok: ['Chiang Mai', 'Phuket', 'Siem Reap', 'Hanoi', 'Krabi'],
+  'Chiang Mai': ['Bangkok', 'Pai', 'Luang Prabang', 'Chiang Rai', 'Sukhothai'],
+  Hanoi: ['Ha Long Bay', 'Hoi An', 'Sapa', 'Ninh Binh', 'Bangkok'],
+  'Ho Chi Minh City': ['Hoi An', 'Da Nang', 'Phnom Penh', 'Hanoi', 'Nha Trang'],
+  Bali: ['Lombok', 'Yogyakarta', 'Singapore', 'Kuala Lumpur', 'Bangkok'],
+  Singapore: ['Kuala Lumpur', 'Bali', 'Bangkok', 'Penang', 'Jakarta'],
+  // South Korea
+  Seoul: ['Busan', 'Jeju', 'Gyeongju', 'Incheon', 'Tokyo'],
+  Busan: ['Seoul', 'Gyeongju', 'Jeju', 'Fukuoka', 'Osaka'],
+  // Americas
+  'New York': ['Boston', 'Washington DC', 'Philadelphia', 'Montreal', 'Chicago'],
+  'Los Angeles': ['San Francisco', 'San Diego', 'Las Vegas', 'Santa Barbara', 'Joshua Tree'],
+  'San Francisco': ['Los Angeles', 'Napa Valley', 'Yosemite', 'Portland', 'Seattle'],
+  Miami: ['Key West', 'Orlando', 'Havana', 'Nassau', 'Fort Lauderdale'],
+  'Mexico City': ['Oaxaca', 'Puebla', 'Cancun', 'Guanajuato', 'San Miguel de Allende'],
+  Cancun: ['Tulum', 'Playa del Carmen', 'Merida', 'Cozumel', 'Valladolid'],
+  Lima: ['Cusco', 'Arequipa', 'Bogota', 'La Paz', 'Huacachina'],
+  Cusco: ['Lima', 'Machu Picchu', 'Lake Titicaca', 'La Paz', 'Arequipa'],
+  'Buenos Aires': ['Montevideo', 'Mendoza', 'Santiago', 'Iguazu Falls', 'Bariloche'],
+  'Rio de Janeiro': ['Sao Paulo', 'Salvador', 'Buzios', 'Paraty', 'Florianopolis'],
+  // Middle East
+  Dubai: ['Abu Dhabi', 'Muscat', 'Doha', 'Istanbul', 'Amman'],
+  Marrakech: ['Fes', 'Casablanca', 'Chefchaouen', 'Essaouira', 'Merzouga'],
+  // Australia / NZ
+  Sydney: ['Melbourne', 'Byron Bay', 'Blue Mountains', 'Gold Coast', 'Canberra'],
+  Melbourne: ['Sydney', 'Great Ocean Road', 'Adelaide', 'Tasmania', 'Philip Island'],
+  Auckland: ['Queenstown', 'Rotorua', 'Wellington', 'Hobbiton', 'Bay of Islands'],
 };
 
 router.post(
@@ -268,12 +310,21 @@ router.post(
 
     let candidates: Array<{ name: string; estimatedCost: number; reason: string }> = [];
 
-    // Find next destinations from current cities
+    // Find next destinations from current cities (case-insensitive lookup)
     if (currentCities && currentCities.length > 0) {
+      // Build case-insensitive index
+      const popularKeys = Object.keys(POPULAR_NEXT);
+      const currentLower = currentCities.map((c) => c.toLowerCase());
+
       for (const city of currentCities) {
-        const nextCities = POPULAR_NEXT[city] ?? [];
+        // Find matching key case-insensitively
+        const key = popularKeys.find((k) => k.toLowerCase() === city.toLowerCase());
+        const nextCities = key ? POPULAR_NEXT[key] : [];
         for (const next of nextCities) {
-          if (!currentCities.includes(next) && !candidates.find((c) => c.name === next)) {
+          if (
+            !currentLower.includes(next.toLowerCase()) &&
+            !candidates.find((c) => c.name.toLowerCase() === next.toLowerCase())
+          ) {
             candidates.push({
               name: next,
               estimatedCost: 100 + Math.floor(Math.random() * 200),
