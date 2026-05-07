@@ -1350,6 +1350,32 @@ export default function PlanningChat() {
       missing.push({ id: 'dates', question: 'When are you thinking?', type: 'dates', skippable: true });
     }
 
+    // Nights: ask whenever we don't have enough info to derive trip length.
+    // Mirrors the skip rule used by the guided-flow `isStepAlreadyAnswered`:
+    //   - already explicitly answered → skip
+    //   - dates form a concrete start+end ISO range (and not flagged
+    //     flexible) → derive nights from range, skip
+    // Otherwise the trip would silently fall through to the optimizer's
+    // 2-nights-per-city default. Without this push the freeform-followup
+    // flow asks travelers → dates → budget → vibe and never asks nights,
+    // even when the date answer was vague ("Next month" / "I'm flexible").
+    const hasNights = typeof answers.nights === 'number' || typeof parsed?.nights === 'number';
+    const parsedDateRange = parsed?.dates;
+    const dateRange = answers.dateRange ?? (parsedDateRange?.start
+      ? { start: parsedDateRange.start, end: parsedDateRange.end ?? '' }
+      : undefined);
+    const isoFmt = /^\d{4}-\d{2}-\d{2}$/;
+    const hasConcreteRange =
+      !!dateRange?.start &&
+      !!dateRange?.end &&
+      isoFmt.test(dateRange.start) &&
+      isoFmt.test(dateRange.end) &&
+      answers.flexible !== true &&
+      new Date(dateRange.end).getTime() > new Date(dateRange.start).getTime();
+    if (!hasNights && !hasConcreteRange) {
+      missing.push({ id: 'nights', question: 'How many nights total?', type: 'nights', skippable: true });
+    }
+
     if (!hasBudget) {
       missing.push({ id: 'budget', question: "What's your budget looking like?", type: 'budget', skippable: true });
     } else if (!budgetPerPersonKnown) {
