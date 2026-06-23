@@ -37,7 +37,7 @@ describe('CanvasPage', () => {
     });
   });
 
-  it('shows trip title from canvas session', async () => {
+  it('shows route header derived from the current cities', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -47,7 +47,7 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('My Euro Trip')).toBeInTheDocument();
+      expect(screen.getByText('Rome → Florence')).toBeInTheDocument();
     });
   });
 

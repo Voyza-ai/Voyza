@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, MapPin, Loader2, Moon, Minus, Plus, Sparkles } from 'lucide-react';
 import { suggestDestinations, Destination } from '@/lib/api';
+import { searchWorldCities } from '@/data/worldCities';
 
 type AddCityModalProps = {
   isOpen: boolean;
@@ -15,21 +16,22 @@ type AddCityModalProps = {
 export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: AddCityModalProps) {
   const [query, setQuery] = useState('');
   const [nights, setNights] = useState(2);
-  const [suggestions, setSuggestions] = useState<Destination[]>([]);
   const [recommendations, setRecommendations] = useState<Destination[]>([]);
-  const [loading, setLoading] = useState(false);
   const [loadingRecs, setLoadingRecs] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Instant client-side filter over the world-cities list — matches as you
+  // type, so users can branch to any major city in any country.
+  const cityMatches = useMemo(
+    () => searchWorldCities(query, currentCities),
+    [query, currentCities],
+  );
 
   // Reset and fetch recommendations when modal opens
   useEffect(() => {
     if (isOpen) {
       setQuery('');
       setNights(2);
-      setSuggestions([]);
-      setHasSearched(false);
       setTimeout(() => inputRef.current?.focus(), 100);
 
       // Fetch recommendations based on current cities
@@ -45,55 +47,25 @@ export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: 
     }
   }, [isOpen, currentCities.join(',')]);
 
-  // Debounced search
-  const searchCities = useCallback(
-    (q: string) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (q.length < 2) {
-        setSuggestions([]);
-        setHasSearched(false);
-        return;
-      }
-      debounceRef.current = setTimeout(async () => {
-        setLoading(true);
-        try {
-          const results = await suggestDestinations({
-            currentCities,
-            vibe: q,
-          });
-          setSuggestions(results);
-          setHasSearched(true);
-        } catch {
-          setSuggestions([]);
-          setHasSearched(true);
-        } finally {
-          setLoading(false);
-        }
-      }, 400);
-    },
-    [currentCities],
-  );
-
-  const handleQueryChange = (value: string) => {
-    setQuery(value);
-    searchCities(value);
-  };
-
   const handleSubmit = () => {
     if (!query.trim()) return;
-    onAdd({ name: query.trim(), nights });
+    // If the typed text exactly matches a known city, carry its country.
+    const exact = cityMatches.find(
+      (c) => c.city.toLowerCase() === query.trim().toLowerCase(),
+    );
+    onAdd({ name: query.trim(), country: exact?.country, nights });
     setQuery('');
   };
 
-  const handleSelectCity = (name: string) => {
-    onAdd({ name, nights });
+  const handleSelectCity = (name: string, country?: string) => {
+    onAdd({ name, country, nights });
     setQuery('');
   };
 
   if (!isOpen) return null;
 
   // Show search results when typing, otherwise show recommendations
-  const showSearchResults = query.length >= 2;
+  const showSearchResults = query.trim().length >= 1;
 
   return (
     <AnimatePresence>
@@ -121,7 +93,7 @@ export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: 
             <div className="px-5 pt-5 pb-3">
               <div className="text-gray-800 text-[15px] font-medium mb-1">Add a city</div>
               <div className="text-gray-400 text-[12px]">
-                Search for a city or pick from recommendations
+                Search for any major city or pick from recommendations
               </div>
             </div>
 
@@ -138,15 +110,22 @@ export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: 
                 <input
                   ref={inputRef}
                   value={query}
-                  onChange={(e) => handleQueryChange(e.target.value)}
+                  onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSubmit();
+                    if (e.key === 'Enter') {
+                      // Enter selects the top match if there is one, else
+                      // adds the typed text directly.
+                      if (cityMatches.length > 0) {
+                        handleSelectCity(cityMatches[0].city, cityMatches[0].country);
+                      } else {
+                        handleSubmit();
+                      }
+                    }
                     if (e.key === 'Escape') onClose();
                   }}
-                  placeholder="City name or vibe..."
+                  placeholder="Search a city or country..."
                   className="flex-1 bg-transparent text-[13px] text-gray-900 placeholder-gray-400 outline-none"
                 />
-                {loading && <Loader2 size={14} className="text-gray-400 animate-spin flex-shrink-0" />}
               </div>
             </div>
 
@@ -186,38 +165,35 @@ export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: 
             {/* Search results OR Recommendations */}
             <div className="max-h-[260px] overflow-y-auto">
               {showSearchResults ? (
-                // Search results
+                // City name matches
                 <>
-                  {suggestions.length > 0 && (
+                  {cityMatches.length > 0 && (
                     <div className="px-3 pb-2">
-                      {suggestions.map((dest) => (
+                      {cityMatches.map((match) => (
                         <button
-                          key={dest.name}
-                          onClick={() => handleSelectCity(dest.name)}
-                          className="w-full flex items-start gap-3 px-3 py-2.5 rounded-xl text-left hover:bg-gray-50 transition-colors"
+                          key={`${match.city}-${match.country}`}
+                          onClick={() => handleSelectCity(match.city, match.country)}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left hover:bg-gray-50 transition-colors"
                         >
                           <div
-                            className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+                            className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
                             style={{ background: 'rgba(37,99,235,0.08)' }}
                           >
                             <MapPin size={12} className="text-[#2563eb]" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="text-gray-900 text-[13px] font-medium">{dest.name}</div>
-                            <div className="text-gray-400 text-[11px] leading-snug mt-0.5 line-clamp-2">
-                              {dest.reason}
+                            <div className="text-gray-900 text-[13px] font-medium">{match.city}</div>
+                            <div className="text-gray-400 text-[11px] leading-snug mt-0.5">
+                              {match.country}
                             </div>
-                          </div>
-                          <div className="text-gray-400 text-[11px] flex-shrink-0 mt-1">
-                            ~${dest.estimatedCost}
                           </div>
                         </button>
                       ))}
                     </div>
                   )}
-                  {hasSearched && suggestions.length === 0 && !loading && (
+                  {cityMatches.length === 0 && (
                     <div className="px-5 pb-3 text-gray-400 text-[12px] text-center py-4">
-                      No suggestions found — press Enter to add &ldquo;{query}&rdquo; directly
+                      No match — press Enter to add &ldquo;{query.trim()}&rdquo; directly
                     </div>
                   )}
                 </>
@@ -261,11 +237,11 @@ export default function AddCityModal({ isOpen, onClose, onAdd, currentCities }: 
                         </button>
                       ))}
                     </>
-                  ) : currentCities.length > 0 ? (
+                  ) : (
                     <div className="text-gray-400 text-[12px] text-center py-6">
                       Type a city name to search
                     </div>
-                  ) : null}
+                  )}
                 </div>
               )}
             </div>

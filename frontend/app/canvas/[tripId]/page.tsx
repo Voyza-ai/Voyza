@@ -21,8 +21,10 @@ import {
   postCanvasSuggestion,
   updateSuggestionStatus,
   getTrip,
+  searchHotels,
   Destination,
 } from '@/lib/api';
+import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 
 export default function CanvasPage() {
   const params = useParams();
@@ -40,6 +42,7 @@ export default function CanvasPage() {
   const [showInvite, setShowInvite] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [addingAfterIndex, setAddingAfterIndex] = useState<number | null>(null);
+  const [hotelLoadingCities, setHotelLoadingCities] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const { canvasState, suggestions, isConnected } = useCanvasRealtime(tripId);
@@ -101,6 +104,12 @@ export default function CanvasPage() {
               returnToHome: originData.returnToHome ?? true,
             };
           }
+        }
+
+        // Lock in each city's color so it stops depending on position —
+        // reordering will no longer reshuffle colors from here on.
+        if (Array.isArray(sessionState.cities)) {
+          sessionState.cities = withColorIndices(sessionState.cities);
         }
 
         setLocalState(sessionState);
@@ -207,6 +216,47 @@ export default function CanvasPage() {
     setAddingAfterIndex(index);
   };
 
+  // Fetches real hotels for a freshly added city and merges them into the
+  // first matching city that still has no hotels. Matching by name (not
+  // index) keeps it correct even if the user reorders while the request is
+  // in flight.
+  const enrichCityHotels = async (cityName: string, checkin: string, checkout: string) => {
+    if (!cityName || !checkin || !checkout) return;
+    setHotelLoadingCities((prev) => (prev.includes(cityName) ? prev : [...prev, cityName]));
+    try {
+      const results = await searchHotels({
+        city: cityName,
+        checkin,
+        checkout,
+        adults: localState?.trip?.travelers ?? 1,
+      });
+      if (results.length === 0) return;
+      const hotels = results.map((r) => ({
+        name: r.name,
+        rating: r.rating,
+        pricePerNight: r.pricePerNight,
+        area: '',
+        bookingUrl: r.bookingUrl,
+      }));
+      setLocalState((prev: any) => {
+        if (!prev?.cities) return prev;
+        let merged = false;
+        const cities = prev.cities.map((c: any) => {
+          if (!merged && c.name === cityName && (!c.hotels || c.hotels.length === 0)) {
+            merged = true;
+            return { ...c, hotels, hotel: hotels[0], selectedHotelIndex: 0 };
+          }
+          return c;
+        });
+        return { ...prev, cities };
+      });
+    } catch {
+      // Hotel fetch failed — city stays with its "Select hotel" placeholder.
+    } finally {
+      setHotelLoadingCities((prev) => prev.filter((n) => n !== cityName));
+    }
+  };
+
   const handleAddCityConfirm = (cityData: { name: string; country?: string; nights: number }) => {
     if (addingAfterIndex === null || !localState?.cities) return;
     const cities = [...localState.cities];
@@ -221,6 +271,9 @@ export default function CanvasPage() {
     const newCity = {
       name: cityData.name,
       country: cityData.country ?? '',
+      // Permanent color slot — distinct from existing cities and stable
+      // across reordering.
+      colorIndex: nextColorIndex(cities),
       dates: { arrival: toIso(tempArr), departure: toIso(tempDep) },
       hotel: { name: 'Select hotel', rating: 0, pricePerNight: 0, area: '' },
       hotels: [],
@@ -231,17 +284,32 @@ export default function CanvasPage() {
       transportOut: { mode: 'flight', operator: '', duration: '', price: 0 },
     };
     cities.splice(addingAfterIndex + 1, 0, newCity);
-    setLocalState({ ...localState, cities: recalcDates(cities) });
+    const recalced = recalcDates(cities);
+    setLocalState({ ...localState, cities: recalced });
+
+    // Auto-fetch the hotel for the new city so it shows up on the card
+    // (and gets persisted on save) instead of staying "Select hotel".
+    const inserted = recalced[addingAfterIndex + 1];
+    enrichCityHotels(inserted?.name, inserted?.dates?.arrival, inserted?.dates?.departure);
+
     setAddingAfterIndex(null);
   };
 
   const handleAddSuggestedCity = (dest: Destination) => {
     if (!localState?.cities) return;
     const cities = [...localState.cities];
+
+    // Seed temporary dates (2 nights) so recalcDates can chain the new city
+    // onto the trip — which also gives the hotel search valid check-in/out.
+    const toIso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const nights = 2;
+
     cities.push({
       name: dest.name,
       country: '',
-      dates: { arrival: '', departure: '' },
+      colorIndex: nextColorIndex(cities),
+      dates: { arrival: toIso(new Date(2000, 0, 1)), departure: toIso(new Date(2000, 0, 1 + nights)) },
       hotel: { name: 'Select hotel', rating: 0, pricePerNight: 0, area: '' },
       hotels: [],
       selectedHotelIndex: 0,
@@ -250,7 +318,12 @@ export default function CanvasPage() {
       transportIn: { mode: 'flight', operator: '', duration: '', price: 0 },
       transportOut: { mode: 'flight', operator: '', duration: '', price: 0 },
     });
-    setLocalState({ ...localState, cities });
+    const recalced = recalcDates(cities);
+    setLocalState({ ...localState, cities: recalced });
+
+    const inserted = recalced[recalced.length - 1];
+    enrichCityHotels(inserted?.name, inserted?.dates?.arrival, inserted?.dates?.departure);
+
     showToast(`${dest.name} added to canvas`, 'success');
   };
 
@@ -305,7 +378,12 @@ export default function CanvasPage() {
   };
 
   const cities = localState?.cities ?? [];
-  const tripTitle = localState?.trip?.title ?? 'Canvas';
+  // Derive the header live from the current cities so it updates as cities
+  // are added, removed, or reordered — instead of the stale stored title.
+  const tripTitle =
+    cities.length > 0
+      ? cities.map((c: any) => c.name).join(' → ')
+      : localState?.trip?.title ?? 'Canvas';
   const origin = localState?.trip?.origin ?? null;
   const returnToHome = localState?.trip?.returnToHome ?? false;
   const canEdit = role === 'owner' || role === 'editor';
@@ -355,7 +433,9 @@ export default function CanvasPage() {
             VOYZA
           </span>
           <div className="w-px h-5 bg-gray-200" />
-          <span className="text-gray-800 text-[14px] font-medium">{tripTitle}</span>
+          <span className="text-gray-800 text-[14px] font-medium truncate max-w-[40vw]" title={tripTitle}>
+            {tripTitle}
+          </span>
           {hasUnsavedChanges && (
             <span className="text-[11px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
               Unsaved changes
@@ -488,8 +568,8 @@ export default function CanvasPage() {
                     : '',
                   operator: origin.outboundLeg.operator ?? '',
                 } : null}
-                canEdit={false}
-                onAddCity={() => {}}
+                canEdit={canEdit}
+                onAddCity={() => setAddingAfterIndex(-1)}
               />
             </div>
           )}
@@ -516,6 +596,10 @@ export default function CanvasPage() {
                   index={idx}
                   role={role}
                   isLast={idx === cities.length - 1}
+                  hotelLoading={
+                    hotelLoadingCities.includes(city.name) &&
+                    (!city.hotels || city.hotels.length === 0)
+                  }
                   onRemove={handleRemoveCity}
                   onAddAfter={handleAddAfter}
                 />
@@ -555,8 +639,8 @@ export default function CanvasPage() {
                     : '',
                   operator: origin.returnLeg.operator ?? '',
                 } : null}
-                canEdit={false}
-                onAddCity={() => {}}
+                canEdit={canEdit}
+                onAddCity={() => setAddingAfterIndex(cities.length - 1)}
               />
               <CanvasHomeCard origin={origin} direction="inbound" onUpdateOrigin={canEdit ? handleUpdateOrigin : undefined} />
             </div>
