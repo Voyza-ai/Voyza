@@ -1,10 +1,20 @@
 import { createClient, User } from '@supabase/supabase-js';
+import { processLock } from '@supabase/auth-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 export const supabase = supabaseUrl
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        // Use the in-memory process lock instead of the Web Locks API.
+        // navigatorLock throws "lock was stolen by another request" when
+        // concurrent calls (e.g. React StrictMode double-mount) contend for
+        // the auth token. processLock serializes within the tab without the
+        // steal semantics, so it never surfaces those AbortErrors.
+        lock: processLock,
+      },
+    })
   : (null as unknown as ReturnType<typeof createClient>);
 
 export async function getCurrentUser(): Promise<User | null> {
