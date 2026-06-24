@@ -2,6 +2,24 @@ import { env } from '../config/env';
 import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
 
+/**
+ * fetch() with a hard timeout. The Deutsche Bahn REST API is community-run and
+ * occasionally hangs or 503s; without a timeout a single slow leg blocks the
+ * whole optimize (compareLeg awaits flight + train in parallel, so every leg
+ * stalls). Abort after DB_TIMEOUT_MS so train search fails fast and we fall
+ * back to flights instead of hanging.
+ */
+const DB_TIMEOUT_MS = 4500;
+async function fetchWithTimeout(url: string, timeoutMs = DB_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export type TrainOffer = {
   id: string;
   price: number | null;
@@ -75,7 +93,7 @@ export async function getStopId(cityName: string): Promise<string> {
   const baseUrl = env.DB_REST_BASE_URL;
   const url = `${baseUrl}/locations?query=${encodeURIComponent(cityName)}&results=1&poi=false&addresses=false`;
 
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) {
     throw new Error(`DB locations API returned ${res.status}`);
   }
@@ -144,7 +162,7 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<TrainOffe
     const departureISO = new Date(date).toISOString();
     const url = `${baseUrl}/journeys?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}&departure=${encodeURIComponent(departureISO)}&results=5&stopovers=false`;
 
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) {
       logger.warn('DB journeys API error', { status: res.status, origin, destination });
       return [];
