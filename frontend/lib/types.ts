@@ -27,6 +27,14 @@ export type Transport = {
    * "we haven't searched yet" — this means we tried and got nothing.
    */
   unavailable?: boolean;
+  /**
+   * True when this is a flight leg AND no live train option was found for a
+   * route short enough that a train would plausibly compete (≤6h flight).
+   * Drives a subtle "no live train data — showing flights only" note so we're
+   * honest that a train isn't being shown, rather than silently implying the
+   * flight is the only sensible option.
+   */
+  noTrainData?: boolean;
 };
 
 export type Hotel = {

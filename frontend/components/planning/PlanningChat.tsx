@@ -897,6 +897,13 @@ export default function PlanningChat() {
         mainTransport.alternatives = rest.map((opt: any) =>
           optionToTransport(opt, fromCity, toCity),
         );
+        // Honest "no train" signal: a flight leg with no train among the
+        // options, on a route short enough (≤6h) that a train would plausibly
+        // compete — so we note it rather than silently showing flights only.
+        const anyTrain = leg.options.some((o: any) => o.mode === 'train');
+        if (main?.mode === 'flight' && !anyTrain && (main?.durationMinutes ?? 999) <= 360) {
+          mainTransport.noTrainData = true;
+        }
         return mainTransport;
       }
 
@@ -974,6 +981,9 @@ export default function PlanningChat() {
         bookingUrl: picked.bookingUrl || undefined,
         flightNumber: mode === 'flight' ? (picked.carrierCode ?? undefined) : undefined,
         alternatives,
+        // Honest "no train" note when a flight was picked, no train option came
+        // back, and the route is short enough (≤6h) that a train would compete.
+        noTrainData: useFlight && !train && (picked.durationMinutes ?? 999) <= 360,
       };
     };
 

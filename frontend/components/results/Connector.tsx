@@ -373,6 +373,20 @@ export default function Connector({
             </div>
           </div>
 
+          {/* Honest note: we searched for a train on this (short) route and
+              found none, so we say so instead of silently showing only flights. */}
+          {transport.noTrainData && (
+            <div
+              className="px-4 py-2.5 border-t flex items-center gap-1.5"
+              style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+            >
+              <TrainFront size={12} style={{ color: '#888', opacity: 0.6 }} />
+              <span className="text-gray-500 text-[11px]">
+                No live train data for this leg — showing flights only.
+              </span>
+            </div>
+          )}
+
           {/* Top 4 cheapest options — mixed-mode pills (flight, train,
               and eventually bus). Sorted cheapest-first. The currently
               selected option is rendered as the main card above; this
