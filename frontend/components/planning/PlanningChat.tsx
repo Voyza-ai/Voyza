@@ -323,6 +323,13 @@ export default function PlanningChat() {
       //     from the range), OR
       //   - they already explicitly answered the nights question.
       case 'nights':   return typeof answers.nights === 'number' || hasConcreteDateRange(answers);
+      // Origin/roundtrip/notes default-fell-through to false before. If a
+      // setSteps() call ever rebuilds the steps list (e.g. picker confirm,
+      // chat-mode follow-up), the previously-answered values would have
+      // re-prompted. Explicit checks keep the conversation idempotent.
+      case 'origin':   return !!(answers.origin && answers.origin.trim());
+      case 'roundtrip': return typeof answers.returnToHome === 'boolean';
+      case 'notes':    return typeof answers.extraNotes === 'string';
       default:         return false;
     }
   };
@@ -561,6 +568,18 @@ export default function PlanningChat() {
   // before going to Find my trip.
   const handleChatSubmit = async () => {
     if (!textInput.trim()) return;
+    // Defensive guard: if isComplete is already true, the user has finished
+    // the guided flow and the input bar should be hidden. We saw a case in
+    // production where this handler fired anyway and re-emitted "Got it..."
+    // + the first remaining step (looked like a duplicate "Where are you
+    // starting from?" after "Perfect — I've got everything I need."). The
+    // warn lets us catch the trigger source next time it happens.
+    if (isComplete) {
+      console.warn('[PlanningChat] handleChatSubmit called after completion', {
+        intent, chatMode, currentStepIndex, stepsLen: steps.length,
+      });
+      return;
+    }
     const userMessage = textInput.trim();
 
     setMessages((prev) => [
@@ -1392,6 +1411,22 @@ export default function PlanningChat() {
       missing.push({ id: 'vibe', question: "What's the vibe you're going for?", type: 'vibes', skippable: true });
     }
 
+    // Notes ("Anything else?") — closing step from PLACE/VIBE/BUDGET_STEPS.
+    // Previously omitted from buildRemainingSteps, so the picker-confirm
+    // follow-up flow went straight to "Find my trip" without giving the
+    // user a chance to add constraints (avoid layovers, kid-friendly, etc).
+    // Treat empty string as "answered with nothing" to support a Skip path.
+    const hasNotes = typeof answers.extraNotes === 'string';
+    if (!hasNotes) {
+      missing.push({
+        id: 'notes',
+        question: 'Anything else I should know?',
+        type: 'notes',
+        skippable: true,
+        placeholder: 'E.g. "I want to avoid long layovers" — or skip',
+      });
+    }
+
     return missing;
   };
 
@@ -1946,6 +1981,11 @@ export default function PlanningChat() {
   const handleBarSubmit = () => {
     const value = textInput.trim();
     if (!value) return;
+    // Same defensive guard as handleChatSubmit: do nothing if the user
+    // has already finished the flow. The input bar is hidden when
+    // isComplete is true, but this defends against any race where a
+    // stale event fires after completion.
+    if (isComplete) return;
 
     // Open chat mode — capture as a single big message
     if (chatMode) {
@@ -2430,7 +2470,7 @@ export default function PlanningChat() {
       )}
 
       {/* Skip button for non-text skippable steps */}
-      {!isComplete && !chatMode && intent && currentStep && currentStep.skippable && currentStep.type !== 'text' && currentStep.type !== 'notes' && currentStep.type !== 'dates' && currentStep.type !== 'budget' && (
+      {!isComplete && !chatMode && intent && currentStep && currentStep.skippable && currentStep.type !== 'text' && currentStep.type !== 'dates' && currentStep.type !== 'budget' && (
         <motion.div
           className="relative z-10 flex justify-center pb-5"
           initial={{ opacity: 0 }}
