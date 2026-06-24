@@ -1,7 +1,6 @@
 import { env } from '../config/env';
 import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
-import { getStaticTrain } from '../data/staticTrains';
 
 export type TrainOffer = {
   id: string;
@@ -13,31 +12,14 @@ export type TrainOffer = {
   operator: string;
   trainType: string;
   bookingUrl: string;
+  /**
+   * True when we can't fully price-compare this journey — currently means
+   * the provider returned no fare. Derived from REAL data, not a country
+   * guess: a journey with a fare competes with flights on price; one
+   * without can't, so the optimizer should lean on the priced option.
+   */
   limitedCoverage: boolean;
 };
-
-// Countries where Deutsche Bahn's v6.db.transport.rest API returns
-// reliable multi-operator train data. DACH (DE/AT/CH) is covered natively,
-// and DB's public timetable also integrates well with the major European
-// rail operators (Trenitalia, SNCF, NS, SBB, ÖBB, etc.), so we expand
-// the "good coverage" set to the rest of Western/Central Europe.
-const RAIL_COVERAGE_COUNTRIES = new Set([
-  'DE', 'AT', 'CH',           // DACH (native)
-  'IT',                        // Trenitalia
-  'FR',                        // SNCF
-  'BE', 'NL', 'LU',            // Benelux
-  'DK', 'SE', 'NO',            // Scandinavia
-  'PL', 'CZ', 'SK',            // Central EU
-  'ES', 'PT',                  // Iberia
-  'HU', 'SI', 'HR',            // S/E Europe
-  'GB',                        // UK (Eurostar)
-]);
-
-function isOutsideDACH(country?: string): boolean {
-  // Name kept for backward compatibility — now checks the broader set.
-  if (!country) return true;
-  return !RAIL_COVERAGE_COUNTRIES.has(country.toUpperCase());
-}
 
 /**
  * Strip case, diacritics, whitespace, and punctuation so we can compare
@@ -66,10 +48,9 @@ function normalizeForMatch(s: string | undefined | null): string {
  * the trip card.
  *
  * The check is intentionally loose — substring either way — so common
- * cases pass: "Florence" matches "Firenze S.M.N." won't, but
- * "Frankfurt" → "Frankfurt(Main)Hbf" does. Translation gaps (Roma vs
- * Rome) are accepted false-negatives; the tradeoff is that an obvious
- * mismatch like "Reykjavik vs Some German Station" is caught.
+ * cases pass: "Frankfurt" → "Frankfurt(Main)Hbf" matches. Translation
+ * gaps (Roma vs Rome) are accepted false-negatives; the tradeoff is that
+ * an obvious mismatch like "Reykjavik vs Some German Station" is caught.
  */
 function stationMatchesCity(stationName: string | undefined, city: string): boolean {
   const sn = normalizeForMatch(stationName);
@@ -125,36 +106,33 @@ type SearchTrainsParams = {
   destinationCountry?: string;
 };
 
-export async function searchTrains(params: SearchTrainsParams): Promise<TrainOffer[]> {
-  const { origin, destination, date, originCountry, destinationCountry } = params;
+// ─── Provider registry ──────────────────────────────────────────
+// Each train data source is a "provider". Today there's exactly one real,
+// live source: Deutsche Bahn's free REST API (strong in DACH, patchy
+// elsewhere). Trainline / Kiwi-rail / regional operators plug in here as
+// they come online — register a provider and `searchTrains` picks it up.
+//
+// Principle: NO static/hardcoded fare tables. A route has a train only if a
+// real provider returns a real, station-validated journey. When none do, we
+// return [] and the caller surfaces an honest "no live train data" state
+// rather than inventing a fare.
 
-  // Step 1: check the static route table first. Covers JR shinkansen,
-  // Korail KTX, China HSR, Taiwan HSR, and a few Indian expresses — routes
-  // DB REST either doesn't carry or returns nonsense for. Hits here skip
-  // the API call entirely.
-  const staticRoute = getStaticTrain(origin, destination);
-  if (staticRoute) {
-    // Build a plausible departure time: 10:00 on the travel date, arriving
-    // departure + duration. Good enough until we wire real timetables.
-    const depDate = new Date(`${date}T10:00:00`);
-    const arrDate = new Date(depDate.getTime() + staticRoute.durationMinutes * 60_000);
-    return [
-      {
-        id: `static-${staticRoute.from}-${staticRoute.to}`,
-        price: staticRoute.priceUsd,
-        currency: 'USD',
-        departure: depDate.toISOString(),
-        arrival: arrDate.toISOString(),
-        durationMinutes: staticRoute.durationMinutes,
-        operator: staticRoute.operator,
-        trainType: staticRoute.trainType,
-        bookingUrl: staticRoute.bookingUrl,
-        // Static data is confidence-rated as reliable — trains should
-        // compete with flights on the cheapest / fastest logic.
-        limitedCoverage: false,
-      },
-    ];
-  }
+type Coverage = 'authoritative' | 'partial' | 'none';
+
+interface TrainProvider {
+  id: string;
+  /** 'none' skips this provider for the route; anything else queries it. */
+  coverage(params: SearchTrainsParams): Coverage;
+  search(params: SearchTrainsParams): Promise<TrainOffer[]>;
+}
+
+/**
+ * Deutsche Bahn REST provider. Always attempts (returns 'partial') and lets
+ * the real API result + station-match filter decide whether there's actually
+ * a journey — no hardcoded country list claiming coverage we don't have.
+ */
+async function searchDeutscheBahn(params: SearchTrainsParams): Promise<TrainOffer[]> {
+  const { origin, destination, date } = params;
 
   try {
     const [fromId, toId] = await Promise.all([
@@ -174,7 +152,6 @@ export async function searchTrains(params: SearchTrainsParams): Promise<TrainOff
 
     const data: any = await res.json();
     const allJourneys = data.journeys ?? [];
-    const limitedCoverage = isOutsideDACH(originCountry) || isOutsideDACH(destinationCountry);
 
     // Drop journeys whose actual start/end stations don't line up with the
     // requested cities. Catches the case where DB REST has no real coverage
@@ -223,7 +200,8 @@ export async function searchTrains(params: SearchTrainsParams): Promise<TrainOff
         operator,
         trainType,
         bookingUrl: 'https://www.bahn.de/buchung/start',
-        limitedCoverage,
+        // Honest, data-derived: a journey with no fare can't be price-compared.
+        limitedCoverage: price == null,
       };
     });
 
@@ -237,7 +215,42 @@ export async function searchTrains(params: SearchTrainsParams): Promise<TrainOff
       }),
     );
   } catch (err: any) {
-    logger.warn('Train search failed (non-fatal)', { message: err?.message, origin, destination });
+    logger.warn('DB train search failed (non-fatal)', { message: err?.message, origin, destination });
     return [];
   }
+}
+
+const trainProviders: TrainProvider[] = [
+  {
+    id: 'deutsche-bahn',
+    // Always attempt — real results (+ the station-match filter) decide
+    // whether there's a journey, instead of guessing from a country list.
+    coverage: () => 'partial',
+    search: searchDeutscheBahn,
+  },
+  // Future real providers plug in here (no code changes elsewhere):
+  //   { id: 'trainline', coverage: euOnly, search: searchTrainline },
+  //   { id: 'kiwi-rail',  coverage: () => 'partial', search: searchKiwiRail },
+];
+
+/**
+ * Query every train provider that covers the route, in parallel, and merge.
+ * A provider failure is non-fatal (returns []), so one outage can't take
+ * down the others. Empty result = no real train data → caller shows the
+ * honest "no live train data" state.
+ */
+export async function searchTrains(params: SearchTrainsParams): Promise<TrainOffer[]> {
+  const active = trainProviders.filter((p) => p.coverage(params) !== 'none');
+  const results = await Promise.all(
+    active.map((p) =>
+      p.search(params).catch((err: any) => {
+        logger.warn('Train provider failed (non-fatal)', {
+          provider: p.id,
+          message: err?.message,
+        });
+        return [] as TrainOffer[];
+      }),
+    ),
+  );
+  return results.flat();
 }

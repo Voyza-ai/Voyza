@@ -119,10 +119,12 @@ describe('searchTrains', () => {
     expect(offers[0].limitedCoverage).toBe(false);
   });
 
-  it('sets limitedCoverage for routes outside the rail-coverage country list', async () => {
-    // Coverage list expanded over time — DACH plus Trenitalia/SNCF/Eurostar/
-    // Iberia/Scandi/etc. Pick a pair where at least one country is genuinely
-    // outside that set so this test stays meaningful as the list grows.
+  it('sets limitedCoverage when the journey has no fare data', async () => {
+    // limitedCoverage is now derived from REAL data, not a hardcoded country
+    // list: a journey the provider returns *without a price* can't be
+    // price-compared against flights, so it's flagged limited. The mock below
+    // returns a journey with no `price` field. (Cities are arbitrary — the
+    // station names just need to pass the station-matches-city filter.)
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([{ id: '1' }]) })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([{ id: '2' }]) })
