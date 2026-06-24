@@ -288,6 +288,27 @@ Tasks deferred from the current chat work:
 - [ ] Add Amadeus Self-Service as secondary flight source
 - [ ] Flag Duffel-missing LCCs (Southwest, Ryanair) in results with "also check X" disclaimer
 
+### Feature: Ferry coverage (multi-modal — islands)
+Ferries are a first-class transport mode, not an add-on. Europe-first makes
+them essential: many island destinations are reachable cheapest (or only) by
+sea, and ferry often beats a short flight on price + door-to-door time for the
+Balearics, Greek islands, Italian islands, and Croatia. Fits the transport
+provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
+- [ ] Add `ferry` as a third mode in the provider registry; optimizer's
+      compareLeg considers flight / train / ferry on every leg
+- [ ] Integrate a ferry source. Options:
+  - Direct Ferries (aggregator — widest EU coverage, affiliate/API)
+  - AFerry / Ferryhopper (Greece-strong) as alternates
+  - Per-operator: Balearia & Trasmediterránea (Spain/Balearics), Blue Star &
+    Hellenic Seaways (Greece), Grimaldi / Tirrenia (Italy → Sardinia/Sicily),
+    Jadrolinija (Croatia)
+- [ ] Priority island corridors: Barcelona / Valencia / Dénia → Ibiza & Mallorca;
+      Athens (Piraeus) → Santorini / Mykonos / Crete; Naples → Capri / Ischia;
+      mainland Italy → Sicily / Sardinia; Split → Hvar
+- [ ] Static fallback table for top island routes (same pattern as rail stopgap)
+- [ ] Use foot-passenger fares (not vehicle) for pricing
+- [ ] Ferry pill + icon styling in the flowchart Connector (new mode visual)
+
 ### Feature: Calendar reacts to transport changes (calendar view just like flowchart view)
 - [ ] Tag auto-generated travel events ("head to airport" / flight / arrive) with an `auto` flag on `ScheduledEvent`
 - [ ] DayPlanner reconciles tagged events from current `transportIn`/`transportOut` on each open
