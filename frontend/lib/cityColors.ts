@@ -33,3 +33,22 @@ export const HOME_COLOR = {
 export function getCityColor(index: number) {
   return CITY_COLORS[index % CITY_COLORS.length];
 }
+
+// Picks a fresh, permanent colorIndex for a newly added city. Uses
+// (highest existing index + 1) so the new card cycles to the next color in
+// the palette and stays distinct from the cities already on the canvas.
+// The index is stored on the city object, so it never changes on reorder.
+export function nextColorIndex(cities: { colorIndex?: number }[]): number {
+  const used = cities
+    .map((c) => c.colorIndex)
+    .filter((n): n is number => typeof n === 'number');
+  if (used.length === 0) return 0;
+  return Math.max(...used) + 1;
+}
+
+// Ensures every city has a permanent colorIndex. Cities missing one (e.g.
+// older trips created before color slots existed) get locked to their
+// current position, so their color stops depending on order from then on.
+export function withColorIndices<T extends { colorIndex?: number }>(cities: T[]): T[] {
+  return cities.map((c, i) => (typeof c.colorIndex === 'number' ? c : { ...c, colorIndex: i }));
+}
