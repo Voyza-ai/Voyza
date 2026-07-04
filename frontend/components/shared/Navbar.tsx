@@ -63,9 +63,14 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
         <div />
       )}
 
-      {/* Right side — optional page tabs, then the auth corner */}
+      {/* Center — optional page tabs (results view switcher), truly centered
+          regardless of how wide the logo / auth sides are */}
+      {tabs && (
+        <div className="absolute left-1/2 -translate-x-1/2">{tabs}</div>
+      )}
+
+      {/* Right side — the auth corner */}
       <div className="flex items-center gap-4">
-      {tabs}
       {user ? (
         <div className="relative" ref={dropdownRef}>
           <button
