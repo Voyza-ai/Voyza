@@ -142,18 +142,40 @@ function applyLegRefreshToTrip(trip: Trip, refresh: LegRefresh): Trip {
 export default function AIChatPanel({ trip }: AIChatPanelProps) {
   const setTrip = useTripStore((s) => s.setTrip);
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 0,
-      role: 'ai',
-      content: `I built this ${trip.cities.length}-city trip to save you $${trip.savings} vs the most common routing. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`,
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const initial: Message[] = [
+      {
+        id: 0,
+        role: 'ai',
+        content: `I built this ${trip.cities.length}-city trip to save you $${trip.savings} vs the most common routing. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`,
+      },
+    ];
+    // Date-shift savings tip — used to be a page banner above the flowchart;
+    // it now arrives here so the cards keep the full page height. Purely
+    // informational (replan flow isn't wired yet), same as the old banner.
+    const shift = trip.dateShiftSuggestion;
+    if (shift && shift.savings > 0) {
+      const [y, m, d] = shift.newStartDate.split('-').map(Number);
+      const nice = new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+      const dir = shift.dayOffset < 0 ? 'earlier' : 'later';
+      const n = Math.abs(shift.dayOffset);
+      initial.push({
+        id: 1,
+        role: 'ai',
+        content: `💡 Heads up — starting ${n} day${n === 1 ? '' : 's'} ${dir} (${nice}) would save about $${Math.round(shift.savings)}.`,
+      });
+    }
+    return initial;
+  });
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>(fallbackSuggestions(trip));
   const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
-  const idRef = useRef(1);
+  const idRef = useRef(2);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

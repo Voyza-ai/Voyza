@@ -12,7 +12,6 @@ import ViewTabs, { ResultsView } from '@/components/results/ViewTabs';
 import AIChatPanel from '@/components/results/AIChatPanel';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
-import DateShiftBanner from '@/components/results/DateShiftBanner';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, getTrip } from '@/lib/api';
@@ -262,12 +261,15 @@ function ResultsPageInner() {
 
   return (
     <main className="h-screen overflow-hidden dot-grid-bg text-gray-900 flex flex-col">
-      <Navbar />
+      {/* View tabs live in the navbar (next to the auth corner) so the cards
+          below get the full viewport height. The date-shift savings tip now
+          arrives as a Voyza AI chat message instead of a page banner. */}
+      <Navbar tabs={<ViewTabs value={view} onChange={setView} />} />
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
-          except the Flowchart window and the AI chat panel. */}
+          except the cards area (left↔right) and the AI chat panel. */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 px-6 pb-4 pt-[3rem] max-w-[1600px] w-full mx-auto">
-        {/* Main column — header pinned, cards window scrolls inside */}
+        {/* Main column — header pinned, cards fill the rest */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
           <ResultsHeader trip={currentTrip} />
           {typeof currentTrip.budget === 'number' && (
@@ -276,12 +278,8 @@ function ResultsPageInner() {
           {currentTrip.vibeTierUp && (
             <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
           )}
-          {currentTrip.dateShiftSuggestion && (
-            <DateShiftBanner suggestion={currentTrip.dateShiftSuggestion} />
-          )}
-          <ViewTabs value={view} onChange={setView} />
 
-          {/* Scrollable cards window */}
+          {/* Full-height cards area */}
           <div className="flex-1 min-h-0 overflow-hidden">
             {openCityIndex !== null ? (
               <CityDetailPanel
