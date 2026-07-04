@@ -9,6 +9,10 @@ import Flowchart from '@/components/results/Flowchart';
 import CalendarView from '@/components/results/CalendarView';
 import ScheduleView from '@/components/results/ScheduleView';
 import ViewTabs, { ResultsView } from '@/components/results/ViewTabs';
+import dynamic from 'next/dynamic';
+
+// Leaflet touches `window` at import time — load the map client-side only.
+const MapView = dynamic(() => import('@/components/results/MapView'), { ssr: false });
 import AIChatPanel from '@/components/results/AIChatPanel';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
@@ -317,6 +321,8 @@ function ResultsPageInner() {
               <div className="h-full min-h-0">
                 <ScheduleView trip={currentTrip} />
               </div>
+            ) : view === 'map' ? (
+              <MapView trip={currentTrip} />
             ) : (
               <div className="h-full overflow-y-auto">
                 <CalendarView trip={currentTrip} onCityClick={handleCityClick} />

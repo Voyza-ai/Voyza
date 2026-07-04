@@ -1,9 +1,9 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { GitBranch, Calendar, CalendarRange } from 'lucide-react';
+import { GitBranch, Calendar, CalendarRange, Map as MapIcon } from 'lucide-react';
 
-export type ResultsView = 'flowchart' | 'calendar' | 'schedule';
+export type ResultsView = 'flowchart' | 'calendar' | 'schedule' | 'map';
 
 type ViewTabsProps = {
   value: ResultsView;
@@ -14,6 +14,7 @@ const TABS: { id: ResultsView; label: string; icon: typeof GitBranch }[] = [
   { id: 'flowchart', label: 'Flowchart', icon: GitBranch },
   { id: 'calendar', label: 'Calendar', icon: Calendar },
   { id: 'schedule', label: 'Schedule', icon: CalendarRange },
+  { id: 'map', label: 'Map', icon: MapIcon },
 ];
 
 /**
