@@ -142,6 +142,24 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const baseline = trip.totalCost + trip.savings;
   const liveSavings = Math.max(0, baseline - liveTotal);
 
+  // "You can save" surfaces the single MOST valuable savings opportunity:
+  // either the routing optimization we already applied, or the date-shift
+  // suggestion (also delivered as a Voyza AI chat tip) — whichever is bigger.
+  // Fixes the deflating "You save $0" box when routing saved nothing but
+  // shifting the start date would save real money.
+  const shiftSavings = trip.dateShiftSuggestion?.savings ?? 0;
+  const shiftIsBest = shiftSavings > liveSavings;
+  const bestSavings = shiftIsBest ? shiftSavings : liveSavings;
+  const shiftDateNice = (() => {
+    const iso = trip.dateShiftSuggestion?.newStartDate;
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
+  })();
+
   // Per-person vs total display toggle is global (read from tripStore) so
   // every price across the results page — flights, hotels, transit, savings —
   // flips together with the header pill.
@@ -150,7 +168,7 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const displayedTotal =
     priceMode === 'total' ? liveTotal : Math.round(liveTotal / travelers);
   const displayedSavings =
-    priceMode === 'total' ? liveSavings : Math.round(liveSavings / travelers);
+    priceMode === 'total' ? bestSavings : Math.round(bestSavings / travelers);
   const animatedTotal = useCountUp(displayedTotal);
   const animatedSavings = useCountUp(displayedSavings);
   // Subtitle shows the alternate framing so both numbers are visible at a glance.
@@ -159,7 +177,7 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const showToggle = travelers > 1;
 
   return (
-    <div className="px-8 pt-3 pb-0">
+    <div className="px-4 pt-3 pb-0">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         {/* Left: meta + title stacked tight */}
         <div className="min-w-0">
@@ -260,13 +278,13 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
           >
             <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
               <TrendingDown size={9} />
-              <span>You save</span>
+              <span>You can save</span>
             </div>
             <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
               ${animatedSavings.toLocaleString()}
             </div>
             <div className="text-[#22c088]/50 text-[9px]">
-              vs default routing
+              {shiftIsBest ? `by starting ${shiftDateNice}` : 'vs default routing'}
             </div>
           </div>
 

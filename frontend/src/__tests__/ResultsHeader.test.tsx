@@ -24,10 +24,29 @@ describe('ResultsHeader', () => {
     expect(screen.getByText(/Total trip/i)).toBeInTheDocument();
   });
 
-  it('displays savings in green box when savings > 0', () => {
+  it('displays "You can save" with routing savings when that is the best offer', () => {
     const trip = buildTrip({ savings: 249 });
     render(<ResultsHeader trip={trip} />);
-    expect(screen.getByText(/You save/i)).toBeInTheDocument();
+    expect(screen.getByText(/You can save/i)).toBeInTheDocument();
+    expect(screen.getByText(/vs default routing/i)).toBeInTheDocument();
+  });
+
+  it('shows the date-shift savings when it beats routing savings', () => {
+    // totalCost 0 + savings 0 → baseline 0 → live routing savings clamp to 0,
+    // so the $118 date-shift is unambiguously the best offer.
+    const trip = buildTrip({
+      savings: 0,
+      totalCost: 0,
+      dateShiftSuggestion: {
+        dayOffset: -1,
+        newStartDate: '2026-08-03',
+        newTotalCost: 1000,
+        savings: 118,
+      },
+    });
+    render(<ResultsHeader trip={trip} />);
+    expect(screen.getByText(/You can save/i)).toBeInTheDocument();
+    expect(screen.getByText(/by starting Aug 3/i)).toBeInTheDocument();
   });
 
   it('formats city names in title from trip.title', () => {

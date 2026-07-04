@@ -84,7 +84,7 @@ export default function CityCard({
       onMouseLeave={onLeave}
       onClick={onClick}
       tabIndex={0}
-      className="relative flex-shrink-0 w-[300px] rounded-3xl border-2 cursor-pointer overflow-hidden transition-colors duration-300 outline-none"
+      className="relative flex-shrink-0 flex-1 min-h-0 flex flex-col w-[300px] rounded-3xl border-2 cursor-pointer overflow-hidden transition-colors duration-300 outline-none"
       style={{
         background: color.bg,
         borderColor: isActive ? color.text : color.border,
@@ -158,9 +158,11 @@ export default function CityCard({
         )}
       </div>
 
-      {/* Hotel pill — darker shade of card bg */}
+      {/* Hotel pill — darker shade of card bg. my-auto centers it in
+          whatever extra height the card absorbed (cards stretch to fill
+          the full flowchart height), keeping header top / hint bottom. */}
       <div
-        className="mx-4 rounded-2xl"
+        className="mx-4 rounded-2xl my-auto"
         style={{ background: `${color.text}15` }}
       >
         <HotelSection city={city} cityIndex={index} color={color} />
