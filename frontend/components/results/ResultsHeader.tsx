@@ -177,7 +177,7 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const showToggle = travelers > 1;
 
   return (
-    <div className="px-8 pt-3 pb-0">
+    <div className="px-4 pt-3 pb-0">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         {/* Left: meta + title stacked tight */}
         <div className="min-w-0">

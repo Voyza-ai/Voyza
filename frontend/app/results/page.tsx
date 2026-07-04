@@ -268,7 +268,9 @@ function ResultsPageInner() {
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
           except the cards area (left↔right) and the AI chat panel. */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 px-6 pb-4 pt-[3rem] max-w-[1600px] w-full mx-auto">
+      {/* Near-zero side gutters: no max-width cap, minimal padding — the
+          cards start at the left edge and the chat ends at the right edge. */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 px-2 pb-2 pt-[3rem] w-full">
         {/* Main column — header pinned, cards fill the rest */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
           <ResultsHeader trip={currentTrip} />
