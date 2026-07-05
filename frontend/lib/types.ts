@@ -182,6 +182,10 @@ export type Trip = {
     airports: string[];
     outboundLeg?: HomeLeg | null;
     returnLeg?: HomeLeg | null;
+    /** Independent back-home anchor (open-jaw trips). Unset means the
+     *  return goes to the same city/airports as the origin. */
+    returnCity?: string;
+    returnAirports?: string[];
   };
   returnToHome?: boolean;
 };

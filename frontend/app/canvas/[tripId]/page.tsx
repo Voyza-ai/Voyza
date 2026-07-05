@@ -11,6 +11,7 @@ import SuggestedCitiesPanel from '@/components/canvas/SuggestedCitiesPanel';
 import SuggestionsPanel from '@/components/canvas/SuggestionsPanel';
 import InviteModal from '@/components/canvas/InviteModal';
 import AddCityModal from '@/components/canvas/AddCityModal';
+import HomeEditModal from '@/components/canvas/HomeEditModal';
 import { useCanvasRealtime } from '@/hooks/useCanvasRealtime';
 import { useAuthStore } from '@/store/authStore';
 import { useTripStore } from '@/store/tripStore';
@@ -22,9 +23,11 @@ import {
   updateSuggestionStatus,
   getTrip,
   searchHotels,
+  fetchHomeLegs,
   Destination,
 } from '@/lib/api';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
+import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
 
 export default function CanvasPage() {
   const params = useParams();
@@ -43,15 +46,48 @@ export default function CanvasPage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [addingAfterIndex, setAddingAfterIndex] = useState<number | null>(null);
   const [hotelLoadingCities, setHotelLoadingCities] = useState<string[]>([]);
+  const [homeEdit, setHomeEdit] = useState<'outbound' | 'inbound' | null>(null);
+  const [homeLegLoading, setHomeLegLoading] = useState<'outbound' | 'inbound' | null>(null);
   const [loading, setLoading] = useState(true);
 
   const { canvasState, suggestions, isConnected } = useCanvasRealtime(tripId);
 
-  // Unsaved changes detection
+  // Unsaved changes detection — covers city edits AND home-card (origin)
+  // edits, so both enable Save and trigger the leave-without-saving warning.
   const hasUnsavedChanges = useMemo(() => {
     if (!localState || !savedState) return false;
-    return JSON.stringify(localState.cities) !== JSON.stringify(savedState.cities);
+    return (
+      JSON.stringify(localState.cities) !== JSON.stringify(savedState.cities) ||
+      JSON.stringify(localState.trip?.origin ?? null) !==
+        JSON.stringify(savedState.trip?.origin ?? null)
+    );
   }, [localState, savedState]);
+
+  // Warn before leaving with unsaved changes. Covers in-app navigation
+  // (Back / VOYZA) via navigateAway(), and browser refresh/close/tab-switch
+  // via the beforeunload prompt below.
+  const navigateAway = useCallback(
+    (path: string) => {
+      if (
+        hasUnsavedChanges &&
+        !window.confirm('You have unsaved changes. Leave without saving?')
+      ) {
+        return;
+      }
+      router.push(path);
+    },
+    [hasUnsavedChanges, router],
+  );
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges]);
 
   // Load initial session
   useEffect(() => {
@@ -106,6 +142,26 @@ export default function CanvasPage() {
           }
         }
 
+        // Results-page handoff: if the trip was just edited on the results
+        // page (e.g. via the AI chat), apply those cities/origin over the
+        // saved session so the canvas reflects the latest state.
+        let syncedFromResults = false;
+        if (typeof window !== 'undefined') {
+          const sync = readCanvasSync(tripId);
+          if (sync?.cities && Array.isArray(sync.cities) && sync.cities.length > 0) {
+            clearCanvasSync(tripId);
+            sessionState.cities = sync.cities;
+            if (sync.origin) {
+              sessionState.trip = {
+                ...(sessionState.trip ?? {}),
+                origin: sync.origin,
+                returnToHome: sync.returnToHome ?? true,
+              };
+            }
+            syncedFromResults = true;
+          }
+        }
+
         // Lock in each city's color so it stops depending on position —
         // reordering will no longer reshuffle colors from here on.
         if (Array.isArray(sessionState.cities)) {
@@ -114,6 +170,12 @@ export default function CanvasPage() {
 
         setLocalState(sessionState);
         setSavedState(sessionState);
+
+        // Persist the results edits into the canvas session so they survive
+        // reloads and reach collaborators (the save endpoint is owner-gated).
+        if (syncedFromResults && userRole === 'owner') {
+          saveCanvas(tripId, sessionState).catch(() => {});
+        }
 
         // Load members from session
         if (session.state?.members) {
@@ -172,12 +234,30 @@ export default function CanvasPage() {
 
   const recalcDates = (cities: any[]) => {
     if (cities.length === 0) return cities;
-    // Find the earliest arrival as the chain start
+    // Anchor the chain to the EARLIEST arrival across all cities so the trip's
+    // start date stays fixed no matter how cities are reordered. (Taking the
+    // first card's arrival instead would shift the whole trip whenever a
+    // different city is moved to the front.)
+    //
+    // Newly-added cities carry a 2000-01-01 placeholder arrival that only
+    // encodes their night count — skip those so they don't drag the start
+    // back to the year 2000.
+    const isPlaceholder = (iso: string) => iso.startsWith('2000-');
     let startDate = '';
     for (const c of cities) {
-      if (c.dates?.arrival && c.dates.arrival.includes('-')) {
-        startDate = c.dates.arrival;
-        break;
+      const a = c.dates?.arrival;
+      if (a && a.includes('-') && !isPlaceholder(a)) {
+        if (!startDate || a < startDate) startDate = a;
+      }
+    }
+    // All cities are placeholders (e.g. a brand-new trip with no real dates
+    // yet) — fall back to the first valid arrival so the chain still builds.
+    if (!startDate) {
+      for (const c of cities) {
+        if (c.dates?.arrival && c.dates.arrival.includes('-')) {
+          startDate = c.dates.arrival;
+          break;
+        }
       }
     }
     if (!startDate) return cities;
@@ -367,14 +447,60 @@ export default function CanvasPage() {
     }
   };
 
-  const handleUpdateOrigin = (updates: { city?: string; airports?: string[] }) => {
+  // Apply a home-card edit from the popup. The two cards are independent:
+  // the outbound card owns city/airports, the back-home card owns
+  // returnCity/returnAirports. After updating, the affected direction's
+  // flight is re-searched automatically.
+  const applyHomeEdit = async (
+    direction: 'outbound' | 'inbound',
+    updates: { city: string; airports: string[] },
+  ) => {
     if (!localState?.trip) return;
+    setHomeEdit(null);
+
     const currentOrigin = localState.trip.origin ?? { city: '', airports: [] };
-    const newOrigin = { ...currentOrigin, ...updates };
-    setLocalState({
-      ...localState,
-      trip: { ...localState.trip, origin: newOrigin },
-    });
+    const newOrigin =
+      direction === 'outbound'
+        ? { ...currentOrigin, city: updates.city, airports: updates.airports, outboundLeg: null }
+        : { ...currentOrigin, returnCity: updates.city, returnAirports: updates.airports, returnLeg: null };
+
+    setLocalState((prev: any) => ({
+      ...prev,
+      trip: { ...prev.trip, origin: newOrigin },
+    }));
+
+    // Re-search this direction's flight with the new airports.
+    const tripCities = localState?.cities ?? [];
+    const first = tripCities[0];
+    const last = tripCities[tripCities.length - 1];
+    if (!first || !last || !first.dates?.arrival) return;
+
+    setHomeLegLoading(direction);
+    try {
+      const legs = await fetchHomeLegs({
+        originAirports: updates.airports,
+        firstCity: first.name,
+        lastCity: last.name,
+        startDate: first.dates.arrival,
+        endDate: last.dates?.departure,
+        travelers: localState?.trip?.travelers ?? 1,
+        outbound: direction === 'outbound',
+        returnToHome: direction === 'inbound',
+      });
+      const leg = direction === 'outbound' ? legs.outboundLeg : legs.returnLeg;
+      setLocalState((prev: any) => {
+        if (!prev?.trip?.origin) return prev;
+        const o = { ...prev.trip.origin };
+        if (direction === 'outbound') o.outboundLeg = leg ?? null;
+        else o.returnLeg = leg ?? null;
+        return { ...prev, trip: { ...prev.trip, origin: o } };
+      });
+      if (!leg) showToast('No flights found for that airport', 'info');
+    } catch {
+      showToast('Flight search failed — card updated without a flight', 'error');
+    } finally {
+      setHomeLegLoading(null);
+    }
   };
 
   const cities = localState?.cities ?? [];
@@ -419,19 +545,20 @@ export default function CanvasPage() {
         {/* Left: Back button + VOYZA logo + trip title */}
         <div className="flex items-center gap-4">
           <button
-            onClick={() => router.push(`/results?tripId=${tripId}`)}
+            onClick={() => navigateAway(`/results?tripId=${tripId}`)}
             className="flex items-center gap-1.5 text-gray-500 hover:text-gray-800 transition-colors text-[13px]"
           >
             <ArrowLeft size={14} />
             <span className="hidden sm:inline">Back</span>
           </button>
           <div className="w-px h-5 bg-gray-200" />
-          <span
-            className="text-[16px] font-bold tracking-tight"
+          <button
+            onClick={() => navigateAway('/main')}
+            className="text-[16px] font-bold tracking-tight hover:opacity-80 transition-opacity"
             style={{ color: '#2563eb' }}
           >
             VOYZA
-          </span>
+          </button>
           <div className="w-px h-5 bg-gray-200" />
           <span className="text-gray-800 text-[14px] font-medium truncate max-w-[40vw]" title={tripTitle}>
             {tripTitle}
@@ -558,7 +685,12 @@ export default function CanvasPage() {
           {/* Home card (outbound) */}
           {origin?.city && cities.length > 0 && (
             <div className="flex items-center">
-              <CanvasHomeCard origin={origin} direction="outbound" onUpdateOrigin={canEdit ? handleUpdateOrigin : undefined} />
+              <CanvasHomeCard
+                origin={origin}
+                direction="outbound"
+                onEdit={canEdit ? () => setHomeEdit('outbound') : undefined}
+                legLoading={homeLegLoading === 'outbound'}
+              />
               <CanvasConnector
                 transport={origin.outboundLeg ? {
                   mode: 'flight',
@@ -642,7 +774,12 @@ export default function CanvasPage() {
                 canEdit={canEdit}
                 onAddCity={() => setAddingAfterIndex(cities.length - 1)}
               />
-              <CanvasHomeCard origin={origin} direction="inbound" onUpdateOrigin={canEdit ? handleUpdateOrigin : undefined} />
+              <CanvasHomeCard
+                origin={origin}
+                direction="inbound"
+                onEdit={canEdit ? () => setHomeEdit('inbound') : undefined}
+                legLoading={homeLegLoading === 'inbound'}
+              />
             </div>
           )}
         </div>
@@ -671,6 +808,24 @@ export default function CanvasPage() {
         onClose={() => setAddingAfterIndex(null)}
         onAdd={handleAddCityConfirm}
         currentCities={cities.map((c: any) => c.name)}
+      />
+
+      {/* ─── Home / back-home card edit modal ─── */}
+      <HomeEditModal
+        isOpen={homeEdit !== null}
+        direction={homeEdit ?? 'outbound'}
+        city={
+          homeEdit === 'inbound'
+            ? origin?.returnCity ?? origin?.city ?? ''
+            : origin?.city ?? ''
+        }
+        airports={
+          homeEdit === 'inbound'
+            ? origin?.returnAirports ?? origin?.airports ?? []
+            : origin?.airports ?? []
+        }
+        onClose={() => setHomeEdit(null)}
+        onApply={(updates) => homeEdit && applyHomeEdit(homeEdit, updates)}
       />
 
       {/* ─── Invite modal ─── */}

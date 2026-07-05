@@ -54,7 +54,14 @@ function AuthCallbackInner() {
       if (canvasIntent) {
         clearCanvasIntent();
         resolveCanvasTripId(canvasIntent)
-          .then((tripId) => router.push(tripId ? `/canvas/${tripId}` : '/history'))
+          .then((tripId) => {
+            if (!tripId) return router.push('/history');
+            router.push(
+              canvasIntent.destination === 'results'
+                ? `/results?tripId=${tripId}`
+                : `/canvas/${tripId}`,
+            );
+          })
           .catch(() => router.push('/history'));
         return;
       }

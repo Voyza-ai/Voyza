@@ -128,6 +128,11 @@ export function buildTripFromDb(
         airports: Array.isArray(trip.origin_airports) ? trip.origin_airports : [],
         outboundLeg: trip.outbound_leg ?? null,
         returnLeg: trip.return_leg ?? null,
+        // Independent back-home anchor (open-jaw) — null/absent means
+        // "same as origin". Columns exist from migration 003 onward;
+        // older DBs simply don't return the keys.
+        returnCity: trip.return_city ?? undefined,
+        returnAirports: Array.isArray(trip.return_airports) ? trip.return_airports : undefined,
       }
     : undefined;
 

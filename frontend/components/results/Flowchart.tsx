@@ -365,8 +365,8 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                 </div>
               )}
               <HomeCard
-                city={trip.origin.city}
-                airports={trip.origin.airports}
+                city={trip.origin.returnCity ?? trip.origin.city}
+                airports={trip.origin.returnAirports ?? trip.origin.airports}
                 label="Back home"
                 direction="inbound"
                 leg={trip.origin.returnLeg ?? null}

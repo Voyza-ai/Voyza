@@ -72,6 +72,8 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
     origin: trip.origin
       ? { origin: trip.origin, returnToHome: trip.returnToHome ?? true }
       : null,
+    // Current cities (including any AI-chat edits) so the canvas reflects them.
+    syncCities: trip.cities,
   });
 
   const handleEditInCanvas = async () => {

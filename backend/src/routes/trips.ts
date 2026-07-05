@@ -47,6 +47,9 @@ const createTripSchema = z.object({
   // we don't want to break if the frontend sends an extra field.
   outboundLeg: z.any().nullable().optional(),
   returnLeg: z.any().nullable().optional(),
+  // Independent back-home anchor (open-jaw) — null means "same as origin".
+  returnCity: z.string().nullable().optional(),
+  returnAirports: z.array(z.string()).nullable().optional(),
 });
 
 router.post(
@@ -58,28 +61,49 @@ router.post(
 
     // Insert the trip row with all optional metadata columns the
     // migration added. Any field the client didn't send becomes NULL.
-    const { data: trip, error: tripError } = await supabase
+    const tripRow: Record<string, any> = {
+      user_id: user.id,
+      title: body.title,
+      travelers: body.travelers,
+      total_cost: body.totalCost,
+      savings_vs_alternative: body.savingsVsAlternative,
+      status: 'active',
+      budget: body.budget ?? null,
+      budget_per_person: body.budgetPerPerson ?? null,
+      vibe: body.vibe ?? null,
+      start_date: body.startDate ?? null,
+      date_shift_suggestion: body.dateShiftSuggestion ?? null,
+      origin_city: body.originCity ?? null,
+      origin_airports: body.originAirports ?? [],
+      return_to_home: body.returnToHome ?? true,
+      outbound_leg: body.outboundLeg ?? null,
+      return_leg: body.returnLeg ?? null,
+    };
+    // Back-home overrides — only written when actually set, so trips that
+    // never use the feature don't touch the (migration-003) columns.
+    if (body.returnCity) tripRow.return_city = body.returnCity;
+    if (Array.isArray(body.returnAirports)) tripRow.return_airports = body.returnAirports;
+
+    let { data: trip, error: tripError } = await supabase
       .from('trips')
-      .insert({
-        user_id: user.id,
-        title: body.title,
-        travelers: body.travelers,
-        total_cost: body.totalCost,
-        savings_vs_alternative: body.savingsVsAlternative,
-        status: 'active',
-        budget: body.budget ?? null,
-        budget_per_person: body.budgetPerPerson ?? null,
-        vibe: body.vibe ?? null,
-        start_date: body.startDate ?? null,
-        date_shift_suggestion: body.dateShiftSuggestion ?? null,
-        origin_city: body.originCity ?? null,
-        origin_airports: body.originAirports ?? [],
-        return_to_home: body.returnToHome ?? true,
-        outbound_leg: body.outboundLeg ?? null,
-        return_leg: body.returnLeg ?? null,
-      })
+      .insert(tripRow)
       .select()
       .single();
+
+    // Migration 003 not applied yet — retry without the return-anchor
+    // columns rather than failing the whole save.
+    if (tripError && /return_(city|airports)/.test(tripError.message ?? '')) {
+      console.warn(
+        '[trips] return_city/return_airports columns missing — run supabase/migrations/003_return_home_anchor.sql',
+      );
+      delete tripRow.return_city;
+      delete tripRow.return_airports;
+      ({ data: trip, error: tripError } = await supabase
+        .from('trips')
+        .insert(tripRow)
+        .select()
+        .single());
+    }
 
     if (tripError || !trip) {
       throw new AppError(500, tripError?.message ?? 'Failed to create trip');
