@@ -262,7 +262,7 @@ function addDays(iso: string, days: number): string {
  * + per-leg offset lands before today we shift it to tomorrow to keep the
  * optimizer running instead of silently failing with zero-cost legs.
  */
-function clampToFuture(iso: string): string {
+export function clampToFuture(iso: string): string {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const candidate = new Date(iso);
@@ -535,7 +535,7 @@ async function estimateHomeLegCost(params: {
  * Returns null on any failure so the trip still builds — the UI just
  * renders the home card without the detail line.
  */
-async function buildHomeLeg(params: {
+export async function buildHomeLeg(params: {
   originAirports: string[];
   destinationCity: string;
   date: string;

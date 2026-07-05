@@ -56,7 +56,7 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
     >
       {/* Logo */}
       {!minimal ? (
-        <Link href="/" className="text-lg font-bold tracking-tight text-white">
+        <Link href="/main" className="text-lg font-bold tracking-tight text-white">
           VOYZA
         </Link>
       ) : (

@@ -2,6 +2,7 @@ import { getDuffel } from './duffel';
 import { getSupabase } from './supabase';
 import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
+import { getStaticIata } from '../data/cityAirports';
 
 export type FlightOffer = {
   id: string;
@@ -122,6 +123,13 @@ export async function searchFlights(params: SearchFlightsParams): Promise<Flight
 }
 
 export async function getIataCode(cityName: string): Promise<string> {
+  // Curated override first — deterministic, and corrects known bad
+  // auto-resolutions (e.g. Kyoto, which has no airport of its own and
+  // otherwise mis-resolved to ACC/Accra). Takes precedence over any stale
+  // cached row.
+  const override = getStaticIata(cityName);
+  if (override) return override;
+
   const supabase = getSupabase();
 
   // Check cache first

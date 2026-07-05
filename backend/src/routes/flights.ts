@@ -50,4 +50,54 @@ router.post(
   }),
 );
 
+// ─── POST /api/flights/home-legs ─────────────────────────────
+// Standalone home-leg search for trips that weren't built by the
+// optimizer (e.g. Browse marketplace presets). Returns the same
+// HomeLeg shape the optimizer produces — main flight + up to 3
+// alternatives per direction — so the flowchart home connectors and
+// canvas home cards render identically. Either leg can come back
+// null (no offers found); callers save the trip without it.
+const homeLegsSchema = z.object({
+  originAirports: z.array(z.string().min(3)).min(1),
+  firstCity: z.string().min(1),
+  lastCity: z.string().min(1),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD').optional(),
+  travelers: z.number().int().positive().default(1),
+  // Direction toggles — callers refreshing a single home card search only
+  // that leg instead of paying for both flight searches.
+  outbound: z.boolean().default(true),
+  returnToHome: z.boolean().default(true),
+});
+
+router.post(
+  '/home-legs',
+  asyncHandler(async (req, res) => {
+    const input = homeLegsSchema.parse(req.body);
+    const { buildHomeLeg, clampToFuture } = await import('../services/optimizer');
+
+    const [outboundLeg, returnLeg] = await Promise.all([
+      input.outbound
+        ? buildHomeLeg({
+            originAirports: input.originAirports,
+            destinationCity: input.firstCity,
+            date: clampToFuture(input.startDate),
+            travelers: input.travelers,
+          })
+        : Promise.resolve(null),
+      input.returnToHome
+        ? buildHomeLeg({
+            originAirports: input.originAirports,
+            destinationCity: input.lastCity,
+            date: clampToFuture(input.endDate ?? input.startDate),
+            travelers: input.travelers,
+            reverse: true,
+          })
+        : Promise.resolve(null),
+    ]);
+
+    res.json({ outboundLeg, returnLeg });
+  }),
+);
+
 export default router;
