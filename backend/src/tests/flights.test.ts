@@ -142,8 +142,18 @@ describe('getIataCode', () => {
       data: [{ type: 'airport', iata_code: 'FCO', iata_country_code: 'IT' }],
     });
 
-    const code = await getIataCode('Rome');
+    // Use a city NOT in the curated override map so this exercises the
+    // Duffel + Supabase cache path rather than short-circuiting.
+    const code = await getIataCode('Verona');
     expect(code).toBe('FCO');
+  });
+
+  it('uses the curated override before Duffel for known cities', async () => {
+    // Kyoto has no airport of its own; the override maps it to Osaka's
+    // Kansai (KIX) so it never mis-resolves (it previously returned ACC).
+    const code = await getIataCode('Kyoto');
+    expect(code).toBe('KIX');
+    expect(mockDuffel.suggestions.list).not.toHaveBeenCalled();
   });
 
   it('throws AppError when no IATA code found', async () => {
