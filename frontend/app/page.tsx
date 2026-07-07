@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import PlaneAnimation from '@/components/welcome/PlaneAnimation';
 import LogoReveal from '@/components/welcome/LogoReveal';
 import HeroInput from '@/components/welcome/HeroInput';
-import WondersBackground from '@/components/welcome/WondersBackground';
+import AltitudeBackground from '@/components/welcome/AltitudeBackground';
 import LoginModal from '@/components/shared/LoginModal';
 import HomeAuthButton from '@/components/welcome/HomeAuthButton';
 
@@ -17,8 +17,8 @@ export default function WelcomePage() {
 
   useEffect(() => {
     const t1 = setTimeout(() => setPhase('plane'), 300);
-    const t2 = setTimeout(() => setPhase('logo'), 2600);
-    const t3 = setTimeout(() => setPhase('input'), 3800);
+    const t2 = setTimeout(() => setPhase('logo'), 3100);
+    const t3 = setTimeout(() => setPhase('input'), 4300);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
@@ -31,8 +31,8 @@ export default function WelcomePage() {
       className="relative h-screen flex flex-col items-center overflow-hidden"
       style={{ background: '#0f0f1a' }}
     >
-      {/* Subtle destination photo grid */}
-      <WondersBackground />
+      {/* Dusk sky at cruising altitude — stars, horizon glow, cloud deck */}
+      <AltitudeBackground />
 
       {/* Auth corner — "Log in" when signed out, initials avatar when signed in */}
       <motion.div
@@ -46,8 +46,10 @@ export default function WelcomePage() {
 
       <LoginModal isOpen={loginOpen} onClose={() => setLoginOpen(false)} />
 
-      {/* Plane animation */}
-      {(phase === 'waiting' || phase === 'plane') && <PlaneAnimation />}
+      {/* Flight intro — the jet draws the dashed route + pins, then the
+          scene settles into a faint ambient layer behind the logo (the
+          component fades itself; keep it mounted). */}
+      {phase !== 'waiting' && <PlaneAnimation />}
 
       {/* Content — VOYZA at top, content flows down */}
       <div className="relative flex flex-col items-center gap-3 px-4 z-10 pt-[18vh]">
