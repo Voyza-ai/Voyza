@@ -34,10 +34,39 @@ const wonders = [
   },
 ];
 
+/**
+ * Deterministic star field — positions derive from the index (golden-angle
+ * spread), NOT Math.random(), so server and client render identically (no
+ * hydration mismatch). Stars sit in the upper ~65% of the sky and twinkle
+ * on staggered clocks.
+ */
+const STARS = Array.from({ length: 44 }, (_, i) => ({
+  left: (i * 137.508) % 100,
+  top: (i * 61.8 + 7) % 65,
+  size: 1 + (i % 3) * 0.7,
+  duration: 2.6 + (i % 5) * 0.8,
+  delay: (i % 7) * 0.55,
+  bright: i % 4 === 0,
+}));
+
 export default function WondersBackground() {
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
-      {/* Photo grid — 4 columns, 2 rows filling the screen */}
+      <style jsx>{`
+        @keyframes wonderZoom {
+          from { transform: scale(1) translate3d(0, 0, 0); }
+          to   { transform: scale(1.14) translate3d(1.5%, -1.5%, 0); }
+        }
+        @keyframes starTwinkle {
+          0%, 100% { opacity: 0.12; }
+          50%      { opacity: 0.9; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .wonder-img, .voyza-star { animation: none !important; }
+        }
+      `}</style>
+
+      {/* Photo grid — 4 columns, 2 rows, each cell slowly drifting (Ken Burns) */}
       <motion.div
         className="absolute inset-0 grid grid-cols-4 grid-rows-2 gap-1"
         initial={{ opacity: 0 }}
@@ -50,8 +79,12 @@ export default function WondersBackground() {
             <img
               src={wonder.src}
               alt={wonder.name}
-              className="w-full h-full object-cover"
+              className="wonder-img w-full h-full object-cover"
               loading={i < 4 ? 'eager' : 'lazy'}
+              style={{
+                animation: `wonderZoom ${16 + (i % 4) * 4}s ease-in-out infinite alternate`,
+                animationDelay: `${-(i * 3)}s`,
+              }}
             />
           </div>
         ))}
@@ -66,6 +99,62 @@ export default function WondersBackground() {
           />
         </div>
       </motion.div>
+
+      {/* Aurora glows — three blurred color fields drifting slowly. Voyza
+          blue, violet, and a whisper of the train-green from the palette. */}
+      <motion.div
+        className="absolute w-[700px] h-[700px] rounded-full"
+        style={{
+          top: '-15%',
+          left: '-10%',
+          background: 'radial-gradient(circle, rgba(79,142,247,0.32) 0%, transparent 65%)',
+          filter: 'blur(60px)',
+        }}
+        animate={{ x: [0, 120, 30, 0], y: [0, 60, 140, 0] }}
+        transition={{ duration: 26, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.div
+        className="absolute w-[600px] h-[600px] rounded-full"
+        style={{
+          top: '30%',
+          right: '-12%',
+          background: 'radial-gradient(circle, rgba(124,92,255,0.26) 0%, transparent 65%)',
+          filter: 'blur(70px)',
+        }}
+        animate={{ x: [0, -140, -40, 0], y: [0, -70, 50, 0] }}
+        transition={{ duration: 32, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.div
+        className="absolute w-[520px] h-[520px] rounded-full"
+        style={{
+          bottom: '-20%',
+          left: '30%',
+          background: 'radial-gradient(circle, rgba(34,192,136,0.16) 0%, transparent 65%)',
+          filter: 'blur(70px)',
+        }}
+        animate={{ x: [0, 90, -60, 0], y: [0, -50, -10, 0] }}
+        transition={{ duration: 38, repeat: Infinity, ease: 'easeInOut' }}
+      />
+
+      {/* Star field — deterministic positions, staggered twinkle */}
+      <div className="absolute inset-0">
+        {STARS.map((s, i) => (
+          <span
+            key={i}
+            className="voyza-star absolute rounded-full"
+            style={{
+              left: `${s.left}%`,
+              top: `${s.top}%`,
+              width: `${s.size}px`,
+              height: `${s.size}px`,
+              background: s.bright ? 'rgba(210,228,255,0.95)' : 'rgba(255,255,255,0.75)',
+              boxShadow: s.bright ? '0 0 6px rgba(160,200,255,0.9)' : 'none',
+              opacity: 0.12,
+              animation: `starTwinkle ${s.duration}s ease-in-out ${s.delay}s infinite`,
+            }}
+          />
+        ))}
+      </div>
 
       {/* Dark vignette overlay — fades grid toward center for readability */}
       <div

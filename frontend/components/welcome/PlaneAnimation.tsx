@@ -1,31 +1,42 @@
 'use client';
 
 /**
- * Welcome-screen plane animation.
+ * Welcome-screen flight intro, v2 — "the trip drawn across the sky".
  *
- * Uses SVG <animateMotion> + <mpath> to fly a plane silhouette along a single
- * smooth quadratic bezier arc. The vapor trail is the SAME path, drawn
- * progressively via stroke-dasharray — so the trail is guaranteed to match
- * the plane's flight path perfectly at every frame (no keyframe drift).
+ * A jet flies a banking S-curve and DRAWS A DASHED ROUTE behind it — the
+ * same dashed-route language as the flowchart connectors and the Map tab —
+ * while destination pins pulse into existence along the flight path. After
+ * the flyby the whole scene doesn't vanish: it settles into a faint ambient
+ * route-map layer behind the logo, so the intro literally becomes the page
+ * background.
  *
- * Benefits over the old keyframe approach:
- *   - One bezier curve instead of a 21-point polyline → no "elbowing" wobble
- *   - Auto-rotation along the path tangent (rotate="auto") → no manual angles
- *   - GPU-composited (SVG animations don't trigger layout/paint on siblings)
- *   - viewBox-relative → scales to any screen without JS
- *   - Trail is literally the flight path → never diverges from the plane
+ * Implementation notes:
+ *   - One bezier S-path drives everything: <animateMotion rotate="auto">
+ *     flies (and banks) the plane along the tangent, and the SAME path is
+ *     revealed through a stroke-dashoffset MASK — so the dashed route's
+ *     leading edge always trails the plane exactly, no keyframe drift.
+ *   - pathLength="1" normalizes both animations to the same 0–1 clock.
+ *   - Pure SVG/CSS (GPU-composited); no JS timers, SSR-safe.
+ *   - prefers-reduced-motion: skips the flight, shows the settled route.
  */
 export default function PlaneAnimation() {
-  // A single quadratic bezier arc:
-  //   start:   (-150, 620)   — off-screen lower-left
-  //   control: ( 600, -180)  — above the top-center (pulls the curve into a parabola)
-  //   end:     (1350, 620)   — off-screen lower-right
-  const FLIGHT_PATH = 'M -150 620 Q 600 -180 1350 620';
-  const DURATION = '2.2s';
+  // Banking S-curve: swoop up from lower-left, glide through the middle,
+  // climb out top-right. The S command keeps the join tangent-smooth.
+  const FLIGHT_PATH = 'M -120 620 C 160 300 420 260 620 380 S 1040 560 1340 200';
+  const DURATION = '2.4s';
+
+  // Decorative "destinations" pinned just under the flight path, popping in
+  // as the plane passes overhead. Colors echo the city-card palette.
+  const PINS = [
+    { x: 205, y: 442, color: '#FF9A7B', delay: 0.7 },
+    { x: 620, y: 418, color: '#7BB8FF', delay: 1.3 },
+    { x: 985, y: 520, color: '#7BE8B8', delay: 1.85 },
+    { x: 1322, y: 242, color: '#C9A6FF', delay: 2.35 },
+  ];
 
   return (
     <div
-      className="fixed inset-0 overflow-hidden pointer-events-none z-20"
+      className="fixed inset-0 overflow-hidden pointer-events-none z-[6]"
       aria-hidden
     >
       <svg
@@ -34,76 +45,161 @@ export default function PlaneAnimation() {
         viewBox="0 0 1200 800"
         preserveAspectRatio="xMidYMid slice"
         xmlns="http://www.w3.org/2000/svg"
+        className="voyza-flight-scene"
       >
         <defs>
-          {/* The motion path the plane follows. pathLength="1" normalizes
-              stroke-dasharray/offset to 0–1 so the trail progress matches
-              animateMotion progress exactly (which is also 0–1). */}
           <path id="voyza-flight-path" d={FLIGHT_PATH} fill="none" pathLength="1" />
 
-          {/* Soft gradient for the vapor trail — bright near the plane, fading back */}
-          <linearGradient id="voyza-trail-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="rgba(79,142,247,0)" />
-            <stop offset="40%" stopColor="rgba(79,142,247,0.25)" />
-            <stop offset="85%" stopColor="rgba(135,180,255,0.9)" />
-            <stop offset="100%" stopColor="rgba(200,220,255,1)" />
+          <linearGradient id="voyza-route-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="rgba(79,142,247,0.35)" />
+            <stop offset="55%" stopColor="rgba(124,150,255,0.75)" />
+            <stop offset="100%" stopColor="rgba(190,215,255,0.95)" />
           </linearGradient>
 
-          {/* Soft glow for the plane */}
-          <filter id="voyza-plane-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <filter id="voyza-plane-glow" x="-60%" y="-60%" width="220%" height="220%">
             <feGaussianBlur stdDeviation="4" result="blur" />
             <feMerge>
               <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
+
+          {/* Progressive reveal: a fat white stroke sweeps along the path
+              inside a mask; whatever it has covered shows the dashed route. */}
+          <mask id="voyza-route-reveal">
+            <path
+              className="voyza-route-mask"
+              d={FLIGHT_PATH}
+              pathLength="1"
+              stroke="#fff"
+              strokeWidth="26"
+              strokeLinecap="round"
+              fill="none"
+            />
+          </mask>
         </defs>
 
         <style>{`
-          @keyframes voyzaDrawTrail {
-            /* Hold the trail invisible and un-drawn until the plane has
-               already cleared the left edge, then draw it so its leading
-               edge permanently lags the plane by ~12% of the path length. */
-            0%   { stroke-dashoffset: 1;    opacity: 0; }
-            12%  { stroke-dashoffset: 1;    opacity: 0; }
-            18%  { opacity: 0.9; }
-            100% { stroke-dashoffset: 0.12; opacity: 0.9; }
+          @keyframes voyzaRouteDraw {
+            0%   { stroke-dashoffset: 1; }
+            10%  { stroke-dashoffset: 1; }
+            100% { stroke-dashoffset: 0.10; }
           }
-          @keyframes voyzaFadeTrail {
-            0%   { opacity: 0.9; }
-            100% { opacity: 0; }
-          }
-          .voyza-trail {
+          .voyza-route-mask {
             stroke-dasharray: 1;
             stroke-dashoffset: 1;
-            animation:
-              voyzaDrawTrail 2.2s cubic-bezier(0.42, 0, 0.58, 1) forwards,
-              voyzaFadeTrail 1.2s ease-out 2.0s forwards;
+            animation: voyzaRouteDraw 2.4s cubic-bezier(0.42, 0, 0.58, 1) forwards;
           }
-          .voyza-plane-fade {
-            animation: voyzaFadeTrail 0.4s ease-out 2.1s forwards;
+
+          /* The whole scene settles into a faint ambient layer once the
+             flight completes — the intro becomes the page background. */
+          @keyframes voyzaSceneSettle {
+            0%   { opacity: 1; }
+            100% { opacity: 0.22; }
+          }
+          .voyza-flight-scene {
+            animation: voyzaSceneSettle 1.4s ease-out 2.7s forwards;
+          }
+
+          @keyframes voyzaPlaneFade {
+            to { opacity: 0; }
+          }
+          .voyza-plane {
+            animation: voyzaPlaneFade 0.45s ease-out 2.3s forwards;
+          }
+
+          /* Destination pins: pop + one expanding ring, then a slow idle pulse */
+          @keyframes voyzaPinPop {
+            0%   { opacity: 0; transform: scale(0); }
+            60%  { opacity: 1; transform: scale(1.35); }
+            100% { opacity: 1; transform: scale(1); }
+          }
+          @keyframes voyzaPinRing {
+            0%   { opacity: 0.9; transform: scale(0.4); }
+            100% { opacity: 0;   transform: scale(2.6); }
+          }
+          @keyframes voyzaPinIdle {
+            0%, 100% { opacity: 0.85; }
+            50%      { opacity: 0.45; }
+          }
+          .voyza-pin, .voyza-pin-ring {
+            transform-box: fill-box;
+            transform-origin: center;
+            opacity: 0;
+          }
+          .voyza-pin {
+            animation:
+              voyzaPinPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+              voyzaPinIdle 3.4s ease-in-out 3.6s infinite;
+          }
+          .voyza-pin-ring {
+            animation: voyzaPinRing 1.1s ease-out forwards;
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            .voyza-route-mask { animation: none; stroke-dashoffset: 0.10; }
+            .voyza-flight-scene { animation: none; opacity: 0.22; }
+            .voyza-plane { animation: none; opacity: 0; }
+            .voyza-pin { animation: none; opacity: 0.85; }
+            .voyza-pin-ring { animation: none; opacity: 0; }
           }
         `}</style>
 
-        {/* === Vapor trail — the flight path drawn progressively ===
-            pathLength="1" normalizes the dash scale to 0–1 so the trail's
-            leading edge advances at exactly the same rate as the plane. */}
-        <path
-          className="voyza-trail"
-          d={FLIGHT_PATH}
-          pathLength="1"
-          stroke="url(#voyza-trail-gradient)"
-          strokeWidth="3"
-          strokeLinecap="round"
-          fill="none"
-          style={{
-            filter: 'drop-shadow(0 0 6px rgba(79,142,247,0.6))',
-          }}
-        />
+        {/* Soft glow under the route */}
+        <g mask="url(#voyza-route-reveal)">
+          <path
+            d={FLIGHT_PATH}
+            pathLength="1"
+            stroke="rgba(79,142,247,0.30)"
+            strokeWidth="7"
+            strokeLinecap="round"
+            fill="none"
+            style={{ filter: 'blur(4px)' }}
+          />
+          {/* The dashed route itself — same language as connectors + Map */}
+          <path
+            d={FLIGHT_PATH}
+            pathLength="1"
+            stroke="url(#voyza-route-gradient)"
+            strokeWidth="2.6"
+            strokeLinecap="round"
+            strokeDasharray="0.011 0.013"
+            fill="none"
+            style={{ filter: 'drop-shadow(0 0 5px rgba(79,142,247,0.55))' }}
+          />
+        </g>
 
-        {/* === Plane silhouette, centered at (0,0), nose pointing +x === */}
-        <g className="voyza-plane-fade" filter="url(#voyza-plane-glow)">
-          {/* Drive the plane along the flight path with auto-rotation to match the tangent */}
+        {/* Destination pins along the route */}
+        {PINS.map((pin, i) => (
+          <g key={i}>
+            <circle
+              className="voyza-pin-ring"
+              cx={pin.x}
+              cy={pin.y}
+              r="9"
+              fill="none"
+              stroke={pin.color}
+              strokeWidth="1.6"
+              style={{ animationDelay: `${pin.delay + 0.12}s` }}
+            />
+            <circle
+              className="voyza-pin"
+              cx={pin.x}
+              cy={pin.y}
+              r="4.5"
+              fill={pin.color}
+              stroke="rgba(255,255,255,0.85)"
+              strokeWidth="1.4"
+              style={{
+                animationDelay: `${pin.delay}s, 3.6s`,
+                filter: `drop-shadow(0 0 6px ${pin.color})`,
+              }}
+            />
+          </g>
+        ))}
+
+        {/* Plane — flies the path, banking with the tangent */}
+        <g className="voyza-plane" filter="url(#voyza-plane-glow)">
           <animateMotion
             dur={DURATION}
             fill="freeze"
@@ -115,11 +211,6 @@ export default function PlaneAnimation() {
             <mpath href="#voyza-flight-path" />
           </animateMotion>
 
-          {/*
-            Side-view commercial jet silhouette.
-            Center of rotation is (0,0); nose at x ≈ +52; tail at x ≈ -52.
-            Built from simple shapes so it reads clearly at any size.
-          */}
           <g
             transform="scale(1.5)"
             fill="rgba(230,240,255,0.98)"
@@ -159,7 +250,7 @@ export default function PlaneAnimation() {
               "
               fill="rgba(200,220,255,0.95)"
             />
-            {/* Main delta wing (below center, sweeps aft) */}
+            {/* Main delta wing */}
             <path
               d="
                 M 8 6
@@ -173,7 +264,7 @@ export default function PlaneAnimation() {
               "
               fill="rgba(200,220,255,0.9)"
             />
-            {/* Far-side wing hint (smaller, above center, for 3/4 feel) */}
+            {/* Far-side wing hint */}
             <path
               d="
                 M 6 -6

@@ -46,8 +46,10 @@ export default function WelcomePage() {
 
       <LoginModal isOpen={loginOpen} onClose={() => setLoginOpen(false)} />
 
-      {/* Plane animation */}
-      {(phase === 'waiting' || phase === 'plane') && <PlaneAnimation />}
+      {/* Flight intro — draws a dashed route + destination pins across the
+          sky, then settles into a faint ambient layer behind the content
+          (the component fades itself; keep it mounted). */}
+      {phase !== 'waiting' && <PlaneAnimation />}
 
       {/* Content — VOYZA at top, content flows down */}
       <div className="relative flex flex-col items-center gap-3 px-4 z-10 pt-[18vh]">
