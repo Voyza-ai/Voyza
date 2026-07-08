@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import PlaneAnimation from '@/components/welcome/PlaneAnimation';
 import LogoReveal from '@/components/welcome/LogoReveal';
-import StartPills from '@/components/welcome/StartPills';
+import StartPillars from '@/components/welcome/StartPillars';
 import AltitudeBackground from '@/components/welcome/AltitudeBackground';
 import LoginModal from '@/components/shared/LoginModal';
 import HomeAuthButton from '@/components/welcome/HomeAuthButton';
@@ -51,10 +51,10 @@ export default function WelcomePage() {
           component fades itself; keep it mounted). */}
       {phase !== 'waiting' && <PlaneAnimation />}
 
-      {/* Content — VOYZA at top, then the three start pills */}
-      <div className="relative flex flex-col items-center gap-7 px-4 z-10 pt-[15vh] w-full">
+      {/* Content — VOYZA + capability chip at top, then the three pillars */}
+      <div className="relative flex flex-col items-center gap-8 px-4 z-10 pt-[9vh] w-full">
         <LogoReveal show={phase === 'logo' || phase === 'input'} />
-        <StartPills show={phase === 'input'} />
+        <StartPillars show={phase === 'input'} />
       </div>
 
       {/* Ambient glow behind content */}
