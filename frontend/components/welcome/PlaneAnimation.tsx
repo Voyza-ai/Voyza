@@ -1,23 +1,23 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+
 /**
- * Welcome-screen flight intro, v3.
+ * Welcome-screen flight intro, v3.1 — JS-driven.
  *
- * A properly-drawn jet (gradient fuselage, swept VOYZA-blue tail, engine
- * nacelle, cockpit, pulsing beacon + wingtip nav light) flies a 3s eased
- * S-curve and draws a dashed route behind it — the same route language as
- * the flowchart connectors and the Map tab. Destination pins pop in as it
- * passes. After the flyby the scene settles into a faint ambient layer
- * behind the logo instead of vanishing.
+ * The plane is the SAME lucide plane glyph used across the app (connectors,
+ * transport pills), flown along the route by a requestAnimationFrame
+ * timeline instead of SMIL. Why: previous versions animated via
+ * <animateMotion> and hid the plane under `prefers-reduced-motion` — on
+ * machines with macOS Reduce Motion enabled the plane was permanently
+ * invisible while everything else ran. The rAF timeline drives the plane
+ * transform, the route reveal, and the pin pops from ONE clock, so what
+ * you see is always consistent, on every machine.
  *
- * Engineering notes:
- *   - The flight path is INLINED on <animateMotion path=…> — the previous
- *     <mpath href> reference silently failed to resolve in some browsers,
- *     which left the plane parked invisibly at the origin.
- *   - The dashed route is revealed through a stroke-dashoffset mask driven
- *     by the same normalized 0–1 clock (pathLength="1"), so its leading
- *     edge always trails the plane exactly.
- *   - Pure SVG/CSS. prefers-reduced-motion → settled state, no flight.
+ * Choreography (3s): eased lift-off → cruise → level-out. The jet draws a
+ * dashed route (flowchart/Map language); destination pins pop as it
+ * passes; then the whole scene settles into a faint ambient layer behind
+ * the logo instead of vanishing.
  */
 
 type PlaneAnimationProps = {
@@ -25,113 +25,145 @@ type PlaneAnimationProps = {
   ambient?: boolean;
 };
 
-export default function PlaneAnimation({ ambient = false }: PlaneAnimationProps) {
-  // Gentle S: enter low-left, crest through the middle, climb out right.
-  const FLIGHT_PATH = 'M -140 640 C 180 420 360 300 620 330 S 1080 480 1360 210';
-  const DURATION = '3s';
+// Route arc — kept LOW on the screen (crest ≈ 56% height) so it sweeps
+// under the logo/CTA instead of through them.
+const FLIGHT_PATH = 'M -140 690 C 200 500 380 430 640 460 S 1100 590 1360 340';
+const DURATION_MS = 3200;
+/** Fraction of the path the drawn route lags behind the plane's nose. */
+const ROUTE_LAG = 0.085;
 
-  // Destination pins just off the route, popping as the plane passes.
-  const PINS = [
-    { x: 250, y: 448, color: '#E2725B', delay: 0.9 },
-    { x: 620, y: 362, color: '#3D8BFF', delay: 1.55 },
-    { x: 1000, y: 486, color: '#2FB57C', delay: 2.2 },
-    { x: 1338, y: 246, color: '#9B7BF5', delay: 2.75 },
-  ];
+// Destination pins just under the route, with the timeline fraction at
+// which each pops (as the plane passes overhead).
+const PINS = [
+  { x: 255, y: 545, color: '#E2725B', at: 0.24 },
+  { x: 640, y: 500, color: '#3D8BFF', at: 0.5 },
+  { x: 1010, y: 585, color: '#2FB57C', at: 0.74 },
+  { x: 1330, y: 372, color: '#9B7BF5', at: 0.95 },
+];
+
+// lucide "plane" glyph (24×24), same icon the app uses for flights.
+const LUCIDE_PLANE_D =
+  'M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z';
+
+/** easeInOutCubic — slow lift-off, cruise, gentle level-out. */
+const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+export default function PlaneAnimation({ ambient = false }: PlaneAnimationProps) {
+  const sceneRef = useRef<SVGSVGElement>(null);
+  const measureRef = useRef<SVGPathElement>(null);
+  const planeRef = useRef<SVGGElement>(null);
+  const maskRef = useRef<SVGPathElement>(null);
+  const pinRefs = useRef<(SVGGElement | null)[]>([]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const measure = measureRef.current;
+    const plane = planeRef.current;
+    const mask = maskRef.current;
+    if (!scene || !measure || !plane || !mask) return;
+
+    const showPin = (i: number) => {
+      const el = pinRefs.current[i];
+      if (el && !el.classList.contains('voyza-pin-on')) el.classList.add('voyza-pin-on');
+    };
+    const settle = () => scene.classList.add('voyza-settled');
+
+    if (ambient) {
+      // Skip the flight: settled route, pins on, no plane.
+      mask.style.strokeDashoffset = String(ROUTE_LAG);
+      plane.style.opacity = '0';
+      PINS.forEach((_, i) => showPin(i));
+      settle();
+      return;
+    }
+
+    const total = measure.getTotalLength();
+    let raf = 0;
+    const t0 = performance.now();
+
+    const frame = (now: number) => {
+      const p = Math.min((now - t0) / DURATION_MS, 1);
+      const e = ease(p);
+
+      // Plane position + heading along the path tangent.
+      const d = e * total;
+      const pt = measure.getPointAtLength(d);
+      const ahead = measure.getPointAtLength(Math.min(d + 2, total));
+      const deg = (Math.atan2(ahead.y - pt.y, ahead.x - pt.x) * 180) / Math.PI;
+      plane.setAttribute('transform', `translate(${pt.x} ${pt.y}) rotate(${deg})`);
+
+      // Route reveal lags the nose slightly (mask stroke, pathLength=1).
+      mask.style.strokeDashoffset = String(Math.max(1 - e + ROUTE_LAG * e, ROUTE_LAG));
+
+      // Pins pop as the plane passes.
+      PINS.forEach((pin, i) => {
+        if (e >= pin.at) showPin(i);
+      });
+
+      if (p < 1) {
+        raf = requestAnimationFrame(frame);
+      } else {
+        // Flight done: fade the jet, settle the scene to ambient.
+        plane.style.opacity = '0';
+        window.setTimeout(settle, 350);
+      }
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [ambient]);
 
   return (
-    <div
-      className="fixed inset-0 overflow-hidden pointer-events-none z-[6]"
-      aria-hidden
-    >
+    <div className="fixed inset-0 overflow-hidden pointer-events-none z-[6]" aria-hidden>
       <svg
+        ref={sceneRef}
         width="100%"
         height="100%"
         viewBox="0 0 1200 800"
         preserveAspectRatio="xMidYMid slice"
         xmlns="http://www.w3.org/2000/svg"
-        className={`voyza-flight-scene ${ambient ? 'voyza-ambient' : ''}`}
+        className="voyza-flight-scene"
       >
         <defs>
-          {/* Route stroke — brightens toward the plane */}
           <linearGradient id="voyza-route-grad" x1="0%" y1="0%" x2="100%" y2="0%">
             <stop offset="0%" stopColor="rgba(79,142,247,0.30)" />
             <stop offset="60%" stopColor="rgba(124,160,255,0.70)" />
             <stop offset="100%" stopColor="rgba(196,218,255,0.95)" />
           </linearGradient>
 
-          {/* Jet body: white top → cool belly shadow */}
-          <linearGradient id="voyza-jet-body" x1="0" y1="-14" x2="0" y2="14" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="#ffffff" />
-            <stop offset="62%" stopColor="#eef4fd" />
-            <stop offset="100%" stopColor="#c9d9f2" />
-          </linearGradient>
-
-          {/* Tail livery — VOYZA blue sweep */}
-          <linearGradient id="voyza-jet-tail" x1="0" y1="-30" x2="0" y2="0" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="#5f9bff" />
-            <stop offset="100%" stopColor="#2e6bc4" />
-          </linearGradient>
-
-          <filter id="voyza-soft-glow" x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation="3" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-
-          {/* Progressive route reveal — a fat sweep inside a mask */}
+          {/* Progressive route reveal — the mask stroke's dashoffset is
+              driven each frame by the same clock as the plane. */}
           <mask id="voyza-route-reveal">
             <path
-              className="voyza-route-mask"
+              ref={maskRef}
               d={FLIGHT_PATH}
               pathLength="1"
               stroke="#fff"
-              strokeWidth="28"
+              strokeWidth="30"
               strokeLinecap="round"
               fill="none"
+              style={{ strokeDasharray: 1, strokeDashoffset: 1 }}
             />
           </mask>
         </defs>
 
         <style>{`
-          @keyframes voyzaRouteDraw {
-            0%   { stroke-dashoffset: 1; }
-            8%   { stroke-dashoffset: 1; }
-            100% { stroke-dashoffset: 0.085; }
-          }
-          .voyza-route-mask {
-            stroke-dasharray: 1;
-            stroke-dashoffset: 1;
-            animation: voyzaRouteDraw 3s cubic-bezier(0.45, 0.05, 0.35, 1) forwards;
-          }
-
           /* Scene settles into a faint ambient layer after the flight */
-          @keyframes voyzaSceneSettle {
-            to { opacity: 0.22; }
-          }
           .voyza-flight-scene {
-            animation: voyzaSceneSettle 1.5s ease-out 3.4s forwards;
+            opacity: 1;
+            transition: opacity 1.4s ease-out;
+          }
+          .voyza-flight-scene.voyza-settled { opacity: 0.22; }
+
+          .voyza-plane-icon {
+            transition: opacity 0.45s ease-out;
           }
 
-          @keyframes voyzaPlaneFade { to { opacity: 0; } }
-          .voyza-plane {
-            animation: voyzaPlaneFade 0.5s ease-out 2.9s forwards;
+          /* Pins: hidden until the plane passes, then pop + ring */
+          .voyza-pin-dot, .voyza-pin-ring {
+            transform-box: fill-box;
+            transform-origin: center;
+            opacity: 0;
           }
-
-          /* Aviation beacon (red, atop the tail) + wingtip strobe */
-          @keyframes voyzaBeacon {
-            0%, 82%, 100% { opacity: 0.15; }
-            88%           { opacity: 1; }
-          }
-          .voyza-beacon { animation: voyzaBeacon 1.1s linear infinite; }
-          @keyframes voyzaStrobe {
-            0%, 90%, 100% { opacity: 0.1; }
-            94%           { opacity: 1; }
-          }
-          .voyza-strobe { animation: voyzaStrobe 1.4s linear infinite; }
-
-          /* Destination pins: pop + one ring, then slow idle pulse */
           @keyframes voyzaPinPop {
             0%   { opacity: 0; transform: scale(0); }
             60%  { opacity: 1; transform: scale(1.3); }
@@ -145,35 +177,20 @@ export default function PlaneAnimation({ ambient = false }: PlaneAnimationProps)
             0%, 100% { opacity: 0.85; }
             50%      { opacity: 0.5; }
           }
-          .voyza-pin, .voyza-pin-ring {
-            transform-box: fill-box;
-            transform-origin: center;
-            opacity: 0;
-          }
-          .voyza-pin {
+          .voyza-pin-on .voyza-pin-dot {
             animation:
               voyzaPinPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
-              voyzaPinIdle 3.6s ease-in-out 4s infinite;
+              voyzaPinIdle 3.6s ease-in-out 1.2s infinite;
           }
-          .voyza-pin-ring { animation: voyzaPinRing 1s ease-out forwards; }
-
-          @media (prefers-reduced-motion: reduce) {
-            .voyza-route-mask { animation: none; stroke-dashoffset: 0.085; }
-            .voyza-flight-scene { animation: none; opacity: 0.22; }
-            .voyza-plane { animation: none; opacity: 0; }
-            .voyza-pin { animation: none; opacity: 0.85; }
-            .voyza-pin-ring { animation: none; opacity: 0; }
+          .voyza-pin-on .voyza-pin-ring {
+            animation: voyzaPinRing 1s ease-out forwards;
           }
-
-          /* Ambient mode — jump to the settled end state */
-          .voyza-ambient.voyza-flight-scene { animation: none; opacity: 0.22; }
-          .voyza-ambient .voyza-route-mask { animation: none; stroke-dashoffset: 0.085; }
-          .voyza-ambient .voyza-plane { animation: none; opacity: 0; }
-          .voyza-ambient .voyza-pin { animation: voyzaPinIdle 3.6s ease-in-out infinite; opacity: 0.85; }
-          .voyza-ambient .voyza-pin-ring { animation: none; opacity: 0; }
         `}</style>
 
-        {/* Soft under-glow, then the dashed route — both mask-revealed */}
+        {/* Hidden measuring copy of the path (rAF samples it) */}
+        <path ref={measureRef} d={FLIGHT_PATH} fill="none" stroke="none" />
+
+        {/* Soft under-glow + the dashed route — both mask-revealed */}
         <g mask="url(#voyza-route-reveal)">
           <path
             d={FLIGHT_PATH}
@@ -198,7 +215,12 @@ export default function PlaneAnimation({ ambient = false }: PlaneAnimationProps)
 
         {/* Destination pins */}
         {PINS.map((pin, i) => (
-          <g key={i}>
+          <g
+            key={i}
+            ref={(el) => {
+              pinRefs.current[i] = el;
+            }}
+          >
             <circle
               className="voyza-pin-ring"
               cx={pin.x}
@@ -207,121 +229,53 @@ export default function PlaneAnimation({ ambient = false }: PlaneAnimationProps)
               fill="none"
               stroke={pin.color}
               strokeWidth="1.5"
-              style={{ animationDelay: `${pin.delay + 0.15}s` }}
             />
             <circle
-              className="voyza-pin"
+              className="voyza-pin-dot"
               cx={pin.x}
               cy={pin.y}
               r="4.5"
               fill={pin.color}
               stroke="rgba(255,255,255,0.9)"
               strokeWidth="1.4"
-              style={{
-                animationDelay: `${pin.delay}s, 4s`,
-                filter: `drop-shadow(0 0 6px ${pin.color})`,
-              }}
+              style={{ filter: `drop-shadow(0 0 6px ${pin.color})` }}
             />
           </g>
         ))}
 
-        {/* ── The jet ──────────────────────────────────────────────
-            Side profile, nose pointing +x, centered on (0,0).
-            Flies the inlined path with tangent rotation; speed is eased
-            (slow lift-off → cruise → gentle level-out) via keyPoints. */}
-        <g className="voyza-plane" filter="url(#voyza-soft-glow)">
-          <animateMotion
-            dur={DURATION}
-            fill="freeze"
-            rotate="auto"
-            calcMode="spline"
-            keyPoints="0;0.3;0.78;1"
-            keyTimes="0;0.38;0.75;1"
-            keySplines="0.45 0 0.6 1; 0.4 0 0.6 1; 0.4 0 0.55 1"
-            path={FLIGHT_PATH}
-          />
-
-          <g transform="scale(1.7)">
-            {/* Tail fin — swept, VOYZA livery */}
+        {/* The plane — the app's own flight glyph (top-down, like a
+            flight-tracker marker following the route), flown by the rAF
+            clock. The glyph natively points ~45° up-right; the inner
+            rotate(45) re-noses it to +x so the tangent heading applies
+            cleanly. Rendered crisp: white body, thin blue outline, a small
+            grounded shadow — NOT a soft glow (which washed it to a blob). */}
+        <g ref={planeRef} className="voyza-plane-icon">
+          <g transform="rotate(45) scale(2.6) translate(-12 -12)">
+            {/* faint contact glow under the craft, keeps it lifted off the sky */}
             <path
-              d="M -34 -3 L -46 -26 Q -47.5 -29 -44 -29 L -36 -29 Q -32.5 -29 -30.5 -26 L -21 -4 Z"
-              fill="url(#voyza-jet-tail)"
-              stroke="rgba(28,52,94,0.35)"
-              strokeWidth="0.8"
+              d={LUCIDE_PLANE_D}
+              fill="none"
+              stroke="rgba(79,142,247,0.5)"
+              strokeWidth="2.4"
+              strokeLinejoin="round"
+              style={{ filter: 'blur(2px)', opacity: 0.6 }}
             />
-            {/* Beacon light on the fin tip */}
-            <circle className="voyza-beacon" cx="-41.5" cy="-29.5" r="1.6" fill="#ff5a5a"
-              style={{ filter: 'drop-shadow(0 0 4px rgba(255,90,90,0.9))' }} />
-
-            {/* Horizontal stabilizer */}
             <path
-              d="M -33 -2 L -46 -9 Q -48 -10 -47.5 -7.5 L -45 0.5 L -33 1.5 Z"
-              fill="#dbe7f8"
-              stroke="rgba(28,52,94,0.3)"
-              strokeWidth="0.7"
-            />
-
-            {/* Fuselage — long, pointed nose, rounded tail cone */}
-            <path
-              d="M -38 -1
-                 Q -37 -7.5 -28 -8.5
-                 L 26 -8.5
-                 Q 44 -8 54 -2.5
-                 Q 58 -0.5 54 1.5
-                 Q 46 6.5 28 7.5
-                 L -26 7.5
-                 Q -36 6.5 -38 -1 Z"
-              fill="url(#voyza-jet-body)"
-              stroke="rgba(28,52,94,0.4)"
+              d={LUCIDE_PLANE_D}
+              fill="#f2f7ff"
+              stroke="#2e6bc4"
               strokeWidth="0.9"
               strokeLinejoin="round"
+              strokeLinecap="round"
+              style={{ filter: 'drop-shadow(0 1.5px 1.5px rgba(8,12,30,0.55))' }}
             />
-
-            {/* Belly accent stripe */}
+            {/* center spine accent — a hint of the fuselage in brand blue */}
             <path
-              d="M -30 4.5 L 30 4.2 Q 40 3.6 47 1.5 L 46 3 Q 38 6.4 28 7 L -25 7 Z"
-              fill="rgba(79,142,247,0.35)"
-              stroke="none"
-            />
-
-            {/* Cockpit windshield */}
-            <path
-              d="M 40 -6.5 Q 49 -5 52.5 -2 L 44 -2 Q 41 -2.5 40 -6.5 Z"
-              fill="#22344f"
-              opacity="0.85"
-            />
-
-            {/* Window strip */}
-            <line x1="-24" y1="-2.6" x2="34" y2="-2.6"
-              stroke="rgba(46,84,140,0.55)" strokeWidth="1.7"
-              strokeLinecap="round" strokeDasharray="2.4 2.6" />
-
-            {/* Main wing — swept back, foreground */}
-            <path
-              d="M 10 3 L -6 3 L -24 22 Q -25.5 24 -22.5 24 L -4 24 Q 0 24 2 21.5 L 14 5.5 Z"
-              fill="#e6eefb"
-              stroke="rgba(28,52,94,0.35)"
-              strokeWidth="0.8"
-              strokeLinejoin="round"
-            />
-            {/* Wingtip nav light */}
-            <circle className="voyza-strobe" cx="-21" cy="23" r="1.4" fill="#7affc4"
-              style={{ filter: 'drop-shadow(0 0 4px rgba(122,255,196,0.9))' }} />
-
-            {/* Engine nacelle under the wing */}
-            <g>
-              <rect x="-2" y="9.5" width="16" height="8" rx="4"
-                fill="#f4f8fe" stroke="rgba(28,52,94,0.4)" strokeWidth="0.8" />
-              <ellipse cx="-2" cy="13.5" rx="2.2" ry="4" fill="#22344f" opacity="0.8" />
-              <rect x="3" y="10.4" width="9" height="1.6" rx="0.8" fill="rgba(79,142,247,0.4)" />
-            </g>
-
-            {/* Far-side wing hint (above fuselage, subdued) */}
-            <path
-              d="M 4 -7.5 L -8 -7.5 L -17 -15.5 Q -18 -16.5 -15.8 -16.5 L 2 -16.5 Q 4.5 -16.5 5.5 -14.5 L 8 -8.5 Z"
-              fill="rgba(196,214,240,0.55)"
-              stroke="rgba(28,52,94,0.2)"
-              strokeWidth="0.6"
+              d="M13 8 L11 16"
+              stroke="rgba(79,142,247,0.55)"
+              strokeWidth="1.1"
+              strokeLinecap="round"
+              fill="none"
             />
           </g>
         </g>
