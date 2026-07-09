@@ -65,7 +65,10 @@ export default function CanvasCityCard({
   const [hovered, setHovered] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const contextRef = useRef<HTMLDivElement>(null);
-  const canEdit = role === 'owner' || role === 'editor';
+  // Suggesters manipulate their LOCAL copy too — the canvas page keeps
+  // their changes from broadcasting/saving and routes them through the
+  // "Propose changes" → owner-approval flow instead (owner-confirms mode).
+  const canEdit = role === 'owner' || role === 'editor' || role === 'suggester';
 
   const color = getCityColor(city.colorIndex ?? index);
   const hotel = city.hotels?.[city.selectedHotelIndex] ?? city.hotel;

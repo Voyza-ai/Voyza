@@ -2,13 +2,14 @@ import './mocks';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import CanvasPage from '@/app/canvas/[tripId]/page';
-import { getCanvasSession, saveCanvas, getCanvasSuggestions, joinCanvasByLink } from '@/lib/api';
+import { getCanvasSession, saveCanvas, getCanvasSuggestions, joinCanvasByLink, postCanvasSuggestion } from '@/lib/api';
 import { buildCity } from './fixtures';
 
 const mockedGetSession = getCanvasSession as jest.MockedFunction<typeof getCanvasSession>;
 const mockedSaveCanvas = saveCanvas as jest.MockedFunction<typeof saveCanvas>;
 const mockedGetSuggestions = getCanvasSuggestions as jest.MockedFunction<typeof getCanvasSuggestions>;
 const mockedJoinLink = joinCanvasByLink as jest.MockedFunction<typeof joinCanvasByLink>;
+const mockedPostSuggestion = postCanvasSuggestion as jest.MockedFunction<typeof postCanvasSuggestion>;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -308,5 +309,47 @@ describe('CanvasPage', () => {
       // Autosave lands at the 2s debounce
       await waitFor(() => expect(mockedSaveCanvas).toHaveBeenCalled(), { timeout: 3500 });
     }, 10000);
+  });
+
+  describe('owner-confirms mode (Phase C)', () => {
+    it('suggester edits locally and proposes; local view resets after sending', async () => {
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'suggester',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+      mockedPostSuggestion.mockResolvedValue({ suggestion: { id: 's1' } } as any);
+
+      render(<CanvasPage />);
+      expect(await screen.findByText('Rome')).toBeInTheDocument();
+
+      // Suggesters get Propose changes, not Save / autosave status
+      expect(screen.getByText('Propose changes')).toBeInTheDocument();
+      expect(screen.queryByText('Saved ✓')).not.toBeInTheDocument();
+
+      // Edit locally: remove Rome via the context menu
+      fireEvent.contextMenu(screen.getByText('Rome'));
+      fireEvent.click(await screen.findByText('Remove city'));
+      await waitFor(() => {
+        expect(screen.queryByText('Rome')).not.toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText('Propose changes'));
+
+      await waitFor(() => {
+        expect(mockedPostSuggestion).toHaveBeenCalledWith(
+          'trip-test-123',
+          'edit',
+          expect.objectContaining({
+            summary: expect.arrayContaining(['Remove Rome']),
+            state: expect.objectContaining({ cities: expect.any(Array) }),
+          }),
+        );
+      });
+      // ...and nothing was saved directly
+      expect(mockedSaveCanvas).not.toHaveBeenCalled();
+      // Local view resets to canonical (Rome returns)
+      expect(await screen.findAllByText('Rome')).not.toHaveLength(0);
+    });
   });
 });

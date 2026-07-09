@@ -13,7 +13,7 @@ type Suggestion = {
   id: string;
   trip_id: string;
   suggested_by: string;
-  type: 'add_city' | 'comment' | 'reaction';
+  type: 'add_city' | 'comment' | 'reaction' | 'edit';
   payload: any;
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;

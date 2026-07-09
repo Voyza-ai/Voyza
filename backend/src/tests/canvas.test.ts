@@ -185,6 +185,17 @@ describe('Canvas Routes', () => {
       expect(res.status).toBe(403);
     });
 
+    it('accepts edit proposals from suggesters (owner-confirms mode)', async () => {
+      const res = await request(app)
+        .post('/api/canvas/trip-1/suggestions')
+        .set('Authorization', 'Bearer suggester-token')
+        .send({
+          type: 'edit',
+          payload: { state: { cities: [] }, summary: ['Remove Rome'] },
+        });
+      expect(res.status).toBe(201);
+    });
+
     it('allows suggester to POST', async () => {
       const res = await request(app)
         .post('/api/canvas/trip-1/suggestions')

@@ -556,7 +556,7 @@ router.get(
 
 // ─── POST /api/canvas/:tripId/suggestions ────────────────────
 const suggestionSchema = z.object({
-  type: z.enum(['add_city', 'comment', 'reaction']),
+  type: z.enum(['add_city', 'comment', 'reaction', 'edit']),
   payload: z.any(),
 });
 

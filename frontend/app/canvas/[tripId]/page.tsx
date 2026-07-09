@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
-import { Save, Share2, WifiOff, ArrowLeft, Sparkles, X } from 'lucide-react';
+import { Save, Share2, WifiOff, ArrowLeft, Sparkles, X, Send } from 'lucide-react';
 import CanvasCityCard from '@/components/canvas/CanvasCityCard';
 import CanvasConnector from '@/components/canvas/CanvasConnector';
 import CanvasHomeCard from '@/components/canvas/CanvasHomeCard';
@@ -32,6 +32,7 @@ import {
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
 import { liveTripTotal } from '@/lib/tripTotals';
+import { summarizeCanvasChanges } from '@/lib/canvasDiff';
 import { Trip } from '@/lib/types';
 
 export default function CanvasPage() {
@@ -490,12 +491,60 @@ export default function CanvasPage() {
           estimatedCost: suggestion.payload.estimatedCost ?? 0,
           reason: suggestion.payload.reason ?? '',
         });
+      } else if (suggestion?.type === 'edit' && suggestion.payload?.state) {
+        // Proposed state becomes canonical: applying it here triggers the
+        // owner's broadcast + autosave, which carries it to everyone.
+        const proposed = suggestion.payload.state;
+        setLocalState({
+          ...proposed,
+          cities: withColorIndices(proposed.cities ?? []),
+        });
       }
       showToast('Suggestion approved', 'success');
     } catch {
       showToast('Failed to approve', 'error');
     }
   };
+
+  // Suggester: bundle local edits into an 'edit' proposal for the owner.
+  const handlePropose = async () => {
+    if (role !== 'suggester' || !localState || !hasUnsavedChanges) return;
+    setSaving(true);
+    try {
+      const summary = summarizeCanvasChanges(savedState, localState);
+      await postCanvasSuggestion(tripId, 'edit', { state: localState, summary });
+      // Local view resets to canonical — the proposal lives in the panel
+      // and lands for everyone if the owner approves.
+      setLocalState(savedState);
+      showToast('Sent to the owner for approval', 'success');
+    } catch {
+      showToast('Could not send your proposal', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Toast the suggester when the owner decides on their proposal
+  // (suggestion UPDATEs arrive over realtime).
+  const prevSuggestionStatusRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    for (const sug of suggestions) {
+      const prev = prevSuggestionStatusRef.current[sug.id];
+      if (
+        prev === 'pending' &&
+        sug.status !== 'pending' &&
+        sug.suggested_by === user?.id
+      ) {
+        showToast(
+          sug.status === 'approved'
+            ? 'Your proposal was approved 🎉'
+            : 'Your proposal was declined',
+          sug.status === 'approved' ? 'success' : 'info',
+        );
+      }
+      prevSuggestionStatusRef.current[sug.id] = sug.status;
+    }
+  }, [suggestions, user?.id, showToast]);
 
   const handleReject = async (suggestionId: string) => {
     try {
@@ -572,6 +621,10 @@ export default function CanvasPage() {
   const origin = localState?.trip?.origin ?? null;
   const returnToHome = localState?.trip?.returnToHome ?? false;
   const canEdit = role === 'owner' || role === 'editor';
+  // Suggesters manipulate their LOCAL copy freely — nothing broadcasts or
+  // autosaves (both gate on canEdit); instead they submit the whole change
+  // set via "Propose changes" for the owner to approve.
+  const canManipulate = canEdit || role === 'suggester';
 
   // ── Canvas state ⇄ Trip adapters ─────────────────────────────────
   // The AI chat and the totals util both speak the results page's Trip
@@ -844,6 +897,19 @@ export default function CanvasPage() {
             </button>
           )}
 
+          {role === 'suggester' && (
+            <button
+              onClick={handlePropose}
+              disabled={saving || !hasUnsavedChanges}
+              title="Your edits go to the owner for approval"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
+              style={{ background: '#7c3aed' }}
+            >
+              <Send size={12} />
+              {saving ? 'Sending…' : 'Propose changes'}
+            </button>
+          )}
+
           {canEdit && (
             <button
               onClick={handleSave}
@@ -884,7 +950,7 @@ export default function CanvasPage() {
           {cities.length === 0 && (
             <div className="flex flex-col items-center gap-4 text-center px-8">
               <div className="text-gray-400 text-[14px]">No cities yet</div>
-              {canEdit && (
+              {canManipulate && (
                 <button
                   onClick={() => setAddingAfterIndex(-1)}
                   className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-white transition-all hover:brightness-110"
@@ -902,7 +968,7 @@ export default function CanvasPage() {
               <CanvasHomeCard
                 origin={origin}
                 direction="outbound"
-                onEdit={canEdit ? () => setHomeEdit('outbound') : undefined}
+                onEdit={canManipulate ? () => setHomeEdit('outbound') : undefined}
                 legLoading={homeLegLoading === 'outbound'}
               />
               <CanvasConnector
@@ -914,7 +980,7 @@ export default function CanvasPage() {
                     : '',
                   operator: origin.outboundLeg.operator ?? '',
                 } : null}
-                canEdit={canEdit}
+                canEdit={canManipulate}
                 onAddCity={() => setAddingAfterIndex(-1)}
               />
             </div>
@@ -923,7 +989,7 @@ export default function CanvasPage() {
           <Reorder.Group
             axis="x"
             values={cities}
-            onReorder={canEdit ? handleReorder : () => {}}
+            onReorder={canManipulate ? handleReorder : () => {}}
             className="flex items-center gap-0"
             as="div"
           >
@@ -932,7 +998,7 @@ export default function CanvasPage() {
                 key={city.name + '-' + idx}
                 value={city}
                 className="flex items-center"
-                dragListener={canEdit}
+                dragListener={canManipulate}
                 whileDrag={{ scale: 1.05, zIndex: 50, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}
                 transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                 as="div"
@@ -954,7 +1020,7 @@ export default function CanvasPage() {
                 {idx < cities.length - 1 && (
                   <CanvasConnector
                     transport={city.transportOut}
-                    canEdit={canEdit}
+                    canEdit={canManipulate}
                     onAddCity={() => handleAddAfter(idx)}
                   />
                 )}
@@ -963,7 +1029,7 @@ export default function CanvasPage() {
           </Reorder.Group>
 
           {/* Trailing add button — hidden when Back Home card is showing */}
-          {canEdit && cities.length > 0 && !(origin?.city && returnToHome) && (
+          {canManipulate && cities.length > 0 && !(origin?.city && returnToHome) && (
             <button
               onClick={() => setAddingAfterIndex(cities.length - 1)}
               className="ml-6 w-12 h-12 rounded-full flex items-center justify-center border-2 border-dashed transition-all hover:scale-110 hover:border-[#2563eb] hover:text-[#2563eb] group"
@@ -985,13 +1051,13 @@ export default function CanvasPage() {
                     : '',
                   operator: origin.returnLeg.operator ?? '',
                 } : null}
-                canEdit={canEdit}
+                canEdit={canManipulate}
                 onAddCity={() => setAddingAfterIndex(cities.length - 1)}
               />
               <CanvasHomeCard
                 origin={origin}
                 direction="inbound"
-                onEdit={canEdit ? () => setHomeEdit('inbound') : undefined}
+                onEdit={canManipulate ? () => setHomeEdit('inbound') : undefined}
                 legLoading={homeLegLoading === 'inbound'}
               />
             </div>

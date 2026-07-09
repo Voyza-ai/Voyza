@@ -501,7 +501,7 @@ export async function getCanvasSuggestions(tripId: string) {
 
 export async function postCanvasSuggestion(
   tripId: string,
-  type: 'add_city' | 'comment' | 'reaction',
+  type: 'add_city' | 'comment' | 'reaction' | 'edit',
   payload: any,
 ) {
   return apiFetch<{ suggestion: any }>(`/api/canvas/${tripId}/suggestions`, {
