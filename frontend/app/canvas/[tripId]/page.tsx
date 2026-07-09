@@ -46,7 +46,6 @@ export default function CanvasPage() {
   const [role, setRole] = useState<string>('viewer');
   const [localState, setLocalState] = useState<any>(null);
   const [savedState, setSavedState] = useState<any>(null);
-  const [members, setMembers] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -62,9 +61,26 @@ export default function CanvasPage() {
       : null,
   );
   const [sessionNonce, setSessionNonce] = useState(0);
+  // Timestamp of the newest applied live op — lets the session load and
+  // the op-apply effect coordinate (never overwrite newer with older).
+  const lastAppliedOpRef = useRef<number>(0);
   const [loading, setLoading] = useState(true);
 
-  const { canvasState, suggestions, isConnected } = useCanvasRealtime(tripId);
+  // Presence identity for the realtime channel (ref-tracked in the hook,
+  // so object identity churn here doesn't resubscribe).
+  const presenceUser = useMemo(
+    () =>
+      user
+        ? {
+            id: user.id,
+            email: user.email ?? null,
+            name: ((user.user_metadata?.full_name as string) || null),
+          }
+        : null,
+    [user],
+  );
+  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp } =
+    useCanvasRealtime(tripId, presenceUser);
 
   // Unsaved changes detection — covers city edits AND home-card (origin)
   // edits, so both enable Save and trigger the leave-without-saving warning.
@@ -208,18 +224,17 @@ export default function CanvasPage() {
           sessionState.cities = withColorIndices(sessionState.cities);
         }
 
-        setLocalState(sessionState);
-        setSavedState(sessionState);
+        // A live op that arrived while we were loading is newer than any
+        // DB read — don't clobber it with stale session state.
+        if (lastAppliedOpRef.current === 0) {
+          setLocalState(sessionState);
+          setSavedState(sessionState);
+        }
 
         // Persist the results edits into the canvas session so they survive
         // reloads and reach collaborators (the save endpoint is owner-gated).
         if (syncedFromResults && userRole === 'owner') {
           saveCanvas(tripId, sessionState).catch(() => {});
-        }
-
-        // Load members from session
-        if (session.state?.members) {
-          setMembers(session.state.members);
         }
 
         await getCanvasSuggestions(tripId);
@@ -617,6 +632,69 @@ export default function CanvasPage() {
     }));
   }, []);
 
+  // ── Live sync (Phase B) ──────────────────────────────────────
+  // Remote ops apply immediately (last-write-wins); our own edits
+  // broadcast after 400ms of quiet and autosave after 2s.
+  const applyingRemoteRef = useRef(false);
+  const savedStateRef = useRef(savedState);
+  useEffect(() => {
+    savedStateRef.current = savedState;
+  }, [savedState]);
+
+  useEffect(() => {
+    if (!remoteOp || !user || remoteOp.actor === user.id) return;
+    // Apply each op exactly once — guards against object-identity churn
+    // (and replays) turning this effect into a render loop.
+    if (remoteOp.ts <= lastAppliedOpRef.current) return;
+    lastAppliedOpRef.current = remoteOp.ts;
+    applyingRemoteRef.current = true;
+    // The actor owns persistence (their autosave lands ~2s later) — treat
+    // the broadcast state as canonical so receivers don't show phantom
+    // "unsaved changes" for someone else's work.
+    setLocalState(remoteOp.state);
+    setSavedState(remoteOp.state);
+  }, [remoteOp, user]);
+
+  const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // Skip the render caused by applying someone else's op.
+    if (applyingRemoteRef.current) {
+      applyingRemoteRef.current = false;
+      return;
+    }
+    if (!canEdit || !localState) return;
+    if (JSON.stringify(localState) === JSON.stringify(savedStateRef.current)) return;
+
+    if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
+    broadcastTimerRef.current = setTimeout(() => {
+      broadcastOp(localState);
+    }, 400);
+
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await saveCanvas(tripId, localState);
+        setSavedState(localState);
+      } catch {
+        showToast('Autosave failed — click Save to retry', 'error');
+      } finally {
+        setSaving(false);
+      }
+    }, 2000);
+  }, [localState, canEdit, broadcastOp, tripId, showToast]);
+
+  // Clear pending timers on unmount so nothing fires into a dead tree.
+  useEffect(
+    () => () => {
+      if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    },
+    [],
+  );
+
   // User initials for avatar
   const userInitials = (() => {
     const name = user?.user_metadata?.full_name as string | undefined;
@@ -673,33 +751,41 @@ export default function CanvasPage() {
           )}
         </div>
 
-        {/* Center: collaborator avatar rings */}
+        {/* Center: live presence — who's in the canvas right now */}
         <div className="flex items-center gap-1.5">
-          {/* Current user */}
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-medium text-white border-2 border-[#4ade80]"
-            style={{ background: '#2563eb' }}
-            title="You"
-          >
-            {userInitials}
-          </div>
-          {/* Other members */}
-          {members.slice(0, 5).map((m, i) => (
-            <div
-              key={m.id ?? i}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-medium text-white border-2"
-              style={{
-                background: `hsl(${(i + 1) * 60}, 55%, 50%)`,
-                borderColor: m.accepted_at ? '#4ade80' : 'rgba(0,0,0,0.12)',
-              }}
-              title={m.invited_email}
-            >
-              {m.invited_email?.[0]?.toUpperCase() ?? '?'}
-            </div>
-          ))}
-          {members.length > 5 && (
+          {(presence.length > 0
+            ? presence
+            : presenceUser
+              ? [presenceUser]
+              : []
+          )
+            .slice(0, 6)
+            .map((p) => {
+              const label = p.name || p.email || '?';
+              const initials = (p.name || p.email || '?')
+                .split(/[\s@]+/)
+                .map((w: string) => w[0])
+                .join('')
+                .toUpperCase()
+                .slice(0, 2);
+              let hash = 0;
+              for (let i = 0; i < p.id.length; i++) hash = (hash * 31 + p.id.charCodeAt(i)) | 0;
+              const hue = Math.abs(hash) % 360;
+              const isSelf = p.id === user?.id;
+              return (
+                <div
+                  key={p.id}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-medium text-white border-2 border-[#4ade80]"
+                  style={{ background: isSelf ? '#2563eb' : `hsl(${hue}, 55%, 48%)` }}
+                  title={isSelf ? 'You' : label}
+                >
+                  {initials}
+                </div>
+              );
+            })}
+          {presence.length > 6 && (
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-medium text-gray-500 bg-gray-100 border-2 border-gray-200">
-              +{members.length - 5}
+              +{presence.length - 6}
             </div>
           )}
         </div>
@@ -762,11 +848,12 @@ export default function CanvasPage() {
             <button
               onClick={handleSave}
               disabled={saving || !hasUnsavedChanges}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
-              style={{ background: '#2563eb' }}
+              title="Changes autosave — click to save immediately"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
+              style={{ background: saving || hasUnsavedChanges ? '#2563eb' : '#16a34a' }}
             >
               <Save size={12} />
-              {saving ? 'Saving...' : 'Save'}
+              {saving ? 'Saving…' : hasUnsavedChanges ? 'Save' : 'Saved ✓'}
             </button>
           )}
         </div>

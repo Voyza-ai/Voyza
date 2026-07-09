@@ -102,6 +102,9 @@ jest.mock('@/hooks/useCanvasRealtime', () => ({
     suggestions: [],
     isConnected: true,
     updateState: jest.fn(),
+    presence: [],
+    remoteOp: null,
+    broadcastOp: jest.fn(),
   }),
 }));
 

@@ -62,7 +62,7 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Save')).toBeInTheDocument();
+      expect(screen.getByText('Saved ✓')).toBeInTheDocument();
     });
   });
 
@@ -127,7 +127,7 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
     await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
 
-    expect(screen.getByText('Save')).toBeInTheDocument();
+    expect(screen.getByText('Saved ✓')).toBeInTheDocument();
     // ...but Share stays owner-only
     expect(screen.queryByText('Share')).not.toBeInTheDocument();
   });
@@ -240,5 +240,73 @@ describe('CanvasPage', () => {
     expect(await screen.findByText('Rome')).toBeInTheDocument();
 
     window.history.replaceState({}, '', '/');
+  });
+
+  describe('live sync (Phase B)', () => {
+    const rt = jest.requireMock('@/hooks/useCanvasRealtime');
+    const makeRt = (overrides: any = {}) => ({
+      canvasState: null,
+      suggestions: [],
+      isConnected: true,
+      updateState: jest.fn(),
+      presence: [],
+      remoteOp: null,
+      broadcastOp: jest.fn(),
+      ...overrides,
+    });
+    const originalHook = rt.useCanvasRealtime;
+    afterEach(() => {
+      rt.useCanvasRealtime = originalHook;
+      jest.useRealTimers();
+    });
+
+    it('applies a live op broadcast by another user', async () => {
+      // Stable object — a fresh remoteOp per render would loop the effect.
+      const op = {
+        state: { trip: {}, cities: [buildCity({ name: 'Berlin' })] },
+        actor: 'someone-else',
+        ts: 1,
+      };
+      rt.useCanvasRealtime = () => makeRt({ remoteOp: op });
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'editor',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+      render(<CanvasPage />);
+      // The remote op (Berlin) wins over the loaded session (Rome/Florence).
+      // Berlin appears in both the header route title and the city card.
+      expect((await screen.findAllByText('Berlin')).length).toBeGreaterThan(0);
+      await waitFor(() => {
+        expect(screen.queryByText('Rome')).not.toBeInTheDocument();
+      });
+    });
+
+    it('broadcasts (400ms) then autosaves (2s) after a local edit', async () => {
+      // Real timers on purpose: fake timers wedge RTL's waitFor here.
+      const broadcastOp = jest.fn();
+      rt.useCanvasRealtime = () => makeRt({ broadcastOp });
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'owner',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+      mockedSaveCanvas.mockResolvedValue({ saved: true } as any);
+
+      render(<CanvasPage />);
+      expect(await screen.findByText('Rome')).toBeInTheDocument();
+
+      // Local edit: remove Rome via the card's context menu
+      fireEvent.contextMenu(screen.getByText('Rome'));
+      fireEvent.click(await screen.findByText('Remove city'));
+
+      // Broadcast fires on the 400ms debounce (before autosave)
+      await waitFor(() => expect(broadcastOp).toHaveBeenCalled(), { timeout: 1500 });
+      expect(mockedSaveCanvas).not.toHaveBeenCalled();
+
+      // Autosave lands at the 2s debounce
+      await waitFor(() => expect(mockedSaveCanvas).toHaveBeenCalled(), { timeout: 3500 });
+    }, 10000);
   });
 });
