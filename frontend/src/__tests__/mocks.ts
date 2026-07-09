@@ -24,11 +24,16 @@ jest.mock('next/link', () => {
 // Mock framer-motion to avoid animation complexity in tests
 jest.mock('framer-motion', () => {
   const React = require('react');
+  // Cache one component per tag: returning a FRESH component from every
+  // `motion.div` access changes the element type on each re-render, which
+  // makes React unmount/remount the subtree — DOM nodes grabbed by findBy*
+  // right before a state flip end up detached and assertions flake.
+  const motionCache: Record<string, any> = {};
   const motion = new Proxy(
     {},
     {
       get: (_target: any, prop: string) => {
-        return React.forwardRef((props: any, ref: any) => {
+        motionCache[prop] ??= React.forwardRef((props: any, ref: any) => {
           const {
             initial, animate, exit, transition, variants, whileHover,
             whileTap, onAnimationComplete, layout, layoutId,
@@ -36,6 +41,7 @@ jest.mock('framer-motion', () => {
           } = props;
           return React.createElement(prop, { ...rest, ref });
         });
+        return motionCache[prop];
       },
     },
   );
