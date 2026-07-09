@@ -2,12 +2,13 @@ import './mocks';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import CanvasPage from '@/app/canvas/[tripId]/page';
-import { getCanvasSession, saveCanvas, getCanvasSuggestions } from '@/lib/api';
+import { getCanvasSession, saveCanvas, getCanvasSuggestions, joinCanvasByLink } from '@/lib/api';
 import { buildCity } from './fixtures';
 
 const mockedGetSession = getCanvasSession as jest.MockedFunction<typeof getCanvasSession>;
 const mockedSaveCanvas = saveCanvas as jest.MockedFunction<typeof saveCanvas>;
 const mockedGetSuggestions = getCanvasSuggestions as jest.MockedFunction<typeof getCanvasSuggestions>;
+const mockedJoinLink = joinCanvasByLink as jest.MockedFunction<typeof joinCanvasByLink>;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -80,7 +81,7 @@ describe('CanvasPage', () => {
     expect(screen.queryByText('Save')).not.toBeInTheDocument();
   });
 
-  it('Invite button only visible to owner role', async () => {
+  it('Share button only visible to owner role', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -90,11 +91,11 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Invite')).toBeInTheDocument();
+      expect(screen.getByText('Share')).toBeInTheDocument();
     });
   });
 
-  it('Invite button opens InviteModal', async () => {
+  it('Share button opens the share dialog with link access modes', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -104,12 +105,31 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Invite')).toBeInTheDocument();
+      expect(screen.getByText('Share')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Invite'));
+    fireEvent.click(screen.getByText('Share'));
     await waitFor(() => {
-      expect(screen.getByText('Share Canvas')).toBeInTheDocument();
+      expect(screen.getByText('Share this trip')).toBeInTheDocument();
     });
+    // The three link access modes
+    expect(screen.getByText('View only')).toBeInTheDocument();
+    expect(screen.getByText('Owner confirms edits')).toBeInTheDocument();
+    expect(screen.getByText('Full access')).toBeInTheDocument();
+  });
+
+  it('editors get a Save button too (live collaboration)', async () => {
+    mockedGetSession.mockResolvedValue({
+      session: { state: mockCanvasState },
+      role: 'editor',
+    });
+    mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+    render(<CanvasPage />);
+    await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
+
+    expect(screen.getByText('Save')).toBeInTheDocument();
+    // ...but Share stays owner-only
+    expect(screen.queryByText('Share')).not.toBeInTheDocument();
   });
 
   it('handles canvas session fetch failure gracefully', async () => {
@@ -195,5 +215,30 @@ describe('CanvasPage', () => {
 
     expect(screen.queryByPlaceholderText('Ask about your trip...')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Open Voyza AI chat')).not.toBeInTheDocument();
+  });
+
+  it('joins via ?share= link token, then strips the param', async () => {
+    const token = '123e4567-e89b-42d3-a456-426614174000';
+    window.history.replaceState({}, '', `/canvas/trip-test-123?share=${token}`);
+    mockedJoinLink.mockResolvedValue({ role: 'editor', joined: true });
+    mockedGetSession.mockResolvedValue({
+      session: { state: mockCanvasState },
+      role: 'editor',
+    });
+    mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+    render(<CanvasPage />);
+
+    await waitFor(() => {
+      expect(mockedJoinLink).toHaveBeenCalledWith('trip-test-123', token);
+    });
+    // Param stripped so refreshes don't re-join
+    await waitFor(() => {
+      expect(window.location.search).not.toContain('share=');
+    });
+    // Session loads after the join and the canvas renders
+    expect(await screen.findByText('Rome')).toBeInTheDocument();
+
+    window.history.replaceState({}, '', '/');
   });
 });

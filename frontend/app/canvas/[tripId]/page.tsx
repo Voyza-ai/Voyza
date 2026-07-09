@@ -9,7 +9,8 @@ import CanvasConnector from '@/components/canvas/CanvasConnector';
 import CanvasHomeCard from '@/components/canvas/CanvasHomeCard';
 import SuggestedCitiesPanel from '@/components/canvas/SuggestedCitiesPanel';
 import SuggestionsPanel from '@/components/canvas/SuggestionsPanel';
-import InviteModal from '@/components/canvas/InviteModal';
+import ShareModal from '@/components/canvas/ShareModal';
+import LoginModal from '@/components/shared/LoginModal';
 import AddCityModal from '@/components/canvas/AddCityModal';
 import HomeEditModal from '@/components/canvas/HomeEditModal';
 import AIChatPanel from '@/components/results/AIChatPanel';
@@ -25,6 +26,7 @@ import {
   getTrip,
   searchHotels,
   fetchHomeLegs,
+  joinCanvasByLink,
   Destination,
 } from '@/lib/api';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
@@ -37,6 +39,7 @@ export default function CanvasPage() {
   const router = useRouter();
   const tripId = params.tripId as string;
   const user = useAuthStore((s) => s.user);
+  const authLoading = useAuthStore((s) => s.isLoading);
   const storeTrip = useTripStore((s) => s.currentTrip);
   const storeCities = storeTrip?.cities;
 
@@ -52,6 +55,13 @@ export default function CanvasPage() {
   const [homeEdit, setHomeEdit] = useState<'outbound' | 'inbound' | null>(null);
   const [homeLegLoading, setHomeLegLoading] = useState<'outbound' | 'inbound' | null>(null);
   const [chatOpen, setChatOpen] = useState(true);
+  // Share-link join: token from ?share=… (read once; cleared after joining)
+  const [shareToken, setShareToken] = useState<string | null>(() =>
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('share')
+      : null,
+  );
+  const [sessionNonce, setSessionNonce] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const { canvasState, suggestions, isConnected } = useCanvasRealtime(tripId);
@@ -93,9 +103,35 @@ export default function CanvasPage() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasUnsavedChanges]);
 
+  // Join via share link BEFORE loading the session, so the session load
+  // sees the new membership/role. Requires sign-in (LoginModal below);
+  // once the user exists the join runs, the URL param is stripped, and
+  // sessionNonce retriggers the load.
+  useEffect(() => {
+    if (!shareToken || !tripId || !user) return;
+    (async () => {
+      try {
+        const r = await joinCanvasByLink(tripId, shareToken);
+        if (r.joined) showToast(`You joined this trip as ${r.role}`, 'success');
+      } catch {
+        showToast('This share link is invalid or has been reset', 'error');
+      } finally {
+        setShareToken(null);
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('share');
+          window.history.replaceState({}, '', url.toString());
+        }
+        setSessionNonce((n) => n + 1);
+      }
+    })();
+  }, [shareToken, tripId, user]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Load initial session
   useEffect(() => {
     if (!tripId) return;
+    // A pending share-link join changes our role — wait for it.
+    if (shareToken && user) return;
 
     (async () => {
       try {
@@ -193,22 +229,26 @@ export default function CanvasPage() {
         setLoading(false);
       }
     })();
-  }, [tripId]);
+  }, [tripId, sessionNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync realtime state (from other users)
+  // Sync realtime state (from other users). Applies to EVERY role —
+  // editors save now, so the owner receives updates too. Two guards:
+  // identical states are skipped (echo of our own save), and a client
+  // that's mid-edit keeps its local work instead of being clobbered
+  // (proper per-op reconciliation lands with live editing, Phase B).
+  const hasUnsavedRef = useRef(false);
   useEffect(() => {
-    if (canvasState && role !== 'owner') {
-      setLocalState(canvasState);
-      setSavedState(canvasState);
-    }
-  }, [canvasState, role]);
+    hasUnsavedRef.current = hasUnsavedChanges;
+  }, [hasUnsavedChanges]);
 
-  // Show toast when owner saves (realtime update)
   useEffect(() => {
-    if (canvasState && role !== 'owner') {
-      showToast('Owner saved — trip updated', 'info');
-    }
-  }, [canvasState]);
+    if (!canvasState) return;
+    if (JSON.stringify(canvasState) === JSON.stringify(localStateRef.current)) return;
+    if (hasUnsavedRef.current) return;
+    setLocalState(canvasState);
+    setSavedState(canvasState);
+    showToast('Trip updated by a collaborator', 'info');
+  }, [canvasState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
@@ -216,7 +256,7 @@ export default function CanvasPage() {
   }, []);
 
   const handleSave = async () => {
-    if (role !== 'owner' || !localState) return;
+    if (!canEdit || !localState) return;
     setSaving(true);
     try {
       await saveCanvas(tripId, localState);
@@ -714,11 +754,11 @@ export default function CanvasPage() {
               }}
             >
               <Share2 size={12} />
-              Invite
+              Share
             </button>
           )}
 
-          {role === 'owner' && (
+          {canEdit && (
             <button
               onClick={handleSave}
               disabled={saving || !hasUnsavedChanges}
@@ -964,12 +1004,27 @@ export default function CanvasPage() {
         onApply={(updates) => homeEdit && applyHomeEdit(homeEdit, updates)}
       />
 
-      {/* ─── Invite modal ─── */}
-      <InviteModal
+      {/* ─── Share dialog (link modes + invites + member roles) ─── */}
+      <ShareModal
         tripId={tripId}
         isOpen={showInvite}
         onClose={() => setShowInvite(false)}
-        members={members}
+        onToast={showToast}
+      />
+
+      {/* ─── Share-link sign-in gate: joining requires an account ─── */}
+      <LoginModal
+        isOpen={!!shareToken && !user && !authLoading}
+        onClose={() => {
+          // Bailing out of sign-in: drop the pending join and load whatever
+          // access (if any) this account-less visitor has.
+          setShareToken(null);
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('share');
+            window.history.replaceState({}, '', url.toString());
+          }
+        }}
       />
 
       {/* ─── Toast ─── */}

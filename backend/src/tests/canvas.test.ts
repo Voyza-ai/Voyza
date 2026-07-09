@@ -149,10 +149,28 @@ describe('Canvas Routes', () => {
   });
 
   describe('POST /api/canvas/:tripId/save', () => {
-    it('returns 403 for non-owner', async () => {
+    // Live collaboration: editors persist their changes too. Only
+    // suggesters (propose/approve flow) and viewers are write-blocked.
+    it('allows editor to save', async () => {
       const res = await request(app)
         .post('/api/canvas/trip-1/save')
         .set('Authorization', 'Bearer editor-token')
+        .send({ state: {} });
+      expect(res.status).toBe(200);
+    });
+
+    it('returns 403 for viewer', async () => {
+      const res = await request(app)
+        .post('/api/canvas/trip-1/save')
+        .set('Authorization', 'Bearer viewer-token')
+        .send({ state: {} });
+      expect(res.status).toBe(403);
+    });
+
+    it('returns 403 for suggester', async () => {
+      const res = await request(app)
+        .post('/api/canvas/trip-1/save')
+        .set('Authorization', 'Bearer suggester-token')
         .send({ state: {} });
       expect(res.status).toBe(403);
     });

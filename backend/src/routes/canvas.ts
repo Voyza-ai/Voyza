@@ -215,7 +215,11 @@ router.post(
 
     const tripId = req.params.tripId as string;
     const role = await getMemberRole(tripId, user.id);
-    if (role !== 'owner') throw new AppError(403, 'Only the trip owner can save');
+    // Editors save too (live collaboration). Suggesters go through the
+    // propose/approve flow instead; viewers never write.
+    if (role !== 'owner' && role !== 'editor') {
+      throw new AppError(403, 'You need edit access to save this trip');
+    }
 
     const { state } = req.body;
     if (!state) throw new AppError(400, 'Canvas state is required');
@@ -863,6 +867,177 @@ router.delete(
     if (error) throw new AppError(500, error.message);
 
     res.json({ success: true });
+  }),
+);
+
+
+// ─── Share link ──────────────────────────────────────────────
+// One link per trip, backed by share_token/share_mode on the trip's
+// canvas session. Joining maps the mode to a membership role:
+const SHARE_MODE_TO_ROLE: Record<string, string> = {
+  view: 'viewer',
+  suggest: 'suggester',
+  edit: 'editor',
+};
+const ROLE_RANK: Record<string, number> = { viewer: 0, suggester: 1, editor: 2, owner: 3 };
+
+/** Latest canvas session for a trip, creating an empty one if missing
+ *  (the share dialog can be opened before anything was ever saved). */
+async function findOrCreateSession(tripId: string) {
+  const supabase = getSupabase();
+  const { data: existing } = await supabase
+    .from('canvas_sessions')
+    .select('id, share_mode, share_token')
+    .eq('trip_id', tripId)
+    .order('saved_at', { ascending: false })
+    .limit(1)
+    .single();
+  if (existing) return existing;
+  const { data: created, error } = await supabase
+    .from('canvas_sessions')
+    .insert({ trip_id: tripId, state: {} })
+    .select('id, share_mode, share_token')
+    .single();
+  if (error || !created) throw new AppError(500, 'Could not create canvas session');
+  return created;
+}
+
+const shareUrl = (tripId: string, token: string) =>
+  `${env.FRONTEND_URL}/canvas/${tripId}?share=${token}`;
+
+// ─── GET /api/canvas/:tripId/share ───────────────────────────
+// Owner-only: current share link + mode.
+router.get(
+  '/:tripId/share',
+  asyncHandler(async (req, res) => {
+    const user = await getUserFromToken(req.headers.authorization);
+    if (!user) throw new AppError(401, 'Authentication required');
+    const tripId = req.params.tripId as string;
+    if ((await getMemberRole(tripId, user.id)) !== 'owner') {
+      throw new AppError(403, 'Only the trip owner can manage sharing');
+    }
+    const session = await findOrCreateSession(tripId);
+    res.json({ mode: session.share_mode, url: shareUrl(tripId, session.share_token) });
+  }),
+);
+
+// ─── PATCH /api/canvas/:tripId/share ─────────────────────────
+// Owner-only: change the link's mode and/or rotate the token
+// (rotation invalidates every previously shared copy of the link).
+const sharePatchSchema = z.object({
+  mode: z.enum(['view', 'suggest', 'edit']).optional(),
+  rotate: z.boolean().optional(),
+});
+router.patch(
+  '/:tripId/share',
+  asyncHandler(async (req, res) => {
+    const user = await getUserFromToken(req.headers.authorization);
+    if (!user) throw new AppError(401, 'Authentication required');
+    const tripId = req.params.tripId as string;
+    if ((await getMemberRole(tripId, user.id)) !== 'owner') {
+      throw new AppError(403, 'Only the trip owner can manage sharing');
+    }
+    const { mode, rotate } = sharePatchSchema.parse(req.body);
+    const session = await findOrCreateSession(tripId);
+
+    const update: Record<string, unknown> = {};
+    if (mode) update.share_mode = mode;
+    if (rotate) update.share_token = crypto.randomUUID();
+    if (Object.keys(update).length === 0) {
+      res.json({ mode: session.share_mode, url: shareUrl(tripId, session.share_token) });
+      return;
+    }
+    const supabase = getSupabase();
+    const { data: updated, error } = await supabase
+      .from('canvas_sessions')
+      .update(update)
+      .eq('id', session.id)
+      .select('share_mode, share_token')
+      .single();
+    if (error || !updated) throw new AppError(500, 'Could not update share settings');
+    res.json({ mode: updated.share_mode, url: shareUrl(tripId, updated.share_token) });
+  }),
+);
+
+// ─── POST /api/canvas/:tripId/join-link ──────────────────────
+// Signed-in user opens a share link: validate the token against the
+// trip's session and upsert a membership at the mode's role. Existing
+// members are never DOWNGRADED by a link (the owner may have set them
+// a better role individually); they're upgraded if the link grants more.
+const joinLinkSchema = z.object({ token: z.string().uuid() });
+router.post(
+  '/:tripId/join-link',
+  asyncHandler(async (req, res) => {
+    const user = await getUserFromToken(req.headers.authorization);
+    if (!user) throw new AppError(401, 'Sign in to join this trip');
+    const tripId = req.params.tripId as string;
+    const { token } = joinLinkSchema.parse(req.body);
+    const supabase = getSupabase();
+
+    const { data: session } = await supabase
+      .from('canvas_sessions')
+      .select('share_token, share_mode')
+      .eq('trip_id', tripId)
+      .order('saved_at', { ascending: false })
+      .limit(1)
+      .single();
+    if (!session || session.share_token !== token) {
+      throw new AppError(404, 'This share link is invalid or has been reset');
+    }
+
+    const linkRole = SHARE_MODE_TO_ROLE[session.share_mode] ?? 'viewer';
+    const existingRole = await getMemberRole(tripId, user.id);
+
+    if (existingRole === 'owner') {
+      res.json({ role: 'owner', joined: false });
+      return;
+    }
+    if (existingRole && ROLE_RANK[existingRole] >= ROLE_RANK[linkRole]) {
+      res.json({ role: existingRole, joined: false });
+      return;
+    }
+    if (existingRole) {
+      // Upgrade the existing membership to the link's role.
+      await supabase
+        .from('group_members')
+        .update({ role: linkRole })
+        .eq('trip_id', tripId)
+        .eq('user_id', user.id);
+    } else {
+      await supabase.from('group_members').insert({
+        trip_id: tripId,
+        user_id: user.id,
+        invited_email: user.email ?? null,
+        role: linkRole,
+        accepted_at: new Date().toISOString(),
+      });
+    }
+    res.json({ role: linkRole, joined: true });
+  }),
+);
+
+// ─── PATCH /api/canvas/:tripId/members/apply-role ────────────
+// Owner-only bulk update: set every collaborator (accepted or pending)
+// to the given role — the "give everyone full access" one-click.
+const applyRoleSchema = z.object({ role: z.enum(['editor', 'suggester', 'viewer']) });
+router.patch(
+  '/:tripId/members/apply-role',
+  asyncHandler(async (req, res) => {
+    const user = await getUserFromToken(req.headers.authorization);
+    if (!user) throw new AppError(401, 'Authentication required');
+    const tripId = req.params.tripId as string;
+    if ((await getMemberRole(tripId, user.id)) !== 'owner') {
+      throw new AppError(403, 'Only the trip owner can change roles');
+    }
+    const { role } = applyRoleSchema.parse(req.body);
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('group_members')
+      .update({ role })
+      .eq('trip_id', tripId)
+      .select('id');
+    if (error) throw new AppError(500, 'Could not update member roles');
+    res.json({ updated: data?.length ?? 0, role });
   }),
 );
 
