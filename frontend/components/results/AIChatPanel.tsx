@@ -29,6 +29,19 @@ type Message = {
 
 type AIChatPanelProps = {
   trip: Trip;
+  /**
+   * Where applied edits go. Defaults to the global trip store (results
+   * page). The canvas passes its own handler so chat edits land in the
+   * canvas's local state (unsaved-changes tracking, realtime broadcast)
+   * instead of the store.
+   */
+  onTripUpdate?: (trip: Trip) => void;
+  /**
+   * Freshest trip snapshot for mutations that patch the CURRENT state
+   * (leg refreshes). Defaults to reading the trip store. The canvas
+   * passes a reader over its live local state.
+   */
+  getLatestTrip?: () => Trip | null;
 };
 
 /**
@@ -139,15 +152,33 @@ function applyLegRefreshToTrip(trip: Trip, refresh: LegRefresh): Trip {
   } as Trip;
 }
 
-export default function AIChatPanel({ trip }: AIChatPanelProps) {
+export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AIChatPanelProps) {
   const setTrip = useTripStore((s) => s.setTrip);
+
+  // Host-provided sinks with trip-store defaults — the results page uses
+  // the store; the canvas injects its local-state handlers.
+  const applyTrip = useCallback(
+    (t: Trip) => {
+      if (onTripUpdate) onTripUpdate(t);
+      else setTrip(t);
+    },
+    [onTripUpdate, setTrip],
+  );
+  const latestTrip = useCallback(
+    (): Trip | null =>
+      getLatestTrip ? getLatestTrip() : useTripStore.getState().currentTrip,
+    [getLatestTrip],
+  );
 
   const [messages, setMessages] = useState<Message[]>(() => {
     const initial: Message[] = [
       {
         id: 0,
         role: 'ai',
-        content: `I built this ${trip.cities.length}-city trip to save you $${trip.savings} vs the most common routing. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`,
+        content:
+          trip.savings > 0
+            ? `I built this ${trip.cities.length}-city trip to save you $${trip.savings} vs the most common routing. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`
+            : `You're working on a ${trip.cities.length}-city trip. Ask me anything — swap transports, shift dates, rework a city, or ask why things are ordered this way.`,
       },
     ];
     // Date-shift savings tip — used to be a page banner above the flowchart;
@@ -222,11 +253,12 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
       const result = await planChat({ message: trimmed, currentTrip: trip, history });
 
       if (result.type === 'leg_refresh') {
-        // The chat wants to update the flowchart transport card directly —
-        // no inline card, just a summary + the card shows new options.
-        const currentTrip = useTripStore.getState().currentTrip;
+        // The chat wants to update the transport card directly — no inline
+        // card, just a summary + the card shows new options. Patch the
+        // FRESHEST trip state (store on results, local state on canvas).
+        const currentTrip = latestTrip();
         if (currentTrip) {
-          setTrip(applyLegRefreshToTrip(currentTrip, result.refresh));
+          applyTrip(applyLegRefreshToTrip(currentTrip, result.refresh));
         }
         setMessages((prev) => [
           ...prev,
@@ -274,7 +306,7 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
     } finally {
       setIsTyping(false);
     }
-  }, [isTyping, trip, messages, setTrip]);
+  }, [isTyping, trip, messages, applyTrip, latestTrip]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -286,7 +318,7 @@ export default function AIChatPanel({ trip }: AIChatPanelProps) {
       const msg = prev.find((m) => m.id === messageId);
       if (!msg?.proposal) return prev;
       // date_shift is the only proposal kind now — apply the prebuilt trip.
-      setTrip(msg.proposal.proposedTrip as Trip);
+      applyTrip(msg.proposal.proposedTrip as Trip);
       return prev.map((m) =>
         m.id === messageId ? { ...m, proposalState: 'accepted' } : m,
       );

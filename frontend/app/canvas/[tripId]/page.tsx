@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
-import { Save, Share2, WifiOff, ArrowLeft } from 'lucide-react';
+import { Save, Share2, WifiOff, ArrowLeft, Sparkles, X } from 'lucide-react';
 import CanvasCityCard from '@/components/canvas/CanvasCityCard';
 import CanvasConnector from '@/components/canvas/CanvasConnector';
 import CanvasHomeCard from '@/components/canvas/CanvasHomeCard';
@@ -12,6 +12,7 @@ import SuggestionsPanel from '@/components/canvas/SuggestionsPanel';
 import InviteModal from '@/components/canvas/InviteModal';
 import AddCityModal from '@/components/canvas/AddCityModal';
 import HomeEditModal from '@/components/canvas/HomeEditModal';
+import AIChatPanel from '@/components/results/AIChatPanel';
 import { useCanvasRealtime } from '@/hooks/useCanvasRealtime';
 import { useAuthStore } from '@/store/authStore';
 import { useTripStore } from '@/store/tripStore';
@@ -28,6 +29,8 @@ import {
 } from '@/lib/api';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
+import { liveTripTotal } from '@/lib/tripTotals';
+import { Trip } from '@/lib/types';
 
 export default function CanvasPage() {
   const params = useParams();
@@ -48,6 +51,7 @@ export default function CanvasPage() {
   const [hotelLoadingCities, setHotelLoadingCities] = useState<string[]>([]);
   const [homeEdit, setHomeEdit] = useState<'outbound' | 'inbound' | null>(null);
   const [homeLegLoading, setHomeLegLoading] = useState<'outbound' | 'inbound' | null>(null);
+  const [chatOpen, setChatOpen] = useState(true);
   const [loading, setLoading] = useState(true);
 
   const { canvasState, suggestions, isConnected } = useCanvasRealtime(tripId);
@@ -514,6 +518,65 @@ export default function CanvasPage() {
   const returnToHome = localState?.trip?.returnToHome ?? false;
   const canEdit = role === 'owner' || role === 'editor';
 
+  // ── Canvas state ⇄ Trip adapters ─────────────────────────────────
+  // The AI chat and the totals util both speak the results page's Trip
+  // shape; the canvas keeps { trip: {origin,…}, cities } in localState.
+  // buildCanvasTrip normalizes local state into a Trip (defensive about
+  // cities saved before hotels[] / selectedHotelIndex existed).
+  const buildCanvasTrip = useCallback(
+    (ls: any): Trip | null => {
+      if (!ls?.cities || ls.cities.length === 0) return null;
+      const normCities = ls.cities.map((c: any) => ({
+        ...c,
+        hotels: Array.isArray(c.hotels) && c.hotels.length > 0 ? c.hotels : c.hotel ? [c.hotel] : [],
+        selectedHotelIndex: typeof c.selectedHotelIndex === 'number' ? c.selectedHotelIndex : 0,
+      }));
+      return {
+        id: tripId,
+        title: ls.trip?.title ?? '',
+        cities: normCities,
+        travelers: ls.trip?.travelers ?? storeTrip?.travelers ?? 1,
+        totalCost: 0,
+        savings: ls.trip?.savings ?? 0,
+        origin: ls.trip?.origin ?? undefined,
+        returnToHome: ls.trip?.returnToHome,
+        budget: ls.trip?.budget,
+        dateShiftSuggestion: undefined,
+      } as Trip;
+    },
+    [tripId, storeTrip?.travelers],
+  );
+
+  const canvasTrip = useMemo(() => buildCanvasTrip(localState), [buildCanvasTrip, localState]);
+  const liveTotal = canvasTrip ? liveTripTotal(canvasTrip) : 0;
+  const travelers = canvasTrip?.travelers ?? 1;
+
+  // The chat needs the FRESHEST state when applying leg refreshes (its
+  // callback closures outlive renders) — read through a ref.
+  const localStateRef = useRef(localState);
+  useEffect(() => {
+    localStateRef.current = localState;
+  }, [localState]);
+  const getLatestCanvasTrip = useCallback(
+    () => buildCanvasTrip(localStateRef.current),
+    [buildCanvasTrip],
+  );
+
+  // Chat edits land in canvas local state: cities replaced wholesale
+  // (color indices re-locked), origin/returnToHome merged into trip —
+  // marking unsaved changes exactly like a manual edit.
+  const applyChatTrip = useCallback((updated: Trip) => {
+    setLocalState((prev: any) => ({
+      ...prev,
+      cities: withColorIndices(updated.cities as any[]),
+      trip: {
+        ...(prev?.trip ?? {}),
+        origin: updated.origin ?? prev?.trip?.origin ?? null,
+        returnToHome: updated.returnToHome ?? prev?.trip?.returnToHome,
+      },
+    }));
+  }, []);
+
   // User initials for avatar
   const userInitials = (() => {
     const name = user?.user_metadata?.full_name as string | undefined;
@@ -601,8 +664,30 @@ export default function CanvasPage() {
           )}
         </div>
 
-        {/* Right: connection status + Invite + Save */}
+        {/* Right: total + connection status + Invite + Save */}
         <div className="flex items-center gap-2.5">
+          {/* Live trip total — same math as the results header (hotels ×
+              nights × rooms + all transports incl. home legs) */}
+          {canvasTrip && liveTotal > 0 && (
+            <div
+              className="flex items-baseline gap-1.5 px-3 py-1 rounded-lg"
+              style={{ background: '#eef3fb', border: '1px solid #d4e2f7' }}
+              title="Live total — updates as you edit"
+            >
+              <span className="text-[10px] uppercase tracking-wide font-medium" style={{ color: '#2e6bc4' }}>
+                Total
+              </span>
+              <span className="text-[14px] font-bold" style={{ color: '#1a3a5c' }}>
+                ${liveTotal.toLocaleString()}
+              </span>
+              {travelers > 1 && (
+                <span className="text-[10.5px] text-gray-400">
+                  ${Math.round(liveTotal / travelers).toLocaleString()}/person
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Connection indicator */}
           <div
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px]"
@@ -664,8 +749,10 @@ export default function CanvasPage() {
         )}
       </AnimatePresence>
 
+      {/* ─── Body row: canvas + docked Voyza AI chat ─── */}
+      <div className="flex-1 flex min-h-0">
       {/* ─── Main canvas area ─── */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-12">
+      <div className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex items-center px-12">
         <div className="flex items-center min-w-max gap-0">
           {cities.length === 0 && (
             <div className="flex flex-col items-center gap-4 text-center px-8">
@@ -784,6 +871,55 @@ export default function CanvasPage() {
           )}
         </div>
       </div>
+
+      {/* ─── Voyza AI chat — docked right, editors only ───
+          Same panel as the results page; edits apply to canvas local
+          state (unsaved-changes + save flow) instead of the trip store. */}
+      {canEdit && canvasTrip && chatOpen && (
+        <div className="relative w-[340px] flex-shrink-0 p-3 pl-0 min-h-0">
+          <button
+            onClick={() => setChatOpen(false)}
+            aria-label="Close Voyza AI chat"
+            className="absolute top-6 right-6 z-10 p-1 rounded-md text-white/70 hover:text-white hover:bg-white/15 transition-colors"
+          >
+            <X size={14} />
+          </button>
+          <AIChatPanel
+            trip={canvasTrip}
+            onTripUpdate={applyChatTrip}
+            getLatestTrip={getLatestCanvasTrip}
+          />
+        </div>
+      )}
+      </div>
+
+      {/* Chat pull-out tab — right edge, shown when the chat is closed */}
+      <AnimatePresence>
+        {canEdit && canvasTrip && !chatOpen && (
+          <motion.button
+            initial={{ x: 48 }}
+            animate={{ x: 0 }}
+            exit={{ x: 48 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 250 }}
+            onClick={() => setChatOpen(true)}
+            aria-label="Open Voyza AI chat"
+            className="fixed right-0 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-1.5 rounded-l-xl py-3.5 px-1.5 shadow-md hover:shadow-lg transition-shadow"
+            style={{
+              background: '#2563eb',
+              border: '1px solid rgba(0,0,0,0.08)',
+              borderRight: 'none',
+            }}
+          >
+            <Sparkles size={13} className="text-white" />
+            <span
+              className="text-[10px] font-medium text-white tracking-wide"
+              style={{ writingMode: 'vertical-rl' }}
+            >
+              Voyza AI
+            </span>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* ─── Suggested cities panel ─── */}
       <SuggestedCitiesPanel

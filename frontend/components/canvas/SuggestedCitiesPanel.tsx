@@ -49,23 +49,24 @@ export default function SuggestedCitiesPanel({
 
   return (
     <>
-      {/* Pull-out tab — docked to the right edge while the panel is closed.
-          Labeled (icon + vertical text) so it reads as "there's a Suggested
-          Cities drawer here", not an anonymous 8px chevron strip. */}
+      {/* Pull-out tab — docked to the LEFT edge while the panel is closed
+          (the right side belongs to the Voyza AI chat). Labeled (icon +
+          vertical text) so it reads as "there's a Suggested Cities drawer
+          here", not an anonymous 8px chevron strip. */}
       <AnimatePresence>
         {!isOpen && (
           <motion.button
-            initial={{ x: 48 }}
+            initial={{ x: -48 }}
             animate={{ x: 0 }}
-            exit={{ x: 48 }}
+            exit={{ x: -48 }}
             transition={{ type: 'spring', damping: 25, stiffness: 250 }}
             onClick={() => setIsOpen(true)}
             aria-label="Open suggested cities"
-            className="fixed right-0 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1.5 rounded-l-xl py-3.5 px-1.5 shadow-md hover:shadow-lg transition-shadow"
+            className="fixed left-0 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-1.5 rounded-r-xl py-3.5 px-1.5 shadow-md hover:shadow-lg transition-shadow"
             style={{
               background: '#ffffff',
               border: '1px solid rgba(0,0,0,0.08)',
-              borderRight: 'none',
+              borderLeft: 'none',
             }}
           >
             <Sparkles size={13} style={{ color: '#2563eb' }} />
@@ -83,14 +84,14 @@ export default function SuggestedCitiesPanel({
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ x: 320 }}
+            initial={{ x: -320 }}
             animate={{ x: 0 }}
-            exit={{ x: 320 }}
+            exit={{ x: -320 }}
             transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-            className="fixed right-0 top-0 bottom-0 w-[300px] z-20 flex flex-col shadow-xl"
+            className="fixed left-0 top-0 bottom-0 w-[300px] z-40 flex flex-col shadow-xl"
             style={{
               background: '#ffffff',
-              borderLeft: '1px solid rgba(0,0,0,0.08)',
+              borderRight: '1px solid rgba(0,0,0,0.08)',
             }}
           >
             {/* Header — refresh + explicit close */}

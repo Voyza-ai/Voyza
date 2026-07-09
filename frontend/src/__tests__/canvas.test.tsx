@@ -165,4 +165,35 @@ describe('CanvasPage', () => {
       expect(screen.getByText('VOYZA')).toBeInTheDocument();
     });
   });
+
+  it('shows the live total pill and the Voyza AI chat dock for owners', async () => {
+    mockedGetSession.mockResolvedValue({
+      session: { state: mockCanvasState },
+      role: 'owner',
+    });
+    mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+    render(<CanvasPage />);
+    await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
+
+    // Header total pill (fixture hotels/nights/transports sum > 0)
+    expect(screen.getByText('Total')).toBeInTheDocument();
+    // Docked chat (same panel as results)
+    expect(screen.getByPlaceholderText('Ask about your trip...')).toBeInTheDocument();
+    expect(screen.getByLabelText('Close Voyza AI chat')).toBeInTheDocument();
+  });
+
+  it('hides the Voyza AI chat for viewers', async () => {
+    mockedGetSession.mockResolvedValue({
+      session: { state: mockCanvasState },
+      role: 'viewer',
+    });
+    mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+    render(<CanvasPage />);
+    await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
+
+    expect(screen.queryByPlaceholderText('Ask about your trip...')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Open Voyza AI chat')).not.toBeInTheDocument();
+  });
 });
