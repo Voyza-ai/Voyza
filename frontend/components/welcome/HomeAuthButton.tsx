@@ -8,6 +8,8 @@ import { useAuthStore } from '@/store/authStore';
 type HomeAuthButtonProps = {
   /** Opens the LoginModal (owned by the welcome page). */
   onLoginClick: () => void;
+  /** 'dark' (default) for the old dark hero; 'light' for the paper landing. */
+  variant?: 'dark' | 'light';
 };
 
 /**
@@ -22,7 +24,7 @@ type HomeAuthButtonProps = {
  * Logged in  → initials avatar with the same dropdown actions as the
  * Navbar (My Trips / Sign out), styled for the dark hero background.
  */
-export default function HomeAuthButton({ onLoginClick }: HomeAuthButtonProps) {
+export default function HomeAuthButton({ onLoginClick, variant = 'dark' }: HomeAuthButtonProps) {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -42,10 +44,14 @@ export default function HomeAuthButton({ onLoginClick }: HomeAuthButtonProps) {
   }, [dropdownOpen]);
 
   if (!user) {
+    const pill =
+      variant === 'light'
+        ? 'bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 shadow-sm'
+        : 'bg-white/10 backdrop-blur-sm border border-white/15 text-white/70 hover:text-white hover:bg-white/15';
     return (
       <button
         onClick={onLoginClick}
-        className="flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/15 text-white/70 hover:text-white hover:bg-white/15 px-4 py-2 rounded-full text-sm transition-all"
+        className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm transition-all ${pill}`}
       >
         <User size={16} />
         <span>Log in</span>
@@ -67,7 +73,12 @@ export default function HomeAuthButton({ onLoginClick }: HomeAuthButtonProps) {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className="w-9 h-9 rounded-full flex items-center justify-center bg-white/10 backdrop-blur-sm border border-white/15 text-white text-xs font-medium hover:bg-white/20 transition-all"
+        className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-medium transition-all ${
+          variant === 'light'
+            ? 'text-white shadow-sm hover:brightness-110'
+            : 'bg-white/10 backdrop-blur-sm border border-white/15 text-white hover:bg-white/20'
+        }`}
+        style={variant === 'light' ? { background: '#2e6bc4' } : undefined}
         aria-label="Account menu"
       >
         {initials}

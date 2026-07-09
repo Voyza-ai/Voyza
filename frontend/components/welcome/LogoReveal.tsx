@@ -1,70 +1,54 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Plane, TrainFront, Ship } from 'lucide-react';
 
-type LogoRevealProps = {
-  show: boolean;
-};
-
-export default function LogoReveal({ show }: LogoRevealProps) {
-  if (!show) return null;
-
+/**
+ * Landing hero text — editorial headline on the dusk sky: oversized tight
+ * sans in white with ONE accent word in Instrument Serif italic (the
+ * "designed, not templated" cue), followed by specific subcopy that says
+ * what Voyza actually does. Matches the planning chat's dark surface
+ * (#0f0f1a family + #4f8ef7 blue), not a generic dark theme.
+ */
+export default function LogoReveal() {
   return (
-    <div className="flex flex-col items-center gap-3">
-      {/* VOYZA logo */}
+    <div className="flex flex-col items-center gap-5 text-center">
       <motion.h1
-        className="text-[60px] font-bold tracking-tight leading-none"
-        style={{
-          color: '#4f8ef7',
-          textShadow: '0 0 40px rgba(79,142,247,0.3)',
-        }}
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.6, ease: 'easeOut' }}
+        className="text-[46px] sm:text-[60px] font-bold tracking-[-0.03em] leading-[1.04] text-white max-w-3xl"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.15, ease: 'easeOut' }}
+        style={{ textShadow: '0 2px 30px rgba(10,14,30,0.45)' }}
       >
-        VOYZA
+        The{' '}
+        <em
+          className="not-italic"
+          style={{
+            fontFamily: 'var(--font-serif), Georgia, serif',
+            fontStyle: 'italic',
+            fontWeight: 400,
+            color: '#7BB8FF',
+          }}
+        >
+          smartest
+        </em>{' '}
+        way
+        <br className="hidden sm:block" /> to travel.
       </motion.h1>
 
-      {/* Tagline */}
       <motion.p
-        className="text-lg text-white/55 text-center max-w-lg font-medium"
-        initial={{ opacity: 0, y: 8 }}
+        className="text-[16.5px] leading-relaxed max-w-xl"
+        style={{ color: 'rgba(237,241,250,0.62)' }}
+        initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.3, ease: 'easeOut' }}
+        transition={{ duration: 0.5, delay: 0.35, ease: 'easeOut' }}
       >
-        The smartest way to travel. Less money, less searching, more vibes.
+        Voyza compares{' '}
+        <span className="font-medium" style={{ color: 'rgba(237,241,250,0.92)' }}>
+          flights, trains and ferries
+        </span>{' '}
+        across your whole route in one search — then plans every day of the trip.
+        Less money, less searching, more vibes.
       </motion.p>
-
-      {/* Capability chip — the actual differentiator, stated plainly: Voyza
-          optimizes across every way to get there, not just flights. Modes
-          are color-coded to match the destination pins + pillar accents. */}
-      <motion.div
-        className="flex items-center gap-2.5 px-4 py-1.5 rounded-full text-[12.5px] mt-0.5"
-        style={{
-          border: '1px solid rgba(255,255,255,0.12)',
-          background: 'rgba(255,255,255,0.04)',
-          backdropFilter: 'blur(6px)',
-          WebkitBackdropFilter: 'blur(6px)',
-        }}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.5, ease: 'easeOut' }}
-      >
-        <span className="flex items-center gap-1 text-white/75">
-          <Plane size={13} style={{ color: '#7BB8FF' }} /> Flights
-        </span>
-        <span className="text-white/25">·</span>
-        <span className="flex items-center gap-1 text-white/75">
-          <TrainFront size={13} style={{ color: '#2FB57C' }} /> Trains
-        </span>
-        <span className="text-white/25">·</span>
-        <span className="flex items-center gap-1 text-white/75">
-          <Ship size={13} style={{ color: '#E2725B' }} /> Ferries
-        </span>
-        <span className="text-white/25">·</span>
-        <span className="text-white/45">compared in one search</span>
-      </motion.div>
     </div>
   );
 }

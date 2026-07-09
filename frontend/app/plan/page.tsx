@@ -33,8 +33,13 @@ export default function PlanPage() {
     planPageEntryCount += 1;
     entryRef.current = planPageEntryCount;
     // Zustand's `getState().setter()` is safe to call during render —
-    // it queues a React update rather than mutating the in-flight render
+    // it queues a React update rather than mutating the in-flight render.
+    // The landing search box seeds `rawInput` right before navigating here —
+    // carry that one key across the clean-slate reset so the chat opens
+    // with the user's sentence already loaded.
+    const heroSeed = useTripStore.getState().answers.rawInput;
     useTripStore.getState().resetPlanning();
+    if (heroSeed) useTripStore.getState().setAnswer('rawInput', heroSeed);
   }
 
   return <PlanningChat />;
