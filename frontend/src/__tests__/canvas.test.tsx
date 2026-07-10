@@ -2,12 +2,14 @@ import './mocks';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import CanvasPage from '@/app/canvas/[tripId]/page';
-import { getCanvasSession, saveCanvas, getCanvasSuggestions } from '@/lib/api';
+import { getCanvasSession, saveCanvas, getCanvasSuggestions, joinCanvasByLink, postCanvasSuggestion } from '@/lib/api';
 import { buildCity } from './fixtures';
 
 const mockedGetSession = getCanvasSession as jest.MockedFunction<typeof getCanvasSession>;
 const mockedSaveCanvas = saveCanvas as jest.MockedFunction<typeof saveCanvas>;
 const mockedGetSuggestions = getCanvasSuggestions as jest.MockedFunction<typeof getCanvasSuggestions>;
+const mockedJoinLink = joinCanvasByLink as jest.MockedFunction<typeof joinCanvasByLink>;
+const mockedPostSuggestion = postCanvasSuggestion as jest.MockedFunction<typeof postCanvasSuggestion>;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -61,7 +63,7 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Save')).toBeInTheDocument();
+      expect(screen.getByText('Saved ✓')).toBeInTheDocument();
     });
   });
 
@@ -80,7 +82,7 @@ describe('CanvasPage', () => {
     expect(screen.queryByText('Save')).not.toBeInTheDocument();
   });
 
-  it('Invite button only visible to owner role', async () => {
+  it('Share button only visible to owner role', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -90,11 +92,11 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Invite')).toBeInTheDocument();
+      expect(screen.getByText('Share')).toBeInTheDocument();
     });
   });
 
-  it('Invite button opens InviteModal', async () => {
+  it('Share button opens the share dialog with link access modes', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -104,12 +106,31 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Invite')).toBeInTheDocument();
+      expect(screen.getByText('Share')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Invite'));
+    fireEvent.click(screen.getByText('Share'));
     await waitFor(() => {
-      expect(screen.getByText('Share Canvas')).toBeInTheDocument();
+      expect(screen.getByText('Share this trip')).toBeInTheDocument();
     });
+    // The three link access modes
+    expect(screen.getByText('View only')).toBeInTheDocument();
+    expect(screen.getByText('Owner confirms edits')).toBeInTheDocument();
+    expect(screen.getByText('Full access')).toBeInTheDocument();
+  });
+
+  it('editors get a Save button too (live collaboration)', async () => {
+    mockedGetSession.mockResolvedValue({
+      session: { state: mockCanvasState },
+      role: 'editor',
+    });
+    mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+    render(<CanvasPage />);
+    await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
+
+    expect(screen.getByText('Saved ✓')).toBeInTheDocument();
+    // ...but Share stays owner-only
+    expect(screen.queryByText('Share')).not.toBeInTheDocument();
   });
 
   it('handles canvas session fetch failure gracefully', async () => {
@@ -163,6 +184,172 @@ describe('CanvasPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('VOYZA')).toBeInTheDocument();
+    });
+  });
+
+  it('shows the live total pill and the Voyza AI chat dock for owners', async () => {
+    mockedGetSession.mockResolvedValue({
+      session: { state: mockCanvasState },
+      role: 'owner',
+    });
+    mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+    render(<CanvasPage />);
+    await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
+
+    // Header total pill (fixture hotels/nights/transports sum > 0)
+    expect(screen.getByText('Total')).toBeInTheDocument();
+    // Docked chat (same panel as results)
+    expect(screen.getByPlaceholderText('Ask about your trip...')).toBeInTheDocument();
+    expect(screen.getByLabelText('Close Voyza AI chat')).toBeInTheDocument();
+  });
+
+  it('hides the Voyza AI chat for viewers', async () => {
+    mockedGetSession.mockResolvedValue({
+      session: { state: mockCanvasState },
+      role: 'viewer',
+    });
+    mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+    render(<CanvasPage />);
+    await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
+
+    expect(screen.queryByPlaceholderText('Ask about your trip...')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Open Voyza AI chat')).not.toBeInTheDocument();
+  });
+
+  it('joins via ?share= link token, then strips the param', async () => {
+    const token = '123e4567-e89b-42d3-a456-426614174000';
+    window.history.replaceState({}, '', `/canvas/trip-test-123?share=${token}`);
+    mockedJoinLink.mockResolvedValue({ role: 'editor', joined: true });
+    mockedGetSession.mockResolvedValue({
+      session: { state: mockCanvasState },
+      role: 'editor',
+    });
+    mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+    render(<CanvasPage />);
+
+    await waitFor(() => {
+      expect(mockedJoinLink).toHaveBeenCalledWith('trip-test-123', token);
+    });
+    // Param stripped so refreshes don't re-join
+    await waitFor(() => {
+      expect(window.location.search).not.toContain('share=');
+    });
+    // Session loads after the join and the canvas renders
+    expect(await screen.findByText('Rome')).toBeInTheDocument();
+
+    window.history.replaceState({}, '', '/');
+  });
+
+  describe('live sync (Phase B)', () => {
+    const rt = jest.requireMock('@/hooks/useCanvasRealtime');
+    const makeRt = (overrides: any = {}) => ({
+      canvasState: null,
+      suggestions: [],
+      isConnected: true,
+      updateState: jest.fn(),
+      presence: [],
+      remoteOp: null,
+      broadcastOp: jest.fn(),
+      ...overrides,
+    });
+    const originalHook = rt.useCanvasRealtime;
+    afterEach(() => {
+      rt.useCanvasRealtime = originalHook;
+      jest.useRealTimers();
+    });
+
+    it('applies a live op broadcast by another user', async () => {
+      // Stable object — a fresh remoteOp per render would loop the effect.
+      const op = {
+        state: { trip: {}, cities: [buildCity({ name: 'Berlin' })] },
+        actor: 'someone-else',
+        ts: 1,
+      };
+      rt.useCanvasRealtime = () => makeRt({ remoteOp: op });
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'editor',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+      render(<CanvasPage />);
+      // The remote op (Berlin) wins over the loaded session (Rome/Florence).
+      // Berlin appears in both the header route title and the city card.
+      expect((await screen.findAllByText('Berlin')).length).toBeGreaterThan(0);
+      await waitFor(() => {
+        expect(screen.queryByText('Rome')).not.toBeInTheDocument();
+      });
+    });
+
+    it('broadcasts (400ms) then autosaves (2s) after a local edit', async () => {
+      // Real timers on purpose: fake timers wedge RTL's waitFor here.
+      const broadcastOp = jest.fn();
+      rt.useCanvasRealtime = () => makeRt({ broadcastOp });
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'owner',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+      mockedSaveCanvas.mockResolvedValue({ saved: true } as any);
+
+      render(<CanvasPage />);
+      expect(await screen.findByText('Rome')).toBeInTheDocument();
+
+      // Local edit: remove Rome via the card's context menu
+      fireEvent.contextMenu(screen.getByText('Rome'));
+      fireEvent.click(await screen.findByText('Remove city'));
+
+      // Broadcast fires on the 400ms debounce (before autosave)
+      await waitFor(() => expect(broadcastOp).toHaveBeenCalled(), { timeout: 1500 });
+      expect(mockedSaveCanvas).not.toHaveBeenCalled();
+
+      // Autosave lands at the 2s debounce
+      await waitFor(() => expect(mockedSaveCanvas).toHaveBeenCalled(), { timeout: 3500 });
+    }, 10000);
+  });
+
+  describe('owner-confirms mode (Phase C)', () => {
+    it('suggester edits locally and proposes; local view resets after sending', async () => {
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'suggester',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+      mockedPostSuggestion.mockResolvedValue({ suggestion: { id: 's1' } } as any);
+
+      render(<CanvasPage />);
+      expect(await screen.findByText('Rome')).toBeInTheDocument();
+
+      // Suggesters get Propose changes, not Save / autosave status
+      expect(screen.getByText('Propose changes')).toBeInTheDocument();
+      expect(screen.queryByText('Saved ✓')).not.toBeInTheDocument();
+
+      // Edit locally: remove Rome via the context menu
+      fireEvent.contextMenu(screen.getByText('Rome'));
+      fireEvent.click(await screen.findByText('Remove city'));
+      await waitFor(() => {
+        expect(screen.queryByText('Rome')).not.toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText('Propose changes'));
+
+      await waitFor(() => {
+        expect(mockedPostSuggestion).toHaveBeenCalledWith(
+          'trip-test-123',
+          'edit',
+          expect.objectContaining({
+            summary: expect.arrayContaining(['Remove Rome']),
+            state: expect.objectContaining({ cities: expect.any(Array) }),
+          }),
+        );
+      });
+      // ...and nothing was saved directly
+      expect(mockedSaveCanvas).not.toHaveBeenCalled();
+      // Local view resets to canonical (Rome returns)
+      expect(await screen.findAllByText('Rome')).not.toHaveLength(0);
     });
   });
 });

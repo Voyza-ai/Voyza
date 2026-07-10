@@ -501,7 +501,7 @@ export async function getCanvasSuggestions(tripId: string) {
 
 export async function postCanvasSuggestion(
   tripId: string,
-  type: 'add_city' | 'comment' | 'reaction',
+  type: 'add_city' | 'comment' | 'reaction' | 'edit',
   payload: any,
 ) {
   return apiFetch<{ suggestion: any }>(`/api/canvas/${tripId}/suggestions`, {
@@ -672,5 +672,46 @@ export async function updateMemberRole(
 export async function removeMember(tripId: string, memberId: string): Promise<{ success: boolean }> {
   return apiFetch<{ success: boolean }>(`/api/canvas/${tripId}/members/${memberId}`, {
     method: 'DELETE',
+  });
+}
+
+// ─── Canvas share link ────────────────────────────────────────
+export type ShareMode = 'view' | 'suggest' | 'edit';
+
+export async function getShareLink(
+  tripId: string,
+): Promise<{ mode: ShareMode; url: string; token?: string }> {
+  return apiFetch<{ mode: ShareMode; url: string; token?: string }>(`/api/canvas/${tripId}/share`);
+}
+
+export async function updateShareLink(
+  tripId: string,
+  patch: { mode?: ShareMode; rotate?: boolean },
+): Promise<{ mode: ShareMode; url: string; token?: string }> {
+  return apiFetch<{ mode: ShareMode; url: string; token?: string }>(`/api/canvas/${tripId}/share`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Join a trip via its share link token. Returns the resulting role. */
+export async function joinCanvasByLink(
+  tripId: string,
+  token: string,
+): Promise<{ role: string; joined: boolean }> {
+  return apiFetch<{ role: string; joined: boolean }>(`/api/canvas/${tripId}/join-link`, {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+/** Owner bulk-set: every collaborator gets the given role. */
+export async function applyRoleToMembers(
+  tripId: string,
+  role: 'editor' | 'suggester' | 'viewer',
+): Promise<{ updated: number; role: string }> {
+  return apiFetch<{ updated: number; role: string }>(`/api/canvas/${tripId}/members/apply-role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
   });
 }

@@ -1,17 +1,19 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
-import { Save, Share2, WifiOff, ArrowLeft } from 'lucide-react';
+import { Save, Share2, WifiOff, ArrowLeft, Sparkles, X, Send } from 'lucide-react';
 import CanvasCityCard from '@/components/canvas/CanvasCityCard';
 import CanvasConnector from '@/components/canvas/CanvasConnector';
 import CanvasHomeCard from '@/components/canvas/CanvasHomeCard';
 import SuggestedCitiesPanel from '@/components/canvas/SuggestedCitiesPanel';
 import SuggestionsPanel from '@/components/canvas/SuggestionsPanel';
-import InviteModal from '@/components/canvas/InviteModal';
+import ShareModal from '@/components/canvas/ShareModal';
+import LoginModal from '@/components/shared/LoginModal';
 import AddCityModal from '@/components/canvas/AddCityModal';
 import HomeEditModal from '@/components/canvas/HomeEditModal';
+import AIChatPanel from '@/components/results/AIChatPanel';
 import { useCanvasRealtime } from '@/hooks/useCanvasRealtime';
 import { useAuthStore } from '@/store/authStore';
 import { useTripStore } from '@/store/tripStore';
@@ -24,23 +26,27 @@ import {
   getTrip,
   searchHotels,
   fetchHomeLegs,
+  joinCanvasByLink,
   Destination,
 } from '@/lib/api';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
+import { liveTripTotal } from '@/lib/tripTotals';
+import { summarizeCanvasChanges } from '@/lib/canvasDiff';
+import { Trip } from '@/lib/types';
 
 export default function CanvasPage() {
   const params = useParams();
   const router = useRouter();
   const tripId = params.tripId as string;
   const user = useAuthStore((s) => s.user);
+  const authLoading = useAuthStore((s) => s.isLoading);
   const storeTrip = useTripStore((s) => s.currentTrip);
   const storeCities = storeTrip?.cities;
 
   const [role, setRole] = useState<string>('viewer');
   const [localState, setLocalState] = useState<any>(null);
   const [savedState, setSavedState] = useState<any>(null);
-  const [members, setMembers] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -48,9 +54,34 @@ export default function CanvasPage() {
   const [hotelLoadingCities, setHotelLoadingCities] = useState<string[]>([]);
   const [homeEdit, setHomeEdit] = useState<'outbound' | 'inbound' | null>(null);
   const [homeLegLoading, setHomeLegLoading] = useState<'outbound' | 'inbound' | null>(null);
+  const [chatOpen, setChatOpen] = useState(true);
+  // Share-link join: token from ?share=… (read once; cleared after joining)
+  const [shareToken, setShareToken] = useState<string | null>(() =>
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('share')
+      : null,
+  );
+  const [sessionNonce, setSessionNonce] = useState(0);
+  // Timestamp of the newest applied live op — lets the session load and
+  // the op-apply effect coordinate (never overwrite newer with older).
+  const lastAppliedOpRef = useRef<number>(0);
   const [loading, setLoading] = useState(true);
 
-  const { canvasState, suggestions, isConnected } = useCanvasRealtime(tripId);
+  // Presence identity for the realtime channel (ref-tracked in the hook,
+  // so object identity churn here doesn't resubscribe).
+  const presenceUser = useMemo(
+    () =>
+      user
+        ? {
+            id: user.id,
+            email: user.email ?? null,
+            name: ((user.user_metadata?.full_name as string) || null),
+          }
+        : null,
+    [user],
+  );
+  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp } =
+    useCanvasRealtime(tripId, presenceUser);
 
   // Unsaved changes detection — covers city edits AND home-card (origin)
   // edits, so both enable Save and trigger the leave-without-saving warning.
@@ -89,9 +120,35 @@ export default function CanvasPage() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasUnsavedChanges]);
 
+  // Join via share link BEFORE loading the session, so the session load
+  // sees the new membership/role. Requires sign-in (LoginModal below);
+  // once the user exists the join runs, the URL param is stripped, and
+  // sessionNonce retriggers the load.
+  useEffect(() => {
+    if (!shareToken || !tripId || !user) return;
+    (async () => {
+      try {
+        const r = await joinCanvasByLink(tripId, shareToken);
+        if (r.joined) showToast(`You joined this trip as ${r.role}`, 'success');
+      } catch {
+        showToast('This share link is invalid or has been reset', 'error');
+      } finally {
+        setShareToken(null);
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('share');
+          window.history.replaceState({}, '', url.toString());
+        }
+        setSessionNonce((n) => n + 1);
+      }
+    })();
+  }, [shareToken, tripId, user]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Load initial session
   useEffect(() => {
     if (!tripId) return;
+    // A pending share-link join changes our role — wait for it.
+    if (shareToken && user) return;
 
     (async () => {
       try {
@@ -168,18 +225,17 @@ export default function CanvasPage() {
           sessionState.cities = withColorIndices(sessionState.cities);
         }
 
-        setLocalState(sessionState);
-        setSavedState(sessionState);
+        // A live op that arrived while we were loading is newer than any
+        // DB read — don't clobber it with stale session state.
+        if (lastAppliedOpRef.current === 0) {
+          setLocalState(sessionState);
+          setSavedState(sessionState);
+        }
 
         // Persist the results edits into the canvas session so they survive
         // reloads and reach collaborators (the save endpoint is owner-gated).
         if (syncedFromResults && userRole === 'owner') {
           saveCanvas(tripId, sessionState).catch(() => {});
-        }
-
-        // Load members from session
-        if (session.state?.members) {
-          setMembers(session.state.members);
         }
 
         await getCanvasSuggestions(tripId);
@@ -189,22 +245,26 @@ export default function CanvasPage() {
         setLoading(false);
       }
     })();
-  }, [tripId]);
+  }, [tripId, sessionNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync realtime state (from other users)
+  // Sync realtime state (from other users). Applies to EVERY role —
+  // editors save now, so the owner receives updates too. Two guards:
+  // identical states are skipped (echo of our own save), and a client
+  // that's mid-edit keeps its local work instead of being clobbered
+  // (proper per-op reconciliation lands with live editing, Phase B).
+  const hasUnsavedRef = useRef(false);
   useEffect(() => {
-    if (canvasState && role !== 'owner') {
-      setLocalState(canvasState);
-      setSavedState(canvasState);
-    }
-  }, [canvasState, role]);
+    hasUnsavedRef.current = hasUnsavedChanges;
+  }, [hasUnsavedChanges]);
 
-  // Show toast when owner saves (realtime update)
   useEffect(() => {
-    if (canvasState && role !== 'owner') {
-      showToast('Owner saved — trip updated', 'info');
-    }
-  }, [canvasState]);
+    if (!canvasState) return;
+    if (JSON.stringify(canvasState) === JSON.stringify(localStateRef.current)) return;
+    if (hasUnsavedRef.current) return;
+    setLocalState(canvasState);
+    setSavedState(canvasState);
+    showToast('Trip updated by a collaborator', 'info');
+  }, [canvasState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
@@ -212,7 +272,7 @@ export default function CanvasPage() {
   }, []);
 
   const handleSave = async () => {
-    if (role !== 'owner' || !localState) return;
+    if (!canEdit || !localState) return;
     setSaving(true);
     try {
       await saveCanvas(tripId, localState);
@@ -431,12 +491,60 @@ export default function CanvasPage() {
           estimatedCost: suggestion.payload.estimatedCost ?? 0,
           reason: suggestion.payload.reason ?? '',
         });
+      } else if (suggestion?.type === 'edit' && suggestion.payload?.state) {
+        // Proposed state becomes canonical: applying it here triggers the
+        // owner's broadcast + autosave, which carries it to everyone.
+        const proposed = suggestion.payload.state;
+        setLocalState({
+          ...proposed,
+          cities: withColorIndices(proposed.cities ?? []),
+        });
       }
       showToast('Suggestion approved', 'success');
     } catch {
       showToast('Failed to approve', 'error');
     }
   };
+
+  // Suggester: bundle local edits into an 'edit' proposal for the owner.
+  const handlePropose = async () => {
+    if (role !== 'suggester' || !localState || !hasUnsavedChanges) return;
+    setSaving(true);
+    try {
+      const summary = summarizeCanvasChanges(savedState, localState);
+      await postCanvasSuggestion(tripId, 'edit', { state: localState, summary });
+      // Local view resets to canonical — the proposal lives in the panel
+      // and lands for everyone if the owner approves.
+      setLocalState(savedState);
+      showToast('Sent to the owner for approval', 'success');
+    } catch {
+      showToast('Could not send your proposal', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Toast the suggester when the owner decides on their proposal
+  // (suggestion UPDATEs arrive over realtime).
+  const prevSuggestionStatusRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    for (const sug of suggestions) {
+      const prev = prevSuggestionStatusRef.current[sug.id];
+      if (
+        prev === 'pending' &&
+        sug.status !== 'pending' &&
+        sug.suggested_by === user?.id
+      ) {
+        showToast(
+          sug.status === 'approved'
+            ? 'Your proposal was approved 🎉'
+            : 'Your proposal was declined',
+          sug.status === 'approved' ? 'success' : 'info',
+        );
+      }
+      prevSuggestionStatusRef.current[sug.id] = sug.status;
+    }
+  }, [suggestions, user?.id, showToast]);
 
   const handleReject = async (suggestionId: string) => {
     try {
@@ -513,6 +621,132 @@ export default function CanvasPage() {
   const origin = localState?.trip?.origin ?? null;
   const returnToHome = localState?.trip?.returnToHome ?? false;
   const canEdit = role === 'owner' || role === 'editor';
+  // Suggesters manipulate their LOCAL copy freely — nothing broadcasts or
+  // autosaves (both gate on canEdit); instead they submit the whole change
+  // set via "Propose changes" for the owner to approve.
+  const canManipulate = canEdit || role === 'suggester';
+
+  // ── Canvas state ⇄ Trip adapters ─────────────────────────────────
+  // The AI chat and the totals util both speak the results page's Trip
+  // shape; the canvas keeps { trip: {origin,…}, cities } in localState.
+  // buildCanvasTrip normalizes local state into a Trip (defensive about
+  // cities saved before hotels[] / selectedHotelIndex existed).
+  const buildCanvasTrip = useCallback(
+    (ls: any): Trip | null => {
+      if (!ls?.cities || ls.cities.length === 0) return null;
+      const normCities = ls.cities.map((c: any) => ({
+        ...c,
+        hotels: Array.isArray(c.hotels) && c.hotels.length > 0 ? c.hotels : c.hotel ? [c.hotel] : [],
+        selectedHotelIndex: typeof c.selectedHotelIndex === 'number' ? c.selectedHotelIndex : 0,
+      }));
+      return {
+        id: tripId,
+        title: ls.trip?.title ?? '',
+        cities: normCities,
+        travelers: ls.trip?.travelers ?? storeTrip?.travelers ?? 1,
+        totalCost: 0,
+        savings: ls.trip?.savings ?? 0,
+        origin: ls.trip?.origin ?? undefined,
+        returnToHome: ls.trip?.returnToHome,
+        budget: ls.trip?.budget,
+        dateShiftSuggestion: undefined,
+      } as Trip;
+    },
+    [tripId, storeTrip?.travelers],
+  );
+
+  const canvasTrip = useMemo(() => buildCanvasTrip(localState), [buildCanvasTrip, localState]);
+  const liveTotal = canvasTrip ? liveTripTotal(canvasTrip) : 0;
+  const travelers = canvasTrip?.travelers ?? 1;
+
+  // The chat needs the FRESHEST state when applying leg refreshes (its
+  // callback closures outlive renders) — read through a ref.
+  const localStateRef = useRef(localState);
+  useEffect(() => {
+    localStateRef.current = localState;
+  }, [localState]);
+  const getLatestCanvasTrip = useCallback(
+    () => buildCanvasTrip(localStateRef.current),
+    [buildCanvasTrip],
+  );
+
+  // Chat edits land in canvas local state: cities replaced wholesale
+  // (color indices re-locked), origin/returnToHome merged into trip —
+  // marking unsaved changes exactly like a manual edit.
+  const applyChatTrip = useCallback((updated: Trip) => {
+    setLocalState((prev: any) => ({
+      ...prev,
+      cities: withColorIndices(updated.cities as any[]),
+      trip: {
+        ...(prev?.trip ?? {}),
+        origin: updated.origin ?? prev?.trip?.origin ?? null,
+        returnToHome: updated.returnToHome ?? prev?.trip?.returnToHome,
+      },
+    }));
+  }, []);
+
+  // ── Live sync (Phase B) ──────────────────────────────────────
+  // Remote ops apply immediately (last-write-wins); our own edits
+  // broadcast after 400ms of quiet and autosave after 2s.
+  const applyingRemoteRef = useRef(false);
+  const savedStateRef = useRef(savedState);
+  useEffect(() => {
+    savedStateRef.current = savedState;
+  }, [savedState]);
+
+  useEffect(() => {
+    if (!remoteOp || !user || remoteOp.actor === user.id) return;
+    // Apply each op exactly once — guards against object-identity churn
+    // (and replays) turning this effect into a render loop.
+    if (remoteOp.ts <= lastAppliedOpRef.current) return;
+    lastAppliedOpRef.current = remoteOp.ts;
+    applyingRemoteRef.current = true;
+    // The actor owns persistence (their autosave lands ~2s later) — treat
+    // the broadcast state as canonical so receivers don't show phantom
+    // "unsaved changes" for someone else's work.
+    setLocalState(remoteOp.state);
+    setSavedState(remoteOp.state);
+  }, [remoteOp, user]);
+
+  const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // Skip the render caused by applying someone else's op.
+    if (applyingRemoteRef.current) {
+      applyingRemoteRef.current = false;
+      return;
+    }
+    if (!canEdit || !localState) return;
+    if (JSON.stringify(localState) === JSON.stringify(savedStateRef.current)) return;
+
+    if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
+    broadcastTimerRef.current = setTimeout(() => {
+      broadcastOp(localState);
+    }, 400);
+
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await saveCanvas(tripId, localState);
+        setSavedState(localState);
+      } catch {
+        showToast('Autosave failed — click Save to retry', 'error');
+      } finally {
+        setSaving(false);
+      }
+    }, 2000);
+  }, [localState, canEdit, broadcastOp, tripId, showToast]);
+
+  // Clear pending timers on unmount so nothing fires into a dead tree.
+  useEffect(
+    () => () => {
+      if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    },
+    [],
+  );
 
   // User initials for avatar
   const userInitials = (() => {
@@ -570,39 +804,69 @@ export default function CanvasPage() {
           )}
         </div>
 
-        {/* Center: collaborator avatar rings */}
+        {/* Center: live presence — who's in the canvas right now */}
         <div className="flex items-center gap-1.5">
-          {/* Current user */}
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-medium text-white border-2 border-[#4ade80]"
-            style={{ background: '#2563eb' }}
-            title="You"
-          >
-            {userInitials}
-          </div>
-          {/* Other members */}
-          {members.slice(0, 5).map((m, i) => (
-            <div
-              key={m.id ?? i}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-medium text-white border-2"
-              style={{
-                background: `hsl(${(i + 1) * 60}, 55%, 50%)`,
-                borderColor: m.accepted_at ? '#4ade80' : 'rgba(0,0,0,0.12)',
-              }}
-              title={m.invited_email}
-            >
-              {m.invited_email?.[0]?.toUpperCase() ?? '?'}
-            </div>
-          ))}
-          {members.length > 5 && (
+          {(presence.length > 0
+            ? presence
+            : presenceUser
+              ? [presenceUser]
+              : []
+          )
+            .slice(0, 6)
+            .map((p) => {
+              const label = p.name || p.email || '?';
+              const initials = (p.name || p.email || '?')
+                .split(/[\s@]+/)
+                .map((w: string) => w[0])
+                .join('')
+                .toUpperCase()
+                .slice(0, 2);
+              let hash = 0;
+              for (let i = 0; i < p.id.length; i++) hash = (hash * 31 + p.id.charCodeAt(i)) | 0;
+              const hue = Math.abs(hash) % 360;
+              const isSelf = p.id === user?.id;
+              return (
+                <div
+                  key={p.id}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-medium text-white border-2 border-[#4ade80]"
+                  style={{ background: isSelf ? '#2563eb' : `hsl(${hue}, 55%, 48%)` }}
+                  title={isSelf ? 'You' : label}
+                >
+                  {initials}
+                </div>
+              );
+            })}
+          {presence.length > 6 && (
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-medium text-gray-500 bg-gray-100 border-2 border-gray-200">
-              +{members.length - 5}
+              +{presence.length - 6}
             </div>
           )}
         </div>
 
-        {/* Right: connection status + Invite + Save */}
+        {/* Right: total + connection status + Invite + Save */}
         <div className="flex items-center gap-2.5">
+          {/* Live trip total — same math as the results header (hotels ×
+              nights × rooms + all transports incl. home legs) */}
+          {canvasTrip && liveTotal > 0 && (
+            <div
+              className="flex items-baseline gap-1.5 px-3 py-1 rounded-lg"
+              style={{ background: '#eef3fb', border: '1px solid #d4e2f7' }}
+              title="Live total — updates as you edit"
+            >
+              <span className="text-[10px] uppercase tracking-wide font-medium" style={{ color: '#2e6bc4' }}>
+                Total
+              </span>
+              <span className="text-[14px] font-bold" style={{ color: '#1a3a5c' }}>
+                ${liveTotal.toLocaleString()}
+              </span>
+              {travelers > 1 && (
+                <span className="text-[10.5px] text-gray-400">
+                  ${Math.round(liveTotal / travelers).toLocaleString()}/person
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Connection indicator */}
           <div
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px]"
@@ -629,19 +893,33 @@ export default function CanvasPage() {
               }}
             >
               <Share2 size={12} />
-              Invite
+              Share
             </button>
           )}
 
-          {role === 'owner' && (
+          {role === 'suggester' && (
+            <button
+              onClick={handlePropose}
+              disabled={saving || !hasUnsavedChanges}
+              title="Your edits go to the owner for approval"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
+              style={{ background: '#7c3aed' }}
+            >
+              <Send size={12} />
+              {saving ? 'Sending…' : 'Propose changes'}
+            </button>
+          )}
+
+          {canEdit && (
             <button
               onClick={handleSave}
               disabled={saving || !hasUnsavedChanges}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
-              style={{ background: '#2563eb' }}
+              title="Changes autosave — click to save immediately"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
+              style={{ background: saving || hasUnsavedChanges ? '#2563eb' : '#16a34a' }}
             >
               <Save size={12} />
-              {saving ? 'Saving...' : 'Save'}
+              {saving ? 'Saving…' : hasUnsavedChanges ? 'Save' : 'Saved ✓'}
             </button>
           )}
         </div>
@@ -664,13 +942,15 @@ export default function CanvasPage() {
         )}
       </AnimatePresence>
 
+      {/* ─── Body row: canvas + docked Voyza AI chat ─── */}
+      <div className="flex-1 flex min-h-0">
       {/* ─── Main canvas area ─── */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-12">
+      <div className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex items-center px-12">
         <div className="flex items-center min-w-max gap-0">
           {cities.length === 0 && (
             <div className="flex flex-col items-center gap-4 text-center px-8">
               <div className="text-gray-400 text-[14px]">No cities yet</div>
-              {canEdit && (
+              {canManipulate && (
                 <button
                   onClick={() => setAddingAfterIndex(-1)}
                   className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-white transition-all hover:brightness-110"
@@ -688,7 +968,7 @@ export default function CanvasPage() {
               <CanvasHomeCard
                 origin={origin}
                 direction="outbound"
-                onEdit={canEdit ? () => setHomeEdit('outbound') : undefined}
+                onEdit={canManipulate ? () => setHomeEdit('outbound') : undefined}
                 legLoading={homeLegLoading === 'outbound'}
               />
               <CanvasConnector
@@ -700,7 +980,7 @@ export default function CanvasPage() {
                     : '',
                   operator: origin.outboundLeg.operator ?? '',
                 } : null}
-                canEdit={canEdit}
+                canEdit={canManipulate}
                 onAddCity={() => setAddingAfterIndex(-1)}
               />
             </div>
@@ -709,7 +989,7 @@ export default function CanvasPage() {
           <Reorder.Group
             axis="x"
             values={cities}
-            onReorder={canEdit ? handleReorder : () => {}}
+            onReorder={canManipulate ? handleReorder : () => {}}
             className="flex items-center gap-0"
             as="div"
           >
@@ -718,7 +998,7 @@ export default function CanvasPage() {
                 key={city.name + '-' + idx}
                 value={city}
                 className="flex items-center"
-                dragListener={canEdit}
+                dragListener={canManipulate}
                 whileDrag={{ scale: 1.05, zIndex: 50, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}
                 transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                 as="div"
@@ -740,7 +1020,7 @@ export default function CanvasPage() {
                 {idx < cities.length - 1 && (
                   <CanvasConnector
                     transport={city.transportOut}
-                    canEdit={canEdit}
+                    canEdit={canManipulate}
                     onAddCity={() => handleAddAfter(idx)}
                   />
                 )}
@@ -749,7 +1029,7 @@ export default function CanvasPage() {
           </Reorder.Group>
 
           {/* Trailing add button — hidden when Back Home card is showing */}
-          {canEdit && cities.length > 0 && !(origin?.city && returnToHome) && (
+          {canManipulate && cities.length > 0 && !(origin?.city && returnToHome) && (
             <button
               onClick={() => setAddingAfterIndex(cities.length - 1)}
               className="ml-6 w-12 h-12 rounded-full flex items-center justify-center border-2 border-dashed transition-all hover:scale-110 hover:border-[#2563eb] hover:text-[#2563eb] group"
@@ -771,19 +1051,68 @@ export default function CanvasPage() {
                     : '',
                   operator: origin.returnLeg.operator ?? '',
                 } : null}
-                canEdit={canEdit}
+                canEdit={canManipulate}
                 onAddCity={() => setAddingAfterIndex(cities.length - 1)}
               />
               <CanvasHomeCard
                 origin={origin}
                 direction="inbound"
-                onEdit={canEdit ? () => setHomeEdit('inbound') : undefined}
+                onEdit={canManipulate ? () => setHomeEdit('inbound') : undefined}
                 legLoading={homeLegLoading === 'inbound'}
               />
             </div>
           )}
         </div>
       </div>
+
+      {/* ─── Voyza AI chat — docked right, editors only ───
+          Same panel as the results page; edits apply to canvas local
+          state (unsaved-changes + save flow) instead of the trip store. */}
+      {canEdit && canvasTrip && chatOpen && (
+        <div className="relative w-[340px] flex-shrink-0 p-3 pl-0 min-h-0">
+          <button
+            onClick={() => setChatOpen(false)}
+            aria-label="Close Voyza AI chat"
+            className="absolute top-6 right-6 z-10 p-1 rounded-md text-white/70 hover:text-white hover:bg-white/15 transition-colors"
+          >
+            <X size={14} />
+          </button>
+          <AIChatPanel
+            trip={canvasTrip}
+            onTripUpdate={applyChatTrip}
+            getLatestTrip={getLatestCanvasTrip}
+          />
+        </div>
+      )}
+      </div>
+
+      {/* Chat pull-out tab — right edge, shown when the chat is closed */}
+      <AnimatePresence>
+        {canEdit && canvasTrip && !chatOpen && (
+          <motion.button
+            initial={{ x: 48 }}
+            animate={{ x: 0 }}
+            exit={{ x: 48 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 250 }}
+            onClick={() => setChatOpen(true)}
+            aria-label="Open Voyza AI chat"
+            className="fixed right-0 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-1.5 rounded-l-xl py-3.5 px-1.5 shadow-md hover:shadow-lg transition-shadow"
+            style={{
+              background: '#2563eb',
+              border: '1px solid rgba(0,0,0,0.08)',
+              borderRight: 'none',
+            }}
+          >
+            <Sparkles size={13} className="text-white" />
+            <span
+              className="text-[10px] font-medium text-white tracking-wide"
+              style={{ writingMode: 'vertical-rl' }}
+            >
+              Voyza AI
+            </span>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* ─── Suggested cities panel ─── */}
       <SuggestedCitiesPanel
@@ -828,12 +1157,27 @@ export default function CanvasPage() {
         onApply={(updates) => homeEdit && applyHomeEdit(homeEdit, updates)}
       />
 
-      {/* ─── Invite modal ─── */}
-      <InviteModal
+      {/* ─── Share dialog (link modes + invites + member roles) ─── */}
+      <ShareModal
         tripId={tripId}
         isOpen={showInvite}
         onClose={() => setShowInvite(false)}
-        members={members}
+        onToast={showToast}
+      />
+
+      {/* ─── Share-link sign-in gate: joining requires an account ─── */}
+      <LoginModal
+        isOpen={!!shareToken && !user && !authLoading}
+        onClose={() => {
+          // Bailing out of sign-in: drop the pending join and load whatever
+          // access (if any) this account-less visitor has.
+          setShareToken(null);
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('share');
+            window.history.replaceState({}, '', url.toString());
+          }
+        }}
       />
 
       {/* ─── Toast ─── */}
