@@ -55,6 +55,13 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareModalProps) {
+  // Compose the link from OUR origin — the backend's FRONTEND_URL points at
+  // prod, which would hand dev/localhost users a wrong-environment link.
+  const composeUrl = (token?: string, fallback?: string) =>
+    token && typeof window !== 'undefined'
+      ? `${window.location.origin}/canvas/${tripId}?share=${token}`
+      : fallback ?? '';
+
   const [mode, setMode] = useState<ShareMode>('view');
   const [url, setUrl] = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
@@ -76,7 +83,7 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
     getShareLink(tripId)
       .then((r) => {
         setMode(r.mode);
-        setUrl(r.url);
+        setUrl(composeUrl(r.token, r.url));
       })
       .catch(() => toast('Could not load share link', 'error'))
       .finally(() => setLinkLoading(false));
@@ -91,7 +98,7 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
     try {
       const r = await updateShareLink(tripId, { mode: next });
       setMode(r.mode);
-      setUrl(r.url);
+      setUrl(composeUrl(r.token, r.url));
     } catch {
       setMode(prev);
       toast('Could not change link access', 'error');
@@ -109,7 +116,7 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
     if (!window.confirm('Reset the link? Anyone holding the old link loses access to it.')) return;
     try {
       const r = await updateShareLink(tripId, { rotate: true });
-      setUrl(r.url);
+      setUrl(composeUrl(r.token, r.url));
       toast('Link reset — old copies no longer work');
     } catch {
       toast('Could not reset the link', 'error');

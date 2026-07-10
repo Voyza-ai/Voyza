@@ -917,7 +917,11 @@ router.get(
       throw new AppError(403, 'Only the trip owner can manage sharing');
     }
     const session = await findOrCreateSession(tripId);
-    res.json({ mode: session.share_mode, url: shareUrl(tripId, session.share_token) });
+    res.json({
+      mode: session.share_mode,
+      token: session.share_token,
+      url: shareUrl(tripId, session.share_token),
+    });
   }),
 );
 
@@ -944,7 +948,11 @@ router.patch(
     if (mode) update.share_mode = mode;
     if (rotate) update.share_token = crypto.randomUUID();
     if (Object.keys(update).length === 0) {
-      res.json({ mode: session.share_mode, url: shareUrl(tripId, session.share_token) });
+      res.json({
+        mode: session.share_mode,
+        token: session.share_token,
+        url: shareUrl(tripId, session.share_token),
+      });
       return;
     }
     const supabase = getSupabase();
@@ -955,7 +963,11 @@ router.patch(
       .select('share_mode, share_token')
       .single();
     if (error || !updated) throw new AppError(500, 'Could not update share settings');
-    res.json({ mode: updated.share_mode, url: shareUrl(tripId, updated.share_token) });
+    res.json({
+      mode: updated.share_mode,
+      token: updated.share_token,
+      url: shareUrl(tripId, updated.share_token),
+    });
   }),
 );
 

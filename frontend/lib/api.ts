@@ -678,15 +678,17 @@ export async function removeMember(tripId: string, memberId: string): Promise<{ 
 // ─── Canvas share link ────────────────────────────────────────
 export type ShareMode = 'view' | 'suggest' | 'edit';
 
-export async function getShareLink(tripId: string): Promise<{ mode: ShareMode; url: string }> {
-  return apiFetch<{ mode: ShareMode; url: string }>(`/api/canvas/${tripId}/share`);
+export async function getShareLink(
+  tripId: string,
+): Promise<{ mode: ShareMode; url: string; token?: string }> {
+  return apiFetch<{ mode: ShareMode; url: string; token?: string }>(`/api/canvas/${tripId}/share`);
 }
 
 export async function updateShareLink(
   tripId: string,
   patch: { mode?: ShareMode; rotate?: boolean },
-): Promise<{ mode: ShareMode; url: string }> {
-  return apiFetch<{ mode: ShareMode; url: string }>(`/api/canvas/${tripId}/share`, {
+): Promise<{ mode: ShareMode; url: string; token?: string }> {
+  return apiFetch<{ mode: ShareMode; url: string; token?: string }>(`/api/canvas/${tripId}/share`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
   });

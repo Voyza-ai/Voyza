@@ -29,6 +29,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockedGetShareLink.mockResolvedValue({
     mode: 'view',
+    token: 'tok-1',
     url: 'https://voyza.test/canvas/trip-1?share=tok-1',
   });
   mockedListMembers.mockResolvedValue({ members: [] });
@@ -48,13 +49,14 @@ describe('ShareModal', () => {
     expect(screen.getByText('Owner confirms edits')).toBeInTheDocument();
     expect(screen.getByText('Full access')).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByDisplayValue('https://voyza.test/canvas/trip-1?share=tok-1')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('http://localhost/canvas/trip-1?share=tok-1')).toBeInTheDocument();
     });
   });
 
   it('changes the link mode when a mode card is clicked', async () => {
     mockedUpdateShareLink.mockResolvedValue({
       mode: 'edit',
+      token: 'tok-1',
       url: 'https://voyza.test/canvas/trip-1?share=tok-1',
     });
     render(<ShareModal {...baseProps} />);
@@ -73,7 +75,7 @@ describe('ShareModal', () => {
     );
     fireEvent.click(screen.getByText('Copy link'));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      'https://voyza.test/canvas/trip-1?share=tok-1',
+      'http://localhost/canvas/trip-1?share=tok-1',
     );
     expect(await screen.findByText('Copied')).toBeInTheDocument();
   });
