@@ -57,6 +57,7 @@ type TripStore = {
   updateScheduledEvent: (cityIndex: number, date: string, eventId: string, updates: Partial<ScheduledEvent>) => void;
   removeScheduledEvent: (cityIndex: number, date: string, eventId: string) => void;
   addChatMessage: (role: 'user' | 'assistant', content: string) => void;
+  setChatHistory: (history: ChatMessage[]) => void;
   resetPlanning: () => void;
 };
 
@@ -314,6 +315,8 @@ export const useTripStore = create<TripStore>((set) => ({
       cities[cityIndex] = { ...c, schedule };
       return { currentTrip: { ...state.currentTrip, cities } };
     }),
+
+  setChatHistory: (history) => set({ chatHistory: history }),
 
   addChatMessage: (role, content) =>
     set((state) => ({
