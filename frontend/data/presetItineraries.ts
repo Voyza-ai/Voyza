@@ -390,6 +390,135 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
       },
     ],
   },
+  {
+    slug: 'italian-renaissance-trail',
+    title: 'Italian Renaissance Trail',
+    tagline: "Colosseum to canals — Italy's greatest architecture in one sweep.",
+    description:
+      "A pilgrimage through Italy's architectural canon: ancient Rome's Colosseum and Pantheon, Florence's Duomo and Renaissance palaces, and Venice's Gothic basilicas floating on the lagoon. Cathedrals, cupolas, and piazzas the whole way — connected by fast trains.",
+    coverGradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+    flags: '🇮🇹',
+    scope: 'One country',
+    travelers: 2,
+    cities: [
+      {
+        name: 'Rome',
+        country: 'Italy',
+        nights: 3,
+        hotel: { name: 'Hotel Artemide', rating: 9.0, pricePerNight: 214, area: 'Via Nazionale' },
+        activities: [
+          'Colosseum and Roman Forum at opening time',
+          'Pantheon — the 2,000-year-old dome',
+          "Vatican Museums and St. Peter's Basilica",
+          'Trevi Fountain and Spanish Steps night walk',
+        ],
+        restaurants: [
+          { name: 'Roscioli', cuisine: 'Roman', priceRange: '$$' },
+          { name: 'Pizzarium Bonci', cuisine: 'Pizza al taglio', priceRange: '$' },
+        ],
+        vibes: ['history', 'art'],
+        transportOut: t('train', 'Frecciarossa', '1h 32m', 45),
+      },
+      {
+        name: 'Florence',
+        country: 'Italy',
+        nights: 3,
+        hotel: { name: 'Hotel Davanzati', rating: 9.3, pricePerNight: 187, area: 'Centro Storico' },
+        activities: [
+          "Brunelleschi's Duomo dome climb",
+          'Uffizi Gallery — Botticelli to Michelangelo',
+          'Ponte Vecchio and Palazzo Vecchio',
+          'Sunset from Piazzale Michelangelo',
+        ],
+        restaurants: [
+          { name: 'Trattoria Mario', cuisine: 'Tuscan', priceRange: '$' },
+          { name: "All'Antico Vinaio", cuisine: 'Panini', priceRange: '$' },
+        ],
+        vibes: ['art', 'history'],
+        transportOut: t('train', 'Frecciarossa', '2h 5m', 39),
+      },
+      {
+        name: 'Venice',
+        country: 'Italy',
+        nights: 2,
+        hotel: { name: 'Hotel Antiche Figure', rating: 9.0, pricePerNight: 196, area: 'Santa Croce' },
+        activities: [
+          "St. Mark's Basilica and the Doge's Palace",
+          'Grand Canal vaporetto at golden hour',
+          "Getting lost in Dorsoduro's back alleys",
+        ],
+        restaurants: [
+          { name: 'Osteria alle Testiere', cuisine: 'Seafood', priceRange: '$$$' },
+          { name: "Dal Moro's", cuisine: 'Fresh pasta', priceRange: '$' },
+        ],
+        vibes: ['romance', 'art'],
+      },
+    ],
+  },
+  {
+    slug: 'greek-island-escape',
+    title: 'Greek Island Escape',
+    tagline: 'Ancient Athens, then whitewashed villages and Aegean sunsets.',
+    description:
+      "Two days among the ruins of ancient Athens — the Acropolis, the Agora — then out to the islands: Santorini's caldera-edge villages and volcanic beaches, and Naxos's Venetian old town and long sandy coast. Sunsets, seafood, and slow island time.",
+    coverGradient: 'linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)',
+    flags: '🇬🇷',
+    scope: 'One country',
+    travelers: 2,
+    cities: [
+      {
+        name: 'Athens',
+        country: 'Greece',
+        nights: 2,
+        hotel: { name: 'Athens Was Hotel', rating: 9.1, pricePerNight: 178, area: 'Plaka' },
+        activities: [
+          'Acropolis and Parthenon at opening time',
+          'Ancient Agora and Temple of Hephaestus',
+          'Plaka and Anafiotika village stroll',
+        ],
+        restaurants: [
+          { name: 'O Thanasis', cuisine: 'Souvlaki', priceRange: '$' },
+          { name: 'Ta Karamanlidika', cuisine: 'Greek deli', priceRange: '$$' },
+        ],
+        vibes: ['history', 'food'],
+        transportOut: t('flight', 'Aegean Airlines', '0h 45m', 78),
+      },
+      {
+        name: 'Santorini',
+        country: 'Greece',
+        nights: 3,
+        hotel: { name: 'Caldera Villas Oia', rating: 9.2, pricePerNight: 265, area: 'Oia' },
+        activities: [
+          'Oia sunset from the castle ruins',
+          'Caldera-edge hike from Fira to Oia',
+          'Red Beach and the Akrotiri ruins',
+          'Catamaran cruise with hot-springs swim',
+        ],
+        restaurants: [
+          { name: 'Metaxi Mas', cuisine: 'Greek', priceRange: '$$' },
+          { name: "Lucky's Souvlakis", cuisine: 'Souvlaki', priceRange: '$' },
+        ],
+        vibes: ['romance', 'beach'],
+        transportOut: t('flight', 'Sky Express', '0h 35m', 62),
+      },
+      {
+        name: 'Naxos',
+        country: 'Greece',
+        nights: 3,
+        hotel: { name: 'Naxos Island Hotel', rating: 9.0, pricePerNight: 96, area: 'Agios Prokopios' },
+        activities: [
+          'Portara — the marble temple gate at sunset',
+          'Agios Prokopios beach day',
+          'Old Town Kastro and its Venetian alleys',
+        ],
+        restaurants: [
+          { name: 'Axiotissa Taverna', cuisine: 'Farm-to-table', priceRange: '$$' },
+          { name: 'To Elliniko', cuisine: 'Greek', priceRange: '$' },
+        ],
+        vibes: ['beach', 'nature'],
+      },
+    ],
+  },
 ];
 
 const EMPTY_TRANSPORT: Transport = { mode: 'flight', operator: '', duration: '', price: 0 };

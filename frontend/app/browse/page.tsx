@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -14,11 +14,14 @@ import {
   Utensils,
   Save,
   Loader2,
+  Search,
+  Sparkles,
 } from 'lucide-react';
 import Navbar from '@/components/shared/Navbar';
 import LoginModal from '@/components/shared/LoginModal';
 import { useAuthStore } from '@/store/authStore';
 import { getCityColor } from '@/lib/cityColors';
+import { searchPresets } from '@/lib/marketplaceSearch';
 import {
   PRESET_ITINERARIES,
   PresetItinerary,
@@ -39,6 +42,12 @@ export default function BrowsePage() {
   const [selected, setSelected] = useState<PresetItinerary | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState('');
+
+  // Instant natural-language filter — re-scores on every keystroke, no
+  // network round-trip. Empty query shows the whole marketplace.
+  const results = useMemo(() => searchPresets(query, PRESET_ITINERARIES), [query]);
+  const isFiltering = query.trim().length > 0;
 
   // A preset is an unsaved trip — reuse the same intent machinery the
   // results page uses, so login (password AND Google OAuth) resumes
@@ -97,16 +106,70 @@ export default function BrowsePage() {
 
       <div className="pt-20 px-6 pb-12 max-w-5xl mx-auto">
         {/* Header */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <h1 className="text-[26px] font-bold text-gray-900">Browse itineraries</h1>
           <p className="text-sm text-gray-500 mt-1">
             Hand-crafted trips you can make your own — open one in the canvas and start editing.
           </p>
         </div>
 
+        {/* Search */}
+        <div className="max-w-xl mx-auto mb-8">
+          <div
+            className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-white border shadow-sm focus-within:border-[#2563eb] transition-colors"
+            style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+          >
+            <Search size={16} className="text-gray-400 flex-shrink-0" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder='Describe your trip — "Italy with lots of architecture", "beach and food"…'
+              className="flex-1 bg-transparent text-[13px] text-gray-900 placeholder-gray-400 outline-none"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery('')}
+                className="text-gray-300 hover:text-gray-500 transition-colors flex-shrink-0"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          {isFiltering && results.length > 0 && (
+            <div className="text-[11px] text-gray-400 text-center mt-2">
+              {results.length} of {PRESET_ITINERARIES.length} itineraries match — best match first
+            </div>
+          )}
+        </div>
+
+        {/* No matches — hand off to the AI planner */}
+        {isFiltering && results.length === 0 && (
+          <div className="flex flex-col items-center py-14 text-center">
+            <div
+              className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
+              style={{ background: 'rgba(37,99,235,0.08)' }}
+            >
+              <Sparkles size={24} style={{ color: '#2563eb' }} />
+            </div>
+            <h2 className="text-[15px] font-medium text-gray-900 mb-1">
+              No ready-made trip matches that
+            </h2>
+            <p className="text-[13px] text-gray-500 mb-5 max-w-sm">
+              Our AI planner can build exactly what you described from scratch instead.
+            </p>
+            <button
+              onClick={() => router.push('/plan')}
+              className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-white transition-all hover:brightness-110"
+              style={{ background: '#2563eb' }}
+            >
+              Describe it to the AI planner
+            </button>
+          </div>
+        )}
+
         {/* Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {PRESET_ITINERARIES.map((preset, idx) => (
+          {results.map(({ preset }, idx) => (
             <motion.button
               key={preset.slug}
               onClick={() => setSelected(preset)}
