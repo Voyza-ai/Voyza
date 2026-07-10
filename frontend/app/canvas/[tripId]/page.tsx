@@ -85,7 +85,7 @@ export default function CanvasPage() {
         : null,
     [user],
   );
-  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp, roleEvent, broadcastRoleChange } =
+  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp, roleEvent, broadcastRoleChange, cursorEvent, broadcastCursor } =
     useCanvasRealtime(tripId, presenceUser);
 
   // Unsaved changes detection — covers city edits AND home-card (origin)
@@ -569,6 +569,71 @@ export default function CanvasPage() {
     setRole(roleEvent.role);
     showToast(`Your access changed: you're now ${roleEvent.role === 'editor' ? 'an editor' : roleEvent.role === 'suggester' ? 'a suggester' : 'a viewer'}`, 'info');
   }, [roleEvent, user, role, showToast]);
+
+  // ── Live cursors ─────────────────────────────────────────────
+  // Everyone in the canvas sees everyone else's pointer, Figma-style:
+  // positions are broadcast in CONTENT coordinates (scroll-adjusted on
+  // send), each receiver re-projects into their own viewport. Cursors
+  // fade out after 4s without movement.
+  const canvasScrollRef = useRef<HTMLDivElement | null>(null);
+  const [remoteCursors, setRemoteCursors] = useState<
+    Record<string, { x: number; y: number; name: string | null; ts: number }>
+  >({});
+  const lastCursorSentRef = useRef(0);
+  const [scrollTick, setScrollTick] = useState(0);
+
+  const handleCanvasMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!user || presence.length < 2) return; // nobody else to show it to
+      const now = Date.now();
+      if (now - lastCursorSentRef.current < 50) return;
+      lastCursorSentRef.current = now;
+      const el = canvasScrollRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      broadcastCursor(
+        e.clientX - rect.left + el.scrollLeft,
+        e.clientY - rect.top,
+      );
+    },
+    [user, presence.length, broadcastCursor],
+  );
+
+  useEffect(() => {
+    if (!cursorEvent || !user || cursorEvent.actor === user.id) return;
+    setRemoteCursors((prev) => ({
+      ...prev,
+      [cursorEvent.actor]: {
+        x: cursorEvent.x,
+        y: cursorEvent.y,
+        name: cursorEvent.name,
+        ts: cursorEvent.ts,
+      },
+    }));
+  }, [cursorEvent, user]);
+
+  // Prune idle cursors.
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setRemoteCursors((prev) => {
+        const cutoff = Date.now() - 4000;
+        const next: typeof prev = {};
+        let changed = false;
+        for (const [k, v] of Object.entries(prev)) {
+          if (v.ts >= cutoff) next[k] = v;
+          else changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, 1500);
+    return () => clearInterval(iv);
+  }, []);
+
+  const cursorHue = (id: string) => {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+    return Math.abs(hash) % 360;
+  };
 
   // Toast the suggester when the owner decides on their proposal
   // (suggestion UPDATEs arrive over realtime).
@@ -1170,7 +1235,44 @@ export default function CanvasPage() {
       {/* ─── Body row: canvas + docked Voyza AI chat ─── */}
       <div className="flex-1 flex min-h-0">
       {/* ─── Main canvas area ─── */}
-      <div className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex items-center px-12">
+      <div
+        ref={canvasScrollRef}
+        onMouseMove={handleCanvasMouseMove}
+        onScroll={() => setScrollTick((t) => t + 1)}
+        className="relative flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex items-center px-12"
+      >
+        {/* Remote cursors — re-projected into this viewport on each scroll */}
+        <div className="pointer-events-none absolute inset-0 z-30" aria-hidden data-scroll-tick={scrollTick}>
+          {Object.entries(remoteCursors).map(([actor, c]) => {
+            const el = canvasScrollRef.current;
+            const left = c.x - (el?.scrollLeft ?? 0);
+            if (left < -40 || left > (el?.clientWidth ?? 0) + 40) return null;
+            const hue = cursorHue(actor);
+            return (
+              <div
+                key={actor}
+                className="absolute transition-all duration-75 ease-linear"
+                style={{ left, top: c.y }}
+              >
+                <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
+                  <path
+                    d="M1 1 L15 8.5 L8.5 10 L5.5 17 Z"
+                    fill={`hsl(${hue}, 65%, 50%)`}
+                    stroke="#fff"
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span
+                  className="ml-3 -mt-0.5 inline-block px-1.5 py-0.5 rounded-md text-[10px] font-medium text-white whitespace-nowrap"
+                  style={{ background: `hsl(${hue}, 65%, 45%)` }}
+                >
+                  {c.name ?? 'Someone'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
         <div className="flex items-center min-w-max gap-0">
           {cities.length === 0 && (
             <div className="flex flex-col items-center gap-4 text-center px-8">

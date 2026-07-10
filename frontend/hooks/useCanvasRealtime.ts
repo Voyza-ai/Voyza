@@ -40,6 +40,15 @@ export type RoleEvent = {
   ts: number;
 };
 
+/** Another person's cursor position (canvas content coordinates). */
+export type CursorEvent = {
+  x: number;
+  y: number;
+  actor: string;
+  name: string | null;
+  ts: number;
+};
+
 type UseCanvasRealtimeReturn = {
   canvasState: CanvasState | null;
   suggestions: Suggestion[];
@@ -55,6 +64,10 @@ type UseCanvasRealtimeReturn = {
   roleEvent: RoleEvent | null;
   /** Owner: announce a role change so the target reflects it live. */
   broadcastRoleChange: (targetUserId: string, role: string) => void;
+  /** Latest cursor movement from another person. */
+  cursorEvent: CursorEvent | null;
+  /** Share my cursor position (content coordinates). */
+  broadcastCursor: (x: number, y: number) => void;
 };
 
 export function useCanvasRealtime(
@@ -67,6 +80,7 @@ export function useCanvasRealtime(
   const [presence, setPresence] = useState<PresenceUser[]>([]);
   const [remoteOp, setRemoteOp] = useState<RemoteOp | null>(null);
   const [roleEvent, setRoleEvent] = useState<RoleEvent | null>(null);
+  const [cursorEvent, setCursorEvent] = useState<CursorEvent | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   // Track identity via ref so the channel effect doesn't resubscribe on
   // every render (user object identity changes freely).
@@ -140,6 +154,9 @@ export function useCanvasRealtime(
       .on('broadcast', { event: 'role_change' }, ({ payload }) => {
         if (payload?.targetUserId && payload?.role) setRoleEvent(payload as RoleEvent);
       })
+      .on('broadcast', { event: 'cursor' }, ({ payload }) => {
+        if (payload && typeof payload.x === 'number') setCursorEvent(payload as CursorEvent);
+      })
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState<PresenceUser>();
         const byId = new Map<string, PresenceUser>();
@@ -190,6 +207,20 @@ export function useCanvasRealtime(
     });
   }, []);
 
+  const broadcastCursor = useCallback((x: number, y: number) => {
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'cursor',
+      payload: {
+        x,
+        y,
+        actor: userRef.current?.id ?? 'unknown',
+        name: userRef.current?.name ?? userRef.current?.email ?? null,
+        ts: Date.now(),
+      },
+    });
+  }, []);
+
   return {
     canvasState,
     suggestions,
@@ -200,5 +231,7 @@ export function useCanvasRealtime(
     broadcastOp,
     roleEvent,
     broadcastRoleChange,
+    cursorEvent,
+    broadcastCursor,
   };
 }
