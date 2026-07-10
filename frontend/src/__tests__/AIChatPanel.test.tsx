@@ -269,4 +269,55 @@ describe('AIChatPanel', () => {
     fireEvent.submit(input.closest('form')!);
     await waitFor(() => expect(input.value).toBe(''));
   });
+
+  it('routes leg_refresh edits through onTripUpdate when provided (canvas mode)', async () => {
+    mockedPlanChat.mockResolvedValue({
+      type: 'leg_refresh',
+      reply: 'Swapped to the train',
+      refresh: {
+        fromCity: 'Rome',
+        toCity: 'Florence',
+        date: '2026-06-18',
+        totalFound: 1,
+        updatedConstraints: null,
+        options: [
+          {
+            mode: 'train',
+            operator: 'Trenitalia',
+            duration: '1h 32m',
+            price: 39,
+            departTime: '09:05',
+            arriveTime: '10:37',
+            stops: 0,
+            bookingUrl: null,
+          },
+        ],
+      },
+    } as any);
+
+    const trip = buildTrip();
+    const onTripUpdate = jest.fn();
+    const getLatestTrip = jest.fn(() => trip);
+    // Empty the store to prove the injected sinks are used instead of it.
+    useTripStore.setState({ currentTrip: null });
+
+    render(
+      <AIChatPanel trip={trip} onTripUpdate={onTripUpdate} getLatestTrip={getLatestTrip} />,
+    );
+    const input = screen.getByPlaceholderText('Ask about your trip...');
+    fireEvent.change(input, { target: { value: 'take the train instead' } });
+    fireEvent.submit(input.closest('form')!);
+
+    await waitFor(() => expect(onTripUpdate).toHaveBeenCalled());
+    const updated = onTripUpdate.mock.calls[0][0];
+    expect(updated.cities[0].transportOut.operator).toBe('Trenitalia');
+    expect(updated.cities[0].transportOut.price).toBe(39);
+    // The global store must stay untouched in canvas mode.
+    expect(useTripStore.getState().currentTrip).toBeNull();
+  });
+
+  it('shows the neutral greeting when savings are zero (canvas trips)', () => {
+    render(<AIChatPanel trip={buildTrip({ savings: 0 })} />);
+    expect(screen.getByText(/You're working on a 2-city trip/)).toBeInTheDocument();
+  });
 });

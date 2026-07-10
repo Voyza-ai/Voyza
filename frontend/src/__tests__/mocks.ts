@@ -24,11 +24,16 @@ jest.mock('next/link', () => {
 // Mock framer-motion to avoid animation complexity in tests
 jest.mock('framer-motion', () => {
   const React = require('react');
+  // Cache one component per tag: returning a FRESH component from every
+  // `motion.div` access changes the element type on each re-render, which
+  // makes React unmount/remount the subtree — DOM nodes grabbed by findBy*
+  // right before a state flip end up detached and assertions flake.
+  const motionCache: Record<string, any> = {};
   const motion = new Proxy(
     {},
     {
       get: (_target: any, prop: string) => {
-        return React.forwardRef((props: any, ref: any) => {
+        motionCache[prop] ??= React.forwardRef((props: any, ref: any) => {
           const {
             initial, animate, exit, transition, variants, whileHover,
             whileTap, onAnimationComplete, layout, layoutId,
@@ -36,6 +41,7 @@ jest.mock('framer-motion', () => {
           } = props;
           return React.createElement(prop, { ...rest, ref });
         });
+        return motionCache[prop];
       },
     },
   );
@@ -96,6 +102,9 @@ jest.mock('@/hooks/useCanvasRealtime', () => ({
     suggestions: [],
     isConnected: true,
     updateState: jest.fn(),
+    presence: [],
+    remoteOp: null,
+    broadcastOp: jest.fn(),
   }),
 }));
 
@@ -107,6 +116,13 @@ jest.mock('@/lib/api', () => ({
   optimizeTrip: jest.fn().mockResolvedValue(null),
   compareLeg: jest.fn().mockResolvedValue(null),
   suggestDestinations: jest.fn().mockResolvedValue([]),
+  getShareLink: jest.fn().mockResolvedValue({ mode: 'view', token: 'tok', url: 'https://voyza.test/canvas/trip-1?share=tok' }),
+  updateShareLink: jest.fn().mockResolvedValue({ mode: 'edit', token: 'tok', url: 'https://voyza.test/canvas/trip-1?share=tok' }),
+  joinCanvasByLink: jest.fn().mockResolvedValue({ role: 'editor', joined: true }),
+  applyRoleToMembers: jest.fn().mockResolvedValue({ updated: 2, role: 'editor' }),
+  listTripMembers: jest.fn().mockResolvedValue({ members: [] }),
+  updateMemberRole: jest.fn().mockResolvedValue({ member: {} }),
+  removeMember: jest.fn().mockResolvedValue({ success: true }),
   interpretPlan: jest.fn().mockResolvedValue({}),
   editPlan: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
   planChat: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),

@@ -1,11 +1,11 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, X, MessageCircle, Smile } from 'lucide-react';
+import { Check, X, MessageCircle, Smile, PenSquare } from 'lucide-react';
 
 type Suggestion = {
   id: string;
-  type: 'add_city' | 'comment' | 'reaction';
+  type: 'add_city' | 'comment' | 'reaction' | 'edit';
   payload: any;
   status: 'pending' | 'approved' | 'rejected';
   suggested_by: string;
@@ -72,12 +72,17 @@ export default function SuggestionsPanel({
                 {s.type === 'reaction' && (
                   <Smile size={12} className="text-green-500" />
                 )}
+                {s.type === 'edit' && (
+                  <PenSquare size={12} className="text-violet-500" />
+                )}
                 <span className="text-gray-700 text-[12px] font-medium flex-1">
                   {s.type === 'add_city'
                     ? `Add ${s.payload?.name ?? 'city'}`
                     : s.type === 'comment'
                       ? 'Comment'
-                      : 'Reaction'}
+                      : s.type === 'edit'
+                        ? 'Proposed changes'
+                        : 'Reaction'}
                 </span>
               </div>
 
@@ -85,6 +90,17 @@ export default function SuggestionsPanel({
                 <div className="text-gray-500 text-[11px] mb-2 pl-7">
                   {s.payload.text}
                 </div>
+              )}
+
+              {s.type === 'edit' && Array.isArray(s.payload?.summary) && (
+                <ul className="text-gray-500 text-[11px] mb-2 pl-7 flex flex-col gap-0.5">
+                  {s.payload.summary.map((line: string, i: number) => (
+                    <li key={i} className="flex gap-1.5">
+                      <span className="text-gray-300">•</span>
+                      {line}
+                    </li>
+                  ))}
+                </ul>
               )}
 
               {isOwner && (
