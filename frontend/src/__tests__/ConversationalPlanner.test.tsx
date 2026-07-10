@@ -174,4 +174,22 @@ describe('ConversationalPlanner', () => {
     expect(history[1]).toEqual({ role: 'user', content: 'Barcelona' });
     expect(history[2]).toEqual({ role: 'assistant', content: 'Got it!' });
   });
+
+  it('carries the full conversation history on every turn (regression)', async () => {
+    mockedConverse.mockResolvedValue({ reply: 'Portugal is lovely!', updates: {}, action: 'ask' });
+    render(<ConversationalPlanner {...baseProps} />);
+    await sendText('thinking about portugal');
+    await screen.findByText('Portugal is lovely!');
+
+    mockedConverse.mockResolvedValue({ reply: 'Mild and a bit rainy.', updates: {}, action: 'ask' });
+    await sendText('is it rainy there in november?');
+    await screen.findByText('Mild and a bit rainy.');
+
+    // The SECOND call must include the first exchange — an empty history
+    // here made the AI lose the thread mid-conversation.
+    const secondCall = mockedConverse.mock.calls[1][0];
+    const contents = secondCall.history.map((h: any) => h.content);
+    expect(contents).toContain('thinking about portugal');
+    expect(contents).toContain('Portugal is lovely!');
+  });
 });

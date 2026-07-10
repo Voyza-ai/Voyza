@@ -88,6 +88,10 @@ export default function ConversationalPlanner({
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentSeedRef = useRef(false);
+  // Source of truth for handlers: React state updaters run at render time,
+  // AFTER the fetch below would fire — reading history out of an updater
+  // sent EMPTY history on every turn (the model kept losing the thread).
+  const messagesRef = useRef<ChatMsg[]>(messages);
 
   // Keep the store's chatHistory in sync (successful turns only) so the
   // conversation survives navigation to/from results.
@@ -155,13 +159,12 @@ export default function ConversationalPlanner({
       setWidget(null);
       setShowRecap(false);
 
-      let nextMsgs: ChatMsg[] = [];
-      setMessages((prev) => {
-        nextMsgs = opts?.retryOfId
-          ? prev.map((m) => (m.id === opts.retryOfId ? { ...m, failed: undefined } : m))
-          : [...prev, { id: nextId(), role: 'user', content: trimmed }];
-        return nextMsgs;
-      });
+      const base = messagesRef.current;
+      const nextMsgs: ChatMsg[] = opts?.retryOfId
+        ? base.map((m) => (m.id === opts.retryOfId ? { ...m, failed: undefined } : m))
+        : [...base, { id: nextId(), role: 'user', content: trimmed }];
+      messagesRef.current = nextMsgs;
+      setMessages(nextMsgs);
 
       try {
         const history = nextMsgs
@@ -178,11 +181,13 @@ export default function ConversationalPlanner({
         applyUpdates(result.updates);
         setFailCount(0);
 
-        setMessages((prev) => {
-          const withReply = [...prev, { id: nextId(), role: 'assistant' as const, content: result.reply }];
-          syncStore(withReply);
-          return withReply;
-        });
+        const withReply = [
+          ...messagesRef.current,
+          { id: nextId(), role: 'assistant' as const, content: result.reply },
+        ];
+        messagesRef.current = withReply;
+        setMessages(withReply);
+        syncStore(withReply);
         setQuickReplies(result.quickReplies ?? []);
 
         // The AI's chosen next step → UI. Widget-summons for a field the
@@ -209,13 +214,13 @@ export default function ConversationalPlanner({
       } catch (err: any) {
         const isNetwork = err?.message?.includes('fetch') || err?.name === 'TypeError';
         setFailCount((n) => n + 1);
-        setMessages((prev) =>
-          prev.map((m, i) =>
-            i === prev.length - 1 && m.role === 'user'
-              ? { ...m, failed: isNetwork ? 'network' : 'assistant' }
-              : m,
-          ),
+        const marked = messagesRef.current.map((m, i, arr) =>
+          i === arr.length - 1 && m.role === 'user'
+            ? { ...m, failed: (isNetwork ? 'network' : 'assistant') as ChatMsg['failed'] }
+            : m,
         );
+        messagesRef.current = marked;
+        setMessages(marked);
       } finally {
         setIsTyping(false);
       }
@@ -230,14 +235,16 @@ export default function ConversationalPlanner({
     if (seedMessage) {
       send(seedMessage);
     } else if (messages.length === 0) {
-      setMessages([
+      const greeting: ChatMsg[] = [
         {
           id: nextId(),
           role: 'assistant',
           content:
             "Tell me about the trip you're dreaming of — where, when, who's coming, budget… in whatever order it comes out. I'm listening.",
         },
-      ]);
+      ];
+      messagesRef.current = greeting;
+      setMessages(greeting);
     } else if (meetsMinimums()) {
       // Resumed with a complete plan (came back from results to tweak).
       setShowRecap(true);
