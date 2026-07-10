@@ -27,6 +27,8 @@ import {
   searchHotels,
   fetchHomeLegs,
   joinCanvasByLink,
+  compareLeg,
+  saveTrip,
   Destination,
 } from '@/lib/api';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
@@ -54,6 +56,9 @@ export default function CanvasPage() {
   const [hotelLoadingCities, setHotelLoadingCities] = useState<string[]>([]);
   const [homeEdit, setHomeEdit] = useState<'outbound' | 'inbound' | null>(null);
   const [homeLegLoading, setHomeLegLoading] = useState<'outbound' | 'inbound' | null>(null);
+  // Inter-city legs currently being re-searched, keyed "From→To" — the
+  // connectors render a spinner instead of a stale/empty price.
+  const [refreshingLegs, setRefreshingLegs] = useState<string[]>([]);
   const [chatOpen, setChatOpen] = useState(true);
   // Share-link join: token from ?share=… (read once; cleared after joining)
   const [shareToken, setShareToken] = useState<string | null>(() =>
@@ -80,7 +85,7 @@ export default function CanvasPage() {
         : null,
     [user],
   );
-  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp } =
+  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp, roleEvent, broadcastRoleChange, cursorEvent, broadcastCursor } =
     useCanvasRealtime(tripId, presenceUser);
 
   // Unsaved changes detection — covers city edits AND home-card (origin)
@@ -272,7 +277,7 @@ export default function CanvasPage() {
   }, []);
 
   const handleSave = async () => {
-    if (!canEdit || !localState) return;
+    if (role !== 'owner' || !localState) return;
     setSaving(true);
     try {
       await saveCanvas(tripId, localState);
@@ -506,6 +511,34 @@ export default function CanvasPage() {
     }
   };
 
+  // Non-owners: clone the CURRENT canvas state into your own trips.
+  // Nothing touches the shared trip — it's your personal copy.
+  const handleSaveCopy = async () => {
+    const t = getLatestCanvasTrip();
+    if (!t) return;
+    setSaving(true);
+    try {
+      await saveTrip({
+        ...t,
+        id: undefined,
+        title: tripTitle,
+        totalCost: liveTripTotal(t),
+      });
+      showToast('Saved a copy to your trips', 'success');
+    } catch {
+      showToast('Could not save a copy', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Throw away local changes and return to the last saved state.
+  const handleDiscard = () => {
+    if (!savedState) return;
+    setLocalState(savedState);
+    showToast('Changes discarded', 'info');
+  };
+
   // Suggester: bundle local edits into an 'edit' proposal for the owner.
   const handlePropose = async () => {
     if (role !== 'suggester' || !localState || !hasUnsavedChanges) return;
@@ -522,6 +555,84 @@ export default function CanvasPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Live permission changes: when the owner changes MY role (directly or
+  // via "apply to all"), reflect it immediately — capabilities flip
+  // in-place and a toast explains what happened. No refresh needed.
+  useEffect(() => {
+    if (!roleEvent || !user) return;
+    if (roleEvent.actor === user.id) return;
+    if (role === 'owner') return; // bulk changes never demote the owner
+    if (roleEvent.targetUserId !== user.id && roleEvent.targetUserId !== '*') return;
+    if (roleEvent.role === role) return;
+    setRole(roleEvent.role);
+    showToast(`Your access changed: you're now ${roleEvent.role === 'editor' ? 'an editor' : roleEvent.role === 'suggester' ? 'a suggester' : 'a viewer'}`, 'info');
+  }, [roleEvent, user, role, showToast]);
+
+  // ── Live cursors ─────────────────────────────────────────────
+  // Everyone in the canvas sees everyone else's pointer, Figma-style:
+  // positions are broadcast in CONTENT coordinates (scroll-adjusted on
+  // send), each receiver re-projects into their own viewport. Cursors
+  // fade out after 4s without movement.
+  const canvasScrollRef = useRef<HTMLDivElement | null>(null);
+  const [remoteCursors, setRemoteCursors] = useState<
+    Record<string, { x: number; y: number; name: string | null; ts: number }>
+  >({});
+  const lastCursorSentRef = useRef(0);
+  const [scrollTick, setScrollTick] = useState(0);
+
+  const handleCanvasMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!user || presence.length < 2) return; // nobody else to show it to
+      const now = Date.now();
+      if (now - lastCursorSentRef.current < 50) return;
+      lastCursorSentRef.current = now;
+      const el = canvasScrollRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      broadcastCursor(
+        e.clientX - rect.left + el.scrollLeft,
+        e.clientY - rect.top,
+      );
+    },
+    [user, presence.length, broadcastCursor],
+  );
+
+  useEffect(() => {
+    if (!cursorEvent || !user || cursorEvent.actor === user.id) return;
+    setRemoteCursors((prev) => ({
+      ...prev,
+      [cursorEvent.actor]: {
+        x: cursorEvent.x,
+        y: cursorEvent.y,
+        name: cursorEvent.name,
+        ts: cursorEvent.ts,
+      },
+    }));
+  }, [cursorEvent, user]);
+
+  // Prune idle cursors.
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setRemoteCursors((prev) => {
+        const cutoff = Date.now() - 4000;
+        const next: typeof prev = {};
+        let changed = false;
+        for (const [k, v] of Object.entries(prev)) {
+          if (v.ts >= cutoff) next[k] = v;
+          else changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, 1500);
+    return () => clearInterval(iv);
+  }, []);
+
+  const cursorHue = (id: string) => {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+    return Math.abs(hash) % 360;
   };
 
   // Toast the suggester when the owner decides on their proposal
@@ -701,15 +812,13 @@ export default function CanvasPage() {
     if (remoteOp.ts <= lastAppliedOpRef.current) return;
     lastAppliedOpRef.current = remoteOp.ts;
     applyingRemoteRef.current = true;
-    // The actor owns persistence (their autosave lands ~2s later) — treat
-    // the broadcast state as canonical so receivers don't show phantom
-    // "unsaved changes" for someone else's work.
+    // Receivers see live edits as UNSAVED — nothing is committed for you
+    // by someone else's edit. The owner's explicit Save persists; then the
+    // canvas-session sync marks everyone clean.
     setLocalState(remoteOp.state);
-    setSavedState(remoteOp.state);
   }, [remoteOp, user]);
 
   const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Skip the render caused by applying someone else's op.
@@ -724,26 +833,183 @@ export default function CanvasPage() {
     broadcastTimerRef.current = setTimeout(() => {
       broadcastOp(localState);
     }, 400);
-
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(async () => {
-      setSaving(true);
-      try {
-        await saveCanvas(tripId, localState);
-        setSavedState(localState);
-      } catch {
-        showToast('Autosave failed — click Save to retry', 'error');
-      } finally {
-        setSaving(false);
-      }
-    }, 2000);
-  }, [localState, canEdit, broadcastOp, tripId, showToast]);
+    // NO autosave: persistence is explicit and owner-only (the owner's
+    // Save commits the canonical trip; collaborators use Save-a-copy).
+  }, [localState, canEdit, broadcastOp]);
 
   // Clear pending timers on unmount so nothing fires into a dead tree.
   useEffect(
     () => () => {
       if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    },
+    [],
+  );
+
+  // ── Stale-leg repair ─────────────────────────────────────────
+  // Reordering/adding/removing cities used to leave the OLD transports on
+  // screen: each city kept a flight pointing at its former neighbor, new
+  // cities showed empty $0 legs, and home legs still targeted the old
+  // first/last city. The backend repaired all this on save, but the user
+  // never saw it. This effect repairs the visible state directly: after a
+  // structural change settles (800ms), every leg whose destination no
+  // longer matches its neighbor (or that has no real transport) is
+  // re-searched (flight vs train) and swapped in, with a spinner on the
+  // connector meanwhile. Home legs re-search when the first/last city
+  // changes. Runs only for the person editing — receivers get repaired
+  // state through the normal broadcast.
+  const legRepairTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const homeAnchorRef = useRef<{ first: string | null; last: string | null }>({
+    first: null,
+    last: null,
+  });
+
+  const fmtDuration = (mins: number) =>
+    `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`;
+  const fmtTime = (iso?: string | null) => {
+    if (!iso) return undefined;
+    const hhmm = iso.split('T')[1]?.slice(0, 5);
+    return hhmm ?? undefined;
+  };
+
+  const repairLeg = useCallback(
+    async (fromName: string, toName: string, date: string, travelers: number) => {
+      const key = `${fromName}→${toName}`;
+      setRefreshingLegs((prev) => (prev.includes(key) ? prev : [...prev, key]));
+      try {
+        const result = await compareLeg({ origin: fromName, destination: toName, date, travelers });
+        const useTrain = result.recommendation === 'train' && result.trainOption;
+        const opt: any = useTrain ? result.trainOption : result.flightOption;
+        if (!opt) return;
+        const transport = {
+          mode: useTrain ? ('train' as const) : ('flight' as const),
+          operator: useTrain ? (opt.operator ?? '') : (opt.carrier ?? ''),
+          duration: fmtDuration(opt.durationMinutes ?? 0),
+          price: opt.price ?? 0,
+          from: fromName,
+          to: toName,
+          departTime: fmtTime(opt.departure),
+          arriveTime: fmtTime(opt.arrival),
+          bookingUrl: opt.bookingUrl ?? undefined,
+        };
+        // Name-matched application — reorder-safe even if the user kept
+        // dragging while the search was in flight.
+        setLocalState((prev: any) => {
+          if (!prev?.cities) return prev;
+          const idx = prev.cities.findIndex(
+            (c: any, i: number) =>
+              c.name === fromName && prev.cities[i + 1]?.name === toName,
+          );
+          if (idx < 0) return prev; // pair no longer adjacent — drop silently
+          const cities = [...prev.cities];
+          cities[idx] = { ...cities[idx], transportOut: transport };
+          cities[idx + 1] = { ...cities[idx + 1], transportIn: transport };
+          return { ...prev, cities };
+        });
+      } catch {
+        // leave the stale leg; the save-side repair still catches it
+      } finally {
+        setRefreshingLegs((prev) => prev.filter((k) => k !== key));
+      }
+    },
+    [],
+  );
+
+  const refreshHomeLegDirection = useCallback(
+    async (direction: 'outbound' | 'inbound', ls: any) => {
+      const o = ls?.trip?.origin;
+      const tripCities = ls?.cities ?? [];
+      const first = tripCities[0];
+      const last = tripCities[tripCities.length - 1];
+      if (!o?.city || !first?.dates?.arrival) return;
+      const airports =
+        direction === 'inbound'
+          ? (o.returnAirports ?? o.airports ?? [])
+          : (o.airports ?? []);
+      if (airports.length === 0) return;
+      setHomeLegLoading(direction);
+      try {
+        const legs = await fetchHomeLegs({
+          originAirports: airports,
+          firstCity: first.name,
+          lastCity: last?.name ?? first.name,
+          startDate: first.dates.arrival,
+          endDate: last?.dates?.departure,
+          travelers: ls?.trip?.travelers ?? 1,
+          outbound: direction === 'outbound',
+          returnToHome: direction === 'inbound',
+        });
+        const leg = direction === 'outbound' ? legs.outboundLeg : legs.returnLeg;
+        setLocalState((prev: any) => {
+          if (!prev?.trip?.origin) return prev;
+          const po = { ...prev.trip.origin };
+          if (direction === 'outbound') po.outboundLeg = leg ?? null;
+          else po.returnLeg = leg ?? null;
+          return { ...prev, trip: { ...prev.trip, origin: po } };
+        });
+      } catch {
+        // keep the stale home leg rather than blanking it
+      } finally {
+        setHomeLegLoading(null);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!canManipulate || !localState?.cities || localState.cities.length === 0) return;
+    // Receivers get already-repaired state; don't re-repair what a remote
+    // actor just sent (their client owns the searches).
+    if (applyingRemoteRef.current) return;
+
+    if (legRepairTimerRef.current) clearTimeout(legRepairTimerRef.current);
+    legRepairTimerRef.current = setTimeout(() => {
+      const ls = localStateRef.current;
+      const cities = ls?.cities ?? [];
+      const travelers = ls?.trip?.travelers ?? 1;
+
+      // Inter-city legs whose transport is missing/empty or points at the
+      // wrong neighbor.
+      for (let i = 0; i < cities.length - 1; i++) {
+        const t = cities[i].transportOut;
+        const expectedTo = cities[i + 1]?.name ?? '';
+        const stale =
+          !t ||
+          !t.operator ||
+          (t.price ?? 0) <= 0 ||
+          (t.to && expectedTo && t.to.toLowerCase() !== expectedTo.toLowerCase());
+        const key = `${cities[i].name}→${expectedTo}`;
+        if (stale && !refreshingLegs.includes(key)) {
+          const date =
+            cities[i].dates?.departure ||
+            cities[i + 1].dates?.arrival ||
+            new Date().toISOString().split('T')[0];
+          repairLeg(cities[i].name, expectedTo, date, travelers);
+        }
+      }
+
+      // Home legs when the trip's endpoints changed.
+      const firstName = cities[0]?.name ?? null;
+      const lastName = cities[cities.length - 1]?.name ?? null;
+      const anchors = homeAnchorRef.current;
+      if (ls?.trip?.origin?.city) {
+        if (anchors.first !== null && anchors.first !== firstName) {
+          refreshHomeLegDirection('outbound', ls);
+        }
+        if (
+          anchors.last !== null &&
+          anchors.last !== lastName &&
+          (ls?.trip?.returnToHome ?? false)
+        ) {
+          refreshHomeLegDirection('inbound', ls);
+        }
+      }
+      homeAnchorRef.current = { first: firstName, last: lastName };
+    }, 800);
+  }, [localState, canManipulate, repairLeg, refreshHomeLegDirection, refreshingLegs]);
+
+  useEffect(
+    () => () => {
+      if (legRepairTimerRef.current) clearTimeout(legRepairTimerRef.current);
     },
     [],
   );
@@ -897,6 +1163,17 @@ export default function CanvasPage() {
             </button>
           )}
 
+          {hasUnsavedChanges && (
+            <button
+              onClick={handleDiscard}
+              disabled={saving}
+              title="Throw away local changes and return to the last saved version"
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-gray-500 border border-gray-200 transition-all hover:bg-gray-50 hover:text-gray-700 disabled:opacity-40"
+            >
+              Discard
+            </button>
+          )}
+
           {role === 'suggester' && (
             <button
               onClick={handlePropose}
@@ -910,16 +1187,29 @@ export default function CanvasPage() {
             </button>
           )}
 
-          {canEdit && (
+          {role === 'owner' && (
             <button
               onClick={handleSave}
               disabled={saving || !hasUnsavedChanges}
-              title="Changes autosave — click to save immediately"
+              title="Save this trip for everyone (owner only)"
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
               style={{ background: saving || hasUnsavedChanges ? '#2563eb' : '#16a34a' }}
             >
               <Save size={12} />
               {saving ? 'Saving…' : hasUnsavedChanges ? 'Save' : 'Saved ✓'}
+            </button>
+          )}
+
+          {role !== 'owner' && role !== 'viewer' && (
+            <button
+              onClick={handleSaveCopy}
+              disabled={saving}
+              title="Save the current state as your own trip — the shared trip is untouched"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium transition-all hover:bg-blue-50 disabled:opacity-40"
+              style={{ color: '#2563eb', border: '1px solid #2563eb' }}
+            >
+              <Save size={12} />
+              {saving ? 'Saving…' : 'Save a copy'}
             </button>
           )}
         </div>
@@ -945,7 +1235,44 @@ export default function CanvasPage() {
       {/* ─── Body row: canvas + docked Voyza AI chat ─── */}
       <div className="flex-1 flex min-h-0">
       {/* ─── Main canvas area ─── */}
-      <div className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex items-center px-12">
+      <div
+        ref={canvasScrollRef}
+        onMouseMove={handleCanvasMouseMove}
+        onScroll={() => setScrollTick((t) => t + 1)}
+        className="relative flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex items-center px-12"
+      >
+        {/* Remote cursors — re-projected into this viewport on each scroll */}
+        <div className="pointer-events-none absolute inset-0 z-30" aria-hidden data-scroll-tick={scrollTick}>
+          {Object.entries(remoteCursors).map(([actor, c]) => {
+            const el = canvasScrollRef.current;
+            const left = c.x - (el?.scrollLeft ?? 0);
+            if (left < -40 || left > (el?.clientWidth ?? 0) + 40) return null;
+            const hue = cursorHue(actor);
+            return (
+              <div
+                key={actor}
+                className="absolute transition-all duration-75 ease-linear"
+                style={{ left, top: c.y }}
+              >
+                <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
+                  <path
+                    d="M1 1 L15 8.5 L8.5 10 L5.5 17 Z"
+                    fill={`hsl(${hue}, 65%, 50%)`}
+                    stroke="#fff"
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span
+                  className="ml-3 -mt-0.5 inline-block px-1.5 py-0.5 rounded-md text-[10px] font-medium text-white whitespace-nowrap"
+                  style={{ background: `hsl(${hue}, 65%, 45%)` }}
+                >
+                  {c.name ?? 'Someone'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
         <div className="flex items-center min-w-max gap-0">
           {cities.length === 0 && (
             <div className="flex flex-col items-center gap-4 text-center px-8">
@@ -1022,6 +1349,9 @@ export default function CanvasPage() {
                     transport={city.transportOut}
                     canEdit={canManipulate}
                     onAddCity={() => handleAddAfter(idx)}
+                    refreshing={refreshingLegs.includes(
+                      `${city.name}→${cities[idx + 1]?.name ?? ''}`,
+                    )}
                   />
                 )}
               </Reorder.Item>
@@ -1163,6 +1493,7 @@ export default function CanvasPage() {
         isOpen={showInvite}
         onClose={() => setShowInvite(false)}
         onToast={showToast}
+        onRoleChanged={broadcastRoleChange}
       />
 
       {/* ─── Share-link sign-in gate: joining requires an account ─── */}

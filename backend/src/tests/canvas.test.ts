@@ -149,14 +149,14 @@ describe('Canvas Routes', () => {
   });
 
   describe('POST /api/canvas/:tripId/save', () => {
-    // Live collaboration: editors persist their changes too. Only
-    // suggesters (propose/approve flow) and viewers are write-blocked.
-    it('allows editor to save', async () => {
+    // Owner-only: the owner commits the canonical trip; editors use
+    // "Save a copy" (their own trips) instead of writing the shared one.
+    it('returns 403 for editor (owner-only canonical save)', async () => {
       const res = await request(app)
         .post('/api/canvas/trip-1/save')
         .set('Authorization', 'Bearer editor-token')
         .send({ state: {} });
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
     });
 
     it('returns 403 for viewer', async () => {

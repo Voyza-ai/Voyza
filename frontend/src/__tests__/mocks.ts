@@ -105,6 +105,10 @@ jest.mock('@/hooks/useCanvasRealtime', () => ({
     presence: [],
     remoteOp: null,
     broadcastOp: jest.fn(),
+    roleEvent: null,
+    broadcastRoleChange: jest.fn(),
+    cursorEvent: null,
+    broadcastCursor: jest.fn(),
   }),
 }));
 
@@ -120,6 +124,7 @@ jest.mock('@/lib/api', () => ({
   updateShareLink: jest.fn().mockResolvedValue({ mode: 'edit', token: 'tok', url: 'https://voyza.test/canvas/trip-1?share=tok' }),
   joinCanvasByLink: jest.fn().mockResolvedValue({ role: 'editor', joined: true }),
   applyRoleToMembers: jest.fn().mockResolvedValue({ updated: 2, role: 'editor' }),
+  transferOwnership: jest.fn().mockResolvedValue({ success: true, newOwnerUserId: 'u2' }),
   listTripMembers: jest.fn().mockResolvedValue({ members: [] }),
   updateMemberRole: jest.fn().mockResolvedValue({ member: {} }),
   removeMember: jest.fn().mockResolvedValue({ success: true }),

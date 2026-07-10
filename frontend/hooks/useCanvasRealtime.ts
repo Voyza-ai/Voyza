@@ -32,6 +32,23 @@ export type RemoteOp = {
   ts: number;
 };
 
+/** Owner changed someone's access. target '*' = every non-owner member. */
+export type RoleEvent = {
+  targetUserId: string;
+  role: string;
+  actor: string;
+  ts: number;
+};
+
+/** Another person's cursor position (canvas content coordinates). */
+export type CursorEvent = {
+  x: number;
+  y: number;
+  actor: string;
+  name: string | null;
+  ts: number;
+};
+
 type UseCanvasRealtimeReturn = {
   canvasState: CanvasState | null;
   suggestions: Suggestion[];
@@ -43,6 +60,14 @@ type UseCanvasRealtimeReturn = {
   remoteOp: RemoteOp | null;
   /** Broadcast a local edit to everyone else on the channel. */
   broadcastOp: (state: CanvasState) => void;
+  /** Latest role change announced by the owner. */
+  roleEvent: RoleEvent | null;
+  /** Owner: announce a role change so the target reflects it live. */
+  broadcastRoleChange: (targetUserId: string, role: string) => void;
+  /** Latest cursor movement from another person. */
+  cursorEvent: CursorEvent | null;
+  /** Share my cursor position (content coordinates). */
+  broadcastCursor: (x: number, y: number) => void;
 };
 
 export function useCanvasRealtime(
@@ -54,6 +79,8 @@ export function useCanvasRealtime(
   const [isConnected, setIsConnected] = useState(false);
   const [presence, setPresence] = useState<PresenceUser[]>([]);
   const [remoteOp, setRemoteOp] = useState<RemoteOp | null>(null);
+  const [roleEvent, setRoleEvent] = useState<RoleEvent | null>(null);
+  const [cursorEvent, setCursorEvent] = useState<CursorEvent | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   // Track identity via ref so the channel effect doesn't resubscribe on
   // every render (user object identity changes freely).
@@ -62,12 +89,19 @@ export function useCanvasRealtime(
     userRef.current = currentUser ?? null;
   }, [currentUser]);
 
+  const userId = currentUser?.id ?? null;
+
   useEffect(() => {
     if (!tripId) return;
+    // Wait for a real identity before joining the channel. Subscribing
+    // early minted an anonymous presence key; when auth finished loading
+    // the user appeared TWICE (their anon ghost + their real self) — the
+    // "clicking my own share link adds another icon of me" bug.
+    if (!userId) return;
 
     const channel = supabase
       .channel(`canvas-${tripId}`, {
-        config: { presence: { key: userRef.current?.id ?? `anon-${Math.random().toString(36).slice(2)}` } },
+        config: { presence: { key: userId } },
       })
       .on(
         'postgres_changes',
@@ -117,17 +151,26 @@ export function useCanvasRealtime(
       .on('broadcast', { event: 'canvas_op' }, ({ payload }) => {
         if (payload?.state) setRemoteOp(payload as RemoteOp);
       })
+      .on('broadcast', { event: 'role_change' }, ({ payload }) => {
+        if (payload?.targetUserId && payload?.role) setRoleEvent(payload as RoleEvent);
+      })
+      .on('broadcast', { event: 'cursor' }, ({ payload }) => {
+        if (payload && typeof payload.x === 'number') setCursorEvent(payload as CursorEvent);
+      })
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState<PresenceUser>();
-        const users: PresenceUser[] = [];
+        const byId = new Map<string, PresenceUser>();
         for (const key of Object.keys(state)) {
           const metas = state[key];
           if (metas && metas.length > 0) {
             const m = metas[0] as any;
-            users.push({ id: m.id ?? key, email: m.email ?? null, name: m.name ?? null });
+            const id = m.id ?? key;
+            // Dedupe by user id — multiple tabs/devices of the same person
+            // collapse into one avatar.
+            if (!byId.has(id)) byId.set(id, { id, email: m.email ?? null, name: m.name ?? null });
           }
         }
-        setPresence(users);
+        setPresence(Array.from(byId.values()));
       })
       .subscribe(async (status) => {
         setIsConnected(status === 'SUBSCRIBED');
@@ -142,7 +185,7 @@ export function useCanvasRealtime(
       channel.unsubscribe();
       channelRef.current = null;
     };
-  }, [tripId]);
+  }, [tripId, userId]);
 
   const updateState = useCallback((newState: CanvasState) => {
     setCanvasState(newState);
@@ -156,5 +199,39 @@ export function useCanvasRealtime(
     });
   }, []);
 
-  return { canvasState, suggestions, isConnected, updateState, presence, remoteOp, broadcastOp };
+  const broadcastRoleChange = useCallback((targetUserId: string, role: string) => {
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'role_change',
+      payload: { targetUserId, role, actor: userRef.current?.id ?? 'unknown', ts: Date.now() },
+    });
+  }, []);
+
+  const broadcastCursor = useCallback((x: number, y: number) => {
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'cursor',
+      payload: {
+        x,
+        y,
+        actor: userRef.current?.id ?? 'unknown',
+        name: userRef.current?.name ?? userRef.current?.email ?? null,
+        ts: Date.now(),
+      },
+    });
+  }, []);
+
+  return {
+    canvasState,
+    suggestions,
+    isConnected,
+    updateState,
+    presence,
+    remoteOp,
+    broadcastOp,
+    roleEvent,
+    broadcastRoleChange,
+    cursorEvent,
+    broadcastCursor,
+  };
 }

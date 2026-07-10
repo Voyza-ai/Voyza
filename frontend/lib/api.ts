@@ -652,6 +652,8 @@ export type TripMember = {
   role: 'owner' | 'editor' | 'suggester' | 'viewer';
   accepted_at: string | null;
   created_at: string;
+  /** Present for the OWNER only — personal join link token for pending invites. */
+  invite_token?: string;
 };
 
 export async function listTripMembers(tripId: string): Promise<{ members: TripMember[] }> {
@@ -703,6 +705,17 @@ export async function joinCanvasByLink(
     method: 'POST',
     body: JSON.stringify({ token }),
   });
+}
+
+/** Owner hands the trip to an accepted member; old owner becomes editor. */
+export async function transferOwnership(
+  tripId: string,
+  memberId: string,
+): Promise<{ success: boolean; newOwnerUserId: string }> {
+  return apiFetch<{ success: boolean; newOwnerUserId: string }>(
+    `/api/canvas/${tripId}/transfer-ownership`,
+    { method: 'POST', body: JSON.stringify({ memberId }) },
+  );
 }
 
 /** Owner bulk-set: every collaborator gets the given role. */

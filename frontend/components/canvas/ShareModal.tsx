@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Copy, Check, Eye, MessageSquare, Pencil, RefreshCw, Trash2, Send } from 'lucide-react';
+import { X, Copy, Check, Eye, MessageSquare, Pencil, RefreshCw, Trash2, Send, Crown } from 'lucide-react';
 import {
   getShareLink,
   updateShareLink,
   applyRoleToMembers,
+  transferOwnership,
   inviteToCanvas,
   listTripMembers,
   updateMemberRole,
@@ -21,6 +22,9 @@ type ShareModalProps = {
   onClose: () => void;
   /** Toast passthrough so feedback matches the canvas. */
   onToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+  /** Announce a role change over realtime ('*' = all non-owner members)
+   *  so affected people see it reflect instantly. */
+  onRoleChanged?: (targetUserId: string, role: string) => void;
 };
 
 const MODES: { key: ShareMode; icon: typeof Eye; title: string; blurb: string; joinRole: string }[] = [
@@ -54,7 +58,7 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: 'Viewer',
 };
 
-export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareModalProps) {
+export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleChanged }: ShareModalProps) {
   // Compose the link from OUR origin — the backend's FRONTEND_URL points at
   // prod, which would hand dev/localhost users a wrong-environment link.
   const composeUrl = (token?: string, fallback?: string) =>
@@ -66,6 +70,7 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
   const [url, setUrl] = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [members, setMembers] = useState<TripMember[]>([]);
   const [email, setEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'editor' | 'suggester' | 'viewer'>('editor');
@@ -112,6 +117,12 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const copyText = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   const rotateLink = async () => {
     if (!window.confirm('Reset the link? Anyone holding the old link loses access to it.')) return;
     try {
@@ -130,6 +141,7 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
     try {
       const r = await applyRoleToMembers(tripId, role);
       setMembers((prev) => prev.map((m) => ({ ...m, role }) as TripMember));
+      onRoleChanged?.('*', role);
       toast(`${r.updated} member${r.updated === 1 ? '' : 's'} set to ${ROLE_LABELS[role]}`);
     } catch {
       toast('Could not update members', 'error');
@@ -144,7 +156,7 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
       setEmail('');
       const r = await listTripMembers(tripId);
       setMembers(r.members);
-      toast(`Invited ${email.trim()}`);
+      toast(`Invite created — use its Copy link button to send it`);
     } catch {
       toast('Invite failed', 'error');
     } finally {
@@ -157,9 +169,31 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
     setMembers((ms) => ms.map((m) => (m.id === memberId ? ({ ...m, role } as TripMember) : m)));
     try {
       await updateMemberRole(tripId, memberId, role);
+      const target = members.find((m) => m.id === memberId);
+      if (target?.user_id) onRoleChanged?.(target.user_id, role);
     } catch {
       setMembers(prev);
       toast('Could not change role', 'error');
+    }
+  };
+
+  const handleTransfer = async (member: TripMember) => {
+    const who = member.invited_email ?? 'this member';
+    if (
+      !window.confirm(
+        `Make ${who} the owner of this trip? You'll stay on it as an editor.`,
+      )
+    )
+      return;
+    try {
+      const r = await transferOwnership(tripId, member.id);
+      onRoleChanged?.(r.newOwnerUserId, 'owner');
+      toast(`${who} now owns this trip — you're an editor`, 'success');
+      onClose();
+      // The page reloads its session to pick up the role change.
+      window.location.reload();
+    } catch {
+      toast('Could not transfer ownership', 'error');
     }
   };
 
@@ -270,9 +304,12 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
                 </button>
               </div>
 
-              {/* ── Email invite ── */}
+              {/* ── Personal invites (link-based — email sending comes later) ── */}
               <div>
-                <div className="text-[12px] font-medium text-gray-500 mb-2">Invite by email</div>
+                <div className="text-[12px] font-medium text-gray-500 mb-0.5">Personal invites</div>
+                <div className="text-[11px] text-gray-400 mb-2">
+                  Creates a personal link at the role you pick — copy it and send it yourself.
+                </div>
                 <div className="flex items-center gap-2">
                   <input
                     value={email}
@@ -332,6 +369,18 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
                             <div className="text-[10px] text-amber-600">Invite pending</div>
                           )}
                         </div>
+                        {!m.accepted_at && m.invite_token && (
+                          <button
+                            onClick={() => copyText(composeUrl(m.invite_token), m.id)}
+                            aria-label={`Copy invite link for ${m.invited_email ?? 'member'}`}
+                            title="Copy this person's invite link"
+                            className="flex items-center gap-1 px-2 py-1 rounded-md text-[10.5px] font-medium transition-colors"
+                            style={{ color: '#2563eb', border: '1px solid #bfdbfe', background: '#eff6ff' }}
+                          >
+                            {copiedId === m.id ? <Check size={11} /> : <Copy size={11} />}
+                            {copiedId === m.id ? 'Copied' : 'Copy link'}
+                          </button>
+                        )}
                         {m.role === 'owner' ? (
                           <span className="text-[11px] text-gray-400 px-1.5">Owner</span>
                         ) : (
@@ -346,6 +395,16 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
                               <option value="suggester">Suggester</option>
                               <option value="viewer">Viewer</option>
                             </select>
+                            {m.accepted_at && m.user_id && (
+                              <button
+                                onClick={() => handleTransfer(m)}
+                                aria-label={`Make ${m.invited_email ?? 'member'} the owner`}
+                                title="Transfer ownership"
+                                className="p-1 rounded-md text-gray-300 hover:text-amber-500 hover:bg-amber-50 transition-colors"
+                              >
+                                <Crown size={13} />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleRemove(m.id)}
                               aria-label={`Remove ${m.invited_email ?? 'member'}`}

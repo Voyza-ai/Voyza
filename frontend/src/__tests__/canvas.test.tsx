@@ -2,7 +2,7 @@ import './mocks';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import CanvasPage from '@/app/canvas/[tripId]/page';
-import { getCanvasSession, saveCanvas, getCanvasSuggestions, joinCanvasByLink, postCanvasSuggestion } from '@/lib/api';
+import { getCanvasSession, saveCanvas, getCanvasSuggestions, joinCanvasByLink, postCanvasSuggestion, compareLeg } from '@/lib/api';
 import { buildCity } from './fixtures';
 
 const mockedGetSession = getCanvasSession as jest.MockedFunction<typeof getCanvasSession>;
@@ -10,6 +10,7 @@ const mockedSaveCanvas = saveCanvas as jest.MockedFunction<typeof saveCanvas>;
 const mockedGetSuggestions = getCanvasSuggestions as jest.MockedFunction<typeof getCanvasSuggestions>;
 const mockedJoinLink = joinCanvasByLink as jest.MockedFunction<typeof joinCanvasByLink>;
 const mockedPostSuggestion = postCanvasSuggestion as jest.MockedFunction<typeof postCanvasSuggestion>;
+const mockedCompareLeg = compareLeg as jest.MockedFunction<typeof compareLeg>;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -118,7 +119,7 @@ describe('CanvasPage', () => {
     expect(screen.getByText('Full access')).toBeInTheDocument();
   });
 
-  it('editors get a Save button too (live collaboration)', async () => {
+  it('editors get Save-a-copy (not the canonical Save)', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'editor',
@@ -128,8 +129,9 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
     await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
 
-    expect(screen.getByText('Saved ✓')).toBeInTheDocument();
-    // ...but Share stays owner-only
+    expect(screen.getByText('Save a copy')).toBeInTheDocument();
+    expect(screen.queryByText('Saved ✓')).not.toBeInTheDocument();
+    // ...and Share stays owner-only
     expect(screen.queryByText('Share')).not.toBeInTheDocument();
   });
 
@@ -284,7 +286,7 @@ describe('CanvasPage', () => {
       });
     });
 
-    it('broadcasts (400ms) then autosaves (2s) after a local edit', async () => {
+    it('broadcasts a local edit but never persists it silently', async () => {
       // Real timers on purpose: fake timers wedge RTL's waitFor here.
       const broadcastOp = jest.fn();
       rt.useCanvasRealtime = () => makeRt({ broadcastOp });
@@ -302,12 +304,15 @@ describe('CanvasPage', () => {
       fireEvent.contextMenu(screen.getByText('Rome'));
       fireEvent.click(await screen.findByText('Remove city'));
 
-      // Broadcast fires on the 400ms debounce (before autosave)
+      // Broadcast fires on the 400ms debounce
       await waitFor(() => expect(broadcastOp).toHaveBeenCalled(), { timeout: 1500 });
+      // …and there is NO silent autosave — persistence is the owner's
+      // explicit Save (2.5s of quiet proves no timer fires).
+      await new Promise((r) => setTimeout(r, 2500));
       expect(mockedSaveCanvas).not.toHaveBeenCalled();
-
-      // Autosave lands at the 2s debounce
-      await waitFor(() => expect(mockedSaveCanvas).toHaveBeenCalled(), { timeout: 3500 });
+      // The owner now has an enabled Save + a Discard
+      expect(screen.getByText('Save')).toBeInTheDocument();
+      expect(screen.getByText('Discard')).toBeInTheDocument();
     }, 10000);
   });
 
@@ -351,5 +356,58 @@ describe('CanvasPage', () => {
       // Local view resets to canonical (Rome returns)
       expect(await screen.findAllByText('Rome')).not.toHaveLength(0);
     });
+  });
+
+  describe('stale-leg repair', () => {
+    it('re-searches the new adjacent pair after removing a middle city', async () => {
+      const threeCities = {
+        trip: { title: 'Trio' },
+        cities: [
+          buildCity({ name: 'Rome' }),
+          buildCity({
+            name: 'Florence',
+            dates: { arrival: '2026-06-18', departure: '2026-06-20' },
+          }),
+          buildCity({
+            name: 'Venice',
+            dates: { arrival: '2026-06-20', departure: '2026-06-22' },
+          }),
+        ],
+      };
+      mockedGetSession.mockResolvedValue({
+        session: { state: threeCities },
+        role: 'owner',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+      mockedCompareLeg.mockResolvedValue({
+        flightOption: {
+          id: 'f1', price: 120, currency: 'USD',
+          departure: '2026-06-18T09:00:00', arrival: '2026-06-18T10:10:00',
+          durationMinutes: 70, stops: 0, carrier: 'ITA Airways',
+          carrierCode: 'AZ', bookingUrl: 'https://example.com',
+        } as any,
+        trainOption: null,
+        cheapest: 'flight', fastest: 'flight',
+        recommendation: 'flight', priceDifference: 0, timeDifference: 0,
+      });
+
+      render(<CanvasPage />);
+      expect(await screen.findByText('Florence')).toBeInTheDocument();
+
+      // Remove the middle city → Rome/Venice become adjacent with a stale leg
+      fireEvent.contextMenu(screen.getByText('Florence'));
+      fireEvent.click(await screen.findByText('Remove city'));
+
+      await waitFor(
+        () =>
+          expect(mockedCompareLeg).toHaveBeenCalledWith(
+            expect.objectContaining({ origin: 'Rome', destination: 'Venice' }),
+          ),
+        { timeout: 2500 },
+      );
+      // The repaired transport lands on the connector (and the card line)
+      const prices = await screen.findAllByText('$120', {}, { timeout: 2500 });
+      expect(prices.length).toBeGreaterThan(0);
+    }, 10000);
   });
 });

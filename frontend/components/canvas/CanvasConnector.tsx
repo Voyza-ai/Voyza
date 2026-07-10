@@ -1,11 +1,14 @@
 'use client';
 
-import { Plane, TrainFront, Plus } from 'lucide-react';
+import { Plane, TrainFront, Plus, Loader2 } from 'lucide-react';
 
 type CanvasConnectorProps = {
   transport: any;
   canEdit: boolean;
   onAddCity: () => void;
+  /** A fresh flight/train search is running for this leg (after a
+   *  reorder/add) — show a spinner instead of the stale price. */
+  refreshing?: boolean;
 };
 
 const MODE_COLORS: Record<string, string> = {
@@ -13,7 +16,7 @@ const MODE_COLORS: Record<string, string> = {
   train: '#22c088',
 };
 
-export default function CanvasConnector({ transport, canEdit, onAddCity }: CanvasConnectorProps) {
+export default function CanvasConnector({ transport, canEdit, onAddCity, refreshing = false }: CanvasConnectorProps) {
   const mode = transport?.mode ?? 'flight';
   const accentColor = MODE_COLORS[mode] ?? '#2e6bc4';
   const Icon = mode === 'train' ? TrainFront : Plane;
@@ -31,7 +34,17 @@ export default function CanvasConnector({ transport, canEdit, onAddCity }: Canva
 
       {/* Center: transport pill or add button */}
       <div className="flex flex-col items-center gap-1 mx-1">
-        {hasPrice ? (
+        {refreshing ? (
+          <>
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center border"
+              style={{ background: `${accentColor}12`, borderColor: `${accentColor}30` }}
+            >
+              <Loader2 size={13} className="animate-spin" style={{ color: accentColor }} />
+            </div>
+            <div className="text-[9px] text-gray-400">finding route…</div>
+          </>
+        ) : hasPrice ? (
           <>
             {/* Transport icon badge */}
             <div
