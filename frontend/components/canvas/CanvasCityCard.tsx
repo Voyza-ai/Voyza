@@ -13,6 +13,7 @@ import {
   Trash2,
   StickyNote,
   Eye,
+  Loader2,
 } from 'lucide-react';
 import { getCityColor } from '@/lib/cityColors';
 
@@ -21,6 +22,7 @@ type CanvasCityCardProps = {
   index: number;
   role: string;
   isLast: boolean;
+  hotelLoading?: boolean;
   onRemove: (index: number) => void;
   onAddAfter: (index: number) => void;
 };
@@ -56,6 +58,7 @@ export default function CanvasCityCard({
   index,
   role,
   isLast,
+  hotelLoading = false,
   onRemove,
   onAddAfter,
 }: CanvasCityCardProps) {
@@ -211,6 +214,19 @@ export default function CanvasCityCard({
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Hotel loading state — shown while a freshly added city fetches its hotel */}
+        {(!hotel || hotel.name === 'Select hotel') && hotelLoading && (
+          <div
+            className="mx-4 mb-2 px-3 py-2.5 rounded-xl flex items-center gap-2"
+            style={{ background: `${color.text}10` }}
+          >
+            <Loader2 size={11} className="animate-spin" style={{ color: `${color.text}88` }} />
+            <span className="text-[11px]" style={{ color: `${color.text}aa` }}>
+              Finding hotel…
+            </span>
           </div>
         )}
 

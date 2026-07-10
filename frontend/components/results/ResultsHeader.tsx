@@ -5,7 +5,12 @@ import { useRouter } from 'next/navigation';
 import { Calendar, Users, TrendingDown, Sparkles, PenSquare } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
-import { saveTrip } from '@/lib/api';
+import {
+  stashCanvasIntent,
+  clearCanvasIntent,
+  resolveCanvasTripId,
+  type CanvasIntent,
+} from '@/lib/canvasHandoff';
 import { useAuthStore } from '@/store/authStore';
 import { useTripStore } from '@/store/tripStore';
 import LoginModal from '@/components/shared/LoginModal';
@@ -56,49 +61,66 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const [saving, setSaving] = useState(false);
   const alreadySaved = !!trip.id && !trip.id.startsWith('mock');
 
+  // Captures the current "Edit in Canvas" request so it can be resumed after
+  // sign-in — including across the Google OAuth full-page redirect, which
+  // wipes in-memory trip state.
+  const buildCanvasIntent = (): CanvasIntent => ({
+    savedId: alreadySaved ? trip.id ?? null : null,
+    // Pass the whole trip through so new fields (budget, vibe,
+    // dateShiftSuggestion, etc.) flow to the backend.
+    payload: alreadySaved ? null : { ...trip, totalCost: liveTripTotal(trip) },
+    origin: trip.origin
+      ? { origin: trip.origin, returnToHome: trip.returnToHome ?? true }
+      : null,
+    // Current cities (including any AI-chat edits) so the canvas reflects them.
+    syncCities: trip.cities,
+  });
+
   const handleEditInCanvas = async () => {
     if (!user) {
+      // Persist the intent so it survives the OAuth redirect, then prompt
+      // sign-in. The callback page (Google) or onSuccess below (password)
+      // resumes it.
+      stashCanvasIntent(buildCanvasIntent());
       setShowLoginModal(true);
       return;
     }
 
-    // If already saved, go straight to canvas
-    if (alreadySaved) {
-      // Store origin data in localStorage so the canvas tab can read it
-      if (trip.origin) {
-        localStorage.setItem(`voyza-origin-${trip.id}`, JSON.stringify({
-          origin: trip.origin,
-          returnToHome: trip.returnToHome ?? true,
-        }));
-      }
-      window.open(`/canvas/${trip.id}`, '_blank');
-      return;
-    }
-
-    // Save first, then open canvas
+    // Already authenticated — save if needed and open canvas in a new tab.
     setSaving(true);
     try {
-      // Pass the whole trip through so new fields (budget, vibe,
-      // dateShiftSuggestion, etc.) flow to the backend.
-      const result = await saveTrip({ ...trip, totalCost: liveTripTotal(trip) });
+      const tripId = await resolveCanvasTripId(buildCanvasIntent());
+      if (!tripId) return;
 
-      setTrip({ ...trip, id: result.tripId });
-
-      // Update the browser URL so the trip is bookmarkable
-      if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        url.searchParams.set('tripId', result.tripId);
-        window.history.replaceState({}, '', url.toString());
+      if (!alreadySaved) {
+        setTrip({ ...trip, id: tripId });
+        // Update the browser URL so the trip is bookmarkable
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          url.searchParams.set('tripId', tripId);
+          window.history.replaceState({}, '', url.toString());
+        }
       }
+      window.open(`/canvas/${tripId}`, '_blank');
+    } catch {
+      // handle error silently
+    } finally {
+      setSaving(false);
+    }
+  };
 
-      // Store origin data in localStorage so the canvas tab can read it
-      if (trip.origin) {
-        localStorage.setItem(`voyza-origin-${result.tripId}`, JSON.stringify({
-          origin: trip.origin,
-          returnToHome: trip.returnToHome ?? true,
-        }));
-      }
-      window.open(`/canvas/${result.tripId}`, '_blank');
+  // Email/password sign-in completes in-place (no redirect), so the trip is
+  // still in memory. Resume straight into canvas in the same tab — opening a
+  // new tab here would be blocked since the user gesture was consumed by the
+  // async sign-in.
+  const handleLoginSuccess = async () => {
+    setSaving(true);
+    try {
+      const tripId = await resolveCanvasTripId(buildCanvasIntent());
+      clearCanvasIntent();
+      if (!tripId) return;
+      if (!alreadySaved) setTrip({ ...trip, id: tripId });
+      router.push(`/canvas/${tripId}`);
     } catch {
       // handle error silently
     } finally {
@@ -122,6 +144,24 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const baseline = trip.totalCost + trip.savings;
   const liveSavings = Math.max(0, baseline - liveTotal);
 
+  // "You can save" surfaces the single MOST valuable savings opportunity:
+  // either the routing optimization we already applied, or the date-shift
+  // suggestion (also delivered as a Voyza AI chat tip) — whichever is bigger.
+  // Fixes the deflating "You save $0" box when routing saved nothing but
+  // shifting the start date would save real money.
+  const shiftSavings = trip.dateShiftSuggestion?.savings ?? 0;
+  const shiftIsBest = shiftSavings > liveSavings;
+  const bestSavings = shiftIsBest ? shiftSavings : liveSavings;
+  const shiftDateNice = (() => {
+    const iso = trip.dateShiftSuggestion?.newStartDate;
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
+  })();
+
   // Per-person vs total display toggle is global (read from tripStore) so
   // every price across the results page — flights, hotels, transit, savings —
   // flips together with the header pill.
@@ -130,7 +170,7 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const displayedTotal =
     priceMode === 'total' ? liveTotal : Math.round(liveTotal / travelers);
   const displayedSavings =
-    priceMode === 'total' ? liveSavings : Math.round(liveSavings / travelers);
+    priceMode === 'total' ? bestSavings : Math.round(bestSavings / travelers);
   const animatedTotal = useCountUp(displayedTotal);
   const animatedSavings = useCountUp(displayedSavings);
   // Subtitle shows the alternate framing so both numbers are visible at a glance.
@@ -139,7 +179,7 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const showToggle = travelers > 1;
 
   return (
-    <div className="px-8 pt-3 pb-0">
+    <div className="px-4 pt-3 pb-0">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         {/* Left: meta + title stacked tight */}
         <div className="min-w-0">
@@ -240,13 +280,13 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
           >
             <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
               <TrendingDown size={9} />
-              <span>You save</span>
+              <span>You can save</span>
             </div>
             <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
               ${animatedSavings.toLocaleString()}
             </div>
             <div className="text-[#22c088]/50 text-[9px]">
-              vs default routing
+              {shiftIsBest ? `by starting ${shiftDateNice}` : 'vs default routing'}
             </div>
           </div>
 
@@ -273,7 +313,7 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
       <LoginModal
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
-        onSuccess={handleEditInCanvas}
+        onSuccess={handleLoginSuccess}
       />
     </div>
   );

@@ -3,15 +3,24 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
+import LoginModal from '@/components/shared/LoginModal';
 
 type NavbarProps = {
   minimal?: boolean;
+  /**
+   * Optional content rendered on the right side of the bar, just before the
+   * auth corner (results page passes its view tabs here so Flowchart /
+   * Calendar / Schedule / Map live in the navbar instead of eating a row of
+   * the page). Visually adjacent to — but independent of — the auth button.
+   */
+  tabs?: React.ReactNode;
 };
 
-export default function Navbar({ minimal = false }: NavbarProps) {
+export default function Navbar({ minimal = false, tabs }: NavbarProps) {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -47,14 +56,21 @@ export default function Navbar({ minimal = false }: NavbarProps) {
     >
       {/* Logo */}
       {!minimal ? (
-        <Link href="/" className="text-lg font-bold tracking-tight text-white">
+        <Link href="/main" className="text-lg font-bold tracking-tight text-white">
           VOYZA
         </Link>
       ) : (
         <div />
       )}
 
-      {/* Right side */}
+      {/* Center — optional page tabs (results view switcher), truly centered
+          regardless of how wide the logo / auth sides are */}
+      {tabs && (
+        <div className="absolute left-1/2 -translate-x-1/2">{tabs}</div>
+      )}
+
+      {/* Right side — the auth corner */}
+      <div className="flex items-center gap-4">
       {user ? (
         <div className="relative" ref={dropdownRef}>
           <button
@@ -91,22 +107,19 @@ export default function Navbar({ minimal = false }: NavbarProps) {
           )}
         </div>
       ) : (
-        <div className="flex items-center gap-2">
-          <Link
-            href="/auth/login"
-            className="px-4 py-1.5 rounded-full text-sm font-medium border border-white/30 text-white hover:bg-white/10 transition-colors"
-          >
-            Log in
-          </Link>
-          <Link
-            href="/auth/signup"
-            className="px-4 py-1.5 rounded-full text-sm font-medium bg-white hover:bg-gray-50 transition-colors"
-            style={{ color: '#2563eb' }}
-          >
-            Sign up
-          </Link>
-        </div>
+        // Single entry point: the LoginModal already offers Google, email
+        // sign-in, AND "Create account" — a separate Sign up button was
+        // redundant chrome.
+        <button
+          onClick={() => setLoginOpen(true)}
+          className="px-4 py-1.5 rounded-full text-sm font-medium border border-white/30 text-white hover:bg-white/10 transition-colors"
+        >
+          Log in
+        </button>
       )}
+      </div>
+
+      <LoginModal isOpen={loginOpen} onClose={() => setLoginOpen(false)} />
     </nav>
   );
 }

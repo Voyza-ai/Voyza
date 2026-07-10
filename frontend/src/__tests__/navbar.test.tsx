@@ -32,6 +32,17 @@ jest.mock('@/store/authStore', () => ({
   },
 }));
 
+// Stub the LoginModal — we only care that Navbar toggles it open. The modal
+// itself (Google/email/create-account) has its own test file.
+jest.mock('@/components/shared/LoginModal', () => {
+  const React = require('react');
+  return {
+    __esModule: true,
+    default: ({ isOpen }: any) =>
+      React.createElement('div', { 'data-testid': 'login-modal', 'data-open': String(isOpen) }),
+  };
+});
+
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import Navbar from '@/components/shared/Navbar';
@@ -42,10 +53,22 @@ beforeEach(() => {
 });
 
 describe('Navbar', () => {
-  test('shows "Log in" and "Sign up" when user is null', () => {
+  test('shows a single "Log in" button (no separate Sign up) when user is null', () => {
     render(<Navbar />);
     expect(screen.getByText('Log in')).toBeInTheDocument();
-    expect(screen.getByText('Sign up')).toBeInTheDocument();
+    expect(screen.queryByText('Sign up')).not.toBeInTheDocument();
+  });
+
+  test('clicking "Log in" opens the LoginModal', () => {
+    render(<Navbar />);
+    expect(screen.getByTestId('login-modal')).toHaveAttribute('data-open', 'false');
+    fireEvent.click(screen.getByText('Log in'));
+    expect(screen.getByTestId('login-modal')).toHaveAttribute('data-open', 'true');
+  });
+
+  test('renders content passed via the tabs prop', () => {
+    render(<Navbar tabs={<div data-testid="view-tabs">tabs</div>} />);
+    expect(screen.getByTestId('view-tabs')).toBeInTheDocument();
   });
 
   test('shows avatar with correct initials when user is logged in', () => {

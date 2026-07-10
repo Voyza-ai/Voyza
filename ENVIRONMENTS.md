@@ -41,6 +41,28 @@ frontend change → commit to dev → push → auto-deploys to voyza-dev.vercel.
   https://voyza-nine.vercel.app,https://voyza-dev.vercel.app,http://localhost:3000
   ```
 
+## Supabase Auth — Google sign-in redirect URLs
+Google OAuth **must** return the user to the SAME domain they started on, or the
+PKCE session fails (the code-verifier is stored per-domain). Supabase honors the
+app's `redirectTo` only if it matches the **Redirect URLs allowlist**; otherwise it
+silently falls back to the **Site URL** (prod) — landing OAuth on the wrong domain,
+so the user appears logged-out even though Supabase recorded the sign-in.
+
+- **Site URL:** `https://voyza-nine.vercel.app/`
+- **Redirect URLs allowlist** *(Authentication → URL Configuration)*:
+  ```
+  http://localhost:3000/**
+  http://localhost:3001/**
+  https://voyza-nine.vercel.app/**
+  https://voyza-dev.vercel.app/**
+  ```
+
+> ⚠️ **Rule: every new environment (domain) must be added here**, or Google sign-in
+> from it bounces to prod and fails to log in. Set it in the dashboard, or via the
+> Management API:
+> `PATCH https://api.supabase.com/v1/projects/vzptwvrgiaqveckrdmke/config/auth`
+> with body `{"uri_allow_list": "<comma-separated urls>"}`.
+
 ## Local development
 - Frontend: `cd frontend && npm run dev` (localhost:3000, falls back to 3001)
 - Backend: `cd backend && npm run dev` (localhost:4000)

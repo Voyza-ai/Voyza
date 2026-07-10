@@ -7,7 +7,7 @@ import LogoReveal from '@/components/welcome/LogoReveal';
 import HeroInput from '@/components/welcome/HeroInput';
 import WondersBackground from '@/components/welcome/WondersBackground';
 import LoginModal from '@/components/shared/LoginModal';
-import { User } from 'lucide-react';
+import HomeAuthButton from '@/components/welcome/HomeAuthButton';
 
 export default function WelcomePage() {
   const [phase, setPhase] = useState<
@@ -34,20 +34,14 @@ export default function WelcomePage() {
       {/* Subtle destination photo grid */}
       <WondersBackground />
 
-      {/* Login button */}
+      {/* Auth corner — "Log in" when signed out, initials avatar when signed in */}
       <motion.div
         className="fixed top-4 right-6 z-50"
         initial={{ opacity: 0 }}
         animate={{ opacity: phase === 'input' ? 1 : 0 }}
         transition={{ duration: 0.4 }}
       >
-        <button
-          onClick={() => setLoginOpen(true)}
-          className="flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/15 text-white/70 hover:text-white hover:bg-white/15 px-4 py-2 rounded-full text-sm transition-all"
-        >
-          <User size={16} />
-          <span>Log in</span>
-        </button>
+        <HomeAuthButton onLoginClick={() => setLoginOpen(true)} />
       </motion.div>
 
       <LoginModal isOpen={loginOpen} onClose={() => setLoginOpen(false)} />

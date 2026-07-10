@@ -177,7 +177,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
         `}</style>
 
         <motion.div
-          className="flex items-stretch px-12 pt-3 pb-8 min-w-max gap-6"
+          className="flex items-stretch px-3 pt-3 pb-4 min-w-max gap-6 h-full"
           initial="hidden"
           animate="visible"
           variants={{
@@ -365,8 +365,8 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                 </div>
               )}
               <HomeCard
-                city={trip.origin.city}
-                airports={trip.origin.airports}
+                city={trip.origin.returnCity ?? trip.origin.city}
+                airports={trip.origin.returnAirports ?? trip.origin.airports}
                 label="Back home"
                 direction="inbound"
                 leg={trip.origin.returnLeg ?? null}

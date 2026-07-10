@@ -118,6 +118,7 @@ router.post(
     };
 
     if (anthropic) {
+      try {
       const { DEFAULT_MODEL } = require('../services/anthropic');
       const response = await anthropic.messages.create({
         model: DEFAULT_MODEL,
@@ -153,10 +154,19 @@ Return JSON with:
       const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
       const parsed = extractJson(rawText);
       if (parsed) return res.json(parsed);
-      return res.json({ raw: rawText });
+      logger.warn('AI interpret returned unparseable output — using heuristic fallback');
+      } catch (err: any) {
+        // AI failed (e.g. depleted credits, rate limit, network). Fall through
+        // to the heuristic below so country detection / city selection still
+        // works instead of returning a 500 that the client can't act on.
+        logger.warn('AI interpret failed — using heuristic fallback', {
+          message: err?.message,
+        });
+      }
     }
 
-    // Mock response — extract city/country names from the raw input
+    // Heuristic response (also the fallback when the AI call above fails) —
+    // extract city/country names from the raw input
     const words = rawInput
       .split(/[,&+]|\band\b/i)
       .map((w) => w.trim())
@@ -166,14 +176,30 @@ Return JSON with:
     const countries: Array<{ country: string; cities: string[] }> = [];
     let needsCitySelection = false;
 
+    const seenCountry = new Set<string>();
     for (const w of words) {
       const lower = w.toLowerCase();
-      const citiesForCountry = COUNTRY_CITIES[lower];
-      if (citiesForCountry) {
-        // It's a country — add default city but flag for selection
-        destinations.push(citiesForCountry[0]);
-        countries.push({ country: w.charAt(0).toUpperCase() + w.slice(1), cities: citiesForCountry });
-        needsCitySelection = true;
+      // Match either an exact country ("Greece") or a country name embedded in
+      // a natural-language phrase ("I want to go to Greece").
+      let matchedKey = COUNTRY_CITIES[lower] ? lower : undefined;
+      if (!matchedKey) {
+        matchedKey = Object.keys(COUNTRY_CITIES).find((key) =>
+          new RegExp(`\\b${key}\\b`, 'i').test(lower),
+        );
+      }
+
+      if (matchedKey) {
+        // It's a country — flag for city selection (skip duplicates).
+        if (!seenCountry.has(matchedKey)) {
+          seenCountry.add(matchedKey);
+          const citiesForCountry = COUNTRY_CITIES[matchedKey];
+          destinations.push(citiesForCountry[0]);
+          countries.push({
+            country: matchedKey.charAt(0).toUpperCase() + matchedKey.slice(1),
+            cities: citiesForCountry,
+          });
+          needsCitySelection = true;
+        }
       } else {
         // Assume it's already a city name
         destinations.push(w.charAt(0).toUpperCase() + w.slice(1));

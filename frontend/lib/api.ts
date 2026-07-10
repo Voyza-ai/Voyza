@@ -1,14 +1,6 @@
-import { supabase } from './supabase';
+import { getAuthHeader } from './supabase';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-
-async function getAuthHeader(): Promise<Record<string, string>> {
-  if (!supabase) return {};
-  const { data } = await supabase.auth.getSession();
-  const token = data?.session?.access_token;
-  if (token) return { Authorization: `Bearer ${token}` };
-  return {};
-}
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const authHeaders = await getAuthHeader();
@@ -174,6 +166,28 @@ export async function optimizeTrip(params: {
     method: 'POST',
     body: JSON.stringify(params),
   });
+}
+
+// ─── Home Legs ───────────────────────────────────────────────
+// Live flight search for the home→first-city and last-city→home legs of a
+// trip that wasn't built by the optimizer (e.g. Browse presets). Returns
+// the optimizer's HomeLeg shape (or null per direction when no offers).
+export async function fetchHomeLegs(params: {
+  originAirports: string[];
+  firstCity: string;
+  lastCity: string;
+  startDate: string;
+  endDate?: string;
+  travelers?: number;
+  /** Search the home→first-city leg (default true). */
+  outbound?: boolean;
+  /** Search the last-city→home leg (default true). */
+  returnToHome?: boolean;
+}): Promise<{ outboundLeg: any | null; returnLeg: any | null }> {
+  return apiFetch<{ outboundLeg: any | null; returnLeg: any | null }>(
+    '/api/flights/home-legs',
+    { method: 'POST', body: JSON.stringify(params) },
+  );
 }
 
 // ─── Compare Leg ─────────────────────────────────────────────
@@ -546,6 +560,9 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
       originCity: trip.origin?.city ?? null,
       originAirports: trip.origin?.airports ?? null,
       returnToHome: typeof trip.returnToHome === 'boolean' ? trip.returnToHome : null,
+      // Back-home overrides (open-jaw) — null when returning to the origin.
+      returnCity: trip.origin?.returnCity ?? null,
+      returnAirports: trip.origin?.returnAirports ?? null,
       // Flight detail for the pill between Home and first/last city.
       // Without these, the pill disappears after reload.
       outboundLeg: trip.origin?.outboundLeg ?? null,

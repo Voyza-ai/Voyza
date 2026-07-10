@@ -477,14 +477,51 @@ router.post(
       return sum + hotelCost + transportCost;
     }, 0);
 
-    await supabase
+    const tripUpdate: Record<string, any> = {
+      title: (state.cities ?? []).map((c: any) => c.name).join(' · '),
+      total_cost: totalCost,
+      updated_at: new Date().toISOString(),
+    };
+    // Persist home-anchor edits made on the canvas (city/airport changes
+    // on the home cards) so the results page and history — which read the
+    // trips table, not the canvas session — agree.
+    if (state.trip?.origin?.city) {
+      tripUpdate.origin_city = state.trip.origin.city;
+      tripUpdate.origin_airports = Array.isArray(state.trip.origin.airports)
+        ? state.trip.origin.airports
+        : [];
+      tripUpdate.return_to_home =
+        typeof state.trip.returnToHome === 'boolean' ? state.trip.returnToHome : true;
+      // Home legs can be re-searched on the canvas — persist them so the
+      // results flowchart shows the same flights.
+      tripUpdate.outbound_leg = state.trip.origin.outboundLeg ?? null;
+      tripUpdate.return_leg = state.trip.origin.returnLeg ?? null;
+      // Independent back-home overrides (open-jaw). Only written when the
+      // user actually customized the back-home card, so pre-migration DBs
+      // aren't touched by trips that never use the feature.
+      if (state.trip.origin.returnCity) {
+        tripUpdate.return_city = state.trip.origin.returnCity;
+      }
+      if (Array.isArray(state.trip.origin.returnAirports)) {
+        tripUpdate.return_airports = state.trip.origin.returnAirports;
+      }
+    }
+
+    const { error: tripUpdateError } = await supabase
       .from('trips')
-      .update({
-        title: (state.cities ?? []).map((c: any) => c.name).join(' · '),
-        total_cost: totalCost,
-        updated_at: new Date().toISOString(),
-      })
+      .update(tripUpdate)
       .eq('id', tripId);
+
+    // Migration 003 not applied yet — retry without the return-anchor
+    // columns so the rest of the trip metadata still saves.
+    if (tripUpdateError && /return_(city|airports)/.test(tripUpdateError.message ?? '')) {
+      console.warn(
+        '[canvas save] return_city/return_airports columns missing — run supabase/migrations/003_return_home_anchor.sql',
+      );
+      delete tripUpdate.return_city;
+      delete tripUpdate.return_airports;
+      await supabase.from('trips').update(tripUpdate).eq('id', tripId);
+    }
 
     res.json({ saved: true, savedAt: new Date().toISOString() });
   }),

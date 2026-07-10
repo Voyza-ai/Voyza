@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
+import { readCanvasIntent, clearCanvasIntent, resolveCanvasTripId } from '@/lib/canvasHandoff';
 import { Suspense } from 'react';
 
 export default function AuthCallbackPage() {
@@ -45,6 +46,26 @@ function AuthCallbackInner() {
     const finish = (session: any, user: any) => {
       setSession(session);
       setUser(user);
+
+      // Did the user start an "Edit in Canvas" flow before signing in? If so,
+      // save the trip (now that we're authenticated) and go straight to the
+      // canvas instead of the page they came from.
+      const canvasIntent = readCanvasIntent();
+      if (canvasIntent) {
+        clearCanvasIntent();
+        resolveCanvasTripId(canvasIntent)
+          .then((tripId) => {
+            if (!tripId) return router.push('/history');
+            router.push(
+              canvasIntent.destination === 'results'
+                ? `/results?tripId=${tripId}`
+                : `/canvas/${tripId}`,
+            );
+          })
+          .catch(() => router.push('/history'));
+        return;
+      }
+
       let returnTo = '/history';
       try {
         const saved = sessionStorage.getItem('voyza.oauth_return_to');
