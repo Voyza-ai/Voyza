@@ -28,6 +28,7 @@ import {
   fetchHomeLegs,
   joinCanvasByLink,
   compareLeg,
+  saveTrip,
   Destination,
 } from '@/lib/api';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
@@ -84,7 +85,7 @@ export default function CanvasPage() {
         : null,
     [user],
   );
-  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp } =
+  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp, roleEvent, broadcastRoleChange } =
     useCanvasRealtime(tripId, presenceUser);
 
   // Unsaved changes detection — covers city edits AND home-card (origin)
@@ -276,7 +277,7 @@ export default function CanvasPage() {
   }, []);
 
   const handleSave = async () => {
-    if (!canEdit || !localState) return;
+    if (role !== 'owner' || !localState) return;
     setSaving(true);
     try {
       await saveCanvas(tripId, localState);
@@ -510,6 +511,34 @@ export default function CanvasPage() {
     }
   };
 
+  // Non-owners: clone the CURRENT canvas state into your own trips.
+  // Nothing touches the shared trip — it's your personal copy.
+  const handleSaveCopy = async () => {
+    const t = getLatestCanvasTrip();
+    if (!t) return;
+    setSaving(true);
+    try {
+      await saveTrip({
+        ...t,
+        id: undefined,
+        title: tripTitle,
+        totalCost: liveTripTotal(t),
+      });
+      showToast('Saved a copy to your trips', 'success');
+    } catch {
+      showToast('Could not save a copy', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Throw away local changes and return to the last saved state.
+  const handleDiscard = () => {
+    if (!savedState) return;
+    setLocalState(savedState);
+    showToast('Changes discarded', 'info');
+  };
+
   // Suggester: bundle local edits into an 'edit' proposal for the owner.
   const handlePropose = async () => {
     if (role !== 'suggester' || !localState || !hasUnsavedChanges) return;
@@ -527,6 +556,19 @@ export default function CanvasPage() {
       setSaving(false);
     }
   };
+
+  // Live permission changes: when the owner changes MY role (directly or
+  // via "apply to all"), reflect it immediately — capabilities flip
+  // in-place and a toast explains what happened. No refresh needed.
+  useEffect(() => {
+    if (!roleEvent || !user) return;
+    if (roleEvent.actor === user.id) return;
+    if (role === 'owner') return; // bulk changes never demote the owner
+    if (roleEvent.targetUserId !== user.id && roleEvent.targetUserId !== '*') return;
+    if (roleEvent.role === role) return;
+    setRole(roleEvent.role);
+    showToast(`Your access changed: you're now ${roleEvent.role === 'editor' ? 'an editor' : roleEvent.role === 'suggester' ? 'a suggester' : 'a viewer'}`, 'info');
+  }, [roleEvent, user, role, showToast]);
 
   // Toast the suggester when the owner decides on their proposal
   // (suggestion UPDATEs arrive over realtime).
@@ -705,15 +747,13 @@ export default function CanvasPage() {
     if (remoteOp.ts <= lastAppliedOpRef.current) return;
     lastAppliedOpRef.current = remoteOp.ts;
     applyingRemoteRef.current = true;
-    // The actor owns persistence (their autosave lands ~2s later) — treat
-    // the broadcast state as canonical so receivers don't show phantom
-    // "unsaved changes" for someone else's work.
+    // Receivers see live edits as UNSAVED — nothing is committed for you
+    // by someone else's edit. The owner's explicit Save persists; then the
+    // canvas-session sync marks everyone clean.
     setLocalState(remoteOp.state);
-    setSavedState(remoteOp.state);
   }, [remoteOp, user]);
 
   const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Skip the render caused by applying someone else's op.
@@ -728,26 +768,14 @@ export default function CanvasPage() {
     broadcastTimerRef.current = setTimeout(() => {
       broadcastOp(localState);
     }, 400);
-
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(async () => {
-      setSaving(true);
-      try {
-        await saveCanvas(tripId, localState);
-        setSavedState(localState);
-      } catch {
-        showToast('Autosave failed — click Save to retry', 'error');
-      } finally {
-        setSaving(false);
-      }
-    }, 2000);
-  }, [localState, canEdit, broadcastOp, tripId, showToast]);
+    // NO autosave: persistence is explicit and owner-only (the owner's
+    // Save commits the canonical trip; collaborators use Save-a-copy).
+  }, [localState, canEdit, broadcastOp]);
 
   // Clear pending timers on unmount so nothing fires into a dead tree.
   useEffect(
     () => () => {
       if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     },
     [],
   );
@@ -1070,6 +1098,17 @@ export default function CanvasPage() {
             </button>
           )}
 
+          {hasUnsavedChanges && (
+            <button
+              onClick={handleDiscard}
+              disabled={saving}
+              title="Throw away local changes and return to the last saved version"
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-gray-500 border border-gray-200 transition-all hover:bg-gray-50 hover:text-gray-700 disabled:opacity-40"
+            >
+              Discard
+            </button>
+          )}
+
           {role === 'suggester' && (
             <button
               onClick={handlePropose}
@@ -1083,16 +1122,29 @@ export default function CanvasPage() {
             </button>
           )}
 
-          {canEdit && (
+          {role === 'owner' && (
             <button
               onClick={handleSave}
               disabled={saving || !hasUnsavedChanges}
-              title="Changes autosave — click to save immediately"
+              title="Save this trip for everyone (owner only)"
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
               style={{ background: saving || hasUnsavedChanges ? '#2563eb' : '#16a34a' }}
             >
               <Save size={12} />
               {saving ? 'Saving…' : hasUnsavedChanges ? 'Save' : 'Saved ✓'}
+            </button>
+          )}
+
+          {role !== 'owner' && role !== 'viewer' && (
+            <button
+              onClick={handleSaveCopy}
+              disabled={saving}
+              title="Save the current state as your own trip — the shared trip is untouched"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium transition-all hover:bg-blue-50 disabled:opacity-40"
+              style={{ color: '#2563eb', border: '1px solid #2563eb' }}
+            >
+              <Save size={12} />
+              {saving ? 'Saving…' : 'Save a copy'}
             </button>
           )}
         </div>
@@ -1339,6 +1391,7 @@ export default function CanvasPage() {
         isOpen={showInvite}
         onClose={() => setShowInvite(false)}
         onToast={showToast}
+        onRoleChanged={broadcastRoleChange}
       />
 
       {/* ─── Share-link sign-in gate: joining requires an account ─── */}

@@ -215,10 +215,11 @@ router.post(
 
     const tripId = req.params.tripId as string;
     const role = await getMemberRole(tripId, user.id);
-    // Editors save too (live collaboration). Suggesters go through the
-    // propose/approve flow instead; viewers never write.
-    if (role !== 'owner' && role !== 'editor') {
-      throw new AppError(403, 'You need edit access to save this trip');
+    // Owner-only by design: the owner commits the canonical trip.
+    // Editors see/broadcast live edits and use "Save a copy" for their
+    // own account; suggesters go through propose/approve.
+    if (role !== 'owner') {
+      throw new AppError(403, 'Only the trip owner saves the shared trip');
     }
 
     const { state } = req.body;
@@ -661,15 +662,33 @@ router.post(
     const { email, role } = inviteSchema.parse(req.body);
     const supabase = getSupabase();
 
-    const { data } = await supabase
+    // Re-inviting the same email updates the existing row (new role) —
+    // duplicate member rows made the share dialog claim more people than
+    // were actually invited.
+    const { data: existing } = await supabase
       .from('group_members')
-      .insert({
-        trip_id: tripId,
-        invited_email: email,
-        role,
-      })
-      .select()
+      .select('id')
+      .eq('trip_id', tripId)
+      .ilike('invited_email', email)
+      .limit(1)
       .single();
+
+    const { data } = existing
+      ? await supabase
+          .from('group_members')
+          .update({ role })
+          .eq('id', existing.id)
+          .select()
+          .single()
+      : await supabase
+          .from('group_members')
+          .insert({
+            trip_id: tripId,
+            invited_email: email,
+            role,
+          })
+          .select()
+          .single();
 
     const inviteLink = `${env.FRONTEND_URL}/canvas/join/${data?.invite_token}`;
     res.status(201).json({ member: data, inviteLink });
@@ -1015,15 +1034,49 @@ router.post(
         .update({ role: linkRole })
         .eq('trip_id', tripId)
         .eq('user_id', user.id);
-    } else {
-      await supabase.from('group_members').insert({
-        trip_id: tripId,
-        user_id: user.id,
-        invited_email: user.email ?? null,
-        role: linkRole,
-        accepted_at: new Date().toISOString(),
-      });
+      res.json({ role: linkRole, joined: true });
+      return;
     }
+
+    // If this person was invited by email and is now arriving via the
+    // share link, CLAIM the pending invite row instead of inserting a
+    // second membership — the "I shared to one person but it says
+    // multiple people" duplication.
+    if (user.email) {
+      const { data: pendingInvite } = await supabase
+        .from('group_members')
+        .select('id, role')
+        .eq('trip_id', tripId)
+        .ilike('invited_email', user.email)
+        .is('user_id', null)
+        .limit(1)
+        .single();
+      if (pendingInvite) {
+        // Keep the BETTER of the invite's role and the link's role.
+        const keptRole =
+          (ROLE_RANK[pendingInvite.role] ?? 0) >= (ROLE_RANK[linkRole] ?? 0)
+            ? pendingInvite.role
+            : linkRole;
+        await supabase
+          .from('group_members')
+          .update({
+            user_id: user.id,
+            role: keptRole,
+            accepted_at: new Date().toISOString(),
+          })
+          .eq('id', pendingInvite.id);
+        res.json({ role: keptRole, joined: true });
+        return;
+      }
+    }
+
+    await supabase.from('group_members').insert({
+      trip_id: tripId,
+      user_id: user.id,
+      invited_email: user.email ?? null,
+      role: linkRole,
+      accepted_at: new Date().toISOString(),
+    });
     res.json({ role: linkRole, joined: true });
   }),
 );

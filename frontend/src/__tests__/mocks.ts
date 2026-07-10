@@ -105,6 +105,8 @@ jest.mock('@/hooks/useCanvasRealtime', () => ({
     presence: [],
     remoteOp: null,
     broadcastOp: jest.fn(),
+    roleEvent: null,
+    broadcastRoleChange: jest.fn(),
   }),
 }));
 

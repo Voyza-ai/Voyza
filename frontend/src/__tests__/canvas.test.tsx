@@ -119,7 +119,7 @@ describe('CanvasPage', () => {
     expect(screen.getByText('Full access')).toBeInTheDocument();
   });
 
-  it('editors get a Save button too (live collaboration)', async () => {
+  it('editors get Save-a-copy (not the canonical Save)', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'editor',
@@ -129,8 +129,9 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
     await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
 
-    expect(screen.getByText('Saved ✓')).toBeInTheDocument();
-    // ...but Share stays owner-only
+    expect(screen.getByText('Save a copy')).toBeInTheDocument();
+    expect(screen.queryByText('Saved ✓')).not.toBeInTheDocument();
+    // ...and Share stays owner-only
     expect(screen.queryByText('Share')).not.toBeInTheDocument();
   });
 
@@ -285,7 +286,7 @@ describe('CanvasPage', () => {
       });
     });
 
-    it('broadcasts (400ms) then autosaves (2s) after a local edit', async () => {
+    it('broadcasts a local edit but never persists it silently', async () => {
       // Real timers on purpose: fake timers wedge RTL's waitFor here.
       const broadcastOp = jest.fn();
       rt.useCanvasRealtime = () => makeRt({ broadcastOp });
@@ -303,12 +304,15 @@ describe('CanvasPage', () => {
       fireEvent.contextMenu(screen.getByText('Rome'));
       fireEvent.click(await screen.findByText('Remove city'));
 
-      // Broadcast fires on the 400ms debounce (before autosave)
+      // Broadcast fires on the 400ms debounce
       await waitFor(() => expect(broadcastOp).toHaveBeenCalled(), { timeout: 1500 });
+      // …and there is NO silent autosave — persistence is the owner's
+      // explicit Save (2.5s of quiet proves no timer fires).
+      await new Promise((r) => setTimeout(r, 2500));
       expect(mockedSaveCanvas).not.toHaveBeenCalled();
-
-      // Autosave lands at the 2s debounce
-      await waitFor(() => expect(mockedSaveCanvas).toHaveBeenCalled(), { timeout: 3500 });
+      // The owner now has an enabled Save + a Discard
+      expect(screen.getByText('Save')).toBeInTheDocument();
+      expect(screen.getByText('Discard')).toBeInTheDocument();
     }, 10000);
   });
 

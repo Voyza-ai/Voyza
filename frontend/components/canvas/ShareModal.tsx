@@ -21,6 +21,9 @@ type ShareModalProps = {
   onClose: () => void;
   /** Toast passthrough so feedback matches the canvas. */
   onToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+  /** Announce a role change over realtime ('*' = all non-owner members)
+   *  so affected people see it reflect instantly. */
+  onRoleChanged?: (targetUserId: string, role: string) => void;
 };
 
 const MODES: { key: ShareMode; icon: typeof Eye; title: string; blurb: string; joinRole: string }[] = [
@@ -54,7 +57,7 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: 'Viewer',
 };
 
-export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareModalProps) {
+export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleChanged }: ShareModalProps) {
   // Compose the link from OUR origin — the backend's FRONTEND_URL points at
   // prod, which would hand dev/localhost users a wrong-environment link.
   const composeUrl = (token?: string, fallback?: string) =>
@@ -130,6 +133,7 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
     try {
       const r = await applyRoleToMembers(tripId, role);
       setMembers((prev) => prev.map((m) => ({ ...m, role }) as TripMember));
+      onRoleChanged?.('*', role);
       toast(`${r.updated} member${r.updated === 1 ? '' : 's'} set to ${ROLE_LABELS[role]}`);
     } catch {
       toast('Could not update members', 'error');
@@ -157,6 +161,8 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast }: ShareMo
     setMembers((ms) => ms.map((m) => (m.id === memberId ? ({ ...m, role } as TripMember) : m)));
     try {
       await updateMemberRole(tripId, memberId, role);
+      const target = members.find((m) => m.id === memberId);
+      if (target?.user_id) onRoleChanged?.(target.user_id, role);
     } catch {
       setMembers(prev);
       toast('Could not change role', 'error');
