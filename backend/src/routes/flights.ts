@@ -59,6 +59,9 @@ router.post(
 // null (no offers found); callers save the trip without it.
 const homeLegsSchema = z.object({
   originAirports: z.array(z.string().min(3)).min(1),
+  /** Home city name — lets the search fall back to the metro code when
+   *  the specific airports return no offers. */
+  originCity: z.string().optional(),
   firstCity: z.string().min(1),
   lastCity: z.string().min(1),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'),
@@ -83,6 +86,7 @@ router.post(
             destinationCity: input.firstCity,
             date: clampToFuture(input.startDate),
             travelers: input.travelers,
+            originCity: input.originCity,
           })
         : Promise.resolve(null),
       input.returnToHome
@@ -92,6 +96,7 @@ router.post(
             date: clampToFuture(input.endDate ?? input.startDate),
             travelers: input.travelers,
             reverse: true,
+            originCity: input.originCity,
           })
         : Promise.resolve(null),
     ]);

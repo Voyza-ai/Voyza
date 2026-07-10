@@ -174,6 +174,8 @@ export async function optimizeTrip(params: {
 // the optimizer's HomeLeg shape (or null per direction when no offers).
 export async function fetchHomeLegs(params: {
   originAirports: string[];
+  /** Home city — enables the backend's metro-code fallback search. */
+  originCity?: string;
   firstCity: string;
   lastCity: string;
   startDate: string;
@@ -598,6 +600,9 @@ export type PatchTripBody = {
   vibe?: string | null;
   startDate?: string | null;
   dateShiftSuggestion?: any;
+  /** Backfilled home-leg flights (see results-page home-leg backfill). */
+  outboundLeg?: any;
+  returnLeg?: any;
 };
 
 export async function updateTrip(tripId: string, patch: PatchTripBody): Promise<{ trip: any }> {
