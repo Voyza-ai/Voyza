@@ -81,6 +81,9 @@ export function useCanvasRealtime(
   const [remoteOp, setRemoteOp] = useState<RemoteOp | null>(null);
   const [roleEvent, setRoleEvent] = useState<RoleEvent | null>(null);
   const [cursorEvent, setCursorEvent] = useState<CursorEvent | null>(null);
+  // Bumped to force a fresh channel after a fatal status (timeout/closed).
+  const [rejoinNonce, setRejoinNonce] = useState(0);
+  const rejoinAttemptRef = useRef(0);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   // Track identity via ref so the channel effect doesn't resubscribe on
   // every render (user object identity changes freely).
@@ -98,6 +101,10 @@ export function useCanvasRealtime(
     // the user appeared TWICE (their anon ghost + their real self) — the
     // "clicking my own share link adds another icon of me" bug.
     if (!userId) return;
+
+    // Deliberate teardown (unmount / deps change) also emits CLOSED —
+    // don't let our own cleanup schedule ghost rejoins.
+    let disposed = false;
 
     const channel = supabase
       .channel(`canvas-${tripId}`, {
@@ -173,19 +180,32 @@ export function useCanvasRealtime(
         setPresence(Array.from(byId.values()));
       })
       .subscribe(async (status) => {
+        if (disposed) return;
         setIsConnected(status === 'SUBSCRIBED');
         if (status === 'SUBSCRIBED' && userRef.current) {
+          rejoinAttemptRef.current = 0;
           await channel.track(userRef.current);
+        }
+        // Supabase Realtime channels can die for good after long idle
+        // (auth token expiry, network sleep) — the "it timed out and
+        // stopped working" report. Rebuild the channel with capped
+        // exponential backoff instead of staying dead until refresh.
+        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR' || status === 'CLOSED') {
+          const attempt = Math.min(rejoinAttemptRef.current + 1, 6);
+          rejoinAttemptRef.current = attempt;
+          const delay = Math.min(2000 * 2 ** (attempt - 1), 30000);
+          setTimeout(() => setRejoinNonce((n) => n + 1), delay);
         }
       });
 
     channelRef.current = channel;
 
     return () => {
+      disposed = true;
       channel.unsubscribe();
       channelRef.current = null;
     };
-  }, [tripId, userId]);
+  }, [tripId, userId, rejoinNonce]);
 
   const updateState = useCallback((newState: CanvasState) => {
     setCanvasState(newState);

@@ -647,13 +647,17 @@ export async function deleteCurrentUser(): Promise<{ success: boolean; deletedUs
 // ─── Trip collaboration members ─────────────────────────────
 export type TripMember = {
   id: string;
-  user_id: string | null;
-  invited_email: string | null;
+  userId: string | null;
   role: 'owner' | 'editor' | 'suggester' | 'viewer';
-  accepted_at: string | null;
-  created_at: string;
-  /** Present for the OWNER only — personal join link token for pending invites. */
-  invite_token?: string;
+  acceptedAt: string | null;
+  createdAt: string;
+  /** Real email for accepted members; invited_email for pending invites. */
+  email: string | null;
+  fullName: string | null;
+  avatarUrl: string | null;
+  pending: boolean;
+  /** Personal join-link token — non-null for the OWNER only. */
+  inviteToken: string | null;
 };
 
 export async function listTripMembers(tripId: string): Promise<{ members: TripMember[] }> {

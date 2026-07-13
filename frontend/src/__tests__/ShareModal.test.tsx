@@ -9,6 +9,7 @@ import {
   inviteToCanvas,
   listTripMembers,
   updateMemberRole,
+  transferOwnership,
 } from '@/lib/api';
 
 const mockedGetShareLink = getShareLink as jest.MockedFunction<typeof getShareLink>;
@@ -17,13 +18,33 @@ const mockedApplyRole = applyRoleToMembers as jest.MockedFunction<typeof applyRo
 const mockedInvite = inviteToCanvas as jest.MockedFunction<typeof inviteToCanvas>;
 const mockedListMembers = listTripMembers as jest.MockedFunction<typeof listTripMembers>;
 const mockedUpdateMemberRole = updateMemberRole as jest.MockedFunction<typeof updateMemberRole>;
+const mockedTransfer = transferOwnership as jest.MockedFunction<typeof transferOwnership>;
 
+const onRoleChanged = jest.fn();
 const baseProps = {
   tripId: 'trip-1',
   isOpen: true,
   onClose: jest.fn(),
   onToast: jest.fn(),
+  onRoleChanged,
 };
+
+// The real /members contract: enriched, camelCase. Round 1 mocked
+// snake_case, so the tests passed while prod silently read undefined
+// (names → "Member", no crown, role-change never broadcast).
+const member = (over: Partial<any> = {}) => ({
+  id: 'm1',
+  userId: 'u2',
+  role: 'viewer',
+  acceptedAt: '2026-07-01T00:00:00Z',
+  createdAt: '2026-07-01T00:00:00Z',
+  email: 'pal@test.com',
+  fullName: 'Pal Smith',
+  avatarUrl: null,
+  pending: false,
+  inviteToken: null,
+  ...over,
+});
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -104,21 +125,19 @@ describe('ShareModal', () => {
     });
   });
 
-  it('lists members and changes a member role', async () => {
-    mockedListMembers.mockResolvedValue({
-      members: [
-        {
-          id: 'm1',
-          user_id: 'u2',
-          invited_email: 'pal@test.com',
-          role: 'viewer',
-          accepted_at: '2026-07-01T00:00:00Z',
-          created_at: '2026-07-01T00:00:00Z',
-        } as any,
-      ],
-    });
+  it("shows the member's real NAME (not 'Member') and their email", async () => {
+    mockedListMembers.mockResolvedValue({ members: [member()] as any });
     render(<ShareModal {...baseProps} />);
-    expect(await screen.findByText('pal@test.com')).toBeInTheDocument();
+    // Regression: the enriched name must render, not the "Member" fallback.
+    expect(await screen.findByText('Pal Smith')).toBeInTheDocument();
+    expect(screen.getByText('pal@test.com')).toBeInTheDocument();
+    expect(screen.queryByText('Member')).not.toBeInTheDocument();
+  });
+
+  it('changes a member role AND broadcasts it to that user', async () => {
+    mockedListMembers.mockResolvedValue({ members: [member()] as any });
+    render(<ShareModal {...baseProps} />);
+    await screen.findByText('Pal Smith');
 
     fireEvent.change(screen.getByLabelText('Role for pal@test.com'), {
       target: { value: 'editor' },
@@ -126,5 +145,45 @@ describe('ShareModal', () => {
     await waitFor(() => {
       expect(mockedUpdateMemberRole).toHaveBeenCalledWith('trip-1', 'm1', 'editor');
     });
+    // The live-notify event MUST fire with the real userId (round 1 read
+    // undefined here, so the friend had to refresh).
+    expect(onRoleChanged).toHaveBeenCalledWith('u2', 'editor');
+  });
+
+  it('offers the crown (transfer) only for accepted members with a user', async () => {
+    mockedListMembers.mockResolvedValue({
+      members: [
+        member({ id: 'accepted', pending: false, userId: 'u2' }),
+        member({ id: 'pending', pending: true, userId: null, email: 'new@test.com', fullName: null }),
+      ] as any,
+    });
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    mockedTransfer.mockResolvedValue({ success: true, newOwnerUserId: 'u2' } as any);
+
+    render(<ShareModal {...baseProps} />);
+    await screen.findByText('Pal Smith');
+    // Accepted member has the crown; pending invite does not.
+    expect(screen.getByLabelText('Make pal@test.com the owner')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Make new@test.com the owner')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Make pal@test.com the owner'));
+    await waitFor(() => {
+      expect(mockedTransfer).toHaveBeenCalledWith('trip-1', 'accepted');
+    });
+    expect(onRoleChanged).toHaveBeenCalledWith('u2', 'owner');
+  });
+
+  it('shows a Copy-link button for a pending personal invite (owner only)', async () => {
+    mockedListMembers.mockResolvedValue({
+      members: [
+        member({ id: 'inv', pending: true, userId: null, fullName: null, email: 'new@test.com', inviteToken: 'tok-xyz' }),
+      ] as any,
+    });
+    render(<ShareModal {...baseProps} />);
+    const copyBtn = await screen.findByLabelText('Copy invite link for new@test.com');
+    fireEvent.click(copyBtn);
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining('share=tok-xyz'),
+    );
   });
 });
