@@ -703,6 +703,7 @@ export default function CanvasPage() {
     try {
       const legs = await fetchHomeLegs({
         originAirports: updates.airports,
+        originCity: updates.city,
         firstCity: first.name,
         lastCity: last.name,
         startDate: first.dates.arrival,

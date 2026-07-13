@@ -541,10 +541,14 @@ export async function buildHomeLeg(params: {
   date: string;
   travelers: number;
   reverse?: boolean;
+  /** Home city name — enables a metro-code fallback search when none of
+   *  the specific airports return offers (e.g. EWR alone comes back empty
+   *  but the NYC metro code has plenty). */
+  originCity?: string;
 }): Promise<HomeLeg | null> {
   // Pull top 4 — first becomes the main leg, rest go into alternatives
   // so the user can swap to another carrier/time without a new search.
-  const offers = await searchHomeFlights({
+  let offers = await searchHomeFlights({
     originAirports: params.originAirports,
     tripCity: params.destinationCity,
     date: params.date,
@@ -552,6 +556,27 @@ export async function buildHomeLeg(params: {
     reverse: params.reverse ?? false,
     limit: 4,
   });
+
+  // Fallback: none of the specific airports had offers — retry with the
+  // origin city's metro/primary code, which covers all its airports.
+  if (offers.length === 0 && params.originCity) {
+    try {
+      const metro = await getIataCode(params.originCity);
+      if (metro && !params.originAirports.includes(metro)) {
+        offers = await searchHomeFlights({
+          originAirports: [metro],
+          tripCity: params.destinationCity,
+          date: params.date,
+          travelers: params.travelers,
+          reverse: params.reverse ?? false,
+          limit: 4,
+        });
+      }
+    } catch {
+      // metro lookup failed — fall through to null below.
+    }
+  }
+
   if (offers.length === 0) return null;
 
   const toLeg = (o: HomeFlightOffer): Omit<HomeLeg, 'alternatives'> => ({
@@ -822,6 +847,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       destinationCity: bestOrdering[0],
       date: clampToFuture(startDate),
       travelers,
+      originCity: origin,
     });
     if (returnToHome) {
       const lastIdx = bestOrdering.length - 1;
@@ -833,6 +859,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         date: clampToFuture(addDays(startDate, totalNightsResolved)),
         travelers,
         reverse: true,
+        originCity: origin,
       });
     }
   }
