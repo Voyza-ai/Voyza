@@ -797,13 +797,47 @@ router.get(
         fullName: profile?.fullName ?? null,
         avatarUrl: profile?.avatarUrl ?? null,
         pending: !m.accepted_at,
+        // Personal join link for pending invites (owner-only; stripped below)
+        inviteToken: m.invite_token ?? null,
       };
     });
 
-    // invite_token grants access — only the owner (who sends links) sees it
+    // The trip owner may have no group_members row (ownership lives on
+    // trips.user_id) — synthesize an entry so "People with access" always
+    // shows them, with their real name/email.
+    const hasOwnerRow = enriched.some((m: any) => m.role === 'owner');
+    if (!hasOwnerRow) {
+      const { data: trip } = await supabase
+        .from('trips')
+        .select('user_id, created_at')
+        .eq('id', tripId)
+        .single();
+      if (trip?.user_id) {
+        const { data: ownerAuth } = await supabase.auth.admin.getUserById(trip.user_id);
+        const { data: ownerProfile } = await supabase
+          .from('user_profiles')
+          .select('full_name, avatar_url')
+          .eq('id', trip.user_id)
+          .single();
+        enriched.unshift({
+          id: `owner-${trip.user_id}`,
+          userId: trip.user_id,
+          role: 'owner',
+          acceptedAt: trip.created_at,
+          createdAt: trip.created_at,
+          email: ownerAuth?.user?.email ?? null,
+          fullName: ownerProfile?.full_name ?? null,
+          avatarUrl: ownerProfile?.avatar_url ?? null,
+          pending: false,
+          inviteToken: null,
+        });
+      }
+    }
+
+    // inviteToken grants access — only the owner (who sends links) sees it
     const requesterRole = await getMemberRole(tripId, user.id);
-    const safeMembers = (Array.isArray(enriched) ? enriched : []).map((mm: any) =>
-      requesterRole === 'owner' ? mm : { ...mm, invite_token: undefined },
+    const safeMembers = enriched.map((mm: any) =>
+      requesterRole === 'owner' ? mm : { ...mm, inviteToken: null },
     );
     res.json({ members: safeMembers });
   }),

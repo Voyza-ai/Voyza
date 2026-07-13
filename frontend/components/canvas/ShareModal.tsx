@@ -25,6 +25,9 @@ type ShareModalProps = {
   /** Announce a role change over realtime ('*' = all non-owner members)
    *  so affected people see it reflect instantly. */
   onRoleChanged?: (targetUserId: string, role: string) => void;
+  /** Ownership was handed off — the page demotes the (now former) owner to
+   *  editor and reloads its session. No full-page reload. */
+  onTransferred?: () => void;
 };
 
 const MODES: { key: ShareMode; icon: typeof Eye; title: string; blurb: string; joinRole: string }[] = [
@@ -58,7 +61,7 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: 'Viewer',
 };
 
-export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleChanged }: ShareModalProps) {
+export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleChanged, onTransferred }: ShareModalProps) {
   // Compose the link from OUR origin — the backend's FRONTEND_URL points at
   // prod, which would hand dev/localhost users a wrong-environment link.
   const composeUrl = (token?: string, fallback?: string) =>
@@ -170,7 +173,7 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
     try {
       await updateMemberRole(tripId, memberId, role);
       const target = members.find((m) => m.id === memberId);
-      if (target?.user_id) onRoleChanged?.(target.user_id, role);
+      if (target?.userId) onRoleChanged?.(target.userId, role);
     } catch {
       setMembers(prev);
       toast('Could not change role', 'error');
@@ -178,7 +181,7 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
   };
 
   const handleTransfer = async (member: TripMember) => {
-    const who = member.invited_email ?? 'this member';
+    const who = member.fullName ?? member.email ?? 'this member';
     if (
       !window.confirm(
         `Make ${who} the owner of this trip? You'll stay on it as an editor.`,
@@ -190,8 +193,9 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
       onRoleChanged?.(r.newOwnerUserId, 'owner');
       toast(`${who} now owns this trip — you're an editor`, 'success');
       onClose();
-      // The page reloads its session to pick up the role change.
-      window.location.reload();
+      // Demote the former owner + reload their session in place (no
+      // jarring full-page reload).
+      onTransferred?.();
     } catch {
       toast('Could not transfer ownership', 'error');
     }
@@ -359,20 +363,23 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
                           className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-medium text-white flex-shrink-0"
                           style={{ background: '#64748b' }}
                         >
-                          {(m.invited_email?.[0] ?? '?').toUpperCase()}
+                          {((m.fullName ?? m.email)?.[0] ?? '?').toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-[12px] text-gray-800 truncate">
-                            {m.invited_email ?? 'Member'}
+                            {m.fullName ?? m.email ?? 'Member'}
                           </div>
-                          {!m.accepted_at && (
+                          {m.fullName && m.email && (
+                            <div className="text-[10px] text-gray-400 truncate">{m.email}</div>
+                          )}
+                          {m.pending && (
                             <div className="text-[10px] text-amber-600">Invite pending</div>
                           )}
                         </div>
-                        {!m.accepted_at && m.invite_token && (
+                        {m.pending && m.inviteToken && (
                           <button
-                            onClick={() => copyText(composeUrl(m.invite_token), m.id)}
-                            aria-label={`Copy invite link for ${m.invited_email ?? 'member'}`}
+                            onClick={() => copyText(composeUrl(m.inviteToken ?? undefined), m.id)}
+                            aria-label={`Copy invite link for ${m.email ?? 'member'}`}
                             title="Copy this person's invite link"
                             className="flex items-center gap-1 px-2 py-1 rounded-md text-[10.5px] font-medium transition-colors"
                             style={{ color: '#2563eb', border: '1px solid #bfdbfe', background: '#eff6ff' }}
@@ -388,17 +395,17 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
                             <select
                               value={m.role}
                               onChange={(e) => changeMemberRole(m.id, e.target.value as any)}
-                              aria-label={`Role for ${m.invited_email ?? 'member'}`}
+                              aria-label={`Role for ${m.email ?? 'member'}`}
                               className="px-1.5 py-1 rounded-md border border-gray-200 text-[11px] text-gray-700 outline-none bg-white"
                             >
                               <option value="editor">Editor</option>
                               <option value="suggester">Suggester</option>
                               <option value="viewer">Viewer</option>
                             </select>
-                            {m.accepted_at && m.user_id && (
+                            {!m.pending && m.userId && (
                               <button
                                 onClick={() => handleTransfer(m)}
-                                aria-label={`Make ${m.invited_email ?? 'member'} the owner`}
+                                aria-label={`Make ${m.email ?? 'member'} the owner`}
                                 title="Transfer ownership"
                                 className="p-1 rounded-md text-gray-300 hover:text-amber-500 hover:bg-amber-50 transition-colors"
                               >
@@ -407,7 +414,8 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
                             )}
                             <button
                               onClick={() => handleRemove(m.id)}
-                              aria-label={`Remove ${m.invited_email ?? 'member'}`}
+                              disabled={m.id.startsWith('owner-')}
+                              aria-label={`Remove ${m.email ?? 'member'}`}
                               className="p-1 rounded-md text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
                             >
                               <Trash2 size={13} />

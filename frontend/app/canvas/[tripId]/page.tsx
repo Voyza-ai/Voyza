@@ -268,7 +268,12 @@ export default function CanvasPage() {
     if (hasUnsavedRef.current) return;
     setLocalState(canvasState);
     setSavedState(canvasState);
-    showToast('Trip updated by a collaborator', 'info');
+    showToast(
+      role === 'owner'
+        ? 'Trip updated by a collaborator'
+        : 'Owner saved — view updated. Use “Save a copy” to keep your own version.',
+      'info',
+    );
   }, [canvasState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -876,7 +881,13 @@ export default function CanvasPage() {
       const key = `${fromName}→${toName}`;
       setRefreshingLegs((prev) => (prev.includes(key) ? prev : [...prev, key]));
       try {
-        const result = await compareLeg({ origin: fromName, destination: toName, date, travelers });
+        let result;
+        try {
+          result = await compareLeg({ origin: fromName, destination: toName, date, travelers });
+        } catch {
+          // one retry — transient rate-limit / network blip
+          result = await compareLeg({ origin: fromName, destination: toName, date, travelers });
+        }
         const useTrain = result.recommendation === 'train' && result.trainOption;
         const opt: any = useTrain ? result.trainOption : result.flightOption;
         if (!opt) return;
@@ -972,11 +983,13 @@ export default function CanvasPage() {
       for (let i = 0; i < cities.length - 1; i++) {
         const t = cities[i].transportOut;
         const expectedTo = cities[i + 1]?.name ?? '';
+        const fromName = cities[i]?.name ?? '';
         const stale =
           !t ||
           !t.operator ||
           (t.price ?? 0) <= 0 ||
-          (t.to && expectedTo && t.to.toLowerCase() !== expectedTo.toLowerCase());
+          (t.to && expectedTo && t.to.toLowerCase() !== expectedTo.toLowerCase()) ||
+          (t.from && fromName && t.from.toLowerCase() !== fromName.toLowerCase());
         const key = `${cities[i].name}→${expectedTo}`;
         if (stale && !refreshingLegs.includes(key)) {
           const date =
@@ -1494,6 +1507,12 @@ export default function CanvasPage() {
         onClose={() => setShowInvite(false)}
         onToast={showToast}
         onRoleChanged={broadcastRoleChange}
+        onTransferred={() => {
+          // I handed ownership away → I'm an editor now; reload the
+          // session so every gate re-derives from the new role.
+          setRole('editor');
+          setSessionNonce((n) => n + 1);
+        }}
       />
 
       {/* ─── Share-link sign-in gate: joining requires an account ─── */}
