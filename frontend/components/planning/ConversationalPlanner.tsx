@@ -146,7 +146,13 @@ export default function ConversationalPlanner({
    *  code so a hallucinated 'ready' can't slip through. */
   const meetsMinimums = useCallback(() => {
     const a = useTripStore.getState().answers;
-    return Boolean(a.destinations?.length && a.dateRange?.start && a.dateRange?.end && a.travelers);
+    return Boolean(
+      a.destinations?.length &&
+        a.dateRange?.start &&
+        a.dateRange?.end &&
+        a.travelers &&
+        a.origin, // where they're flying FROM — required for the flight search
+    );
   }, []);
 
   const send = useCallback(

@@ -113,17 +113,28 @@ describe('ConversationalPlanner', () => {
     await screen.findByText('All set!');
     expect(screen.queryByText('Your trip so far')).not.toBeInTheDocument();
 
-    // Now with real minimums delivered in updates → recap + Find my trip
+    // Destinations + dates + travelers but STILL no origin → not ready yet
+    // (origin is required — you can't search flights without a departure).
     mockedConverse.mockResolvedValue({
-      reply: "That's everything!",
+      reply: 'Where are you flying from?',
       updates: {
         destinations: ['Rome'],
         dates: { start: '2026-10-01', end: '2026-10-05' },
         travelers: 2,
       },
-      action: 'ready',
+      action: 'ready', // even if the AI over-eagerly says ready, the client gate holds
     });
     await sendText('Rome, Oct 1-5, 2 people');
+    await screen.findByText('Where are you flying from?');
+    expect(screen.queryByText('Your trip so far')).not.toBeInTheDocument();
+
+    // Now origin arrives → recap + Find my trip
+    mockedConverse.mockResolvedValue({
+      reply: "That's everything!",
+      updates: { origin: 'New York' },
+      action: 'ready',
+    });
+    await sendText('from New York');
     expect(await screen.findByText('Your trip so far')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Find my trip →'));

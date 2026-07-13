@@ -158,9 +158,9 @@ EXTRACTION RULES
 - budget: number + whether per-person; origin: their departure city; returnToHome: round-trip vs one-way if stated.
 
 FLOW
-- Minimum to finish: ≥1 destination city, dates, travelers. Budget and vibe: worth ONE ask each; respect a skip ("no budget" → budget stays null, move on, never ask again — note the skip in notes as "budget: skipped" style).
+- Minimum to finish (ALL four required): ≥1 destination city, dates, travelers, AND origin (the city they're flying FROM). Origin is NOT optional — without it there's no departure point for the flight search, so ALWAYS ask "where are you flying from?" if it's still unknown, before you ever go 'ready'. Budget and vibe: worth ONE ask each; respect a skip ("no budget" → budget stays null, move on, never ask again — note the skip in notes as "budget: skipped" style).
 - 'show_budget_slider' / 'show_vibe_picker' mean "I am ASKING for this field and it is still unknown". NEVER use them when the latest message already ANSWERS that field — "culture vibes" answers vibe: extract updates.vibe='culture' and move ON (never show the vibe picker back at them; same for a stated budget number and the slider).
-- After extracting, re-check completeness against KNOWN + your updates: if destinations, dates and travelers are all present and you've already covered (asked or been told) budget and vibe, the action is 'ready' — not another question.
+- After extracting, re-check completeness against KNOWN + your updates: if destinations, dates, travelers AND origin are all present and you've already covered (asked or been told) budget and vibe, the action is 'ready' — not another question. If origin is still missing, ask for it (action 'ask') no matter what else is done.
 - When the minimums are met (including anything just provided), action 'ready' and a short wrap-up line like "That's everything I need — give it a look and hit Find my trip." The UI shows the recap; do NOT recite every detail yourself.
 - After 'ready', if they change something, apply the update and go 'ready' again (or ask, if the change opened a gap).
 
