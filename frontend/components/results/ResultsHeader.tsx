@@ -120,7 +120,9 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   // pre-optimized baseline). When the user picks a more expensive hotel the
   // savings shrink in lockstep so the comparison stays honest.
   const baseline = trip.totalCost + trip.savings;
-  const liveSavings = Math.max(0, baseline - liveTotal);
+  // Rounded — raw floats (e.g. $3,213.72) widen the savings pill enough to
+  // wrap the whole stats row below the title on narrower viewports.
+  const liveSavings = Math.max(0, Math.round(baseline - liveTotal));
 
   // "You can save" surfaces the single MOST valuable savings opportunity:
   // either the routing optimization we already applied, or the date-shift
@@ -148,7 +150,7 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const displayedTotal =
     priceMode === 'total' ? liveTotal : Math.round(liveTotal / travelers);
   const displayedSavings =
-    priceMode === 'total' ? bestSavings : Math.round(bestSavings / travelers);
+    priceMode === 'total' ? Math.round(bestSavings) : Math.round(bestSavings / travelers);
   const animatedTotal = useCountUp(displayedTotal);
   const animatedSavings = useCountUp(displayedSavings);
   // Subtitle shows the alternate framing so both numbers are visible at a glance.
@@ -189,8 +191,11 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
           </h1>
         </div>
 
-        {/* Right: toggle stacked above cost cards + save button */}
-        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+        {/* Right: toggle stacked above cost cards + save button. ml-auto
+            keeps this block pinned to the right even when flex-wrap drops
+            it onto its own row — without it, a wrapped stats row jumped to
+            the left edge and read as broken. */}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-auto">
           {/* Total / Per-person pill toggle — sits above the cards so it doesn't widen the row */}
           {showToggle && (
             <div
