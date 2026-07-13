@@ -74,6 +74,46 @@ const CONCEPTS: Record<string, string[]> = {
   cities: ['city'],
   europe: ['european'],
   asia: ['asian'],
+  // Climate & geography — descriptive words users reach for that map to
+  // trip traits rather than literal content.
+  tropical: ['jungle', 'humid', 'palm', 'island', 'beach', 'surf', 'rice', 'lagoon', 'warm'],
+  warm: ['tropical', 'sunny', 'summer', 'beach', 'mediterranean'],
+  sunny: ['warm', 'summer', 'beach', 'coastal', 'mediterranean'],
+  sunshine: ['sunny'],
+  hot: ['warm', 'tropical'],
+  cold: ['winter', 'nordic', 'glaciers', 'geothermal', 'northern'],
+  winter: ['cold', 'nordic', 'northern', 'lights', 'glaciers'],
+  snow: ['winter', 'glaciers', 'nordic'],
+  summer: ['warm', 'beach', 'mediterranean', 'islands', 'sunsets'],
+  jungle: ['tropical', 'rainforest', 'nature'],
+  paradise: ['island', 'beach', 'tropical', 'lagoon'],
+  exotic: ['tropical', 'temples', 'markets', 'bazaars'],
+  mountains: ['andes', 'hiking', 'volcano', 'nature', 'valley'],
+  volcano: ['geothermal', 'glaciers', 'mountains'],
+  waterfalls: ['waterfall', 'nature', 'geothermal'],
+  coastal: ['coast', 'seaside', 'beach', 'sunny'],
+  ocean: ['sea', 'beach', 'coastal', 'island'],
+  sea: ['coastal', 'beach', 'mediterranean', 'seaside'],
+
+  // Trip styles & occasions.
+  backpacking: ['budget', 'street', 'cheap', 'tropical'],
+  luxury: ['premium', 'resort', 'villas', 'fine'],
+  weekend: ['break', 'quick', 'escape'],
+  quick: ['weekend', 'break', 'escape'],
+  getaway: ['weekend', 'escape', 'break'],
+  escape: ['weekend', 'getaway', 'break'],
+  honeymooning: ['honeymoon'],
+  anniversary: ['romance', 'romantic', 'honeymoon'],
+  chill: ['relaxing', 'beach', 'sunsets'],
+  wellness: ['spa', 'onsen', 'geothermal', 'lagoon', 'relaxing', 'springs'],
+  spa: ['wellness', 'onsen', 'geothermal', 'springs'],
+  spiritual: ['temple', 'shrine', 'zen', 'blessing'],
+  diving: ['snorkel', 'reef', 'beach', 'island'],
+  snorkeling: ['snorkel', 'diving', 'beach'],
+  surfing: ['surf', 'beach'],
+  shopping: ['market', 'bazaar', 'markets'],
+  photography: ['sunset', 'sunsets', 'viewpoint', 'scenic', 'lights'],
+
   // Country adjectives that prefix matching alone can't bridge.
   // (japanese↔japan, german↔germany etc. work via prefix already.)
   dutch: ['netherlands', 'amsterdam'],
@@ -116,6 +156,10 @@ function buildIndex(preset: PresetItinerary): IndexedTerm[] {
   const add = (text: string | undefined, weight: number) => {
     for (const t of tokenize(text ?? '')) terms.push({ term: t, weight });
   };
+
+  // Invisible search tags — curated trip traits ("tropical", "northern
+  // lights") that users search for but visible text may not contain.
+  for (const tag of preset.searchTags ?? []) add(tag, 4);
 
   for (const city of preset.cities) {
     add(city.country, 5);
@@ -191,7 +235,10 @@ export function searchPresets(
   results.sort((a, b) => b.score - a.score);
 
   // Relevance floor: drop the noise tail — trips scoring far below the
-  // best match are barely related and dilute the "filtered" feel.
+  // best match are barely related and dilute the "filtered" feel. 45%
+  // keeps genuinely comparable trips (vague queries score everything
+  // similarly) while pruning tangential hits on specific queries, e.g.
+  // "Italy architecture" no longer drags along temple trips elsewhere.
   const top = results[0]?.score ?? 0;
-  return results.filter((r) => r.score >= top * 0.35);
+  return results.filter((r) => r.score >= top * 0.45);
 }

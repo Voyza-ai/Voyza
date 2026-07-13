@@ -42,6 +42,33 @@ describe('marketplace search', () => {
     expect(results[0].preset.slug).toBe('south-america-grand-tour');
   });
 
+  test('descriptive trait query: tropical finds the tropical trips', () => {
+    const results = searchPresets('I want to go somewhere more tropical', PRESET_ITINERARIES);
+    const slugs = results.map((r) => r.preset.slug);
+    expect(slugs).toContain('southeast-asia-adventure');
+    expect(slugs).toContain('grand-asia-expedition');
+    expect(slugs).not.toContain('reykjavik-adventure-weekend');
+  });
+
+  test('descriptive trait query: winter/cold finds Iceland, not the beach trips', () => {
+    const results = searchPresets('somewhere cold in the winter with northern lights', PRESET_ITINERARIES);
+    expect(results[0].preset.slug).toBe('reykjavik-adventure-weekend');
+  });
+
+  test('matches words from descriptions, not just place names', () => {
+    // "lantern" appears only in the SE Asia description/activities.
+    const results = searchPresets('lantern lit streets at night', PRESET_ITINERARIES);
+    expect(results[0].preset.slug).toBe('southeast-asia-adventure');
+  });
+
+  test('occasion query: wellness and hot springs finds onsen/geothermal trips', () => {
+    const results = searchPresets('spa wellness hot springs', PRESET_ITINERARIES);
+    const top2 = results.slice(0, 2).map((r) => r.preset.slug);
+    expect(top2).toEqual(
+      expect.arrayContaining(['japan-golden-route', 'reykjavik-adventure-weekend']),
+    );
+  });
+
   test('nonsense query returns no results (drives the AI-planner handoff)', () => {
     const results = searchPresets('zzqx flurbish', PRESET_ITINERARIES);
     expect(results).toHaveLength(0);
