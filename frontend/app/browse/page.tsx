@@ -16,6 +16,7 @@ import {
   Loader2,
   Search,
   Sparkles,
+  SlidersHorizontal,
 } from 'lucide-react';
 import Navbar from '@/components/shared/Navbar';
 import LoginModal from '@/components/shared/LoginModal';
@@ -28,13 +29,33 @@ import {
   presetNights,
   presetCost,
   buildPresetTrip,
+  presetVibes,
 } from '@/data/presetItineraries';
+import type { Vibe } from '@/lib/types';
 import {
   stashCanvasIntent,
   clearCanvasIntent,
   resolveCanvasTripId,
   type CanvasIntent,
 } from '@/lib/canvasHandoff';
+
+const VIBES: Array<{ key: Vibe; label: string }> = [
+  { key: 'beach', label: 'Beach' },
+  { key: 'food', label: 'Food' },
+  { key: 'history', label: 'History' },
+  { key: 'art', label: 'Art' },
+  { key: 'nature', label: 'Nature' },
+  { key: 'city', label: 'City' },
+  { key: 'nightlife', label: 'Nightlife' },
+  { key: 'romance', label: 'Romance' },
+];
+
+// Slider bounds derived from the catalog, so they stay honest as presets
+// are added. Sliders sit at their max by default, which means "any".
+const NIGHTS_MIN = Math.min(...PRESET_ITINERARIES.map(presetNights));
+const NIGHTS_MAX = Math.max(...PRESET_ITINERARIES.map(presetNights));
+const COST_MIN = Math.floor(Math.min(...PRESET_ITINERARIES.map(presetCost)) / 100) * 100;
+const COST_MAX = Math.ceil(Math.max(...PRESET_ITINERARIES.map(presetCost)) / 100) * 100;
 
 export default function BrowsePage() {
   const router = useRouter();
@@ -43,11 +64,34 @@ export default function BrowsePage() {
   const [showLogin, setShowLogin] = useState(false);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState('');
+  // Sliders filter by "at most" — full-right means no limit.
+  const [maxNights, setMaxNights] = useState(NIGHTS_MAX);
+  const [maxBudget, setMaxBudget] = useState(COST_MAX);
+  const [vibe, setVibe] = useState<Vibe | ''>('');
 
-  // Instant natural-language filter — re-scores on every keystroke, no
-  // network round-trip. Empty query shows the whole marketplace.
-  const results = useMemo(() => searchPresets(query, PRESET_ITINERARIES), [query]);
+  // Instant natural-language search — re-scores on every keystroke, no
+  // network round-trip. Empty query shows the whole marketplace. The
+  // sidebar filters then narrow whatever the search produced.
+  const searchResults = useMemo(() => searchPresets(query, PRESET_ITINERARIES), [query]);
   const isFiltering = query.trim().length > 0;
+
+  const results = useMemo(
+    () =>
+      searchResults.filter(
+        (r) =>
+          presetNights(r.preset) <= maxNights &&
+          presetCost(r.preset) <= maxBudget &&
+          (vibe === '' || presetVibes(r.preset).includes(vibe)),
+      ),
+    [searchResults, maxNights, maxBudget, vibe],
+  );
+
+  const anyFilterActive = maxNights < NIGHTS_MAX || maxBudget < COST_MAX || vibe !== '';
+  const clearFilters = () => {
+    setMaxNights(NIGHTS_MAX);
+    setMaxBudget(COST_MAX);
+    setVibe('');
+  };
 
   // A preset is an unsaved trip — reuse the same intent machinery the
   // results page uses, so login (password AND Google OAuth) resumes
@@ -104,17 +148,19 @@ export default function BrowsePage() {
     <main className="min-h-screen" style={{ background: '#f0f4f8' }}>
       <Navbar />
 
-      <div className="pt-20 px-6 pb-12 max-w-5xl mx-auto">
+      {/* Full-bleed layout — no max-width, so the filter sidebar sits right
+          at the viewport edge and the grid gets the leftover width. */}
+      <div className="pt-20 px-5 pb-12 w-full">
         {/* Header */}
-        <div className="text-center mb-6">
+        <div className="text-center mb-5">
           <h1 className="text-[26px] font-bold text-gray-900">Browse itineraries</h1>
           <p className="text-sm text-gray-500 mt-1">
             Hand-crafted trips you can make your own — open one in the canvas and start editing.
           </p>
         </div>
 
-        {/* Search */}
-        <div className="max-w-xl mx-auto mb-8">
+        {/* Search — centered on the page, above the sidebar/grid row */}
+        <div className="max-w-xl mx-auto mb-6">
           <div
             className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-white border shadow-sm focus-within:border-[#2563eb] transition-colors"
             style={{ borderColor: 'rgba(0,0,0,0.08)' }}
@@ -135,96 +181,240 @@ export default function BrowsePage() {
               </button>
             )}
           </div>
-          {isFiltering && results.length > 0 && (
-            <div className="text-[11px] text-gray-400 text-center mt-2">
-              {results.length} of {PRESET_ITINERARIES.length} itineraries match — best match first
+          {(isFiltering || anyFilterActive) && results.length > 0 && (
+            <div className="text-[11px] text-gray-400 text-center mt-2.5">
+              {results.length} of {PRESET_ITINERARIES.length} itineraries
+              {isFiltering ? ' match — best match first' : ''}
             </div>
           )}
         </div>
 
-        {/* No matches — hand off to the AI planner */}
-        {isFiltering && results.length === 0 && (
-          <div className="flex flex-col items-center py-14 text-center">
-            <div
-              className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
-              style={{ background: 'rgba(37,99,235,0.08)' }}
-            >
-              <Sparkles size={24} style={{ color: '#2563eb' }} />
-            </div>
-            <h2 className="text-[15px] font-medium text-gray-900 mb-1">
-              No ready-made trip matches that
-            </h2>
-            <p className="text-[13px] text-gray-500 mb-5 max-w-sm">
-              Our AI planner can build exactly what you described from scratch instead.
-            </p>
-            <button
-              onClick={() => router.push('/plan')}
-              className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-white transition-all hover:brightness-110"
-              style={{ background: '#2563eb' }}
-            >
-              Describe it to the AI planner
-            </button>
-          </div>
-        )}
-
-        {/* Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {results.map(({ preset }, idx) => (
-            <motion.button
-              key={preset.slug}
-              onClick={() => setSelected(preset)}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, delay: idx * 0.07, ease: 'easeOut' }}
-              whileHover={{ y: -4 }}
-              className="text-left bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow group"
-            >
-              {/* Gradient banner */}
-              <div
-                className="h-28 px-5 flex flex-col justify-end pb-3 relative"
-                style={{ background: preset.coverGradient }}
-              >
-                <span
-                  className="absolute top-3 right-3 text-[10px] font-medium px-2 py-0.5 rounded-full"
-                  style={{ background: 'rgba(255,255,255,0.25)', color: 'white' }}
+        {/* Sidebar + results. A hidden right spacer mirrors the sidebar's
+            width, so the card grid sits perfectly centered on the page —
+            on the same axis as the search bar above. */}
+        <div className="flex flex-col lg:flex-row gap-6 items-start">
+          {/* ─── Filter sidebar ─── */}
+          <aside className="w-full lg:w-60 flex-shrink-0 lg:sticky lg:top-20 bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col gap-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-gray-800 text-[13px] font-semibold">
+                <SlidersHorizontal size={14} style={{ color: '#2563eb' }} />
+                Filters
+              </div>
+              {anyFilterActive && (
+                <button
+                  onClick={clearFilters}
+                  className="text-[11px] text-gray-400 underline hover:text-gray-600 transition-colors"
                 >
-                  {preset.scope.toUpperCase()}
-                </span>
-                <div className="text-white text-[19px] font-bold leading-tight drop-shadow-sm">
-                  {preset.title}
-                </div>
-                <div className="text-white/85 text-[12px] mt-0.5">{preset.flags}</div>
-              </div>
+                  Clear all
+                </button>
+              )}
+            </div>
 
-              {/* Body */}
-              <div className="p-5">
-                <p className="text-[13px] text-gray-600 leading-relaxed mb-3">
-                  {preset.tagline}
-                </p>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-                  <span className="flex items-center gap-1">
-                    <MapPin size={12} />
-                    {preset.cities.map((c) => c.name).join(' → ')}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
-                  <div className="flex gap-4 text-xs text-gray-500">
-                    <span className="flex items-center gap-1">
-                      <Moon size={12} />
-                      {presetNights(preset)} nights
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Users size={12} />
-                      {preset.travelers}
-                    </span>
-                  </div>
-                  <span className="text-[13px] font-semibold" style={{ color: '#2563eb' }}>
-                    ~${presetCost(preset).toLocaleString()}
-                  </span>
-                </div>
+            {/* Trip length slider */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label
+                  htmlFor="filter-nights"
+                  className="text-[10px] uppercase tracking-wider text-gray-400"
+                >
+                  Trip length
+                </label>
+                <span className="text-[11px] font-medium text-gray-700">
+                  {maxNights >= NIGHTS_MAX ? 'Any' : `≤ ${maxNights} nights`}
+                </span>
               </div>
-            </motion.button>
-          ))}
+              <input
+                id="filter-nights"
+                type="range"
+                aria-label="Trip length"
+                min={NIGHTS_MIN}
+                max={NIGHTS_MAX}
+                step={1}
+                value={maxNights}
+                onChange={(e) => setMaxNights(Number(e.target.value))}
+                className="w-full cursor-pointer accent-[#2563eb]"
+              />
+              <div className="flex justify-between text-[9px] text-gray-400 mt-1">
+                <span>{NIGHTS_MIN} nights</span>
+                <span>Any</span>
+              </div>
+            </div>
+
+            {/* Budget slider */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label
+                  htmlFor="filter-budget"
+                  className="text-[10px] uppercase tracking-wider text-gray-400"
+                >
+                  Budget
+                </label>
+                <span className="text-[11px] font-medium text-gray-700">
+                  {maxBudget >= COST_MAX ? 'Any' : `≤ $${maxBudget.toLocaleString()}`}
+                </span>
+              </div>
+              <input
+                id="filter-budget"
+                type="range"
+                aria-label="Budget"
+                min={COST_MIN}
+                max={COST_MAX}
+                step={100}
+                value={maxBudget}
+                onChange={(e) => setMaxBudget(Number(e.target.value))}
+                className="w-full cursor-pointer accent-[#2563eb]"
+              />
+              <div className="flex justify-between text-[9px] text-gray-400 mt-1">
+                <span>${COST_MIN.toLocaleString()}</span>
+                <span>Any</span>
+              </div>
+            </div>
+
+            {/* Vibe dropdown */}
+            <div>
+              <label
+                htmlFor="filter-vibe"
+                className="block text-[10px] uppercase tracking-wider text-gray-400 mb-2"
+              >
+                Vibe
+              </label>
+              <select
+                id="filter-vibe"
+                aria-label="Vibe"
+                value={vibe}
+                onChange={(e) => setVibe(e.target.value as Vibe | '')}
+                className="w-full px-3 py-2 rounded-xl text-[12px] text-gray-800 outline-none cursor-pointer border transition-colors focus:border-[#2563eb]"
+                style={{ background: '#f0f4f8', borderColor: 'rgba(0,0,0,0.08)' }}
+              >
+                <option value="">Any vibe</option>
+                {VIBES.map((v) => (
+                  <option key={v.key} value={v.key}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-3">
+              {results.length} of {PRESET_ITINERARIES.length} itineraries shown
+            </div>
+          </aside>
+
+          {/* ─── Main column: results, centered with a sane max width so
+              cards grow on big screens without becoming billboards ─── */}
+          <div className="flex-1 min-w-0 flex justify-center">
+            <div className="w-full max-w-5xl">
+            {/* Search found trips, but the sidebar filters excluded them all */}
+            {searchResults.length > 0 && results.length === 0 && (
+              <div className="flex flex-col items-center py-14 text-center">
+                <h2 className="text-[15px] font-medium text-gray-900 mb-1">
+                  No trips match these filters
+                </h2>
+                <p className="text-[13px] text-gray-500 mb-5 max-w-sm">
+                  {isFiltering
+                    ? 'There are matching trips outside your current filters.'
+                    : 'Try raising the length or budget sliders, or switching the vibe.'}
+                </p>
+                <button
+                  onClick={clearFilters}
+                  className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-white transition-all hover:brightness-110"
+                  style={{ background: '#2563eb' }}
+                >
+                  Clear filters
+                </button>
+              </div>
+            )}
+
+            {/* No matches at all — hand off to the AI planner */}
+            {isFiltering && searchResults.length === 0 && (
+              <div className="flex flex-col items-center py-14 text-center">
+                <div
+                  className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
+                  style={{ background: 'rgba(37,99,235,0.08)' }}
+                >
+                  <Sparkles size={24} style={{ color: '#2563eb' }} />
+                </div>
+                <h2 className="text-[15px] font-medium text-gray-900 mb-1">
+                  No ready-made trip matches that
+                </h2>
+                <p className="text-[13px] text-gray-500 mb-5 max-w-sm">
+                  Our AI planner can build exactly what you described from scratch instead.
+                </p>
+                <button
+                  onClick={() => router.push('/plan')}
+                  className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-white transition-all hover:brightness-110"
+                  style={{ background: '#2563eb' }}
+                >
+                  Describe it to the AI planner
+                </button>
+              </div>
+            )}
+
+            {/* Cards — compact squares, 3-up on desktop */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {results.map(({ preset }, idx) => (
+                <motion.button
+                  key={preset.slug}
+                  onClick={() => setSelected(preset)}
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: idx * 0.05, ease: 'easeOut' }}
+                  whileHover={{ y: -3 }}
+                  className="text-left bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col aspect-square"
+                >
+                  {/* Gradient banner */}
+                  <div
+                    className="h-[42%] flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
+                    style={{ background: preset.coverGradient }}
+                  >
+                    <span
+                      className="absolute top-2 right-2 text-[9px] font-medium px-1.5 py-0.5 rounded-full"
+                      style={{ background: 'rgba(255,255,255,0.25)', color: 'white' }}
+                    >
+                      {preset.scope.toUpperCase()}
+                    </span>
+                    <div className="text-white text-[15px] font-bold leading-tight drop-shadow-sm line-clamp-2">
+                      {preset.title}
+                    </div>
+                    <div className="text-white/85 text-[10px] mt-0.5">{preset.flags}</div>
+                  </div>
+
+                  {/* Body */}
+                  <div className="p-3.5 flex-1 flex flex-col min-h-0">
+                    <p className="text-[11px] text-gray-600 leading-snug line-clamp-2 mb-2">
+                      {preset.tagline}
+                    </p>
+                    <div className="flex items-center gap-1 text-[10px] text-gray-500 min-w-0">
+                      <MapPin size={10} className="flex-shrink-0" />
+                      <span className="truncate">
+                        {preset.cities.map((c) => c.name).join(' → ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-100">
+                      <div className="flex gap-2.5 text-[10px] text-gray-500">
+                        <span className="flex items-center gap-0.5">
+                          <Moon size={10} />
+                          {presetNights(preset)}n
+                        </span>
+                        <span className="flex items-center gap-0.5">
+                          <Users size={10} />
+                          {preset.travelers}
+                        </span>
+                      </div>
+                      <span className="text-[12px] font-semibold" style={{ color: '#2563eb' }}>
+                        ~${presetCost(preset).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+            </div>
+          </div>
+
+          {/* Invisible mirror of the sidebar — keeps the grid centered on
+              the page axis (same center as the search bar). */}
+          <div className="hidden lg:block w-60 flex-shrink-0" aria-hidden="true" />
         </div>
       </div>
 
