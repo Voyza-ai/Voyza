@@ -14,6 +14,7 @@ import { parseLocal, toIso } from '@/lib/dateHelpers';
 import { buildDayTransportContext } from '@/lib/dayScheduleDefaults';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
+import ConversationalPlanner from './ConversationalPlanner';
 import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
@@ -87,6 +88,8 @@ type Message = {
 
 export default function PlanningChat() {
   const router = useRouter();
+  // Landing-page hero seed — handed to the conversational planner on mount.
+  const chatSeedRef = useRef<string | null>(null);
   const { answers, setAnswer, setTrip } = useTripStore();
   const [intent, setIntent] = useState<Intent | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
@@ -152,23 +155,16 @@ export default function PlanningChat() {
     const snapshotRawInput = answers.rawInput;
 
     if (snapshotRawInput) {
-      const placeSteps = PLACE_STEPS.slice(1);
-      setIntent('place');
-      setSteps(placeSteps);
-      setCurrentStepIndex(0);
-      setMessages([
-        { id: nextId(), role: 'assistant', content: `Love it — "${snapshotRawInput}". Let's make it happen.` },
-      ]);
-      setAnswer('destinations', [snapshotRawInput]);
+      // Hero-input seed → straight into the AI conversation; it parses the
+      // sentence itself (no more "treat the whole sentence as a city").
+      chatSeedRef.current = snapshotRawInput;
       setAnswer('rawInput', undefined);
-
-      window.setTimeout(() => {
-        if (!mountedRef.current) return;
-        setMessages((prev) => [
-          ...prev,
-          { id: nextId(), role: 'assistant', content: placeSteps[0].question, stepId: placeSteps[0].id },
-        ]);
-      }, 800);
+      setAnswer('planningMode', 'destination');
+      setIntent('chat');
+    } else if (useTripStore.getState().chatHistory.length > 0) {
+      // Resumed session (back from results to replan) — rejoin the
+      // conversation where it left off.
+      setIntent('chat');
     } else {
       setMessages([
         { id: nextId(), role: 'assistant', content: "What kind of trip are you planning?", stepId: 'intent' },
@@ -211,29 +207,11 @@ export default function PlanningChat() {
   const handleIntentSelect = (selectedIntent: Intent) => {
     setShowIntent(false);
 
-    // Chat mode — completely different flow
+    // Chat mode — the AI-driven conversational planner takes over the
+    // whole flow (question order is emergent, any field editable anytime).
     if (selectedIntent === 'chat') {
-      setIntent('chat');
-      setChatMode(true);
-      // Chat-mode inputs always name a destination (or the AI extracts
-      // one from the raw text). Treat it as the destination-first mode
-      // for downstream validation + routing purposes. If we later
-      // support "vibe-chat" (user describes a feeling in free text
-      // without naming a city), add a parser that flips this to 'vibe'.
       setAnswer('planningMode', 'destination');
-
-      setMessages((prev) => [
-        ...prev,
-        { id: nextId(), role: 'user', content: 'Let me just tell you' },
-      ]);
-
-      setTimeout(() => {
-        setMessages((prev) => [
-          ...prev,
-          { id: nextId(), role: 'assistant', content: "Go for it — tell me everything. Where, when, budget, vibe, who's coming — whatever you've got. I'll figure out the rest." },
-        ]);
-      }, 500);
-
+      setIntent('chat');
       return;
     }
 
@@ -2110,6 +2088,29 @@ export default function PlanningChat() {
         </Link>
       </div>
 
+      {intent === 'chat' ? (
+        <ConversationalPlanner
+          seedMessage={chatSeedRef.current ?? undefined}
+          onFindTrip={handleFindTrip}
+          findTripLoading={findTripLoading}
+          findTripStatus={findTripStatus}
+          findTripError={findTripError}
+          onSwitchToGuided={() => {
+            setIntent('place');
+            setSteps(PLACE_STEPS);
+            setCurrentStepIndex(0);
+            setMessages([
+              {
+                id: nextId(),
+                role: 'assistant',
+                content: PLACE_STEPS[0].question,
+                stepId: PLACE_STEPS[0].id,
+              },
+            ]);
+          }}
+        />
+      ) : (
+      <>
       {/* Chat area — flex-1 + min-h-0 lets the column actually scroll instead
           of pushing the pinned bottom bar off-screen. */}
       <div ref={scrollRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto px-6 pb-6">
@@ -2494,6 +2495,8 @@ export default function PlanningChat() {
             Skip this <SkipForward size={16} />
           </button>
         </motion.div>
+      )}
+      </>
       )}
     </div>
   );

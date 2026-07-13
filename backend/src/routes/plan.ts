@@ -9,6 +9,7 @@ import {
   TripConstraints,
 } from '../services/constraints';
 import { searchLegOptions, LegOption } from '../services/legOptions';
+import { converse } from '../services/planConverse';
 import { compareLeg } from '../services/compareLeg';
 import { getCityCountry } from '../data/cityCountries';
 
@@ -71,6 +72,51 @@ const interpretSchema = z.object({
   rawInput: z.string().min(1),
   userLocation: z.string().optional(),
 });
+
+// ─── POST /api/plan/converse ─────────────────────────────────
+// The conversational planner: one AI turn per user message. Replies like
+// a human agent, extracts any trip facts present (any order, several at
+// once), and tells the UI what to render next (question / city picker /
+// vibe picker / budget slider / ready recap). 503 'assistant_unavailable'
+// on AI failure so the client can offer an honest Retry.
+const converseSchema = z.object({
+  message: z.string().min(1).max(2000),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string().max(4000),
+      }),
+    )
+    .max(40)
+    .default([]),
+  known: z
+    .object({
+      destinations: z.array(z.string()).optional(),
+      origin: z.string().nullable().optional(),
+      dates: z
+        .object({ start: z.string(), end: z.string() })
+        .nullable()
+        .optional(),
+      travelers: z.number().nullable().optional(),
+      budget: z.number().nullable().optional(),
+      budgetPerPerson: z.boolean().nullable().optional(),
+      vibe: z.string().nullable().optional(),
+      returnToHome: z.boolean().nullable().optional(),
+      notes: z.string().nullable().optional(),
+    })
+    .default({}),
+  userLocation: z.string().optional(),
+});
+
+router.post(
+  '/converse',
+  asyncHandler(async (req, res) => {
+    const input = converseSchema.parse(req.body);
+    const result = await converse(input);
+    res.json(result);
+  }),
+);
 
 router.post(
   '/interpret',
