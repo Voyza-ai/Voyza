@@ -1,0 +1,8 @@
+# Railway sets NODE_ENV=production, which makes the default Nixpacks
+# `npm ci` OMIT devDependencies. But the build step (`npm run build` → tsc)
+# needs typescript + @types/*, which live in devDependencies — hence the
+# "tsc: not found" build failure. Force a full install so the compiler is
+# present at build time. The runtime still boots from the compiled dist/
+# (railway.toml startCommand = `npm run start` → node dist/index.js).
+[phases.install]
+cmds = ["npm ci --include=dev"]
