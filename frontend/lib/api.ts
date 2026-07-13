@@ -284,6 +284,50 @@ export async function suggestDestinationsForVibe(params: {
 }
 
 // ─── Plan Interpret ──────────────────────────────────────────
+// ─── Conversational planner ──────────────────────────────────
+export type ConverseAction =
+  | 'ask'
+  | 'show_city_picker'
+  | 'show_vibe_picker'
+  | 'show_budget_slider'
+  | 'ready'
+  | 'redirect';
+
+export type ConverseUpdates = {
+  destinations?: string[];
+  countries?: Array<{ country: string; cities: string[] }>;
+  origin?: string | null;
+  dates?: { start: string; end: string } | null;
+  travelers?: number | null;
+  travelersAmbiguous?: boolean;
+  budget?: number | null;
+  budgetPerPerson?: boolean | null;
+  vibe?: string | null;
+  returnToHome?: boolean | null;
+  notes?: string | null;
+};
+
+export type ConverseResponse = {
+  reply: string;
+  updates: ConverseUpdates;
+  action: ConverseAction;
+  quickReplies?: string[];
+};
+
+/** One turn of the AI trip-planning conversation. Throws on failure —
+ *  callers show an honest error + Retry (503 = assistant unavailable). */
+export async function converse(params: {
+  message: string;
+  history: Array<{ role: 'user' | 'assistant'; content: string }>;
+  known: Record<string, any>;
+  userLocation?: string;
+}): Promise<ConverseResponse> {
+  return apiFetch<ConverseResponse>('/api/plan/converse', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
 export async function interpretPlan(params: {
   rawInput: string;
   userLocation?: string;

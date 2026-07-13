@@ -129,6 +129,7 @@ jest.mock('@/lib/api', () => ({
   updateMemberRole: jest.fn().mockResolvedValue({ member: {} }),
   removeMember: jest.fn().mockResolvedValue({ success: true }),
   interpretPlan: jest.fn().mockResolvedValue({}),
+  converse: jest.fn().mockResolvedValue({ reply: 'Sounds great!', updates: {}, action: 'ask' }),
   editPlan: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
   planChat: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
   planChatSuggestions: jest.fn().mockResolvedValue({

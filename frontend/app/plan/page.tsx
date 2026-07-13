@@ -32,9 +32,22 @@ export default function PlanPage() {
   if (entryRef.current === null) {
     planPageEntryCount += 1;
     entryRef.current = planPageEntryCount;
-    // Zustand's `getState().setter()` is safe to call during render —
-    // it queues a React update rather than mutating the in-flight render
-    useTripStore.getState().resetPlanning();
+    // ?resume=1 (the "Adjust trip" path from results) keeps the whole
+    // planning session — answers AND the AI conversation — so the user
+    // can change anything without starting over. Every other entry gets
+    // the usual clean slate.
+    const resume =
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('resume') === '1';
+    if (!resume) {
+      // Zustand's `getState().setter()` is safe to call during render —
+      // it queues a React update rather than mutating the in-flight render.
+      // A landing-page rawInput seed (if present) survives the reset so
+      // the conversation opens with the user's sentence.
+      const heroSeed = useTripStore.getState().answers.rawInput;
+      useTripStore.getState().resetPlanning();
+      if (heroSeed) useTripStore.getState().setAnswer('rawInput', heroSeed);
+    }
   }
 
   return <PlanningChat />;
