@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Users, TrendingDown, Sparkles, PenSquare } from 'lucide-react';
+import { Calendar, Users, TrendingDown, Sparkles, PenSquare, MessageSquare } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
+import { useCountUp } from '@/lib/useCountUp';
 import {
   stashCanvasIntent,
   clearCanvasIntent,
@@ -29,29 +30,6 @@ const parseLocal = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1);
 };
-
-function useCountUp(target: number, duration = 1200) {
-  const [value, setValue] = useState(0);
-  const rafRef = useRef<number>(0);
-  const startRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    startRef.current = null;
-    const animate = (ts: number) => {
-      if (startRef.current === null) startRef.current = ts;
-      const elapsed = ts - startRef.current;
-      const progress = Math.min(elapsed / duration, 1);
-      // ease-out cubic
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setValue(Math.round(eased * target));
-      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
-    };
-    rafRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [target, duration]);
-
-  return value;
-}
 
 export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const router = useRouter();
@@ -297,6 +275,19 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
               already persisted (`alreadySaved`). The save-only state of
               the previous button (Saved checkmark, etc.) is rolled into
               `handleEditInCanvas`'s flow. */}
+          {/* Adjust trip — reopens the planning chat with everything
+              filled in (resume=1 keeps the conversation + answers) so the
+              user can change anything and search again. */}
+          <button
+            onClick={() => router.push('/plan?resume=1')}
+            title="Reopen the planning chat with your trip loaded — change anything and search again"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-blue-50"
+            style={{ color: '#2e6bc4', borderColor: '#2e6bc4' }}
+          >
+            <MessageSquare size={13} />
+            Adjust trip
+          </button>
+
           <button
             onClick={handleEditInCanvas}
             disabled={saving}
