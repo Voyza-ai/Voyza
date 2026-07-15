@@ -18,7 +18,8 @@ import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
-import { searchHotels, getTrip } from '@/lib/api';
+import { searchHotels, getTrip, fetchHomeLegs, updateTrip } from '@/lib/api';
+import { getOriginAirports } from '@/lib/originAirports';
 import { Hotel, City, Transport } from '@/lib/types';
 import { useAuthStore } from '@/store/authStore';
 
@@ -227,6 +228,109 @@ function ResultsPageInner() {
     });
   }, [currentTrip, updateCity]);
 
+  // Backfill missing home-leg flights so the flowchart ALWAYS shows the
+  // home↔trip flights when a home anchor exists. Covers trips saved before
+  // flights were searched, saves where the search failed, and canvas edits
+  // that never re-searched. Persists the found legs (owner PATCH) so the
+  // backfill only ever runs once per trip.
+  const homeLegsFetchedRef = useRef<string | null>(null);
+  const [homeLegSearch, setHomeLegSearch] = useState({ outbound: false, return: false });
+
+  useEffect(() => {
+    const trip = currentTrip;
+    if (!trip?.origin?.city || trip.cities.length === 0) return;
+    const key = trip.id ?? 'store-trip';
+    if (homeLegsFetchedRef.current === key) return;
+
+    const needOutbound = !trip.origin.outboundLeg;
+    const needReturn = (trip.returnToHome ?? true) && !trip.origin.returnLeg;
+    if (!needOutbound && !needReturn) return;
+    homeLegsFetchedRef.current = key;
+
+    const first = trip.cities[0];
+    const last = trip.cities[trip.cities.length - 1];
+    if (!first?.dates?.arrival) return;
+
+    // Airports may be empty on older trips — fall back to the known-airports
+    // lookup for the home city.
+    const outAirports = trip.origin.airports?.length
+      ? trip.origin.airports
+      : getOriginAirports(trip.origin.city);
+    const retAirports = trip.origin.returnAirports?.length
+      ? trip.origin.returnAirports
+      : outAirports;
+
+    const jobs: Promise<void>[] = [];
+    setHomeLegSearch({ outbound: needOutbound, return: needReturn });
+
+    const merge = (dir: 'outbound' | 'return', leg: any) => {
+      const cur = useTripStore.getState().currentTrip;
+      if (!cur?.origin) return;
+      setTrip({
+        ...cur,
+        origin: {
+          ...cur.origin,
+          ...(dir === 'outbound' ? { outboundLeg: leg } : { returnLeg: leg }),
+        },
+      });
+    };
+
+    if (needOutbound && outAirports.length > 0) {
+      jobs.push(
+        fetchHomeLegs({
+          originAirports: outAirports,
+          originCity: trip.origin.city,
+          firstCity: first.name,
+          lastCity: last.name,
+          startDate: first.dates.arrival,
+          endDate: last.dates?.departure,
+          travelers: trip.travelers ?? 1,
+          outbound: true,
+          returnToHome: false,
+        })
+          .then((r) => merge('outbound', r.outboundLeg ?? null))
+          .catch(() => {})
+          .finally(() => setHomeLegSearch((s) => ({ ...s, outbound: false }))),
+      );
+    } else {
+      setHomeLegSearch((s) => ({ ...s, outbound: false }));
+    }
+
+    if (needReturn && retAirports.length > 0) {
+      jobs.push(
+        fetchHomeLegs({
+          originAirports: retAirports,
+          originCity: trip.origin.returnCity ?? trip.origin.city,
+          firstCity: first.name,
+          lastCity: last.name,
+          startDate: first.dates.arrival,
+          endDate: last.dates?.departure,
+          travelers: trip.travelers ?? 1,
+          outbound: false,
+          returnToHome: true,
+        })
+          .then((r) => merge('return', r.returnLeg ?? null))
+          .catch(() => {})
+          .finally(() => setHomeLegSearch((s) => ({ ...s, return: false }))),
+      );
+    } else {
+      setHomeLegSearch((s) => ({ ...s, return: false }));
+    }
+
+    // Persist whatever was found so the next load doesn't re-search.
+    if (jobs.length > 0) {
+      Promise.allSettled(jobs).then(() => {
+        const cur = useTripStore.getState().currentTrip;
+        if (!cur?.id || cur.id.startsWith('mock') || !cur.origin) return;
+        if (!cur.origin.outboundLeg && !cur.origin.returnLeg) return;
+        updateTrip(cur.id, {
+          outboundLeg: cur.origin.outboundLeg ?? null,
+          returnLeg: cur.origin.returnLeg ?? null,
+        }).catch(() => {});
+      });
+    }
+  }, [currentTrip?.id, currentTrip?.origin?.city]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (loading) {
     return (
       <main className="h-screen flex items-center justify-center" style={{ background: '#f0f4f8' }}>
@@ -316,7 +420,12 @@ function ResultsPageInner() {
                 }
               />
             ) : view === 'flowchart' ? (
-              <Flowchart trip={currentTrip} onCityClick={handleCityClick} onActivitiesClick={handleActivitiesClick} />
+              <Flowchart
+                trip={currentTrip}
+                onCityClick={handleCityClick}
+                onActivitiesClick={handleActivitiesClick}
+                homeLegSearch={homeLegSearch}
+              />
             ) : view === 'schedule' ? (
               <div className="h-full min-h-0">
                 <ScheduleView trip={currentTrip} />

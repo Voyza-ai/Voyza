@@ -100,6 +100,7 @@ export async function resolveCanvasTripId(intent: CanvasIntent): Promise<string 
         const last = p.cities[p.cities.length - 1];
         const legs = await fetchHomeLegs({
           originAirports: p.origin.airports,
+          originCity: p.origin.city,
           firstCity: first.name,
           lastCity: last.name,
           startDate: first.dates?.arrival,

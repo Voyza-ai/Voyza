@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 // got consolidated into ResultsHeader (backend_gohiltalla). Keeping the
 // `Transport` type — still referenced by the homeLegToTransport helper
 // further down in this file.
-import { ChevronLeft, ChevronRight, Home } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Home, Loader2 } from 'lucide-react';
 import { Trip, HomeLeg, Transport } from '@/lib/types';
 import CityCard from './CityCard';
 import CityActivitiesCard from './CityActivitiesCard';
@@ -50,9 +50,12 @@ type FlowchartProps = {
   trip: Trip;
   onCityClick?: (cityIndex: number) => void;
   onActivitiesClick?: (cityIndex: number) => void;
+  /** True per direction while the results page is backfilling a missing
+   *  home-leg flight — shows a searching pill instead of an empty gap. */
+  homeLegSearch?: { outbound: boolean; return: boolean };
 };
 
-export default function Flowchart({ trip, onCityClick, onActivitiesClick }: FlowchartProps) {
+export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLegSearch }: FlowchartProps) {
   const setHomeLegAlternative = useTripStore((s) => s.setHomeLegAlternative);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   // Sub-card hover is independent from main card hover — each card is its
@@ -206,7 +209,10 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                 direction="outbound"
                 leg={trip.origin.outboundLeg ?? null}
               />
-              {trip.origin.outboundLeg && (
+              {/* Always show SOMETHING between home and the first city:
+                  the real flight, a searching state while the backfill
+                  runs, or an honest "no flights found" card. */}
+              {trip.origin.outboundLeg ? (
                 <div className="flex items-center flex-shrink-0 mx-2">
                   <Connector
                     transport={homeLegToTransport(
@@ -227,6 +233,33 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                     }
                     onPickAlternative={(altIdx) =>
                       setHomeLegAlternative('outbound', altIdx)
+                    }
+                  />
+                </div>
+              ) : homeLegSearch?.outbound ? (
+                <HomeLegSearchingPill />
+              ) : (
+                <div className="flex items-center flex-shrink-0 mx-2">
+                  <Connector
+                    transport={{
+                      mode: 'flight',
+                      operator: '',
+                      duration: '',
+                      price: 0,
+                      from: trip.origin.city,
+                      to: trip.cities[0]?.name ?? '',
+                      unavailable: true,
+                    }}
+                    index={-1}
+                    cityIndex={-1}
+                    isExpanded={openConnectors.has(-1)}
+                    onToggle={() =>
+                      setOpenConnectors((curr) => {
+                        const next = new Set(curr);
+                        if (next.has(-1)) next.delete(-1);
+                        else next.add(-1);
+                        return next;
+                      })
                     }
                   />
                 </div>
@@ -339,13 +372,13 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                 visible: { opacity: 1, y: 0, transition: { duration: 0.45 } },
               }}
             >
-              {trip.origin.returnLeg && (
+              {trip.origin.returnLeg ? (
                 <div className="flex items-center flex-shrink-0 mx-2">
                   <Connector
                     transport={homeLegToTransport(
                       trip.origin.returnLeg,
                       trip.cities[trip.cities.length - 1]?.name ?? '',
-                      trip.origin.city,
+                      trip.origin.returnCity ?? trip.origin.city,
                     )}
                     index={-2}
                     cityIndex={-2}
@@ -360,6 +393,33 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
                     }
                     onPickAlternative={(altIdx) =>
                       setHomeLegAlternative('return', altIdx)
+                    }
+                  />
+                </div>
+              ) : homeLegSearch?.return ? (
+                <HomeLegSearchingPill />
+              ) : (
+                <div className="flex items-center flex-shrink-0 mx-2">
+                  <Connector
+                    transport={{
+                      mode: 'flight',
+                      operator: '',
+                      duration: '',
+                      price: 0,
+                      from: trip.cities[trip.cities.length - 1]?.name ?? '',
+                      to: trip.origin.returnCity ?? trip.origin.city,
+                      unavailable: true,
+                    }}
+                    index={-2}
+                    cityIndex={-2}
+                    isExpanded={openConnectors.has(-2)}
+                    onToggle={() =>
+                      setOpenConnectors((curr) => {
+                        const next = new Set(curr);
+                        if (next.has(-2)) next.delete(-2);
+                        else next.add(-2);
+                        return next;
+                      })
                     }
                   />
                 </div>
@@ -379,6 +439,22 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick }: Flow
       {/* Hint — pinned below the scroll window */}
       <div className="flex-shrink-0 text-center pt-2 pb-1 text-gray-500 text-xs">
         Hover or use ← → keys to focus a stop · Click to open the full guide
+      </div>
+    </div>
+  );
+}
+
+/** Compact pill shown in a home connector's slot while the results page
+ *  backfills that direction's flight. */
+function HomeLegSearchingPill() {
+  return (
+    <div className="flex items-center flex-shrink-0 mx-2">
+      <div
+        className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-[12px] text-gray-500"
+        style={{ background: '#ffffff', borderColor: 'rgba(0,0,0,0.08)' }}
+      >
+        <Loader2 size={13} className="animate-spin" style={{ color: '#2563eb' }} />
+        Finding flights…
       </div>
     </div>
   );

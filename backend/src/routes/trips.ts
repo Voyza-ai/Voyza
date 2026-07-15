@@ -330,6 +330,10 @@ const patchTripSchema = z.object({
   vibe: z.string().nullable().optional(),
   startDate: z.string().nullable().optional(),
   dateShiftSuggestion: z.any().nullable().optional(),
+  // Home legs — the results page backfills these when a trip was saved
+  // without searched flights (or the search failed at save time).
+  outboundLeg: z.any().nullable().optional(),
+  returnLeg: z.any().nullable().optional(),
 });
 
 router.patch(
@@ -362,6 +366,8 @@ router.patch(
     if (body.vibe !== undefined) update.vibe = body.vibe;
     if (body.startDate !== undefined) update.start_date = body.startDate;
     if (body.dateShiftSuggestion !== undefined) update.date_shift_suggestion = body.dateShiftSuggestion;
+    if (body.outboundLeg !== undefined) update.outbound_leg = body.outboundLeg;
+    if (body.returnLeg !== undefined) update.return_leg = body.returnLeg;
 
     const { data, error } = await supabase
       .from('trips')
