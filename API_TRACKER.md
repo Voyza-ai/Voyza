@@ -18,7 +18,7 @@ dates (2026-07-20), never "last week"._
 | **Trainline affiliate** | Rail booking deep-links + commission now | thetrainline.com/about-us/partnerships | — | 🔲 | Sign up (low bar, independent of the API application) |
 | **Rail Europe** | EU rail incl. Italy — 200+ operators | Form: agent.raileurope.com/agency-registration | — | ❌ parked — form requires a Federal EIN / business doc upload | Get an EIN (free, irs.gov, ~15 min — discuss with team), then submit ([field answers](RAIL_API_APPLICATIONS.md#2-rail-europe--agency-registration-form)) |
 | **Omio Partner** | Rail + bus, 1,000+ operators (hedge) | Emailed directly (salesportal form was broken) | 2026-07-13 | 📤 emailed — awaiting reply | Nudge after ~1 week of silence |
-| **Junction** | Multimodal rail/flights (email-only) | deploy@junctionconnect.com | — | 📝 draft ready | Send email ([draft](RAIL_API_APPLICATIONS.md#4-junction--email-only)) |
+| **Junction** | Multimodal rail/flights (email-only) | deploy@junctionconnect.com | 2026-07-13 | 📤 emailed — awaiting reply | Nudge after ~1 week of silence |
 | **Duffel — LIVE token** | Real flight prices (today = sandbox data) | Verify business in Duffel dashboard | — | 🔲 | Complete verification — top data-layer priority ([plan](API_PROVIDERS.md)) |
 | **Kiwi Tequila** | LCC flights (Ryanair) | Self-serve: tequila.kiwi.com | — | 📝 draft ready | Register ([answers](APPLICATION_DRAFTS.md#1-kiwicom-tequila-flights--lccryanair)) |
 | **Booking.com affiliate** | Hotel revenue on existing links | Self-serve affiliate signup | — | 🔲 | Sign up — biggest easy revenue ([plan](API_PROVIDERS.md)) |
@@ -40,6 +40,7 @@ dates (2026-07-20), never "last week"._
 
 _Append a line whenever anything happens, newest first._
 
+- 2026-07-13 — Junction inquiry emailed to deploy@junctionconnect.com (Gohil).
 - 2026-07-13 — Omio partner inquiry emailed directly (Gohil). Their salesportal
   form wouldn't submit; noted that in the email.
 - 2026-07-13 — Rail Europe parked: agent-registration form requires an EIN/business
