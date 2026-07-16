@@ -16,7 +16,7 @@ dates (2026-07-20), never "last week"._
 | **All Aboard** | EU rail (SNCF, Renfe, NS, UK) — data + booking | Form: allaboard.eu/join · backup tech@allaboard.eu | 2026-07-13 | 📤 form submitted | Await reply; nudge via email after ~1 week of silence ([draft](RAIL_API_APPLICATIONS.md#1-all-aboard--signup-form--email-best-bet)) |
 | **Trainline Partner API** | EU rail — the long-term ceiling (270+ operators) | Form: tps.thetrainline.com/get-in-touch ([draft](TRAINLINE_APPLICATION.md)) | _[date — ask friend]_ | 📤 submitted, no response | Send follow-up ([draft](RAIL_API_APPLICATIONS.md#5-trainline--follow-up-on-the-existing-application)) |
 | **Trainline affiliate** | Rail booking deep-links + commission now | thetrainline.com/about-us/partnerships | — | 🔲 | Sign up (low bar, independent of the API application) |
-| **Rail Europe** | EU rail incl. Italy — 200+ operators | Form: agent.raileurope.com/agency-registration | — | 📝 draft ready | Submit form ([field answers](RAIL_API_APPLICATIONS.md#2-rail-europe--agency-registration-form)) |
+| **Rail Europe** | EU rail incl. Italy — 200+ operators | Form: agent.raileurope.com/agency-registration | — | ❌ parked — form requires a Federal EIN / business doc upload | Get an EIN (free, irs.gov, ~15 min — discuss with team), then submit ([field answers](RAIL_API_APPLICATIONS.md#2-rail-europe--agency-registration-form)) |
 | **Omio Partner** | Rail + bus, 1,000+ operators (hedge) | omio.com/corporate/partners | — | 📝 draft ready | Apply ([blurb](RAIL_API_APPLICATIONS.md#3-omio-partner--multimodal-hedge)) |
 | **Junction** | Multimodal rail/flights (email-only) | deploy@junctionconnect.com | — | 📝 draft ready | Send email ([draft](RAIL_API_APPLICATIONS.md#4-junction--email-only)) |
 | **Duffel — LIVE token** | Real flight prices (today = sandbox data) | Verify business in Duffel dashboard | — | 🔲 | Complete verification — top data-layer priority ([plan](API_PROVIDERS.md)) |
@@ -40,5 +40,7 @@ dates (2026-07-20), never "last week"._
 
 _Append a line whenever anything happens, newest first._
 
+- 2026-07-13 — Rail Europe parked: agent-registration form requires an EIN/business
+  document we don't have yet. Unblock = get EIN (sole prop works, no LLC needed).
 - 2026-07-13 — All Aboard join form submitted (Gohil).
 - _[date]_ — Trainline partner inquiry submitted (friend). No response as of 2026-07-13.
