@@ -86,7 +86,7 @@ export default function CanvasPage() {
         : null,
     [user],
   );
-  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp, roleEvent, broadcastRoleChange, cursorEvent, broadcastCursor, membershipNonce } =
+  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp, roleEvent, broadcastRoleChange, cursorEvent, broadcastCursor } =
     useCanvasRealtime(tripId, presenceUser);
 
   // Unsaved changes detection — covers city edits AND home-card (origin)
@@ -564,13 +564,13 @@ export default function CanvasPage() {
   };
 
   // Live permission changes, INCLUDING ownership transfer. The authoritative
-  // role lives in the DB (trips.user_id + group_members), so we never trust a
-  // broadcast payload's role blindly — doing so used to leave the former owner
-  // frozen as "owner" on other screens (and let an owner ignore demotion).
-  // Both signals below just trigger a re-fetch of the REAL role:
-  //   • roleEvent      — fast path: an owner broadcast targeting me / everyone
-  //   • membershipNonce — reliable path: the actual trips/group_members row
-  //     change, which lands even if the broadcast was missed.
+  // role lives in the DB, so we never trust a broadcast payload's role blindly
+  // — doing so used to leave the former owner frozen as "owner" on other
+  // screens (and let an owner ignore demotion). Every signal below just
+  // triggers a re-fetch of the REAL role from the server:
+  //   • role_change broadcast — fast path: the owner announces the change
+  //   • return-to-tab / reconnect — catches a broadcast missed while away
+  //   • slow poll — backstop if a broadcast is dropped while sitting here
   const roleRef = useRef(role);
   useEffect(() => {
     roleRef.current = role;
@@ -602,17 +602,21 @@ export default function CanvasPage() {
     refreshRole();
   }, [roleEvent, user, refreshRole]);
 
-  // Reliable path: any trips/group_members DB change for this trip (e.g. an
-  // ownership transfer moving trips.user_id and inserting the ex-owner's row).
+  // Backstop: broadcasts are fire-and-forget, so on the rare chance one is
+  // dropped while I'm on the canvas (connected + focused, so neither the focus
+  // nor reconnect handler fires), re-derive my role on a slow poll. Guarantees
+  // the view converges on the real role within ~25s in every case. The call is
+  // cheap and a no-op when nothing changed, so we don't bother gating on tab
+  // visibility (a backgrounded tab still self-heals rather than waiting for a
+  // return-to-focus that may never come).
   useEffect(() => {
-    if (membershipNonce === 0) return; // ignore the initial mount value
-    refreshRole();
-  }, [membershipNonce, refreshRole]);
+    const id = setInterval(refreshRole, 25000);
+    return () => clearInterval(id);
+  }, [refreshRole]);
 
-  // Safety net for signals that don't reliably arrive live — a dropped
-  // broadcast, or a role change delivered as an INSERT/UPDATE that Supabase
-  // Realtime RLS-filters for non-owners. Re-derive my role whenever I return
-  // to the tab, so a stale "owner"/"editor" can never persist unnoticed.
+  // Re-derive my role whenever I return to the tab — catches a role_change
+  // broadcast missed while I was away, so a stale "owner"/"editor" can never
+  // persist unnoticed.
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === 'visible') refreshRole();
