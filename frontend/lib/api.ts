@@ -531,6 +531,12 @@ export async function getCanvasSession(tripId: string, cities?: any[]) {
   });
 }
 
+/** Authoritative role for the current user on a trip, straight from the DB.
+ *  Used to re-derive access after a realtime ownership/membership change. */
+export async function getCanvasRole(tripId: string) {
+  return apiFetch<{ role: string | null }>(`/api/canvas/${tripId}/role`);
+}
+
 export async function saveCanvas(tripId: string, state: any) {
   return apiFetch<{ saved: boolean; savedAt: string }>(
     `/api/canvas/${tripId}/save`,

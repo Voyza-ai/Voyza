@@ -19,6 +19,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useTripStore } from '@/store/tripStore';
 import {
   getCanvasSession,
+  getCanvasRole,
   saveCanvas,
   getCanvasSuggestions,
   postCanvasSuggestion,
@@ -85,7 +86,7 @@ export default function CanvasPage() {
         : null,
     [user],
   );
-  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp, roleEvent, broadcastRoleChange, cursorEvent, broadcastCursor } =
+  const { canvasState, suggestions, isConnected, presence, remoteOp, broadcastOp, roleEvent, broadcastRoleChange, cursorEvent, broadcastCursor, membershipNonce } =
     useCanvasRealtime(tripId, presenceUser);
 
   // Unsaved changes detection — covers city edits AND home-card (origin)
@@ -562,18 +563,77 @@ export default function CanvasPage() {
     }
   };
 
-  // Live permission changes: when the owner changes MY role (directly or
-  // via "apply to all"), reflect it immediately — capabilities flip
-  // in-place and a toast explains what happened. No refresh needed.
+  // Live permission changes, INCLUDING ownership transfer. The authoritative
+  // role lives in the DB (trips.user_id + group_members), so we never trust a
+  // broadcast payload's role blindly — doing so used to leave the former owner
+  // frozen as "owner" on other screens (and let an owner ignore demotion).
+  // Both signals below just trigger a re-fetch of the REAL role:
+  //   • roleEvent      — fast path: an owner broadcast targeting me / everyone
+  //   • membershipNonce — reliable path: the actual trips/group_members row
+  //     change, which lands even if the broadcast was missed.
+  const roleRef = useRef(role);
+  useEffect(() => {
+    roleRef.current = role;
+  }, [role]);
+
+  const refreshRole = useCallback(async () => {
+    try {
+      const { role: fresh } = await getCanvasRole(tripId);
+      if (fresh && fresh !== roleRef.current) {
+        roleRef.current = fresh;
+        setRole(fresh);
+        showToast(
+          fresh === 'owner'
+            ? "You're now the owner of this trip"
+            : `Your access changed: you're now ${fresh === 'editor' ? 'an editor' : fresh === 'suggester' ? 'a suggester' : 'a viewer'}`,
+          'info',
+        );
+      }
+    } catch {
+      // transient — the next event or a manual reload reconciles
+    }
+  }, [tripId, showToast]);
+
+  // Fast path: an owner's role_change broadcast that targets me or everyone.
   useEffect(() => {
     if (!roleEvent || !user) return;
     if (roleEvent.actor === user.id) return;
-    if (role === 'owner') return; // bulk changes never demote the owner
     if (roleEvent.targetUserId !== user.id && roleEvent.targetUserId !== '*') return;
-    if (roleEvent.role === role) return;
-    setRole(roleEvent.role);
-    showToast(`Your access changed: you're now ${roleEvent.role === 'editor' ? 'an editor' : roleEvent.role === 'suggester' ? 'a suggester' : 'a viewer'}`, 'info');
-  }, [roleEvent, user, role, showToast]);
+    refreshRole();
+  }, [roleEvent, user, refreshRole]);
+
+  // Reliable path: any trips/group_members DB change for this trip (e.g. an
+  // ownership transfer moving trips.user_id and inserting the ex-owner's row).
+  useEffect(() => {
+    if (membershipNonce === 0) return; // ignore the initial mount value
+    refreshRole();
+  }, [membershipNonce, refreshRole]);
+
+  // Safety net for signals that don't reliably arrive live — a dropped
+  // broadcast, or a role change delivered as an INSERT/UPDATE that Supabase
+  // Realtime RLS-filters for non-owners. Re-derive my role whenever I return
+  // to the tab, so a stale "owner"/"editor" can never persist unnoticed.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshRole();
+    };
+    window.addEventListener('focus', refreshRole);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', refreshRole);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshRole]);
+
+  // …and whenever the realtime channel RE-connects after a drop (offline
+  // window may have missed a change). The initial connect is already covered
+  // by the session load.
+  const hasConnectedRef = useRef(false);
+  useEffect(() => {
+    if (!isConnected) return;
+    if (hasConnectedRef.current) refreshRole();
+    hasConnectedRef.current = true;
+  }, [isConnected, refreshRole]);
 
   // ── Live cursors ─────────────────────────────────────────────
   // Everyone in the canvas sees everyone else's pointer, Figma-style:

@@ -68,6 +68,9 @@ type UseCanvasRealtimeReturn = {
   cursorEvent: CursorEvent | null;
   /** Share my cursor position (content coordinates). */
   broadcastCursor: (x: number, y: number) => void;
+  /** Bumped on any trips/group_members DB change for this trip, so the page
+   *  can re-derive the viewer's role from the source of truth. */
+  membershipNonce: number;
 };
 
 export function useCanvasRealtime(
@@ -81,6 +84,11 @@ export function useCanvasRealtime(
   const [remoteOp, setRemoteOp] = useState<RemoteOp | null>(null);
   const [roleEvent, setRoleEvent] = useState<RoleEvent | null>(null);
   const [cursorEvent, setCursorEvent] = useState<CursorEvent | null>(null);
+  // Bumped whenever a DB change to trips/group_members for this trip lands, so
+  // the page can re-derive the viewer's role from the source of truth even if
+  // the role_change broadcast was missed (backgrounded tab, reconnect,
+  // joined-after-the-event). This is what makes ownership transfer reliable.
+  const [membershipNonce, setMembershipNonce] = useState(0);
   // Bumped to force a fresh channel after a fatal status (timeout/closed).
   const [rejoinNonce, setRejoinNonce] = useState(0);
   const rejoinAttemptRef = useRef(0);
@@ -154,6 +162,23 @@ export function useCanvasRealtime(
             );
           }
         },
+      )
+      // ── Membership changes (DB signal for ownership transfer) ────
+      // The canvas otherwise runs on ephemeral broadcasts: a client that's
+      // backgrounded, reconnecting, or joined after the event can miss a
+      // role_change message and never learn it was promoted or demoted.
+      // An ownership transfer DELETEs the new owner's group_members row, and
+      // that DELETE reliably reaches them (RLS-authorized) even when the
+      // broadcast doesn't — so we bump a nonce and the page re-fetches its
+      // authoritative role. NOTE: Supabase Realtime RLS-filters INSERT/UPDATE
+      // for authenticated users (only DELETE passes), so INSERT/UPDATE won't
+      // arrive here; other role changes fall back to the broadcast plus the
+      // page's focus/reconnect re-fetch. Keeping '*' is harmless and
+      // future-proof (an unexpected event just triggers a no-op re-fetch).
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'group_members', filter: `trip_id=eq.${tripId}` },
+        () => setMembershipNonce((n) => n + 1),
       )
       .on('broadcast', { event: 'canvas_op' }, ({ payload }) => {
         if (payload?.state) setRemoteOp(payload as RemoteOp);
@@ -253,5 +278,6 @@ export function useCanvasRealtime(
     broadcastRoleChange,
     cursorEvent,
     broadcastCursor,
+    membershipNonce,
   };
 }

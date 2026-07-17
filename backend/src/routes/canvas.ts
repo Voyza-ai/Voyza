@@ -206,6 +206,22 @@ router.post(
   }),
 );
 
+// ─── GET /api/canvas/:tripId/role ───────────────────────────
+// Lightweight, authoritative role lookup. The canvas re-fetches this after a
+// realtime ownership/membership change so every client re-derives its role
+// from the DB source of truth — without the full session endpoint's
+// find-or-recreate side effects. Returns `null` for non-members.
+router.get(
+  '/:tripId/role',
+  asyncHandler(async (req, res) => {
+    const user = await getUserFromToken(req.headers.authorization);
+    if (!user) throw new AppError(401, 'Authentication required');
+    const tripId = req.params.tripId as string;
+    const role = await getMemberRole(tripId, user.id);
+    res.json({ role: role ?? null });
+  }),
+);
+
 // ─── POST /api/canvas/:tripId/save ──────────────────────────
 router.post(
   '/:tripId/save',
