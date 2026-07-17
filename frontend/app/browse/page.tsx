@@ -17,6 +17,8 @@ import {
   Search,
   Sparkles,
   SlidersHorizontal,
+  Minus,
+  Plus,
 } from 'lucide-react';
 import Navbar from '@/components/shared/Navbar';
 import LoginModal from '@/components/shared/LoginModal';
@@ -28,6 +30,7 @@ import {
   PresetItinerary,
   presetNights,
   presetCost,
+  presetCostFor,
   buildPresetTrip,
   presetVibes,
 } from '@/data/presetItineraries';
@@ -61,17 +64,24 @@ export default function BrowsePage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const [selected, setSelected] = useState<PresetItinerary | null>(null);
+  // Party size for the trip being saved — asked in the detail modal; the
+  // built trip (costs, flight search, travelers) uses this value.
+  const [travelers, setTravelers] = useState(2);
   const [showLogin, setShowLogin] = useState(false);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState('');
+
+  // Deferred filters: the sidebar controls edit a DRAFT; nothing filters
+  // until the user clicks "Apply filters", which commits draft → applied.
   // Sliders filter by "at most" — full-right means no limit.
-  const [maxNights, setMaxNights] = useState(NIGHTS_MAX);
-  const [maxBudget, setMaxBudget] = useState(COST_MAX);
-  const [vibe, setVibe] = useState<Vibe | ''>('');
+  type Filters = { maxNights: number; maxBudget: number; vibe: Vibe | '' };
+  const NO_FILTERS: Filters = { maxNights: NIGHTS_MAX, maxBudget: COST_MAX, vibe: '' };
+  const [draft, setDraft] = useState<Filters>(NO_FILTERS);
+  const [applied, setApplied] = useState<Filters>(NO_FILTERS);
 
   // Instant natural-language search — re-scores on every keystroke, no
   // network round-trip. Empty query shows the whole marketplace. The
-  // sidebar filters then narrow whatever the search produced.
+  // applied sidebar filters then narrow whatever the search produced.
   const searchResults = useMemo(() => searchPresets(query, PRESET_ITINERARIES), [query]);
   const isFiltering = query.trim().length > 0;
 
@@ -79,25 +89,31 @@ export default function BrowsePage() {
     () =>
       searchResults.filter(
         (r) =>
-          presetNights(r.preset) <= maxNights &&
-          presetCost(r.preset) <= maxBudget &&
-          (vibe === '' || presetVibes(r.preset).includes(vibe)),
+          presetNights(r.preset) <= applied.maxNights &&
+          presetCost(r.preset) <= applied.maxBudget &&
+          (applied.vibe === '' || presetVibes(r.preset).includes(applied.vibe)),
       ),
-    [searchResults, maxNights, maxBudget, vibe],
+    [searchResults, applied],
   );
 
-  const anyFilterActive = maxNights < NIGHTS_MAX || maxBudget < COST_MAX || vibe !== '';
+  const filtersDirty =
+    draft.maxNights !== applied.maxNights ||
+    draft.maxBudget !== applied.maxBudget ||
+    draft.vibe !== applied.vibe;
+  const anyFilterActive =
+    applied.maxNights < NIGHTS_MAX || applied.maxBudget < COST_MAX || applied.vibe !== '';
+
+  const applyFilters = () => setApplied(draft);
   const clearFilters = () => {
-    setMaxNights(NIGHTS_MAX);
-    setMaxBudget(COST_MAX);
-    setVibe('');
+    setDraft(NO_FILTERS);
+    setApplied(NO_FILTERS);
   };
 
   // A preset is an unsaved trip — reuse the same intent machinery the
   // results page uses, so login (password AND Google OAuth) resumes
   // straight into the save.
   const buildIntent = (preset: PresetItinerary): CanvasIntent => {
-    const trip = buildPresetTrip(preset);
+    const trip = buildPresetTrip(preset, travelers);
     return {
       savedId: null,
       payload: trip,
@@ -200,7 +216,7 @@ export default function BrowsePage() {
                 <SlidersHorizontal size={14} style={{ color: '#2563eb' }} />
                 Filters
               </div>
-              {anyFilterActive && (
+              {(anyFilterActive || filtersDirty) && (
                 <button
                   onClick={clearFilters}
                   className="text-[11px] text-gray-400 underline hover:text-gray-600 transition-colors"
@@ -220,7 +236,7 @@ export default function BrowsePage() {
                   Trip length
                 </label>
                 <span className="text-[11px] font-medium text-gray-700">
-                  {maxNights >= NIGHTS_MAX ? 'Any' : `≤ ${maxNights} nights`}
+                  {draft.maxNights >= NIGHTS_MAX ? 'Any' : `≤ ${draft.maxNights} nights`}
                 </span>
               </div>
               <input
@@ -230,8 +246,8 @@ export default function BrowsePage() {
                 min={NIGHTS_MIN}
                 max={NIGHTS_MAX}
                 step={1}
-                value={maxNights}
-                onChange={(e) => setMaxNights(Number(e.target.value))}
+                value={draft.maxNights}
+                onChange={(e) => setDraft((d) => ({ ...d, maxNights: Number(e.target.value) }))}
                 className="w-full cursor-pointer accent-[#2563eb]"
               />
               <div className="flex justify-between text-[9px] text-gray-400 mt-1">
@@ -250,7 +266,7 @@ export default function BrowsePage() {
                   Budget
                 </label>
                 <span className="text-[11px] font-medium text-gray-700">
-                  {maxBudget >= COST_MAX ? 'Any' : `≤ $${maxBudget.toLocaleString()}`}
+                  {draft.maxBudget >= COST_MAX ? 'Any' : `≤ $${draft.maxBudget.toLocaleString()}`}
                 </span>
               </div>
               <input
@@ -260,8 +276,8 @@ export default function BrowsePage() {
                 min={COST_MIN}
                 max={COST_MAX}
                 step={100}
-                value={maxBudget}
-                onChange={(e) => setMaxBudget(Number(e.target.value))}
+                value={draft.maxBudget}
+                onChange={(e) => setDraft((d) => ({ ...d, maxBudget: Number(e.target.value) }))}
                 className="w-full cursor-pointer accent-[#2563eb]"
               />
               <div className="flex justify-between text-[9px] text-gray-400 mt-1">
@@ -281,8 +297,8 @@ export default function BrowsePage() {
               <select
                 id="filter-vibe"
                 aria-label="Vibe"
-                value={vibe}
-                onChange={(e) => setVibe(e.target.value as Vibe | '')}
+                value={draft.vibe}
+                onChange={(e) => setDraft((d) => ({ ...d, vibe: e.target.value as Vibe | '' }))}
                 className="w-full px-3 py-2 rounded-xl text-[12px] text-gray-800 outline-none cursor-pointer border transition-colors focus:border-[#2563eb]"
                 style={{ background: '#f0f4f8', borderColor: 'rgba(0,0,0,0.08)' }}
               >
@@ -295,15 +311,28 @@ export default function BrowsePage() {
               </select>
             </div>
 
+            {/* Apply — filters only take effect when clicked */}
+            <button
+              onClick={applyFilters}
+              disabled={!filtersDirty}
+              className="w-full py-2.5 rounded-xl text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100"
+              style={{ background: '#2563eb' }}
+            >
+              Apply filters
+            </button>
+
             <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-3">
               {results.length} of {PRESET_ITINERARIES.length} itineraries shown
+              {filtersDirty && (
+                <span className="block mt-1 text-amber-600">
+                  Unapplied changes — click Apply
+                </span>
+              )}
             </div>
           </aside>
 
-          {/* ─── Main column: results, centered with a sane max width so
-              cards grow on big screens without becoming billboards ─── */}
-          <div className="flex-1 min-w-0 flex justify-center">
-            <div className="w-full max-w-5xl">
+          {/* ─── Main column: results fill all remaining width ─── */}
+          <div className="flex-1 min-w-0">
             {/* Search found trips, but the sidebar filters excluded them all */}
             {searchResults.length > 0 && results.length === 0 && (
               <div className="flex flex-col items-center py-14 text-center">
@@ -355,16 +384,19 @@ export default function BrowsePage() {
               {results.map(({ preset }, idx) => (
                 <motion.button
                   key={preset.slug}
-                  onClick={() => setSelected(preset)}
+                  onClick={() => {
+                    setSelected(preset);
+                    setTravelers(preset.travelers);
+                  }}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: idx * 0.05, ease: 'easeOut' }}
                   whileHover={{ y: -3 }}
-                  className="text-left bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col aspect-square"
+                  className="text-left bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col min-h-[420px]"
                 >
                   {/* Gradient banner */}
                   <div
-                    className="h-[42%] flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
+                    className="h-44 flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
                     style={{ background: preset.coverGradient }}
                   >
                     <span
@@ -380,17 +412,56 @@ export default function BrowsePage() {
                   </div>
 
                   {/* Body */}
-                  <div className="p-3.5 flex-1 flex flex-col min-h-0">
-                    <p className="text-[11px] text-gray-600 leading-snug line-clamp-2 mb-2">
+                  <div className="p-4 flex-1 flex flex-col min-h-0">
+                    <p className="text-[12px] text-gray-600 leading-snug mb-2">
                       {preset.tagline}
                     </p>
-                    <div className="flex items-center gap-1 text-[10px] text-gray-500 min-w-0">
-                      <MapPin size={10} className="flex-shrink-0" />
+                    <div className="flex items-center gap-1 text-[11px] text-gray-500 min-w-0 mb-2.5">
+                      <MapPin size={11} className="flex-shrink-0" />
                       <span className="truncate">
                         {preset.cities.map((c) => c.name).join(' → ')}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-100">
+
+                    {/* Vibe chips */}
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      {presetVibes(preset).slice(0, 4).map((v) => (
+                        <span
+                          key={v}
+                          className="px-2 py-0.5 rounded-full text-[9px] font-medium uppercase tracking-wider"
+                          style={{ background: 'rgba(37,99,235,0.07)', color: '#2563eb' }}
+                        >
+                          {v}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Highlights — the best moment from each city */}
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-1.5">
+                        Highlights
+                      </div>
+                      <ul className="flex flex-col gap-1.5">
+                        {preset.cities.slice(0, 4).map(
+                          (c) =>
+                            c.activities[0] && (
+                              <li
+                                key={c.name}
+                                className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-snug"
+                              >
+                                <Sparkles
+                                  size={10}
+                                  className="flex-shrink-0 mt-0.5"
+                                  style={{ color: '#2563eb' }}
+                                />
+                                <span>{c.activities[0]}</span>
+                              </li>
+                            ),
+                        )}
+                      </ul>
+                    </div>
+
+                    <div className="flex items-center justify-between mt-auto pt-3 border-t border-gray-100">
                       <div className="flex gap-2.5 text-[10px] text-gray-500">
                         <span className="flex items-center gap-0.5">
                           <Moon size={10} />
@@ -409,12 +480,7 @@ export default function BrowsePage() {
                 </motion.button>
               ))}
             </div>
-            </div>
           </div>
-
-          {/* Invisible mirror of the sidebar — keeps the grid centered on
-              the page axis (same center as the search bar). */}
-          <div className="hidden lg:block w-60 flex-shrink-0" aria-hidden="true" />
         </div>
       </div>
 
@@ -464,9 +530,9 @@ export default function BrowsePage() {
                       <Moon size={12} /> {presetNights(selected)} nights
                     </span>
                     <span className="flex items-center gap-1">
-                      <Users size={12} /> {selected.travelers} travelers
+                      <Users size={12} /> {travelers} {travelers === 1 ? 'traveler' : 'travelers'}
                     </span>
-                    <span className="font-semibold">~${presetCost(selected).toLocaleString()}</span>
+                    <span className="font-semibold">~${presetCostFor(selected, travelers).toLocaleString()}</span>
                   </div>
                 </div>
 
@@ -536,9 +602,36 @@ export default function BrowsePage() {
 
                 {/* Footer */}
                 <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
-                  <span className="text-[11px] text-gray-400">
-                    Saves to your trips — edit it however you like after
-                  </span>
+                  {/* Ask party size before saving — the built itinerary uses it */}
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-xl"
+                      style={{ background: '#f0f4f8', border: '1px solid rgba(0,0,0,0.08)' }}
+                    >
+                      <Users size={13} className="text-gray-400" />
+                      <span className="text-[12px] text-gray-600">Travelers</span>
+                      <button
+                        aria-label="Fewer travelers"
+                        onClick={() => setTravelers((t) => Math.max(1, t - 1))}
+                        className="w-6 h-6 rounded-lg flex items-center justify-center text-gray-500 hover:bg-white hover:text-gray-800 transition-colors"
+                      >
+                        <Minus size={12} />
+                      </button>
+                      <span className="text-[13px] font-semibold text-gray-900 w-5 text-center tabular-nums">
+                        {travelers}
+                      </span>
+                      <button
+                        aria-label="More travelers"
+                        onClick={() => setTravelers((t) => Math.min(12, t + 1))}
+                        className="w-6 h-6 rounded-lg flex items-center justify-center text-gray-500 hover:bg-white hover:text-gray-800 transition-colors"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                    <span className="text-[11px] text-gray-400 hidden sm:inline">
+                      Saves to your trips
+                    </span>
+                  </div>
                   <div className="flex gap-2">
                     <button
                       onClick={() => setSelected(null)}

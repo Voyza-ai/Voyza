@@ -893,14 +893,22 @@ export function presetBudgetBucket(preset: PresetItinerary): BudgetBucket {
   return 'premium';
 }
 
-/** Rough all-in cost: hotels + inter-city transport for the whole party. */
-export function presetCost(preset: PresetItinerary): number {
-  const hotels = preset.cities.reduce((s, c) => s + c.hotel.pricePerNight * c.nights, 0);
+/** Rough all-in cost for a given party size: hotel rooms sleep 2, so rooms
+ *  scale at ceil(travelers/2); inter-city transport is per person. */
+export function presetCostFor(preset: PresetItinerary, travelers: number): number {
+  const rooms = Math.max(1, Math.ceil(travelers / 2));
+  const hotels =
+    preset.cities.reduce((s, c) => s + c.hotel.pricePerNight * c.nights, 0) * rooms;
   const transport = preset.cities.reduce(
-    (s, c) => s + (c.transportOut?.price ?? 0) * preset.travelers,
+    (s, c) => s + (c.transportOut?.price ?? 0) * travelers,
     0,
   );
   return Math.round(hotels + transport);
+}
+
+/** Cost at the preset's default party size — used on the browse cards. */
+export function presetCost(preset: PresetItinerary): number {
+  return presetCostFor(preset, preset.travelers);
 }
 
 /**
@@ -910,7 +918,10 @@ export function presetCost(preset: PresetItinerary): number {
  * stable colorIndex slots — so the canvas treats it exactly like a trip
  * the user planned themselves.
  */
-export function buildPresetTrip(preset: PresetItinerary): Trip {
+export function buildPresetTrip(
+  preset: PresetItinerary,
+  travelers: number = preset.travelers,
+): Trip {
   const start = new Date();
   start.setDate(start.getDate() + 30);
 
@@ -949,9 +960,9 @@ export function buildPresetTrip(preset: PresetItinerary): Trip {
   return {
     title: preset.title,
     status: 'planning',
-    totalCost: presetCost(preset),
+    totalCost: presetCostFor(preset, travelers),
     savings: 0,
-    travelers: preset.travelers,
+    travelers,
     cities,
     savingsTips: [],
     // Default home anchor — every preset starts from New York (JFK).
