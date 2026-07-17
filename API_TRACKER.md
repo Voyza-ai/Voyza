@@ -20,7 +20,7 @@ dates (2026-07-20), never "last week"._
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
 | Duffel live token | 🔲 not started | — |
-| Kiwi Tequila | 📝 draft ready | — |
+| Kiwi Tequila | 📤 awaiting reply | 2026-07-16 |
 | Booking.com affiliate | 🔲 not started | — |
 | Travelpayouts | 📝 draft ready | — |
 | Direct Ferries | 📝 draft ready | — |
@@ -76,10 +76,13 @@ dates (2026-07-20), never "last week"._
 - **Next:** complete business verification in the Duffel dashboard.
   Same EIN conversation as Rail Europe unblocks this.
 
-### Kiwi Tequila  📝
-- **For:** LCC flights (Ryanair) that Duffel misses. Self-serve.
-- **Next:** register at tequila.kiwi.com —
-  [answers](APPLICATION_DRAFTS.md#1-kiwicom-tequila-flights--lccryanair)
+### Kiwi Tequila  📤
+- **For:** LCC flights (Ryanair) that Duffel misses.
+- **Sent:** 2026-07-16 — emailed affiliates@kiwi.com. Tequila's portal no
+  longer offers open self-serve signup (login is magic-link only; the page
+  directs new affiliates to that address).
+- **Next:** wait; nudge after ~2026-07-23 if silent. When the key arrives →
+  Claude integrates it as the second flight source (plan step F3).
 
 ### Booking.com affiliate  🔲
 - **For:** commission on the hotel links we already show. Biggest easy revenue.
@@ -113,6 +116,9 @@ dates (2026-07-20), never "last week"._
 ## Response log
 
 _Append a line whenever anything happens, newest first._
+
+- 2026-07-16 — Kiwi affiliates emailed (Gohil): Tequila portal no longer has
+  open signup, page directs new affiliates to affiliates@kiwi.com.
 
 - 2026-07-13 — Junction inquiry emailed to deploy@junctionconnect.com (Gohil).
 
