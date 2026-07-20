@@ -206,56 +206,110 @@ router.post(
   }),
 );
 
-// ─── GET /api/trips — List user's trips ─────────────────────
+// ─── GET /api/trips — the user's OWNED trips + trips SHARED with them ──────
+// Returns { trips, shared }:
+//   trips  — trips this user owns (trips.user_id === me)
+//   shared — trips shared with me: an accepted group_members row on a trip I
+//            don't own. Membership (with accepted_at) is set the moment the
+//            user accepts a share link, so this needs no extra "save" step.
 router.get(
   '/',
   asyncHandler(async (req, res) => {
     const user = (req as any).user;
     const supabase = getSupabase();
 
-    const { data: trips, error } = await supabase
+    // 1. Trips I own.
+    const { data: owned, error } = await supabase
       .from('trips')
       .select('id, title, status, travelers, total_cost, savings_vs_alternative, created_at')
       .eq('user_id', user.id)
       .neq('status', 'archived')
       .order('created_at', { ascending: false });
+    if (error) throw new AppError(500, error.message);
 
-    if (error) {
-      throw new AppError(500, error.message);
-    }
+    // 2. Trips shared with me — accepted memberships on trips I don't own.
+    const { data: memberships } = await supabase
+      .from('group_members')
+      .select('trip_id, role, accepted_at')
+      .eq('user_id', user.id)
+      .not('accepted_at', 'is', null);
 
-    // Fetch city names for each trip
-    const tripIds = (trips ?? []).map((t: any) => t.id);
-    const { data: cities } = tripIds.length > 0
+    const roleByTrip: Record<string, string> = {};
+    for (const m of memberships ?? []) roleByTrip[m.trip_id] = m.role;
+    const sharedIds = Object.keys(roleByTrip);
+
+    const { data: sharedTrips } = sharedIds.length > 0
+      ? await supabase
+          .from('trips')
+          .select('id, title, status, travelers, total_cost, savings_vs_alternative, created_at, user_id')
+          .in('id', sharedIds)
+          .neq('user_id', user.id) // never surface an owned trip as "shared"
+          .neq('status', 'archived')
+          .order('created_at', { ascending: false })
+      : { data: [] as any[] };
+
+    // 3. City names for every trip (owned + shared) in a single query.
+    const allIds = [
+      ...(owned ?? []).map((t: any) => t.id),
+      ...(sharedTrips ?? []).map((t: any) => t.id),
+    ];
+    const { data: cities } = allIds.length > 0
       ? await supabase
           .from('cities')
           .select('trip_id, name, arrival_date, departure_date')
-          .in('trip_id', tripIds)
+          .in('trip_id', allIds)
           .order('position', { ascending: true })
-      : { data: [] };
+      : { data: [] as any[] };
 
     const citiesByTrip: Record<string, any[]> = {};
     for (const c of cities ?? []) {
-      if (!citiesByTrip[c.trip_id]) citiesByTrip[c.trip_id] = [];
-      citiesByTrip[c.trip_id].push(c);
+      (citiesByTrip[c.trip_id] ??= []).push(c);
     }
 
-    const enriched = (trips ?? []).map((t: any) => {
-      const tripCities = citiesByTrip[t.id] ?? [];
-      const firstCity = tripCities[0];
-      const lastCity = tripCities[tripCities.length - 1];
+    // 4. Owner display info for shared trips ("Shared by …").
+    const ownerIds = Array.from(new Set((sharedTrips ?? []).map((t: any) => t.user_id)));
+    const ownersById: Record<string, { name: string | null; email: string | null }> = {};
+    if (ownerIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, full_name')
+        .in('id', ownerIds);
+      const nameById: Record<string, string | null> = {};
+      for (const p of profiles ?? []) nameById[p.id] = p.full_name ?? null;
+      // Emails live in auth, not user_profiles — fetch per distinct owner
+      // (usually just one or two) so the card can attribute the trip.
+      for (const oid of ownerIds) {
+        const { data: auth } = await supabase.auth.admin.getUserById(oid);
+        ownersById[oid] = { name: nameById[oid] ?? null, email: auth?.user?.email ?? null };
+      }
+    }
+
+    const enrich = (t: any, extra: Record<string, unknown> = {}) => {
+      const tc = citiesByTrip[t.id] ?? [];
+      const first = tc[0];
+      const last = tc[tc.length - 1];
       return {
         ...t,
-        city_count: tripCities.length,
-        cities: tripCities.map((c: any) => c.name),
+        city_count: tc.length,
+        cities: tc.map((c: any) => c.name),
         date_range:
-          firstCity && lastCity
-            ? { start: firstCity.arrival_date, end: lastCity.departure_date }
-            : undefined,
+          first && last ? { start: first.arrival_date, end: last.departure_date } : undefined,
+        ...extra,
       };
-    });
+    };
 
-    res.json({ trips: enriched });
+    res.json({
+      trips: (owned ?? []).map((t: any) => enrich(t)),
+      shared: (sharedTrips ?? []).map((t: any) => {
+        const owner = ownersById[t.user_id] ?? { name: null, email: null };
+        const { user_id, ...rest } = t;
+        return enrich(rest, {
+          role: roleByTrip[t.id] ?? 'viewer',
+          owner_name: owner.name,
+          owner_email: owner.email,
+        });
+      }),
+    });
   }),
 );
 
