@@ -20,12 +20,22 @@ type TripSummary = {
   city_count: number;
   cities: string[];
   date_range?: { start: string; end: string };
+  // Present only on trips shared with me:
+  role?: string;
+  owner_name?: string | null;
+  owner_email?: string | null;
 };
 
 const STATUS_STYLES: Record<string, { label: string }> = {
   active: { label: 'ACTIVE' },
   completed: { label: 'COMPLETED' },
   archived: { label: 'ARCHIVED' },
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  editor: 'Editor',
+  viewer: 'Viewer',
+  suggester: 'Can suggest',
 };
 
 const CARD_GRADIENTS = [
@@ -45,9 +55,104 @@ export default function HistoryPage() {
   );
 }
 
+function TripCard({
+  trip,
+  idx,
+  variant,
+  onDelete,
+  onOpen,
+}: {
+  trip: TripSummary;
+  idx: number;
+  variant: 'owned' | 'shared';
+  onDelete?: (id: string) => void;
+  onOpen: (trip: TripSummary) => void;
+}) {
+  const status = STATUS_STYLES[trip.status] ?? STATUS_STYLES.active;
+  const sharedBy = trip.owner_name || trip.owner_email || 'someone';
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
+      <div
+        className="h-20 px-4 flex items-start justify-between pt-2 pb-2"
+        style={{ background: CARD_GRADIENTS[idx % CARD_GRADIENTS.length] }}
+      >
+        <span
+          className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+          style={{ background: 'rgba(255,255,255,0.25)', color: 'white' }}
+        >
+          {status.label}
+        </span>
+        {variant === 'shared' && (
+          <span
+            className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+            style={{ background: 'rgba(255,255,255,0.25)', color: 'white' }}
+          >
+            {ROLE_LABELS[trip.role ?? 'viewer'] ?? 'Viewer'}
+          </span>
+        )}
+      </div>
+
+      <div className="p-4">
+        <h3 className="text-gray-900 font-medium text-sm mb-1 truncate">
+          {trip.title || trip.cities.join(' · ')}
+        </h3>
+
+        {variant === 'shared' && (
+          <p className="text-[11px] text-gray-400 mb-2 truncate">Shared by {sharedBy}</p>
+        )}
+
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mb-3">
+          <span className="flex items-center gap-1">
+            <MapPin size={12} />
+            {trip.city_count ?? trip.cities.length} cities
+          </span>
+          <span className="flex items-center gap-1">
+            <Users size={12} />
+            {trip.travelers}
+          </span>
+          {trip.date_range && (
+            <span className="flex items-center gap-1">
+              <Calendar size={12} />
+              {trip.date_range.start}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold" style={{ color: '#2563eb' }}>
+            ${trip.total_cost.toLocaleString()}
+          </span>
+          <div className="flex items-center gap-2">
+            {variant === 'owned' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete?.(trip.id);
+                }}
+                title="Delete trip"
+                className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+            <button
+              onClick={() => onOpen(trip)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-white"
+              style={{ background: '#2563eb' }}
+            >
+              Open
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HistoryPageInner() {
   const router = useRouter();
   const [trips, setTrips] = useState<TripSummary[]>([]);
+  const [shared, setShared] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +166,7 @@ function HistoryPageInner() {
         if (!res.ok) throw new Error('Failed to load trips');
         const data = await res.json();
         setTrips(data.trips ?? []);
+        setShared(data.shared ?? []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load trips');
       } finally {
@@ -76,10 +182,13 @@ function HistoryPageInner() {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', ...headers },
     });
-    if (res.ok) {
-      setTrips((prev) => prev.filter((t) => t.id !== tripId));
-    }
+    if (res.ok) setTrips((prev) => prev.filter((t) => t.id !== tripId));
   };
+
+  const openOwned = (trip: TripSummary) => router.push(`/results?tripId=${trip.id}`);
+  const openShared = (trip: TripSummary) => router.push(`/canvas/${trip.id}`);
+
+  const nothingAtAll = !loading && !error && trips.length === 0 && shared.length === 0;
 
   return (
     <main className="min-h-screen" style={{ background: '#f0f4f8' }}>
@@ -118,7 +227,7 @@ function HistoryPageInner() {
           </div>
         )}
 
-        {!loading && !error && trips.length === 0 && (
+        {nothingAtAll && (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: 'rgba(37,99,235,0.08)' }}>
               <Plane size={28} style={{ color: '#2563eb' }} />
@@ -135,76 +244,27 @@ function HistoryPageInner() {
           </div>
         )}
 
+        {/* Owned trips */}
         {!loading && trips.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {trips.map((trip, idx) => {
-              const status = STATUS_STYLES[trip.status] ?? STATUS_STYLES.active;
-              return (
-                <div
-                  key={trip.id}
-                  className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow group"
-                >
-                  <div
-                    className="h-20 px-4 flex items-end pb-2"
-                    style={{ background: CARD_GRADIENTS[idx % CARD_GRADIENTS.length] }}
-                  >
-                    <span
-                      className="text-[10px] font-medium px-2 py-0.5 rounded-full"
-                      style={{ background: 'rgba(255,255,255,0.25)', color: 'white' }}
-                    >
-                      {status.label}
-                    </span>
-                  </div>
+            {trips.map((trip, idx) => (
+              <TripCard key={trip.id} trip={trip} idx={idx} variant="owned" onDelete={handleDelete} onOpen={openOwned} />
+            ))}
+          </div>
+        )}
 
-                  <div className="p-4">
-                    <h3 className="text-gray-900 font-medium text-sm mb-2 truncate">
-                      {trip.title || trip.cities.join(' \u00b7 ')}
-                    </h3>
-
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mb-3">
-                      <span className="flex items-center gap-1">
-                        <MapPin size={12} />
-                        {trip.city_count ?? trip.cities.length} cities
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Users size={12} />
-                        {trip.travelers}
-                      </span>
-                      {trip.date_range && (
-                        <span className="flex items-center gap-1">
-                          <Calendar size={12} />
-                          {trip.date_range.start}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold" style={{ color: '#2563eb' }}>
-                        ${trip.total_cost.toLocaleString()}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(trip.id);
-                          }}
-                          className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                        <button
-                          onClick={() => router.push(`/results?tripId=${trip.id}`)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-white"
-                          style={{ background: '#2563eb' }}
-                        >
-                          Open trip
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+        {/* Shared with me */}
+        {!loading && shared.length > 0 && (
+          <div className="mt-10">
+            <div className="flex items-center gap-2 mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Shared with me</h2>
+              <span className="text-xs text-gray-400">({shared.length})</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {shared.map((trip, idx) => (
+                <TripCard key={trip.id} trip={trip} idx={idx} variant="shared" onOpen={openShared} />
+              ))}
+            </div>
           </div>
         )}
       </div>
