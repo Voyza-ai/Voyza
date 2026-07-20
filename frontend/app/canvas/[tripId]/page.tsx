@@ -932,6 +932,13 @@ export default function CanvasPage() {
     first: null,
     last: null,
   });
+  // Signature of the last city STRUCTURE we ran leg-repair for. repairLeg /
+  // refreshHomeLeg write transports back into localState, which re-triggers
+  // this effect — so without this guard a leg whose search returns an empty/$0
+  // result (a stop with no airport or station, e.g. Hakone) stays "stale" and
+  // gets re-searched forever ("finds one, keeps searching"). Transports are
+  // deliberately NOT part of the signature, so applying a leg never re-arms it.
+  const lastRepairSigRef = useRef<string>('');
 
   const fmtDuration = (mins: number) =>
     `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`;
@@ -1042,6 +1049,21 @@ export default function CanvasPage() {
       const ls = localStateRef.current;
       const cities = ls?.cities ?? [];
       const travelers = ls?.trip?.travelers ?? 1;
+
+      // Repair each city STRUCTURE at most once. The transports repairLeg
+      // writes back are NOT in this signature, so applying a leg (even an
+      // empty/$0 one) doesn't re-arm the repair — this is what stops the
+      // infinite re-search when a stop has no resolvable flight/train.
+      const sig =
+        cities
+          .map((c: any) => `${c.name}|${c.dates?.arrival ?? ''}|${c.dates?.departure ?? ''}`)
+          .join('>') +
+        '::' +
+        (ls?.trip?.origin?.city ?? '') +
+        '|' +
+        (ls?.trip?.returnToHome ? '1' : '0');
+      if (sig === lastRepairSigRef.current) return;
+      lastRepairSigRef.current = sig;
 
       // Inter-city legs whose transport is missing/empty or points at the
       // wrong neighbor.
