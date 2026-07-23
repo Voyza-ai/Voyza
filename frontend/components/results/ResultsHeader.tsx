@@ -15,6 +15,8 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { useTripStore } from '@/store/tripStore';
 import LoginModal from '@/components/shared/LoginModal';
+import TripNameEditor from '@/components/shared/TripNameEditor';
+import { updateTrip } from '@/lib/api';
 
 type ResultsHeaderProps = {
   trip: Trip;
@@ -37,7 +39,32 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const setTrip = useTripStore((s) => s.setTrip);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const alreadySaved = !!trip.id && !trip.id.startsWith('mock');
+
+  // Rename the trip from the flowchart. An unsaved trip is renamed purely in
+  // the store — the name then rides along into saveTrip, so a trip can be
+  // named before it has ever been persisted. A saved trip is patched, and
+  // rolls back if the server refuses (only its owner may rename it).
+  const handleRename = async (name: string) => {
+    const previous = trip.title;
+    setTrip({ ...trip, title: name });
+    setRenameError(null);
+    if (!alreadySaved) return;
+
+    try {
+      await updateTrip(trip.id!, { title: name });
+    } catch (err: any) {
+      setTrip({ ...trip, title: previous });
+      setRenameError(
+        err?.status === 403
+          ? 'Only the trip owner can rename this trip'
+          : 'Could not rename this trip — try again',
+      );
+      setTimeout(() => setRenameError(null), 4000);
+      throw err;
+    }
+  };
 
   // Captures the current "Edit in Canvas" request so it can be resumed after
   // sign-in — including across the Google OAuth full-page redirect, which
@@ -186,9 +213,19 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
             <span className="text-gray-400">·</span>
             <span className="text-gray-500">{trip.cities.length} stops</span>
           </div>
-          <h1 className="text-[22px] leading-tight font-semibold text-gray-900 truncate">
-            {trip.title}
-          </h1>
+          <TripNameEditor
+            value={trip.title ?? ''}
+            canRename
+            onRename={handleRename}
+            placeholder="Name this trip"
+            className="text-[22px] leading-tight font-semibold text-gray-900"
+            inputClassName="text-[22px] leading-tight font-semibold text-gray-900 w-[380px] max-w-full"
+          />
+          {renameError && (
+            <p className="text-[11px] mt-0.5" style={{ color: '#dc2626' }}>
+              {renameError}
+            </p>
+          )}
         </div>
 
         {/* Right: toggle stacked above cost cards + save button. ml-auto

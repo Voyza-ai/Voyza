@@ -2,6 +2,21 @@ import { getAuthHeader } from './supabase';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
+/**
+ * An API error that carries the HTTP status, so callers can distinguish
+ * "you're not allowed to do that" from "that failed" and say something
+ * useful. Extends Error, so existing `catch`/`instanceof Error` handling
+ * keeps working unchanged.
+ */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const authHeaders = await getAuthHeader();
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -22,7 +37,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `API error ${res.status}`);
+    throw new ApiError(res.status, body.error ?? `API error ${res.status}`);
   }
 
   return res.json();

@@ -7,6 +7,7 @@ import { compareLeg } from '../services/compareLeg';
 import { searchHotels } from '../services/hotels';
 import { env } from '../config/env';
 import { parseDurationMinutes } from '../utils/duration';
+import { resolveTripTitle } from '../utils/tripShape';
 
 const router = Router();
 
@@ -499,7 +500,9 @@ router.post(
     }, 0);
 
     const tripUpdate: Record<string, any> = {
-      title: (state.cities ?? []).map((c: any) => c.name).join(' · '),
+      // Keeps the owner's chosen name instead of overwriting it with a
+      // derived city chain — see resolveTripTitle.
+      title: resolveTripTitle(state.trip?.title, state.cities),
       total_cost: totalCost,
       updated_at: new Date().toISOString(),
     };

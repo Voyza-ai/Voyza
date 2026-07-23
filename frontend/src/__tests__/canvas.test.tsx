@@ -40,9 +40,26 @@ describe('CanvasPage', () => {
     });
   });
 
-  it('shows route header derived from the current cities', async () => {
+  it('shows the trip name the owner chose, not the derived route', async () => {
+    // A named trip keeps its name in the header — that name is what everyone
+    // the trip is shared with sees, so it must win over the city chain.
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
+      role: 'owner',
+    });
+    mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+    render(<CanvasPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('My Euro Trip')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Rome → Florence')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the route when the trip has no name', async () => {
+    mockedGetSession.mockResolvedValue({
+      session: { state: { ...mockCanvasState, trip: { title: '' } } },
       role: 'owner',
     });
     mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
