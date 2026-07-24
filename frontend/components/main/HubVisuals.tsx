@@ -61,13 +61,16 @@ const slide = {
   initial: { opacity: 0, y: 14 },
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, y: -14 },
-  transition: { duration: 0.32, ease: 'easeOut' as const },
+  // Kept well under the rotation interval: with AnimatePresence mode="wait"
+  // the exit and enter run back to back, so a slow transition eats the time
+  // each card is actually readable.
+  transition: { duration: 0.19, ease: 'easeOut' as const },
 };
 
 /* ─────────────── Browse: rotate through the marketplace ─────────────── */
 
 export function BrowseRotator({ active, accent }: { active: boolean; accent: string }) {
-  const idx = useRotator(active, PRESET_ITINERARIES.length, 1700);
+  const idx = useRotator(active, PRESET_ITINERARIES.length, 950);
   const preset = PRESET_ITINERARIES[idx];
   const chain = preset.cities.map((c) => c.name);
 
@@ -287,7 +290,7 @@ export function TripsRotator({
   trips: HubTrip[];
   loading: boolean;
 }) {
-  const idx = useRotator(active, trips.length, 1600);
+  const idx = useRotator(active, trips.length, 1200);
 
   if (loading) {
     return (
