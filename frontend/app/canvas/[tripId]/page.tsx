@@ -30,8 +30,10 @@ import {
   joinCanvasByLink,
   compareLeg,
   saveTrip,
+  updateTrip,
   Destination,
 } from '@/lib/api';
+import TripNameEditor from '@/components/shared/TripNameEditor';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
 import { liveTripTotal } from '@/lib/tripTotals';
@@ -161,19 +163,22 @@ export default function CanvasPage() {
         // First try creating/resuming the canvas session.
         // Pass store cities as fallback for trips with no cities in the DB.
         let fallbackCities = storeCities ?? undefined;
+        // The trips row — not the canvas session — is the authority for the
+        // trip's NAME: renaming from My Trips or the results page patches
+        // that row. Read it on every load so a trip opened here (including
+        // by someone it was shared with) shows the name its owner chose,
+        // not a stale copy cached in the session state.
+        let canonicalTitle: string | undefined;
 
-        // If the store is empty (e.g. new tab), fetch the trip from the API
-        // to get the cities for the fallback.
-        if (!fallbackCities) {
-          try {
-            const tripData = await getTrip(tripId);
-            const trip = tripData.trip ?? tripData;
-            if (trip?.cities && Array.isArray(trip.cities)) {
-              fallbackCities = trip.cities;
-            }
-          } catch {
-            // Trip fetch failed — continue without fallback
+        try {
+          const tripData = await getTrip(tripId);
+          const trip = tripData.trip ?? tripData;
+          if (typeof trip?.title === 'string') canonicalTitle = trip.title;
+          if (!fallbackCities && Array.isArray(trip?.cities)) {
+            fallbackCities = trip.cities;
           }
+        } catch {
+          // Trip fetch failed — fall back to whatever the session carries.
         }
 
         const { session, role: userRole } = await getCanvasSession(tripId, fallbackCities);
@@ -181,6 +186,11 @@ export default function CanvasPage() {
 
         // Inject origin/returnToHome if the DB doesn't have it
         const sessionState = { ...session.state };
+
+        // Let the trips row's name win over the session's cached copy.
+        if (canonicalTitle !== undefined) {
+          sessionState.trip = { ...(sessionState.trip ?? {}), title: canonicalTitle };
+        }
         if (!sessionState.trip?.origin) {
           // Try Zustand store first, then localStorage
           let originData = storeTrip?.origin
@@ -517,6 +527,33 @@ export default function CanvasPage() {
     }
   };
 
+  // Rename the trip. Owner-only: the name is what every collaborator sees,
+  // so it isn't an editor's call to change. Applied locally and broadcast
+  // first (collaborators see it immediately, riding the existing canvas_op
+  // channel), then persisted to the trips row that My Trips reads from.
+  const handleRename = async (name: string) => {
+    const previous = localState?.trip?.title ?? '';
+    const optimistic = { ...localState, trip: { ...(localState?.trip ?? {}), title: name } };
+    setLocalState(optimistic);
+    broadcastOp(optimistic);
+    try {
+      await updateTrip(tripId, { title: name });
+      showToast('Trip renamed', 'success');
+    } catch (err: any) {
+      // Roll back so the header never shows a name the server rejected.
+      const reverted = { ...localState, trip: { ...(localState?.trip ?? {}), title: previous } };
+      setLocalState(reverted);
+      broadcastOp(reverted);
+      showToast(
+        err?.status === 403
+          ? 'Only the trip owner can rename this trip'
+          : 'Could not rename this trip',
+        'error',
+      );
+      throw err;
+    }
+  };
+
   // Non-owners: clone the CURRENT canvas state into your own trips.
   // Nothing touches the shared trip — it's your personal copy.
   const handleSaveCopy = async () => {
@@ -793,12 +830,14 @@ export default function CanvasPage() {
   };
 
   const cities = localState?.cities ?? [];
-  // Derive the header live from the current cities so it updates as cities
-  // are added, removed, or reordered — instead of the stale stored title.
-  const tripTitle =
-    cities.length > 0
-      ? cities.map((c: any) => c.name).join(' → ')
-      : localState?.trip?.title ?? 'Canvas';
+  // A name the owner chose always wins — that's the whole point of naming a
+  // trip, and it's what everyone it's shared with should see. Only when the
+  // trip is unnamed do we fall back to deriving a label from the current
+  // cities, which keeps updating as cities are added, removed, or reordered.
+  const customName: string = (localState?.trip?.title ?? '').trim();
+  const derivedName =
+    cities.length > 0 ? cities.map((c: any) => c.name).join(' → ') : 'Canvas';
+  const tripTitle = customName || derivedName;
   const origin = localState?.trip?.origin ?? null;
   const returnToHome = localState?.trip?.returnToHome ?? false;
   const canEdit = role === 'owner' || role === 'editor';
@@ -1160,9 +1199,15 @@ export default function CanvasPage() {
             VOYZA
           </button>
           <div className="w-px h-5 bg-gray-200" />
-          <span className="text-gray-800 text-[14px] font-medium truncate max-w-[40vw]" title={tripTitle}>
-            {tripTitle}
-          </span>
+          <TripNameEditor
+            value={customName}
+            canRename={role === 'owner'}
+            onRename={handleRename}
+            onDenied={() => showToast('Only the trip owner can rename this trip', 'info')}
+            placeholder={derivedName}
+            className="text-gray-800 text-[14px] font-medium max-w-[40vw]"
+            inputClassName="text-gray-800 text-[14px] font-medium w-[260px] max-w-[40vw]"
+          />
           {hasUnsavedChanges && (
             <span className="text-[11px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
               Unsaved changes

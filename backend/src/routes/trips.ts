@@ -406,7 +406,17 @@ router.patch(
       .eq('id', req.params.id)
       .single();
     if (!trip) throw new AppError(404, 'Trip not found');
-    if (trip.user_id !== user.id) throw new AppError(403, 'Only the trip owner can edit this trip');
+    if (trip.user_id !== user.id) {
+      // Renaming is the case collaborators actually hit — the trip name is
+      // what everyone it's shared with sees, so say precisely that rather
+      // than the generic "can't edit this trip".
+      throw new AppError(
+        403,
+        body.title !== undefined
+          ? 'Only the trip owner can rename this trip'
+          : 'Only the trip owner can edit this trip',
+      );
+    }
 
     // Build a sparse update — map camelCase body to snake_case columns.
     const update: Record<string, any> = { updated_at: new Date().toISOString() };

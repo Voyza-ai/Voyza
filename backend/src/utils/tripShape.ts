@@ -157,3 +157,20 @@ export function buildTripFromDb(
     constraints: trip.constraints ?? undefined,
   };
 }
+
+/**
+ * Decide what to persist as a trip's title on a canvas save.
+ *
+ * A trip's name belongs to its owner. The canvas used to overwrite
+ * `trips.title` with a derived city chain on every save, which meant any
+ * name the owner set was silently reverted within seconds of the canvas
+ * autosaving — trip names could not survive at all. So: keep the name the
+ * canvas state carries, and only fall back to deriving a label from the
+ * cities when the trip genuinely has no name (which keeps unnamed trips
+ * tracking city edits, the behaviour the derived title was there for).
+ */
+export function resolveTripTitle(stateTitle: unknown, cities: any[] | undefined): string {
+  const custom = typeof stateTitle === 'string' ? stateTitle.trim() : '';
+  if (custom) return custom;
+  return (cities ?? []).map((c: any) => c?.name).filter(Boolean).join(' · ');
+}
