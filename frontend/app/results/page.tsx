@@ -378,7 +378,7 @@ function ResultsPageInner() {
           except the cards area (left↔right) and the AI chat panel. */}
       {/* Near-zero side gutters: no max-width cap, minimal padding — the
           cards start at the left edge and the chat ends at the right edge. */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 px-2 pb-2 pt-[3rem] w-full">
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 px-2 pb-2 pt-[3rem] w-full">
         {/* Main column — header pinned, cards fill the rest */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
           <ResultsHeader trip={currentTrip} />
@@ -440,8 +440,11 @@ function ResultsPageInner() {
           </div>
         </div>
 
-        {/* AI chat sidebar */}
-        <aside className="lg:w-[380px] lg:flex-shrink-0 min-h-0 flex lg:mt-3">
+        {/* AI chat sidebar. Docks to the right from `md` up (not `lg`) so it
+            matches the canvas on ordinary laptop windows — at the old
+            breakpoint anything under 1024px dropped the chat below the
+            content, which read as a different layout from the rest of the app. */}
+        <aside className="md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 flex md:mt-3">
           <AIChatPanel trip={currentTrip} />
         </aside>
       </div>
