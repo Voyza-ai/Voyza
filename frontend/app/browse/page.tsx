@@ -60,6 +60,11 @@ const NIGHTS_MAX = Math.max(...PRESET_ITINERARIES.map(presetNights));
 const COST_MIN = Math.floor(Math.min(...PRESET_ITINERARIES.map(presetCost)) / 100) * 100;
 const COST_MAX = Math.ceil(Math.max(...PRESET_ITINERARIES.map(presetCost)) / 100) * 100;
 
+const bannerBackground = (preset: PresetItinerary) =>
+  preset.coverImage
+    ? `linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.55) 100%), url(${preset.coverImage}) center/cover no-repeat, ${preset.coverGradient}`
+    : preset.coverGradient;
+
 export default function BrowsePage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
@@ -397,7 +402,7 @@ export default function BrowsePage() {
                   {/* Gradient banner */}
                   <div
                     className="h-44 flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
-                    style={{ background: preset.coverGradient }}
+                    style={{ background: bannerBackground(preset) }}
                   >
                     <span
                       className="absolute top-2 right-2 text-[9px] font-medium px-1.5 py-0.5 rounded-full"
@@ -507,7 +512,7 @@ export default function BrowsePage() {
                 {/* Banner */}
                 <div
                   className="px-6 pt-5 pb-4 relative flex-shrink-0"
-                  style={{ background: selected.coverGradient }}
+                  style={{ background: bannerBackground(selected) }}
                 >
                   <button
                     onClick={() => setSelected(null)}
