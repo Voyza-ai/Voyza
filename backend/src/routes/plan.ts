@@ -470,7 +470,7 @@ router.post(
 
 // ─── POST /api/plan/chat ─────────────────────────────────────
 //
-// The Voyza AI chat endpoint. Replaces the old /edit (which returned a
+// The BlueMurr AI chat endpoint. Replaces the old /edit (which returned a
 // freeform JSON patch that the frontend never actually applied).
 //
 // Claude gets the full trip + existing constraints + conversation
@@ -698,7 +698,7 @@ router.post(
     }
     messages.push({ role: 'user', content: message });
 
-    const systemPrompt = `You are Voyza AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
+    const systemPrompt = `You are BlueMurr AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
 
 You have six tools:
 1. answer_only — for plain questions, explanations, small talk, AND for clarifying questions when the user's request is ambiguous about which leg.
@@ -1142,7 +1142,7 @@ router.post(
       const response = await anthropic.messages.create({
         model: DEFAULT_MODEL,
         max_tokens: 400,
-        system: `You generate 4 short, specific, trip-tailored prompt suggestions that the user could click to start a conversation with Voyza AI about their itinerary. Each suggestion:
+        system: `You generate 4 short, specific, trip-tailored prompt suggestions that the user could click to start a conversation with BlueMurr AI about their itinerary. Each suggestion:
 - Is under 40 characters
 - References a specific city, leg, or feature of THIS trip (not generic)
 - Is a question or a request the user might realistically have

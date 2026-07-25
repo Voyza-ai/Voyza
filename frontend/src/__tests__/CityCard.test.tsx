@@ -62,10 +62,10 @@ describe('CityCard', () => {
     expect(screen.getByText('Trastevere')).toBeInTheDocument();
   });
 
-  it('shows VOYZA BOOK badge when hotel is bookable', () => {
+  it('shows BLUEMURR BOOK badge when hotel is bookable', () => {
     const city = buildCity();
     render(<CityCard city={city} index={0} {...defaultProps} />);
-    expect(screen.getByText('VOYZA BOOK')).toBeInTheDocument();
+    expect(screen.getByText('BLUEMURR BOOK')).toBeInTheDocument();
   });
 
   it('renders vibe tags from city vibes', () => {

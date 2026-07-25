@@ -2123,7 +2123,7 @@ export default function PlanningChat() {
       {/* Header */}
       <div className="relative z-10 flex items-center justify-center pt-10 pb-5">
         <Link href="/main" className="text-4xl font-bold tracking-tight hover:opacity-80 transition-opacity" style={{ color: '#4f8ef7' }}>
-          VOYZA
+          BlueMurr
         </Link>
       </div>
 

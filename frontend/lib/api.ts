@@ -354,7 +354,7 @@ export async function editPlan(params: {
   });
 }
 
-// ─── Voyza AI chat ───────────────────────────────────────────
+// ─── BlueMurr AI chat ───────────────────────────────────────────
 // Send a message to the trip's AI assistant. Response is either a
 // plain-text answer or a proposal the user can Accept/Reject.
 export type ChatTurn = { role: 'user' | 'assistant'; content: string };

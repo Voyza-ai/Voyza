@@ -100,7 +100,7 @@ export default function CanvasPage() {
   }, [localState, savedState]);
 
   // Warn before leaving with unsaved changes. Covers in-app navigation
-  // (Back / VOYZA) via navigateAway(), and browser refresh/close/tab-switch
+  // (Back / BlueMurr) via navigateAway(), and browser refresh/close/tab-switch
   // via the beforeunload prompt below.
   const navigateAway = useCallback(
     (path: string) => {
@@ -1056,7 +1056,7 @@ export default function CanvasPage() {
           borderBottom: '2px solid #2563eb',
         }}
       >
-        {/* Left: Back button + VOYZA logo + trip title */}
+        {/* Left: Back button + BlueMurr logo + trip title */}
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigateAway(`/results?tripId=${tripId}`)}
@@ -1071,7 +1071,7 @@ export default function CanvasPage() {
             className="text-[16px] font-bold tracking-tight hover:opacity-80 transition-opacity"
             style={{ color: '#2563eb' }}
           >
-            VOYZA
+            BlueMurr
           </button>
           <div className="w-px h-5 bg-gray-200" />
           <span className="text-gray-800 text-[14px] font-medium truncate max-w-[40vw]" title={tripTitle}>
@@ -1246,7 +1246,7 @@ export default function CanvasPage() {
         )}
       </AnimatePresence>
 
-      {/* ─── Body row: canvas + docked Voyza AI chat ─── */}
+      {/* ─── Body row: canvas + docked BlueMurr AI chat ─── */}
       <div className="flex-1 flex min-h-0">
       {/* ─── Main canvas area ─── */}
       <div
@@ -1409,14 +1409,14 @@ export default function CanvasPage() {
         </div>
       </div>
 
-      {/* ─── Voyza AI chat — docked right, editors only ───
+      {/* ─── BlueMurr AI chat — docked right, editors only ───
           Same panel as the results page; edits apply to canvas local
           state (unsaved-changes + save flow) instead of the trip store. */}
       {canEdit && canvasTrip && chatOpen && (
         <div className="relative w-[340px] flex-shrink-0 p-3 pl-0 min-h-0">
           <button
             onClick={() => setChatOpen(false)}
-            aria-label="Close Voyza AI chat"
+            aria-label="Close BlueMurr AI chat"
             className="absolute top-6 right-6 z-10 p-1 rounded-md text-white/70 hover:text-white hover:bg-white/15 transition-colors"
           >
             <X size={14} />
@@ -1439,7 +1439,7 @@ export default function CanvasPage() {
             exit={{ x: 48 }}
             transition={{ type: 'spring', damping: 25, stiffness: 250 }}
             onClick={() => setChatOpen(true)}
-            aria-label="Open Voyza AI chat"
+            aria-label="Open BlueMurr AI chat"
             className="fixed right-0 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-1.5 rounded-l-xl py-3.5 px-1.5 shadow-md hover:shadow-lg transition-shadow"
             style={{
               background: '#2563eb',
@@ -1452,7 +1452,7 @@ export default function CanvasPage() {
               className="text-[10px] font-medium text-white tracking-wide"
               style={{ writingMode: 'vertical-rl' }}
             >
-              Voyza AI
+              BlueMurr AI
             </span>
           </motion.button>
         )}

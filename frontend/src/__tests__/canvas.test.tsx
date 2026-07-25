@@ -175,7 +175,7 @@ describe('CanvasPage', () => {
     expect(screen.getByText('No cities yet')).toBeInTheDocument();
   });
 
-  it('shows VOYZA logo in top bar', async () => {
+  it('shows BlueMurr logo in top bar', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -185,11 +185,11 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('VOYZA')).toBeInTheDocument();
+      expect(screen.getByText('BlueMurr')).toBeInTheDocument();
     });
   });
 
-  it('shows the live total pill and the Voyza AI chat dock for owners', async () => {
+  it('shows the live total pill and the BlueMurr AI chat dock for owners', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -203,10 +203,10 @@ describe('CanvasPage', () => {
     expect(screen.getByText('Total')).toBeInTheDocument();
     // Docked chat (same panel as results)
     expect(screen.getByPlaceholderText('Ask about your trip...')).toBeInTheDocument();
-    expect(screen.getByLabelText('Close Voyza AI chat')).toBeInTheDocument();
+    expect(screen.getByLabelText('Close BlueMurr AI chat')).toBeInTheDocument();
   });
 
-  it('hides the Voyza AI chat for viewers', async () => {
+  it('hides the BlueMurr AI chat for viewers', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'viewer',
@@ -217,7 +217,7 @@ describe('CanvasPage', () => {
     await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
 
     expect(screen.queryByPlaceholderText('Ask about your trip...')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Open Voyza AI chat')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Open BlueMurr AI chat')).not.toBeInTheDocument();
   });
 
   it('joins via ?share= link token, then strips the param', async () => {
