@@ -1,9 +1,16 @@
 import './mocks';
 import { mockPush } from './mocks';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import BrowsePage from '@/app/browse/page';
 import { PRESET_ITINERARIES, presetNights, presetCost } from '@/data/presetItineraries';
+import { saveTrip } from '@/lib/api';
+
+const setGeolocation = (impl: any) =>
+  Object.defineProperty(global.navigator, 'geolocation', {
+    value: impl,
+    configurable: true,
+  });
 
 const NIGHTS_MAX = Math.max(...PRESET_ITINERARIES.map(presetNights));
 const COST_MAX = Math.ceil(Math.max(...PRESET_ITINERARIES.map(presetCost)) / 100) * 100;
@@ -28,6 +35,12 @@ const apply = () =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+afterEach(() => {
+  // Remove any geolocation mock so other tests see jsdom's default (undefined).
+  // @ts-expect-error cleanup
+  delete global.navigator.geolocation;
 });
 
 describe('BrowsePage filtering scenarios', () => {
@@ -142,6 +155,45 @@ describe('BrowsePage filtering scenarios', () => {
     for (const p of PRESET_ITINERARIES) {
       expect(screen.getByText(p.title)).toBeInTheDocument();
     }
+  });
+
+  test('saving with location granted uses the nearest airport city as origin', async () => {
+    setGeolocation({
+      // Boston city center — nearest airport city should be Boston, not NYC.
+      getCurrentPosition: (ok: any) =>
+        ok({ coords: { latitude: 42.36, longitude: -71.06 } }),
+    });
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveTrip).toHaveBeenCalled());
+    const payload = (saveTrip as jest.Mock).mock.calls[0][0];
+    expect(payload.origin.city).toBe('Boston');
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith('/results?tripId=trip-123'),
+    );
+  });
+
+  test('saving with location denied falls back to the JFK default', async () => {
+    setGeolocation({
+      getCurrentPosition: (_ok: any, err: any) => err({ code: 1 }),
+    });
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveTrip).toHaveBeenCalled());
+    const payload = (saveTrip as jest.Mock).mock.calls[0][0];
+    expect(payload.origin).toEqual({ city: 'New York', airports: ['JFK'] });
+  });
+
+  test('saving without geolocation support falls back to the JFK default', async () => {
+    // jsdom default: navigator.geolocation is undefined.
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveTrip).toHaveBeenCalled());
+    const payload = (saveTrip as jest.Mock).mock.calls[0][0];
+    expect(payload.origin).toEqual({ city: 'New York', airports: ['JFK'] });
   });
 
   test('save modal asks for travelers and updates the price live', () => {
