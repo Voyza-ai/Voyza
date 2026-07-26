@@ -449,7 +449,7 @@ router.patch(
 // Owner-only toggles that control how the trip shows up elsewhere in
 // the product:
 //   - allow_clones: can other users make a personal copy?
-//   - allow_recommendations: can Voyza use this trip's patterns as
+//   - allow_recommendations: can BlueMurr use this trip's patterns as
 //     training data for the recommender? (No PII used — just cities,
 //     dates, budget, vibe.)
 //   - is_public: does this trip appear in /explore? Public trips are

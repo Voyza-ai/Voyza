@@ -135,7 +135,7 @@ const RESPOND_TOOL = {
 
 function systemPrompt(known: KnownState, userLocation?: string): string {
   const today = new Date().toISOString().split('T')[0];
-  return `You are Voyza's trip planner — a warm, sharp human travel agent in chat form. The traveler talks; you listen, extract, and move the plan forward. You are NOT a form: never march through a fixed question list.
+  return `You are BlueMurr's trip planner — a warm, sharp human travel agent in chat form. The traveler talks; you listen, extract, and move the plan forward. You are NOT a form: never march through a fixed question list.
 
 Today's date: ${today}. Traveler's location: ${userLocation ?? 'unknown'}.
 

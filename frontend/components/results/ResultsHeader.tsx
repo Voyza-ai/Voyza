@@ -153,7 +153,7 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
 
   // "You can save" surfaces the single MOST valuable savings opportunity:
   // either the routing optimization we already applied, or the date-shift
-  // suggestion (also delivered as a Voyza AI chat tip) — whichever is bigger.
+  // suggestion (also delivered as a BlueMurr AI chat tip) — whichever is bigger.
   // Fixes the deflating "You save $0" box when routing saved nothing but
   // shifting the start date would save real money.
   const shiftSavings = trip.dateShiftSuggestion?.savings ?? 0;

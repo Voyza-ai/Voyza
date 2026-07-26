@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin } from 'lucide-react';
+import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin, LocateFixed, Loader2 } from 'lucide-react';
 import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -413,6 +413,45 @@ export default function PlanningChat() {
   };
 
   // Guided text submit (destination, notes)
+  // "Use my location" on the origin step: browser geolocation → nearest
+  // major airport city (offline coordinate lookup, no API) → submitted
+  // through the exact same path as a typed origin answer.
+  const [locating, setLocating] = useState(false);
+  const handleUseMyLocation = async () => {
+    if (locating) return;
+    setLocating(true);
+    try {
+      const { detectNearestAirportCity } = await import('@/lib/nearestAirport');
+      const result = await detectNearestAirportCity();
+
+      if (!result.ok) {
+        const content =
+          result.reason === 'unsupported'
+            ? "Your browser doesn't support location sharing — just type the city you're starting from."
+            : "No worries — I couldn't get your location. Just type the city you're starting from.";
+        setMessages((prev) => [...prev, { id: nextId(), role: 'assistant', content }]);
+        return;
+      }
+
+      const { city } = result;
+      setMessages((prev) => [
+        ...prev,
+        { id: nextId(), role: 'user', content: `📍 ${city.city}` },
+        {
+          id: nextId(),
+          role: 'assistant',
+          content: `Looks like your closest major airport is in ${city.city} — I'll use that as your starting point.`,
+        },
+      ]);
+      const { getOriginAirports } = await import('@/lib/originAirports');
+      setAnswer('origin', city.city);
+      setAnswer('originAirports', getOriginAirports(city.city));
+      advanceToNextStep(currentStepIndex);
+    } finally {
+      setLocating(false);
+    }
+  };
+
   const handleTextSubmit = async () => {
     if (!textInput.trim() || !steps.length) return;
     const step = steps[currentStepIndex];
@@ -2084,7 +2123,7 @@ export default function PlanningChat() {
       {/* Header */}
       <div className="relative z-10 flex items-center justify-center pt-10 pb-5">
         <Link href="/main" className="text-4xl font-bold tracking-tight hover:opacity-80 transition-opacity" style={{ color: '#4f8ef7' }}>
-          VOYZA
+          BlueMurr
         </Link>
       </div>
 
@@ -2274,6 +2313,25 @@ export default function PlanningChat() {
                     <span className="text-white/40 text-[12px]">Combined for everyone</span>
                   </button>
                 </div>
+              )}
+
+              {/* Origin step — offer to detect the nearest airport from the
+                  user's location instead of typing. Typing stays available
+                  in the main input bar either way. */}
+              {currentStep.type === 'origin' && (
+                <button
+                  onClick={handleUseMyLocation}
+                  disabled={locating}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 text-[13px]"
+                  style={{ background: 'rgba(255,255,255,0.04)' }}
+                >
+                  {locating ? (
+                    <Loader2 size={14} className="animate-spin" style={{ color: '#4f8ef7' }} />
+                  ) : (
+                    <LocateFixed size={14} style={{ color: '#4f8ef7' }} />
+                  )}
+                  {locating ? 'Finding your nearest airport…' : 'Use my location'}
+                </button>
               )}
 
               {/* Round-trip / one-way picker — binary toggle, same style

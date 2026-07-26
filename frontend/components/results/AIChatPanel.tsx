@@ -351,7 +351,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
           <Sparkles size={14} className="text-white" />
         </div>
         <div>
-          <div className="text-white text-sm font-medium leading-tight">Voyza AI</div>
+          <div className="text-white text-sm font-medium leading-tight">BlueMurr AI</div>
           <div className="text-white/60 text-[11px]">Tweak your trip in plain English</div>
         </div>
       </div>

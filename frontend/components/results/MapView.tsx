@@ -13,7 +13,7 @@ import { getCityColor, HOME_COLOR } from '@/lib/cityColors';
  *
  * A numbered, card-colored pin per destination (plus a distinct Home pin),
  * connected by a dashed route in visit order (back to home on round-trips).
- * Reads the same trip object as the flowchart, so canvas / Voyza-AI edits
+ * Reads the same trip object as the flowchart, so canvas / BlueMurr-AI edits
  * re-render pins and route automatically. Coordinates come from live
  * geocoding (lib/geocode) — cities the geocoder can't resolve are listed in
  * a corner note rather than pinned somewhere wrong.

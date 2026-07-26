@@ -33,8 +33,12 @@ export type PresetItinerary = {
    *  but that don't necessarily appear in the visible text ("tropical",
    *  "northern lights", "backpacking"). Indexed at high weight. */
   searchTags?: string[];
-  /** Card banner gradient (same visual language as history cards). */
+  /** Card banner gradient — the fallback/loading background behind the
+   *  cover image, and the whole banner when no image is set. */
   coverGradient: string;
+  /** Landmark photo for the banner (Wikimedia hotlink, verified). Layered
+   *  under a dark scrim; the gradient shows if the image fails. */
+  coverImage?: string;
   /** Emoji flags shown on the card — quick read of countries covered. */
   flags: string;
   /** "One country" / "5 countries" / "Continent" chip. */
@@ -59,6 +63,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       'The definitive introduction to Japan: four days soaking in Tokyo\'s energy, a hot-spring night under Mt. Fuji in Hakone, Kyoto\'s shrines and bamboo groves, and Osaka\'s legendary street food to finish. All connected by bullet train.',
     coverGradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f8/View_of_Mount_Fuji_from_%C5%8Cwakudani_20211202.jpg/1280px-View_of_Mount_Fuji_from_%C5%8Cwakudani_20211202.jpg',
     flags: '🇯🇵',
     scope: 'One country',
     travelers: 2,
@@ -141,6 +146,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       'A grand old-world circuit stitched together entirely by high-speed rail: Paris\'s museums, Amsterdam\'s canals, Berlin\'s history, Prague\'s fairytale old town, and Vienna\'s coffee-house grandeur. Watch Europe change out the train window.',
     coverGradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Prague_07-2016_view_from_Lesser_Town_Tower_of_Charles_Bridge_img3.jpg/1280px-Prague_07-2016_view_from_Lesser_Town_Tower_of_Charles_Bridge_img3.jpg',
     flags: '🇫🇷 🇳🇱 🇩🇪 🇨🇿 🇦🇹',
     scope: '5 countries',
     travelers: 2,
@@ -239,6 +245,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       'Bangkok\'s controlled chaos, the ancient temple city of Angkor, Hanoi\'s old-quarter buzz, and the lantern-lit riverside of Hoi An. Maximum flavor per dollar — this route runs on street food and wonder.',
     coverGradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Angkor_Wat.jpg/1280px-Angkor_Wat.jpg',
     flags: '🇹🇭 🇰🇭 🇻🇳',
     scope: '3 countries',
     travelers: 2,
@@ -322,6 +329,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       'A continent-scale sweep: Rio\'s beaches and samba, Buenos Aires\'s steakhouses and tango halls, then up into the Andes for Cusco and the lost city of Machu Picchu, landing in Lima — the food capital of the Americas.',
     coverGradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bb/Machu_Picchu%2C_2023_%28012%29.jpg/1280px-Machu_Picchu%2C_2023_%28012%29.jpg',
     flags: '🇧🇷 🇦🇷 🇵🇪',
     scope: 'Continent',
     travelers: 2,
@@ -406,6 +414,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       "A pilgrimage through Italy's architectural canon: ancient Rome's Colosseum and Pantheon, Florence's Duomo and Renaissance palaces, and Venice's Gothic basilicas floating on the lagoon. Cathedrals, cupolas, and piazzas the whole way — connected by fast trains.",
     coverGradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo_2020.jpg/1280px-Colosseo_2020.jpg',
     flags: '🇮🇹',
     scope: 'One country',
     travelers: 2,
@@ -472,6 +481,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       "Two days among the ruins of ancient Athens — the Acropolis, the Agora — then out to the islands: Santorini's caldera-edge villages and volcanic beaches, and Naxos's Venetian old town and long sandy coast. Sunsets, seafood, and slow island time.",
     coverGradient: 'linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Oia_sunset_-_panoramio_%282%29.jpg/1280px-Oia_sunset_-_panoramio_%282%29.jpg',
     flags: '🇬🇷',
     scope: 'One country',
     travelers: 2,
@@ -537,6 +547,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       'The perfect quick escape: the Louvre and Musée d\'Orsay, croissants in Le Marais, a sunset climb to Sacré-Cœur, and an evening under the Eiffel Tower sparkle. Short enough for a work week, rich enough to feel like a real trip.',
     coverGradient: 'linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Tour_Eiffel_Wikimedia_Commons_%28cropped%29.jpg/1280px-Tour_Eiffel_Wikimedia_Commons_%28cropped%29.jpg',
     flags: '🇫🇷',
     scope: 'City break',
     travelers: 2,
@@ -568,6 +579,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       'Iceland compressed into a long weekend: the Golden Circle\'s geysers and waterfalls, a soak in the Blue Lagoon\'s milky-blue water, black-sand beaches, and — in winter — a shot at the northern lights. Nature at full volume, minutes from a walkable little capital.',
     coverGradient: 'linear-gradient(135deg, #30cfd0 0%, #330867 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/18/Gullfoss_from_the_Air_%28cropped%29.jpg/1280px-Gullfoss_from_the_Air_%28cropped%29.jpg',
     flags: '🇮🇸',
     scope: 'City break',
     travelers: 2,
@@ -599,6 +611,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       'Lisbon\'s miradouros, tram 28, and pastéis de nata straight from the oven, then a night out in fairy-tale Sintra beneath the technicolor Pena Palace. Small distances, big atmosphere — Europe\'s easiest short escape.',
     coverGradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/74/Sintra_Portugal_Pal%C3%A1cio_da_Pena-01.jpg/1280px-Sintra_Portugal_Pal%C3%A1cio_da_Pena-01.jpg',
     flags: '🇵🇹',
     scope: 'City break',
     travelers: 2,
@@ -645,6 +658,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       'The big one: Tokyo\'s neon and izakayas, Seoul\'s markets and palace quarters, Bangkok\'s river life, Singapore\'s hawker centres, and a wind-down week-end of rice terraces and surf beaches in Bali. Five countries, one continent-sized memory.',
     coverGradient: 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Supertree_Grove%2C_Gardens_by_the_Bay%2C_Singapore_-_20120712-02.jpg/1280px-Supertree_Grove%2C_Gardens_by_the_Bay%2C_Singapore_-_20120712-02.jpg',
     flags: '🇯🇵 🇰🇷 🇹🇭 🇸🇬 🇮🇩',
     scope: '5 countries',
     travelers: 2,
@@ -744,6 +758,7 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
     description:
       'A 14-night sweep along the Mediterranean\'s greatest hits: Gaudí\'s Barcelona, the Riviera glamour of Nice, Rome\'s ruins and trattorias, Athens beneath the Acropolis, and the bazaars and bosphorus ferries of Istanbul — where Europe runs out and Asia begins.',
     coverGradient: 'linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%)',
+    coverImage: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/Hagia_Sophia_%28228968325%29.jpeg/1280px-Hagia_Sophia_%28228968325%29.jpeg',
     flags: '🇪🇸 🇫🇷 🇮🇹 🇬🇷 🇹🇷',
     scope: '5 countries',
     travelers: 2,
@@ -893,14 +908,22 @@ export function presetBudgetBucket(preset: PresetItinerary): BudgetBucket {
   return 'premium';
 }
 
-/** Rough all-in cost: hotels + inter-city transport for the whole party. */
-export function presetCost(preset: PresetItinerary): number {
-  const hotels = preset.cities.reduce((s, c) => s + c.hotel.pricePerNight * c.nights, 0);
+/** Rough all-in cost for a given party size: hotel rooms sleep 2, so rooms
+ *  scale at ceil(travelers/2); inter-city transport is per person. */
+export function presetCostFor(preset: PresetItinerary, travelers: number): number {
+  const rooms = Math.max(1, Math.ceil(travelers / 2));
+  const hotels =
+    preset.cities.reduce((s, c) => s + c.hotel.pricePerNight * c.nights, 0) * rooms;
   const transport = preset.cities.reduce(
-    (s, c) => s + (c.transportOut?.price ?? 0) * preset.travelers,
+    (s, c) => s + (c.transportOut?.price ?? 0) * travelers,
     0,
   );
   return Math.round(hotels + transport);
+}
+
+/** Cost at the preset's default party size — used on the browse cards. */
+export function presetCost(preset: PresetItinerary): number {
+  return presetCostFor(preset, preset.travelers);
 }
 
 /**
@@ -910,7 +933,10 @@ export function presetCost(preset: PresetItinerary): number {
  * stable colorIndex slots — so the canvas treats it exactly like a trip
  * the user planned themselves.
  */
-export function buildPresetTrip(preset: PresetItinerary): Trip {
+export function buildPresetTrip(
+  preset: PresetItinerary,
+  travelers: number = preset.travelers,
+): Trip {
   const start = new Date();
   start.setDate(start.getDate() + 30);
 
@@ -949,9 +975,9 @@ export function buildPresetTrip(preset: PresetItinerary): Trip {
   return {
     title: preset.title,
     status: 'planning',
-    totalCost: presetCost(preset),
+    totalCost: presetCostFor(preset, travelers),
     savings: 0,
-    travelers: preset.travelers,
+    travelers,
     cities,
     savingsTips: [],
     // Default home anchor — every preset starts from New York (JFK).

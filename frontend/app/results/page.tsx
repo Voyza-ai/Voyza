@@ -371,7 +371,7 @@ function ResultsPageInner() {
     <main className="h-screen overflow-hidden dot-grid-bg text-gray-900 flex flex-col">
       {/* View tabs live in the navbar (next to the auth corner) so the cards
           below get the full viewport height. The date-shift savings tip now
-          arrives as a Voyza AI chat message instead of a page banner. */}
+          arrives as a BlueMurr AI chat message instead of a page banner. */}
       <Navbar tabs={<ViewTabs value={view} onChange={setView} />} />
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
