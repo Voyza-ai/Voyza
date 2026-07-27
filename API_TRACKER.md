@@ -58,7 +58,9 @@ dates (2026-07-20), never "last week"._
 - **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
 - **2026-07-27: Hervé Gilg (hg@junctionconnect.com) replied within minutes** —
   wants a call, offered Tue 2026-07-28 or Wed 2026-07-29.
-- **Next:** reply with availability, get the call booked, both founders on it.
+- **2026-07-27:** availability sent — Wed 12–1 pm ET or after 5:30 pm ET,
+  both founders attending. Awaiting his time + link.
+- **Next:** call booked → prep talking points, both founders on it.
   Prep: volume story (~200 bookings, study-abroad students), commission model,
   what we need (sandbox, EU rail coverage), ask about their pricing/terms.
 
