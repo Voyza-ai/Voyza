@@ -13,7 +13,7 @@ dates (2026-07-20), never "last week"._
 
 | Provider | Status | Sent |
 |---|---|---|
-| All Aboard | ✅ in conversation — sandbox offered | 2026-07-13 |
+| All Aboard | ✅ in conversation — reply sent, sandbox pending | 2026-07-27 |
 | Omio | 📤 awaiting reply | 2026-07-13 |
 | Junction | 📤 awaiting reply | 2026-07-13 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
@@ -35,9 +35,12 @@ dates (2026-07-20), never "last week"._
 - **2026-07-25: co-founder Carl Törnqvist replied** — positive ("multi-leg
   comparison angle is a good fit"), asked for booking volume projections +
   monetization model, and offered sandbox access either way.
-- **Next:** send the drafted reply (honest pre-revenue numbers, commission
-  model, sandbox ask, BlueMurr rebrand note) from carl's thread. Then wire
-  sandbox key into `.env` when it arrives.
+- **2026-07-27: reply sent** — volume projection (~200 bookings first months,
+  study-abroad students), commission + later subscription model, sandbox ask,
+  call offer, BlueMurr rename note (no link yet — v1 not done).
+- **Next:** wait for sandbox credentials. When they arrive → wire into
+  `backend/.env` and start the rail integration. If silent past ~2026-08-03,
+  gentle nudge in the same thread.
 - **Note:** best odds of the bunch — developer-first company, public docs.
   First provider breakthrough; prioritize this thread.
 
@@ -122,6 +125,14 @@ dates (2026-07-20), never "last week"._
 
 _Append a line whenever anything happens, newest first._
 
+- 2026-07-27 — **All Aboard reply sent** (Gohil, same thread): ~200 bookings
+  projected for first months via study-abroad students, commission model +
+  possible subscription, sandbox access requested, call offered, BlueMurr
+  rename mentioned. Awaiting sandbox credentials.
+
+- 2026-07-25 — **All Aboard replied** (Carl Törnqvist, co-founder): positive fit,
+  wants volume projections + monetization model, sandbox access offered.
+
 - 2026-07-16 — Kiwi affiliates emailed (Gohil): Tequila portal no longer has
   open signup, page directs new affiliates to affiliates@kiwi.com.
 
@@ -134,10 +145,6 @@ _Append a line whenever anything happens, newest first._
   EIN/business document we don't have yet. Unblock = get EIN (sole prop works).
 
 - 2026-07-13 — All Aboard join form submitted (Gohil).
-
-- 2026-07-25 — **All Aboard replied** (Carl Törnqvist, co-founder): positive fit,
-  wants volume projections + monetization model, sandbox access offered.
-  Reply drafted; sending once bluemurr.com is live (done 2026-07-26).
 
 - _[date]_ — Trainline partner inquiry submitted (friend). No response as of
   2026-07-13.
