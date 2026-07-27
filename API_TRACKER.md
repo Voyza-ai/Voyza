@@ -14,13 +14,13 @@ dates (2026-07-20), never "last week"._
 | Provider | Status | Sent |
 |---|---|---|
 | All Aboard | ✅ in conversation — reply sent, sandbox pending | 2026-07-27 |
-| Omio | 📤 awaiting reply | 2026-07-13 |
-| Junction | 📤 awaiting reply | 2026-07-13 |
+| Omio | 🔁 follow-up sent | 2026-07-27 |
+| Junction | 🔁 follow-up sent | 2026-07-27 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
 | Duffel live token | 🔲 not started | — |
-| Kiwi Tequila | 📤 awaiting reply | 2026-07-16 |
+| Kiwi Tequila | 🔁 follow-up sent | 2026-07-27 |
 | Booking.com affiliate | 🔲 not started | — |
 | Travelpayouts | 📝 draft ready | — |
 | Direct Ferries | 📝 draft ready | — |
@@ -44,16 +44,19 @@ dates (2026-07-20), never "last week"._
 - **Note:** best odds of the bunch — developer-first company, public docs.
   First provider breakthrough; prioritize this thread.
 
-### Omio  📤
+### Omio  🔁
 - **For:** rail + bus search, 1,000+ operators. Multimodal hedge.
 - **Sent:** 2026-07-13 by direct email (their salesportal form was broken;
   said so in the email)
-- **Next:** wait. Nudge after ~2026-07-20 if silent.
+- **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
+- **Next:** wait. If still silent past ~2026-08-10, deprioritize — All Aboard
+  and Junction cover the same ground.
 
-### Junction  📤
+### Junction  🔁
 - **For:** multimodal API (rail + flights). Email-only access.
 - **Sent:** 2026-07-13 to deploy@junctionconnect.com
-- **Next:** wait. Nudge after ~2026-07-20 if silent.
+- **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
+- **Next:** wait. If still silent past ~2026-08-10, deprioritize.
 
 ### Trainline Partner API  📤
 - **For:** the long-term ceiling — 270+ operators, 45 countries.
@@ -84,13 +87,15 @@ dates (2026-07-20), never "last week"._
 - **Next:** complete business verification in the Duffel dashboard.
   Same EIN conversation as Rail Europe unblocks this.
 
-### Kiwi Tequila  📤
+### Kiwi Tequila  🔁
 - **For:** LCC flights (Ryanair) that Duffel misses.
 - **Sent:** 2026-07-16 — emailed affiliates@kiwi.com. Tequila's portal no
   longer offers open self-serve signup (login is magic-link only; the page
   directs new affiliates to that address).
-- **Next:** wait; nudge after ~2026-07-23 if silent. When the key arrives →
-  Claude integrates it as the second flight source (plan step F3).
+- **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
+- **Next:** wait. When the key arrives → Claude integrates it as the second
+  flight source (plan step F3). If silent past ~2026-08-10, fall back to
+  Travelpayouts for LCC coverage.
 
 ### Booking.com affiliate  🔲
 - **For:** commission on the hotel links we already show. Biggest easy revenue.
@@ -124,6 +129,9 @@ dates (2026-07-20), never "last week"._
 ## Response log
 
 _Append a line whenever anything happens, newest first._
+
+- 2026-07-27 — Follow-up nudges sent to Omio, Junction, and Kiwi (Gohil, same
+  threads as the originals). Each mentions the Voyza → BlueMurr rename.
 
 - 2026-07-27 — **All Aboard reply sent** (Gohil, same thread): ~200 bookings
   projected for first months via study-abroad students, commission model +
