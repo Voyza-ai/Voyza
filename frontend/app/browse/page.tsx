@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -43,6 +43,7 @@ import {
 } from '@/lib/canvasHandoff';
 import { detectNearestAirportCity } from '@/lib/nearestAirport';
 import { getOriginAirports } from '@/lib/originAirports';
+import { getUseLocationPref, setUseLocationPref } from '@/lib/locationPref';
 
 const VIBES: Array<{ key: Vibe; label: string }> = [
   { key: 'beach', label: 'Beach' },
@@ -82,6 +83,20 @@ export default function BrowsePage() {
     { city: string; airports: string[] } | undefined
   >(undefined);
   const [locating, setLocating] = useState(false);
+  // App-side location switch — the browser permission can't be revoked by
+  // the site, so this is how a user who picked "always allow" opts back out.
+  // Initialized in an effect (not the useState initializer) so server and
+  // client render the same default and hydration stays clean.
+  const [useLocation, setUseLocation] = useState(true);
+  useEffect(() => setUseLocation(getUseLocationPref()), []);
+  const toggleUseLocation = () => {
+    const next = !useLocation;
+    setUseLocation(next);
+    setUseLocationPref(next);
+    // Forget any previously detected origin so a post-login save after
+    // toggling off falls back to the JFK default.
+    if (!next) setDetectedOrigin(undefined);
+  };
   const [query, setQuery] = useState('');
 
   // Deferred filters: the sidebar controls edit a DRAFT; nothing filters
@@ -148,6 +163,8 @@ export default function BrowsePage() {
   const detectOrigin = async (): Promise<
     { city: string; airports: string[] } | undefined
   > => {
+    // User turned location off in the app — never even ask the browser.
+    if (!useLocation) return undefined;
     setLocating(true);
     try {
       const result = await detectNearestAirportCity();
@@ -669,9 +686,40 @@ export default function BrowsePage() {
                         <Plus size={12} />
                       </button>
                     </div>
-                    <span className="text-[11px] text-gray-400 hidden sm:inline">
-                      Saves to your trips
-                    </span>
+                    {/* Location switch — same pill language as the travelers
+                        control. Off = never ask the browser, depart from the
+                        New York (JFK) default. */}
+                    <button
+                      role="switch"
+                      aria-checked={useLocation}
+                      aria-label="Use my location"
+                      onClick={toggleUseLocation}
+                      title={
+                        useLocation
+                          ? 'We pick your nearest departure airport when you save. Click to turn off.'
+                          : 'Location is off — trips depart from New York (JFK). Click to turn on.'
+                      }
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-colors"
+                      style={{ background: '#f0f4f8', border: '1px solid rgba(0,0,0,0.08)' }}
+                    >
+                      <MapPin
+                        size={13}
+                        style={{ color: useLocation ? '#2563eb' : '#9ca3af' }}
+                      />
+                      <span className="text-[12px] text-gray-600 hidden sm:inline">
+                        Use my location
+                      </span>
+                      <span
+                        aria-hidden
+                        className="relative inline-flex w-8 h-[18px] rounded-full transition-colors"
+                        style={{ background: useLocation ? '#2563eb' : '#d1d5db' }}
+                      >
+                        <span
+                          className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-all"
+                          style={{ left: useLocation ? '18px' : '2px' }}
+                        />
+                      </span>
+                    </button>
                   </div>
                   <div className="flex gap-2">
                     <button
