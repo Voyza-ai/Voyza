@@ -15,7 +15,7 @@ dates (2026-07-20), never "last week"._
 |---|---|---|
 | All Aboard | ✅ in conversation — reply sent, sandbox pending | 2026-07-27 |
 | Omio | 🔁 follow-up sent | 2026-07-27 |
-| Junction | 🔁 follow-up sent | 2026-07-27 |
+| Junction | ✅ replied — call scheduling | 2026-07-27 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
@@ -52,11 +52,15 @@ dates (2026-07-20), never "last week"._
 - **Next:** wait. If still silent past ~2026-08-10, deprioritize — All Aboard
   and Junction cover the same ground.
 
-### Junction  🔁
+### Junction  ✅
 - **For:** multimodal API (rail + flights). Email-only access.
 - **Sent:** 2026-07-13 to deploy@junctionconnect.com
 - **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
-- **Next:** wait. If still silent past ~2026-08-10, deprioritize.
+- **2026-07-27: Hervé Gilg (hg@junctionconnect.com) replied within minutes** —
+  wants a call, offered Tue 2026-07-28 or Wed 2026-07-29.
+- **Next:** reply with availability, get the call booked, both founders on it.
+  Prep: volume story (~200 bookings, study-abroad students), commission model,
+  what we need (sandbox, EU rail coverage), ask about their pricing/terms.
 
 ### Trainline Partner API  📤
 - **For:** the long-term ceiling — 270+ operators, 45 countries.
@@ -129,6 +133,9 @@ dates (2026-07-20), never "last week"._
 ## Response log
 
 _Append a line whenever anything happens, newest first._
+
+- 2026-07-27 — **Junction replied minutes after the nudge** (Hervé Gilg,
+  hg@junctionconnect.com): wants a call, offered Tue 07-28 or Wed 07-29.
 
 - 2026-07-27 — Follow-up nudges sent to Omio, Junction, and Kiwi (Gohil, same
   threads as the originals). Each mentions the Voyza → BlueMurr rename.
