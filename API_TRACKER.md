@@ -38,9 +38,19 @@ dates (2026-07-20), never "last week"._
 - **2026-07-27: reply sent** — volume projection (~200 bookings first months,
   study-abroad students), commission + later subscription model, sandbox ask,
   call offer, BlueMurr rename note (no link yet — v1 not done).
-- **Next:** wait for sandbox credentials. When they arrive → wire into
-  `backend/.env` and start the rail integration. If silent past ~2026-08-03,
-  gentle nudge in the same thread.
+- **2026-07-28: Carl replied** — key correction: **no commissions in rail**.
+  All Aboard's revenue is booking fees; API prices are net (parity with
+  operator sites). BlueMurr earns by adding its own margin/service fee on
+  top. Asked if that still works for our model.
+- **2026-07-28: reply sent** — confirmed the model works for us (we set our
+  own service fee), asked for a rough booking-fee example for a typical
+  one-way ticket, and asked for sandbox access whenever ready.
+- **Next:** wait for the fee example + sandbox credentials. When they arrive
+  → wire into `backend/.env`, start the rail integration. If silent past
+  ~2026-08-04, gentle nudge in the same thread.
+- **Model note for pricing later:** displayed rail prices will sit slightly
+  above operator sites (their booking fee + our service fee). Keep our fee
+  small; the value is one-app multi-leg booking.
 - **Note:** best odds of the bunch — developer-first company, public docs.
   First provider breakthrough; prioritize this thread.
 
@@ -135,6 +145,11 @@ dates (2026-07-20), never "last week"._
 ## Response log
 
 _Append a line whenever anything happens, newest first._
+
+- 2026-07-28 — **Carl (All Aboard) replied**: no commissions in rail — their
+  revenue is booking fees, API prices are net, we earn via our own service
+  fee on top. Reply sent same day: model works, asked for a booking-fee
+  example + sandbox access. (Also: disregard their duplicate email.)
 
 - 2026-07-27 — **Junction replied minutes after the nudge** (Hervé Gilg,
   hg@junctionconnect.com): wants a call, offered Tue 07-28 or Wed 07-29.
