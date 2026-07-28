@@ -3,10 +3,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { Home, PanelLeftOpen, Plane, Maximize2, X, Layers, Check } from 'lucide-react';
+import {
+  Home,
+  PanelLeftOpen,
+  Plane,
+  Maximize2,
+  X,
+  Layers,
+  Check,
+  ChevronLeft,
+} from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { geocodeCities, GeoPoint } from '@/lib/geocode';
 import { getCityColor, HOME_COLOR } from '@/lib/cityColors';
+import {
+  buildCitySpots,
+  geocodeSpots,
+  distanceKm,
+  CITY_FRAME_KM,
+  type Spot,
+  type SpotKind,
+} from '@/lib/citySpots';
 
 /**
  * Map tab — the trip drawn on the Earth.
@@ -167,6 +184,100 @@ type PinPoint = {
 };
 
 /**
+ * Spot pins — the places INSIDE a city. Deliberately a different visual class
+ * from the big numbered city pins: smaller, white-filled, with a coloured ring
+ * and a glyph, so "stops on the trip" and "places within a stop" never read as
+ * the same thing. One colour + icon per kind.
+ */
+/**
+ * Opening a city is an explicit act, so its spots show immediately — the map
+ * zooms to fit them rather than making you zoom in to find them. Zooming back
+ * out past this leaves the city and returns to the trip overview.
+ */
+const CITY_EXIT_ZOOM = 8;
+
+const SPOT_STYLE: Record<SpotKind, { color: string; label: string; paths: string[] }> = {
+  airport: {
+    color: '#475569',
+    label: 'Airport',
+    paths: [
+      'M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z',
+    ],
+  },
+  hotel: {
+    color: '#7c3aed',
+    label: 'Hotel',
+    paths: ['M2 20v-8a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v8', 'M4 10V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4', 'M12 4v6', 'M2 18h20'],
+  },
+  restaurant: {
+    color: '#e11d48',
+    label: 'Food',
+    paths: ['M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2', 'M7 2v20', 'M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7'],
+  },
+  sightseeing: {
+    color: '#d97706',
+    label: 'Sights',
+    paths: ['M3 22h18', 'M6 18v-7', 'M10 18v-7', 'M14 18v-7', 'M18 18v-7', 'M12 2 2 9h20Z'],
+  },
+  activity: {
+    color: '#0d9488',
+    label: 'Activities',
+    paths: [
+      'M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z',
+      'M13 5v14',
+    ],
+  },
+};
+
+const spotSvg = (kind: SpotKind, size = 13) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${SPOT_STYLE[kind].color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${SPOT_STYLE[kind]
+    .paths.map((d) => `<path d="${d}"/>`)
+    .join('')}</svg>`;
+
+/**
+ * A spot marker: 24px white disc, coloured ring + glyph. The name is hidden
+ * until hover — a city can hold half a dozen spots and permanent labels would
+ * bury the map.
+ */
+function makeSpotEl(spot: Spot): HTMLDivElement {
+  const style = SPOT_STYLE[spot.kind];
+  const el = document.createElement('div');
+  // No `position` — MapLibre's own class supplies absolute (see makePinEl).
+  el.style.cssText = 'width:24px;height:24px;';
+  el.title = spot.detail ? `${spot.name} — ${spot.detail}` : spot.name;
+
+  const label = document.createElement('div');
+  label.textContent = spot.name;
+  label.style.cssText = `
+    position:absolute;bottom:29px;left:50%;transform:translateX(-50%);
+    max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    font:600 11px/1.35 system-ui,sans-serif;color:#26324b;
+    background:rgba(255,255,255,0.95);border:1px solid rgba(0,0,0,0.08);
+    border-radius:6px;padding:2px 6px;box-shadow:0 1px 4px rgba(0,0,0,0.12);
+    opacity:0;transition:opacity .12s ease;pointer-events:none;
+  `;
+  el.appendChild(label);
+
+  const disc = document.createElement('div');
+  disc.style.cssText = `
+    width:24px;height:24px;border-radius:9999px;
+    background:#fff;border:2px solid ${style.color};
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 1px 5px rgba(0,0,0,0.2);cursor:default;
+  `;
+  disc.innerHTML = spotSvg(spot.kind);
+  el.appendChild(disc);
+
+  el.addEventListener('mouseenter', () => {
+    label.style.opacity = '1';
+  });
+  el.addEventListener('mouseleave', () => {
+    label.style.opacity = '0';
+  });
+  return el;
+}
+
+/**
  * Circular numbered marker in the flowchart card palette, with the city name
  * floating ABOVE the circle (not under it, where the pin covers it). The
  * wrapper stays 30×30 so the marker's `center` anchor keeps the circle on the
@@ -259,6 +370,8 @@ const nightsBetween = (arrival?: string, departure?: string) => {
 
 const ROUTE_SOURCE = 'trip-route';
 const ROUTE_LAYER = 'trip-route-line';
+const SPOTS_SOURCE = 'city-spots-path';
+const SPOTS_LAYER = 'city-spots-path-line';
 
 export default function MapView({ trip }: MapViewProps) {
   const [pins, setPins] = useState<PinPoint[]>([]);
@@ -271,6 +384,20 @@ export default function MapView({ trip }: MapViewProps) {
   const [styleMenuOpen, setStyleMenuOpen] = useState(false);
   // Bumped after a theme swap so the route layer (wiped by setStyle) re-adds.
   const [styleEpoch, setStyleEpoch] = useState(0);
+
+  // ─── Spot state (the places inside one city) ───
+  // Which city's spots we're showing, whether the zoom is close enough to show
+  // them, and the resolved spots themselves. Geocoding is LAZY per city: doing
+  // every city up front would be dozens of rate-limited lookups (~1/sec).
+  const [activeCityIndex, setActiveCityIndex] = useState<number | null>(null);
+  // Mirror for the map's zoom listener, which is registered once and would
+  // otherwise close over a stale activeCityIndex.
+  const activeCityRef = useRef<number | null>(null);
+  const [spots, setSpots] = useState<Spot[]>([]);
+  const [spotsLoading, setSpotsLoading] = useState(false);
+  const [spotsDropped, setSpotsDropped] = useState<string[]>([]);
+  const spotCacheRef = useRef<Map<number, { spots: Spot[]; dropped: string[] }>>(new Map());
+  const spotMarkersRef = useRef<maplibregl.Marker[]>([]);
 
   const shellRef = useRef<HTMLDivElement | null>(null);
   // Keep the mount-time theme stable so the create effect never re-runs on switch.
@@ -305,6 +432,17 @@ export default function MapView({ trip }: MapViewProps) {
       });
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
       map.on('load', () => setReady(true));
+      // Zooming back out to trip scale means you've left the city — drop out of
+      // the city view so the overview isn't littered with its spots.
+      //
+      // `zoomend`, NOT `zoom`: the continuous event also fires on the early
+      // frames of a zoom-IN animation, where the camera is still below the exit
+      // threshold. Listening to it cleared the city the instant it was opened.
+      map.on('zoomend', () => {
+        if (activeCityRef.current !== null && map!.getZoom() < CITY_EXIT_ZOOM) {
+          setActiveCityIndex(null);
+        }
+      });
       mapRef.current = map;
     });
     return () => {
@@ -405,12 +543,20 @@ export default function MapView({ trip }: MapViewProps) {
     const map = mapRef.current;
     const target = pins.find((p) => p.cityIndex === index && p.kind === 'city');
     if (!map || !target) return;
+    setActiveCityIndex(index);
+    // Move in to city scale straight away; once the spots resolve, the effect
+    // below re-fits precisely around them so none of them overlap.
     map.easeTo({
       center: [target.point.lon, target.point.lat],
-      zoom: 9.3,
+      zoom: 11,
       duration: 650,
     });
   }, [pins]);
+
+  // Keep the listener's mirror in step.
+  useEffect(() => {
+    activeCityRef.current = activeCityIndex;
+  }, [activeCityIndex]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -436,6 +582,192 @@ export default function MapView({ trip }: MapViewProps) {
       markersRef.current = [];
     };
   }, [pins, ready, focusCity]);
+
+  // ─── Resolve the active city's spots (lazy, cached per city) ───
+  useEffect(() => {
+    if (activeCityIndex === null) {
+      setSpots([]);
+      setSpotsDropped([]);
+      setSpotsLoading(false);
+      return;
+    }
+    const cached = spotCacheRef.current.get(activeCityIndex);
+    if (cached) {
+      setSpots(cached.spots);
+      setSpotsDropped(cached.dropped);
+      setSpotsLoading(false);
+      return;
+    }
+    const centerPin = pins.find((p) => p.cityIndex === activeCityIndex && p.kind === 'city');
+    if (!centerPin) return;
+
+    const seeds = buildCitySpots(trip, activeCityIndex);
+    if (seeds.length === 0) {
+      spotCacheRef.current.set(activeCityIndex, { spots: [], dropped: [] });
+      setSpots([]);
+      setSpotsDropped([]);
+      return;
+    }
+
+    let cancelled = false;
+    setSpotsLoading(true);
+    setSpots([]);
+    geocodeSpots(seeds, centerPin.point)
+      .then((res) => {
+        // Cache regardless of cancellation — the work is done and valid.
+        spotCacheRef.current.set(activeCityIndex, res);
+        if (cancelled) return;
+        setSpots(res.spots);
+        setSpotsDropped(res.dropped);
+      })
+      .catch(() => {
+        if (!cancelled) setSpotsDropped(seeds.map((s) => s.name));
+      })
+      .finally(() => {
+        if (!cancelled) setSpotsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCityIndex, pins, trip]);
+
+  // ─── Draw the spot markers + the walk between them ───
+  // No zoom gate: opening a city is deliberate, so its spots show right away.
+  // Memoised because the marker effect keys off it — a fresh array each render
+  // tore every marker down and rebuilt it, which flickered the pins.
+  const visibleSpots = useMemo(
+    () => (activeCityIndex !== null ? spots : []),
+    [activeCityIndex, spots],
+  );
+
+  /**
+   * Frame the open city around its own spots, so every pin is separated
+   * instead of clumped. The airport is excluded from the fit — it sits ~25km
+   * out and including it squeezes the in-town spots back into a blob (measured:
+   * 12px apart at region zoom, with 24px pins).
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || activeCityIndex === null || spotsLoading) return;
+    const centre = pins.find((p) => p.cityIndex === activeCityIndex && p.kind === 'city');
+    // Frame on what's actually in town: the airport sits ~25km out, and a day
+    // trip can be 100km+ away. Including either zooms the view out until the
+    // in-town spots collapse together (measured: 12px apart, 24px pins).
+    const inTown = spots.filter(
+      (s) =>
+        s.kind !== 'airport' &&
+        (!centre || distanceKm(centre.point, s.point) <= CITY_FRAME_KM),
+    );
+    if (inTown.length === 0) return;
+
+    if (inTown.length === 1) {
+      map.easeTo({ center: [inTown[0].point.lon, inTown[0].point.lat], zoom: 13.5, duration: 600 });
+      return;
+    }
+    const b = new maplibregl.LngLatBounds();
+    inTown.forEach((s) => b.extend([s.point.lon, s.point.lat]));
+    map.fitBounds(b, { padding: 70, maxZoom: 15, duration: 700 });
+  }, [activeCityIndex, spots, spotsLoading, ready]);
+
+  /**
+   * Nudge spot pins that land on top of each other.
+   *
+   * Real itineraries cluster: Shibuya Crossing and two Shibuya restaurants sit
+   * a few hundred metres apart, while the view has to span 10km out to Asakusa
+   * — measured at 16px apart with 24px pins, i.e. unclickable. Colliding pins
+   * get a small pixel offset (never more than ~30px, so they stay next to the
+   * truth) purely for legibility; the underlying coordinate is untouched.
+   */
+  const declutterSpots = useCallback(() => {
+    const map = mapRef.current;
+    const markers = spotMarkersRef.current;
+    if (!map || markers.length < 2) return;
+    const RADIUS = 27;
+    const placed: { x: number; y: number }[] = [];
+    for (const marker of markers) {
+      marker.setOffset([0, 0]);
+      const base = map.project(marker.getLngLat());
+      let dx = 0;
+      let dy = 0;
+      for (let attempt = 1; attempt <= 12; attempt++) {
+        const clash = placed.some(
+          (p) => Math.hypot(p.x - (base.x + dx), p.y - (base.y + dy)) < RADIUS,
+        );
+        if (!clash) break;
+        // Walk around a widening ring until a free slot turns up.
+        const angle = (attempt % 6) * (Math.PI / 3);
+        const ring = RADIUS * (1 + Math.floor((attempt - 1) / 6) * 0.55);
+        dx = Math.cos(angle) * ring;
+        dy = Math.sin(angle) * ring;
+      }
+      marker.setOffset([dx, dy]);
+      placed.push({ x: base.x + dx, y: base.y + dy });
+    }
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    spotMarkersRef.current.forEach((m) => m.remove());
+    spotMarkersRef.current = visibleSpots.map((spot) =>
+      new maplibregl.Marker({ element: makeSpotEl(spot), anchor: 'center' })
+        .setLngLat([spot.point.lon, spot.point.lat])
+        .addTo(map),
+    );
+    // Offsets are screen-space, so they must be recomputed after the camera
+    // settles as well as on creation.
+    const raf = requestAnimationFrame(declutterSpots);
+    map.on('moveend', declutterSpots);
+    return () => {
+      cancelAnimationFrame(raf);
+      map.off('moveend', declutterSpots);
+      spotMarkersRef.current.forEach((m) => m.remove());
+      spotMarkersRef.current = [];
+    };
+  }, [visibleSpots, ready, declutterSpots]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    // The airport is excluded: it's often far outside town and would drag the
+    // line across the whole view. This is the itinerary's LISTED order, not a
+    // routed walking path.
+    const walk = visibleSpots.filter((s) => s.kind !== 'airport');
+    const data: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features:
+        walk.length > 1
+          ? [
+              {
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'LineString',
+                  coordinates: walk.map((s) => [s.point.lon, s.point.lat]),
+                },
+              },
+            ]
+          : [],
+    };
+    const existing = map.getSource(SPOTS_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    if (existing) {
+      existing.setData(data);
+      return;
+    }
+    map.addSource(SPOTS_SOURCE, { type: 'geojson', data });
+    map.addLayer({
+      id: SPOTS_LAYER,
+      type: 'line',
+      source: SPOTS_SOURCE,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#64748b',
+        'line-opacity': 0.5,
+        'line-width': 1.6,
+        'line-dasharray': [1, 2.4],
+      },
+    });
+  }, [visibleSpots, ready, styleEpoch]);
 
   // ─── Hide the basemap's own labels for the trip's cities ───
   // Each trip city is already labelled by its numbered pin; without this the
@@ -535,6 +867,25 @@ export default function MapView({ trip }: MapViewProps) {
     setTimeout(() => fitToTrip(), 240);
   }, [fitToTrip]);
 
+  /** The city currently opened in the panel, if any. */
+  const activeCity = activeCityIndex !== null ? trip.cities[activeCityIndex] : undefined;
+
+  /** Leave the city view and go back to the whole trip. */
+  const closeCity = useCallback(() => {
+    setActiveCityIndex(null);
+    fitToTrip();
+  }, [fitToTrip]);
+
+  const flyToSpot = useCallback((spot: Spot) => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.easeTo({
+      center: [spot.point.lon, spot.point.lat],
+      zoom: Math.max(map.getZoom(), 14),
+      duration: 550,
+    });
+  }, []);
+
   // Swap the basemap theme. HTML markers survive setStyle (they're DOM, not
   // part of the style); the route source/layer do NOT, so bump styleEpoch once
   // the new style has settled to re-add them.
@@ -568,10 +919,28 @@ export default function MapView({ trip }: MapViewProps) {
       >
         <div className="min-h-0 flex flex-col bg-white/97 backdrop-blur-sm rounded-xl border border-black/10 shadow-lg overflow-hidden">
           <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between gap-2">
-            <span className="text-[12px] font-semibold text-gray-800">Itinerary</span>
-            <div className="flex items-center gap-1.5">
+            {activeCity ? (
+              <button
+                onClick={closeCity}
+                className="flex items-center gap-1 min-w-0 text-left group/back"
+                title="Back to all stops"
+              >
+                <ChevronLeft
+                  size={14}
+                  className="text-gray-400 group-hover/back:text-gray-700 transition-colors flex-shrink-0"
+                />
+                <span className="text-[12px] font-semibold text-gray-800 truncate">
+                  {activeCity.name}
+                </span>
+              </button>
+            ) : (
+              <span className="text-[12px] font-semibold text-gray-800">Itinerary</span>
+            )}
+            <div className="flex items-center gap-1.5 flex-shrink-0">
               <span className="text-[11px] text-gray-400">
-                {trip.cities.length} {trip.cities.length === 1 ? 'stop' : 'stops'}
+                {activeCity
+                  ? `${nightsBetween(activeCity.dates?.arrival, activeCity.dates?.departure)}n`
+                  : `${trip.cities.length} ${trip.cities.length === 1 ? 'stop' : 'stops'}`}
               </span>
               <button
                 onClick={togglePanel}
@@ -583,6 +952,53 @@ export default function MapView({ trip }: MapViewProps) {
             </div>
           </div>
 
+          {/* ── City detail: what's planned inside the open city ── */}
+          {activeCity && (
+            <div className="flex-1 min-h-0 overflow-y-auto px-1.5 py-1.5">
+              {spotsLoading && (
+                <p className="px-2 py-2 text-[11px] text-gray-400">Finding places…</p>
+              )}
+              {!spotsLoading && spots.length === 0 && (
+                <p className="px-2 py-2 text-[11px] text-gray-400">
+                  Nothing to place on the map for this stop yet.
+                </p>
+              )}
+              {spots.map((spot, i) => (
+                <button
+                  key={`${spot.kind}-${spot.name}-${i}`}
+                  onClick={() => flyToSpot(spot)}
+                  title={`Show ${spot.name} on the map`}
+                  className="w-full text-left flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  <span
+                    className="w-5 h-5 rounded-full bg-white flex items-center justify-center flex-shrink-0 mt-0.5"
+                    style={{ border: `2px solid ${SPOT_STYLE[spot.kind].color}` }}
+                    dangerouslySetInnerHTML={{ __html: spotSvg(spot.kind, 9) }}
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-[11.5px] font-medium text-gray-800 leading-snug">
+                      {spot.name}
+                    </span>
+                    {spot.detail && (
+                      <span className="block text-[10px] text-gray-400 truncate">
+                        {spot.detail}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              ))}
+              {spotsDropped.length > 0 && !spotsLoading && (
+                <p
+                  className="px-2 pt-2 text-[10px] text-gray-400 border-t border-gray-100 mt-1"
+                  title={spotsDropped.join(', ')}
+                >
+                  Couldn&apos;t place: {spotsDropped.join(', ')}
+                </p>
+              )}
+            </div>
+          )}
+
+          {!activeCity && (
           <div className="flex-1 min-h-0 overflow-y-auto px-1.5 py-1.5">
             {hasHome && (
               <button
@@ -643,8 +1059,9 @@ export default function MapView({ trip }: MapViewProps) {
               );
             })}
           </div>
+          )}
 
-          {missing.length > 0 && (
+          {missing.length > 0 && !activeCity && (
             <div className="px-3.5 py-2 border-t border-gray-100 text-[10px] text-gray-400">
               Couldn&apos;t locate: {missing.join(', ')}
             </div>
@@ -740,6 +1157,41 @@ export default function MapView({ trip }: MapViewProps) {
         {loading && (
           <div className="absolute bottom-3 left-3 z-[500] px-3 py-1.5 rounded-full text-[12px] bg-white/95 border border-black/10 shadow-sm text-gray-600">
             Locating your cities…
+          </div>
+        )}
+
+        {/* Spot status + legend. Only while a city is open, since that's the
+            only time spot pins are on the map. */}
+        {!loading && activeCityIndex !== null && (
+          <div className="absolute bottom-3 left-3 z-[500] flex flex-col gap-1.5 items-start">
+            {spotsLoading && (
+              <div className="px-3 py-1.5 rounded-full text-[12px] bg-white/95 border border-black/10 shadow-sm text-gray-600">
+                Finding places in {trip.cities[activeCityIndex]?.name}…
+              </div>
+            )}
+            {!spotsLoading && visibleSpots.length > 0 && (
+              <div className="px-2.5 py-1.5 rounded-lg bg-white/95 border border-black/10 shadow-sm flex items-center gap-2.5 flex-wrap max-w-[420px]">
+                {(Object.keys(SPOT_STYLE) as SpotKind[])
+                  .filter((k) => visibleSpots.some((s) => s.kind === k))
+                  .map((k) => (
+                    <span key={k} className="flex items-center gap-1 text-[10.5px] text-gray-600">
+                      <span
+                        className="w-3.5 h-3.5 rounded-full bg-white flex items-center justify-center flex-shrink-0"
+                        style={{ border: `2px solid ${SPOT_STYLE[k].color}` }}
+                      />
+                      {SPOT_STYLE[k].label}
+                    </span>
+                  ))}
+                {spotsDropped.length > 0 && (
+                  <span
+                    className="text-[10.5px] text-gray-400"
+                    title={`No location found for: ${spotsDropped.join(', ')}`}
+                  >
+                    · {spotsDropped.length} not placed
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
