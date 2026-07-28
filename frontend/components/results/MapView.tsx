@@ -635,11 +635,18 @@ export default function MapView({ trip }: MapViewProps) {
     cityFramedRef.current = false;
   }, [activeCityIndex]);
 
+  // City dots belong to the trip overview. Inside a city the itinerary spots
+  // are the subject, and the big numbered dot just sits on top of them.
+  const visibleCityPins = useMemo(
+    () => (activeCityIndex === null ? pins : []),
+    [pins, activeCityIndex],
+  );
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
     markersRef.current.forEach((m) => m.remove());
-    markersRef.current = pins.map((pin) => {
+    markersRef.current = visibleCityPins.map((pin) => {
       const isHome = pin.kind === 'home';
       const palette = isHome ? HOME_COLOR : getCityColor(pin.cityIndex);
       const label = isHome ? '⌂' : String(pin.cityIndex + 1);
@@ -658,7 +665,7 @@ export default function MapView({ trip }: MapViewProps) {
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
     };
-  }, [pins, ready, focusCity]);
+  }, [visibleCityPins, ready, focusCity]);
 
   // ─── Resolve the active city's spots (lazy, cached per city) ───
   useEffect(() => {
@@ -805,13 +812,15 @@ export default function MapView({ trip }: MapViewProps) {
         .setLngLat([spot.point.lon, spot.point.lat])
         .addTo(map),
     );
-    // Offsets are screen-space, so they must be recomputed after the camera
-    // settles as well as on creation.
+    // Recompute on ZOOM only, never on pan. Panning doesn't change the pixel
+    // distance between two pins, so re-running it on every camera move just
+    // reshuffled the nudges and made the pins visibly jump — most obviously
+    // when clicking a row in the panel, which flies the map.
     const raf = requestAnimationFrame(declutterSpots);
-    map.on('moveend', declutterSpots);
+    map.on('zoomend', declutterSpots);
     return () => {
       cancelAnimationFrame(raf);
-      map.off('moveend', declutterSpots);
+      map.off('zoomend', declutterSpots);
       spotMarkersRef.current.forEach((m) => m.remove());
       spotMarkersRef.current = [];
     };
