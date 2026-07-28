@@ -69,8 +69,11 @@ dates (2026-07-20), never "last week"._
 - **2026-07-27: Hervé Gilg (hg@junctionconnect.com) replied within minutes** —
   wants a call, offered Tue 2026-07-28 or Wed 2026-07-29.
 - **2026-07-27:** availability sent — Wed 12–1 pm ET or after 5:30 pm ET,
-  both founders attending. Awaiting his time + link.
-- **Next:** call booked → prep talking points, both founders on it.
+  both founders attending.
+- **2026-07-28 (night):** no confirmation yet — follow-up sent, timed to top
+  his morning inbox. New preference: **Friday 2026-07-31, flexible on time**
+  (both founders free); Wed 12–1 pm ET kept as backup.
+- **Next:** he picks a time → prep sheet before the call, both founders on.
   Prep: volume story (~200 bookings, study-abroad students), commission model,
   what we need (sandbox, EU rail coverage), ask about their pricing/terms.
 
