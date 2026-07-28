@@ -56,7 +56,34 @@ import {
 //   country  → + state/region borders & labels, city dots
 //   city     → + roads
 //   in close → + buildings
-const ROAD_MINZOOM = 11; // roads appear only once you're looking at a city
+/**
+ * Roads come in one class at a time, not all at once.
+ *
+ * Lifting the whole `transportation` group to a single zoom meant the entire
+ * network — every residential street and cycle path — switched on together the
+ * moment you crossed it, which is what made a city view look like a spider's
+ * web. Tiering it means a city first shows its shape (arteries and water), and
+ * only reveals side streets when you're close enough for them to mean anything.
+ */
+const ROAD_TIERS: Array<[RegExp, number]> = [
+  [/motorway/, 11],
+  [/major/, 12],
+  [/minor/, 14.5], // residential + service: the dense web
+  [/path/, 16], // footpaths and cycleways
+  [/railway_(transit|service)/, 16],
+  [/railway/, 13],
+  [/pier|area/, 15],
+];
+const ROAD_DEFAULT_MINZOOM = 13;
+
+/**
+ * Basemap text we don't want on a travel map. Road shields ("S100") never help
+ * plan a trip; street and canal names are only useful once you're right down at
+ * street level, and at city zoom they bury our own pins.
+ */
+const HIDDEN_LABEL = /shield/;
+const STREET_LABEL_MINZOOM = 15;
+
 const BUILDING_MINZOOM = 14;
 const STATE_LABEL_MINZOOM = 7;
 // City labels ship from zoom ~3, so cities clutter the continental overview.
@@ -155,8 +182,16 @@ function loadMapStyle(key: StyleKey): Promise<maplibregl.StyleSpecification | st
         const raise = (z: number) => {
           layer.minzoom = Math.max(layer.minzoom ?? 0, z);
         };
-        if (sl === 'transportation' || sl === 'transportation_name') raise(ROAD_MINZOOM);
-        else if (sl === 'building') raise(BUILDING_MINZOOM);
+        if (sl === 'transportation') {
+          const tier = ROAD_TIERS.find(([re]) => re.test(id));
+          raise(tier ? tier[1] : ROAD_DEFAULT_MINZOOM);
+        } else if (sl === 'transportation_name') {
+          // Shields off entirely; street names only at street level.
+          raise(HIDDEN_LABEL.test(id) ? 24 : STREET_LABEL_MINZOOM);
+        } else if (sl === 'waterway' || sl === 'water_name') {
+          // "Herengracht", "Keizersgracht"… big italic canal names everywhere.
+          if (layer.type === 'symbol') raise(STREET_LABEL_MINZOOM);
+        } else if (sl === 'building') raise(BUILDING_MINZOOM);
         // Place labels are named differently across styles — match by class.
         else if (sl === 'place' && /state|province|region/i.test(id)) raise(STATE_LABEL_MINZOOM);
         else if (sl === 'place' && /city|town/i.test(id)) raise(CITY_LABEL_MINZOOM);
@@ -370,8 +405,21 @@ const nightsBetween = (arrival?: string, departure?: string) => {
 
 const ROUTE_SOURCE = 'trip-route';
 const ROUTE_LAYER = 'trip-route-line';
-const SPOTS_SOURCE = 'city-spots-path';
-const SPOTS_LAYER = 'city-spots-path-line';
+const SCRIM_LAYER = 'voyza-scrim';
+
+/**
+ * A white wash laid over the basemap (but under the pins, which are DOM and
+ * always on top). Fading it in when a city opens pushes the streets back and
+ * leaves the itinerary as the only thing with real contrast.
+ */
+function addScrim(map: maplibregl.Map) {
+  if (map.getLayer(SCRIM_LAYER)) return;
+  map.addLayer({
+    id: SCRIM_LAYER,
+    type: 'background',
+    paint: { 'background-color': '#ffffff', 'background-opacity': 0 },
+  });
+}
 
 export default function MapView({ trip }: MapViewProps) {
   const [pins, setPins] = useState<PinPoint[]>([]);
@@ -393,6 +441,11 @@ export default function MapView({ trip }: MapViewProps) {
   // Mirror for the map's zoom listener, which is registered once and would
   // otherwise close over a stale activeCityIndex.
   const activeCityRef = useRef<number | null>(null);
+  // True once the camera has actually framed the open city. The zoom-out exit
+  // must not fire before then: with no camera move on click, the map is still
+  // at trip zoom — below the exit threshold — so any stray `zoomend` would
+  // close the city the moment it opened.
+  const cityFramedRef = useRef(false);
   const [spots, setSpots] = useState<Spot[]>([]);
   const [spotsLoading, setSpotsLoading] = useState(false);
   const [spotsDropped, setSpotsDropped] = useState<string[]>([]);
@@ -431,7 +484,10 @@ export default function MapView({ trip }: MapViewProps) {
         attributionControl: { compact: true },
       });
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-      map.on('load', () => setReady(true));
+      map.on('load', () => {
+        addScrim(map!);
+        setReady(true);
+      });
       // Zooming back out to trip scale means you've left the city — drop out of
       // the city view so the overview isn't littered with its spots.
       //
@@ -439,7 +495,11 @@ export default function MapView({ trip }: MapViewProps) {
       // frames of a zoom-IN animation, where the camera is still below the exit
       // threshold. Listening to it cleared the city the instant it was opened.
       map.on('zoomend', () => {
-        if (activeCityRef.current !== null && map!.getZoom() < CITY_EXIT_ZOOM) {
+        if (
+          activeCityRef.current !== null &&
+          cityFramedRef.current &&
+          map!.getZoom() < CITY_EXIT_ZOOM
+        ) {
           setActiveCityIndex(null);
         }
       });
@@ -503,15 +563,20 @@ export default function MapView({ trip }: MapViewProps) {
     const map = mapRef.current;
     if (!map || !ready) return;
 
+    // Inside a city the inter-city legs aren't the subject — they just cut a
+    // hard blue diagonal across the place you're actually looking at.
     const data: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
-      features: legs
-        .filter((leg) => includeHome || !leg.home)
-        .map((leg) => ({
-          type: 'Feature',
-          properties: { home: leg.home },
-          geometry: { type: 'LineString', coordinates: leg.coords },
-        })),
+      features:
+        activeCityIndex !== null
+          ? []
+          : legs
+              .filter((leg) => includeHome || !leg.home)
+              .map((leg) => ({
+                type: 'Feature',
+                properties: { home: leg.home },
+                geometry: { type: 'LineString', coordinates: leg.coords },
+              })),
     };
 
     const existing = map.getSource(ROUTE_SOURCE) as maplibregl.GeoJSONSource | undefined;
@@ -533,7 +598,19 @@ export default function MapView({ trip }: MapViewProps) {
       },
     });
     // styleEpoch: a theme swap wipes custom sources/layers, so re-add on bump.
-  }, [legs, includeHome, ready, styleEpoch]);
+  }, [legs, includeHome, ready, styleEpoch, activeCityIndex]);
+
+  // Fade the basemap back while a city is open.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    addScrim(map);
+    if (map.getLayer(SCRIM_LAYER)) {
+      // Enough to push the streets back, not so much that the city stops being
+      // readable — you still need to see where things are to plan around them.
+      map.setPaintProperty(SCRIM_LAYER, 'background-opacity', activeCityIndex !== null ? 0.28 : 0);
+    }
+  }, [activeCityIndex, ready, styleEpoch]);
 
   // ─── Rebuild the pin markers ───
   // Clicking a city frames the whole region around it (roughly a state/metro
@@ -544,18 +621,18 @@ export default function MapView({ trip }: MapViewProps) {
     const target = pins.find((p) => p.cityIndex === index && p.kind === 'city');
     if (!map || !target) return;
     setActiveCityIndex(index);
-    // Move in to city scale straight away; once the spots resolve, the effect
-    // below re-fits precisely around them so none of them overlap.
-    map.easeTo({
-      center: [target.point.lon, target.point.lat],
-      zoom: 11,
-      duration: 650,
-    });
+    // Deliberately NO camera move here. Opening a city used to jump the map to
+    // zoom 11, trickle pins in for up to ~25s, then move a SECOND time to fit
+    // them — three separate lurches. Instead the panel switches immediately as
+    // feedback, and the effect below performs a single move once the places
+    // are known. If they're already cached that happens instantly.
   }, [pins]);
 
-  // Keep the listener's mirror in step.
+  // Keep the listener's mirror in step. Opening a different city (or closing
+  // one) means it hasn't been framed yet.
   useEffect(() => {
     activeCityRef.current = activeCityIndex;
+    cityFramedRef.current = false;
   }, [activeCityIndex]);
 
   useEffect(() => {
@@ -631,7 +708,7 @@ export default function MapView({ trip }: MapViewProps) {
     };
   }, [activeCityIndex, pins, trip]);
 
-  // ─── Draw the spot markers + the walk between them ───
+  // ─── Draw the spot markers ───
   // No zoom gate: opening a city is deliberate, so its spots show right away.
   // Memoised because the marker effect keys off it — a fresh array each render
   // tore every marker down and rebuilt it, which flickered the pins.
@@ -658,16 +735,30 @@ export default function MapView({ trip }: MapViewProps) {
         s.kind !== 'airport' &&
         (!centre || distanceKm(centre.point, s.point) <= CITY_FRAME_KM),
     );
-    if (inTown.length === 0) return;
+    // Arm the zoom-out exit only now that we're framing the city.
+    const framed = () => {
+      cityFramedRef.current = true;
+    };
+
+    // Nothing placeable in town — still go to the city rather than sit at
+    // trip zoom looking like the click did nothing.
+    if (inTown.length === 0) {
+      if (!centre) return;
+      map.easeTo({ center: [centre.point.lon, centre.point.lat], zoom: 12, duration: 600 });
+      map.once('moveend', framed);
+      return;
+    }
 
     if (inTown.length === 1) {
       map.easeTo({ center: [inTown[0].point.lon, inTown[0].point.lat], zoom: 13.5, duration: 600 });
+      map.once('moveend', framed);
       return;
     }
     const b = new maplibregl.LngLatBounds();
     inTown.forEach((s) => b.extend([s.point.lon, s.point.lat]));
     map.fitBounds(b, { padding: 70, maxZoom: 15, duration: 700 });
-  }, [activeCityIndex, spots, spotsLoading, ready]);
+    map.once('moveend', framed);
+  }, [activeCityIndex, spots, spotsLoading, ready, pins]);
 
   /**
    * Nudge spot pins that land on top of each other.
@@ -725,49 +816,6 @@ export default function MapView({ trip }: MapViewProps) {
       spotMarkersRef.current = [];
     };
   }, [visibleSpots, ready, declutterSpots]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !ready) return;
-    // The airport is excluded: it's often far outside town and would drag the
-    // line across the whole view. This is the itinerary's LISTED order, not a
-    // routed walking path.
-    const walk = visibleSpots.filter((s) => s.kind !== 'airport');
-    const data: GeoJSON.FeatureCollection = {
-      type: 'FeatureCollection',
-      features:
-        walk.length > 1
-          ? [
-              {
-                type: 'Feature',
-                properties: {},
-                geometry: {
-                  type: 'LineString',
-                  coordinates: walk.map((s) => [s.point.lon, s.point.lat]),
-                },
-              },
-            ]
-          : [],
-    };
-    const existing = map.getSource(SPOTS_SOURCE) as maplibregl.GeoJSONSource | undefined;
-    if (existing) {
-      existing.setData(data);
-      return;
-    }
-    map.addSource(SPOTS_SOURCE, { type: 'geojson', data });
-    map.addLayer({
-      id: SPOTS_LAYER,
-      type: 'line',
-      source: SPOTS_SOURCE,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#64748b',
-        'line-opacity': 0.5,
-        'line-width': 1.6,
-        'line-dasharray': [1, 2.4],
-      },
-    });
-  }, [visibleSpots, ready, styleEpoch]);
 
   // ─── Hide the basemap's own labels for the trip's cities ───
   // Each trip city is already labelled by its numbered pin; without this the
@@ -917,7 +965,7 @@ export default function MapView({ trip }: MapViewProps) {
         }`}
         aria-hidden={!panelOpen}
       >
-        <div className="min-h-0 flex flex-col bg-white/97 backdrop-blur-sm rounded-xl border border-black/10 shadow-lg overflow-hidden">
+        <div className="min-h-0 flex flex-col bg-white rounded-xl border border-black/10 shadow-lg overflow-hidden">
           <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between gap-2">
             {activeCity ? (
               <button
