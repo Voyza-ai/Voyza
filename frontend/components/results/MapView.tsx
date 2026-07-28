@@ -269,10 +269,17 @@ const spotSvg = (kind: SpotKind, size = 13) =>
     .paths.map((d) => `<path d="${d}"/>`)
     .join('')}</svg>`;
 
+/** Width a spot's name is allowed before it gets an ellipsis. */
+const SPOT_LABEL_MAX = 130;
+
 /**
- * A spot marker: 24px white disc, coloured ring + glyph. The name is hidden
- * until hover — a city can hold half a dozen spots and permanent labels would
- * bury the map.
+ * A spot marker: 24px white disc with a coloured ring and glyph, and its name
+ * on a small plate above it.
+ *
+ * The name is always visible — a pin you have to hover to identify doesn't
+ * help you plan. Long names ("Holiday Inn Express Amsterdam - North Riverside
+ * by IHG") are clipped so one hotel can't span the city; hovering lifts the
+ * pin above its neighbours and shows the name in full.
  */
 function makeSpotEl(spot: Spot): HTMLDivElement {
   const style = SPOT_STYLE[spot.kind];
@@ -284,12 +291,12 @@ function makeSpotEl(spot: Spot): HTMLDivElement {
   const label = document.createElement('div');
   label.textContent = spot.name;
   label.style.cssText = `
-    position:absolute;bottom:29px;left:50%;transform:translateX(-50%);
-    max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-    font:600 11px/1.35 system-ui,sans-serif;color:#26324b;
-    background:rgba(255,255,255,0.95);border:1px solid rgba(0,0,0,0.08);
-    border-radius:6px;padding:2px 6px;box-shadow:0 1px 4px rgba(0,0,0,0.12);
-    opacity:0;transition:opacity .12s ease;pointer-events:none;
+    position:absolute;bottom:28px;left:50%;transform:translateX(-50%);
+    max-width:${SPOT_LABEL_MAX}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    font:600 10.5px/1.3 system-ui,sans-serif;color:#26324b;
+    background:rgba(255,255,255,0.94);border:1px solid rgba(0,0,0,0.07);
+    border-radius:5px;padding:1.5px 5px;box-shadow:0 1px 3px rgba(0,0,0,0.11);
+    transition:max-width .12s ease;pointer-events:none;
   `;
   el.appendChild(label);
 
@@ -303,11 +310,17 @@ function makeSpotEl(spot: Spot): HTMLDivElement {
   disc.innerHTML = spotSvg(spot.kind);
   el.appendChild(disc);
 
+  // Hover reveals the full name and lifts it clear of any neighbour it
+  // happens to be sitting behind.
   el.addEventListener('mouseenter', () => {
-    label.style.opacity = '1';
+    label.style.maxWidth = '280px';
+    label.style.background = '#ffffff';
+    el.style.zIndex = '20';
   });
   el.addEventListener('mouseleave', () => {
-    label.style.opacity = '0';
+    label.style.maxWidth = `${SPOT_LABEL_MAX}px`;
+    label.style.background = 'rgba(255,255,255,0.94)';
+    el.style.zIndex = '';
   });
   return el;
 }
@@ -763,9 +776,16 @@ export default function MapView({ trip }: MapViewProps) {
     }
     const b = new maplibregl.LngLatBounds();
     inTown.forEach((s) => b.extend([s.point.lon, s.point.lat]));
-    map.fitBounds(b, { padding: 70, maxZoom: 15, duration: 700 });
+    map.fitBounds(b, {
+      // Extra room on the left: the itinerary panel floats over the map there,
+      // and without this a spot (and its name) lands underneath it. Top gets a
+      // little more too, since each pin carries its label above it.
+      padding: { top: 86, bottom: 70, right: 70, left: panelOpen ? 272 : 70 },
+      maxZoom: 15,
+      duration: 700,
+    });
     map.once('moveend', framed);
-  }, [activeCityIndex, spots, spotsLoading, ready, pins]);
+  }, [activeCityIndex, spots, spotsLoading, ready, pins, panelOpen]);
 
   /**
    * Nudge spot pins that land on top of each other.
