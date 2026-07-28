@@ -91,6 +91,12 @@ function ResultsPageInner() {
           // if the backend is an older deploy without buildTripFromDb.
           const fullTrip = data.trip;
           if (fullTrip && Array.isArray(fullTrip.cities) && fullTrip.cities[0]?.transportIn) {
+            // AI-planned trips saved before the country fix have none — fill
+            // from the world-cities dataset so their cards match presets.
+            fullTrip.cities = fullTrip.cities.map((c: any) => ({
+              ...c,
+              country: c.country || countryForCity(c.name),
+            }));
             setTrip(fullTrip);
             setLoading(false);
             return;
