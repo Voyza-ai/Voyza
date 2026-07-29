@@ -1,6 +1,7 @@
 import { env } from '../config/env';
 import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
+import { searchAllAboard } from './allaboard';
 
 /**
  * fetch() with a hard timeout. The Deutsche Bahn REST API is community-run and
@@ -239,6 +240,14 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<TrainOffe
 }
 
 const trainProviders: TrainProvider[] = [
+  {
+    id: 'allaboard',
+    // Pan-EU rail (SNCF, Trenitalia, Renfe, NS, Eurostar…). Active only
+    // when a key is configured; its own location matching decides real
+    // coverage per route.
+    coverage: () => (env.ALLABOARD_API_KEY ? 'partial' : 'none'),
+    search: (p) => searchAllAboard(p),
+  },
   {
     id: 'deutsche-bahn',
     // Always attempt — real results (+ the station-match filter) decide

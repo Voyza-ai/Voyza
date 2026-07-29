@@ -39,6 +39,12 @@ const envSchema = z.object({
   // Deutsche Bahn REST API
   DB_REST_BASE_URL: z.string().default('https://v6.db.transport.rest'),
 
+  // All Aboard (EU rail, GraphQL). Key is test-scoped for now; the URL
+  // defaults to their test gateway — switch to api-gateway.allaboard.eu
+  // at go-live together with a live-scoped key.
+  ALLABOARD_API_KEY: z.string().optional(),
+  ALLABOARD_API_URL: z.string().default('https://test.api-gateway.allaboard.eu'),
+
   // Frontend URL for invite links and redirects
   FRONTEND_URL: z.string().default('http://localhost:3000'),
 });
