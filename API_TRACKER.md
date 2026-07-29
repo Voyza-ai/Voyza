@@ -13,7 +13,7 @@ dates (2026-07-20), never "last week"._
 
 | Provider | Status | Sent |
 |---|---|---|
-| All Aboard | ✅ in conversation — reply sent, sandbox pending | 2026-07-27 |
+| All Aboard | 🔑 **SANDBOX GRANTED** — build phase | 2026-07-29 |
 | Omio | 🔁 follow-up sent | 2026-07-27 |
 | Junction | ✅ replied — call scheduling | 2026-07-27 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
@@ -45,11 +45,23 @@ dates (2026-07-20), never "last week"._
 - **2026-07-28: reply sent** — confirmed the model works for us (we set our
   own service fee), asked for a rough booking-fee example for a typical
   one-way ticket, and asked for sandbox access whenever ready.
-- **Next:** wait for the fee example + sandbox credentials. When they arrive
-  → wire into `backend/.env`, start the rail integration. If silent past
-  ~2026-08-04, gentle nudge in the same thread.
+- **2026-07-29: SANDBOX GRANTED.** Carl's reply, all details:
+  - **Booking fee:** standard leisure rate **1% + €2 per completed booking**
+    (€25 ticket → €2.25 fee, €60 → €2.60, €150 → €3.50). Nothing upfront,
+    no monthly fees; charged retroactively via monthly reconciliation.
+  - **Sandbox login:** allaboard.eu/agent with gohil072004@gmail.com —
+    passwordless, one-time code per sign-in. **Issue API keys from the
+    Dashboard, test-scoped to start.**
+  - **Docs:** docs.allaboard.eu · inventory list: docs.allaboard.eu/inventory
+  - **Timeline:** a couple of months to build/explore, then a go-live plan
+    for real bookings. **Company registration NOT needed to build — only for
+    the agreement before go-live** (this is where the EIN lands).
+  - Integration call bookable anytime via his link.
+- **Next:** sign in → issue test API key → `backend/.env` → build the rail
+  integration into searchLegOptions/compareLeg. Book Carl's integration
+  call once we've explored the API.
 - **Model note for pricing later:** displayed rail prices will sit slightly
-  above operator sites (their booking fee + our service fee). Keep our fee
+  above operator sites (their 1% + €2 + our service fee). Keep our fee
   small; the value is one-app multi-leg booking.
 - **Note:** best odds of the bunch — developer-first company, public docs.
   First provider breakthrough; prioritize this thread.
@@ -148,6 +160,11 @@ dates (2026-07-20), never "last week"._
 ## Response log
 
 _Append a line whenever anything happens, newest first._
+
+- 2026-07-29 — **ALL ABOARD SANDBOX GRANTED** (Carl): account live at
+  allaboard.eu/agent (email OTP), test-scoped API keys from Dashboard, docs
+  at docs.allaboard.eu. Fee: 1% + €2/booking, nothing upfront. ~2 months to
+  build, company registration only needed at go-live. First real rail API. 🎉
 
 - 2026-07-28 — **Carl (All Aboard) replied**: no commissions in rail — their
   revenue is booking fees, API prices are net, we earn via our own service
