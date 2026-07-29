@@ -13,7 +13,7 @@ dates (2026-07-20), never "last week"._
 
 | Provider | Status | Sent |
 |---|---|---|
-| All Aboard | 🔑 **SANDBOX GRANTED** — build phase | 2026-07-29 |
+| All Aboard | 🔑 **INTEGRATED** — live in searchTrains (test env) | 2026-07-29 |
 | Omio | 🔁 follow-up sent | 2026-07-27 |
 | Junction | ✅ replied — call scheduling | 2026-07-27 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
@@ -57,9 +57,13 @@ dates (2026-07-20), never "last week"._
     for real bookings. **Company registration NOT needed to build — only for
     the agreement before go-live** (this is where the EIN lands).
   - Integration call bookable anytime via his link.
-- **Next:** sign in → issue test API key → `backend/.env` → build the rail
-  integration into searchLegOptions/compareLeg. Book Carl's integration
-  call once we've explored the API.
+- **2026-07-29 (same day): INTEGRATION SHIPPED.** Test-scoped key in
+  `backend/.env`; `services/allaboard.ts` registered as a train provider.
+  Live-verified: Eurostar Paris→Amsterdam $39.89, Trenitalia Rome→Florence
+  from $14.70. First real rail data for FR/IT/ES/Benelux/UK.
+- **Next:** exercise it through real trip plans, then book Carl's
+  integration call (his link) to review + ask about offer-pricing latency
+  (cold getJourneyOffer can exceed 30s; their cache warms after).
 - **Model note for pricing later:** displayed rail prices will sit slightly
   above operator sites (their 1% + €2 + our service fee). Keep our fee
   small; the value is one-app multi-leg booking.
