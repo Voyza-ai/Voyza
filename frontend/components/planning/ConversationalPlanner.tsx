@@ -126,19 +126,26 @@ export default function ConversationalPlanner({
     };
   }, []);
 
+  // A "set" string must be non-empty — the model occasionally returns ""
+  // instead of null for fields the user didn't mention this turn, and an
+  // empty string must never overwrite a fact we already collected (this
+  // erased a location-detected origin and got the user re-asked for it).
+  const isSet = (v: string | null | undefined): v is string =>
+    typeof v === 'string' && v.trim().length > 0;
+
   const applyUpdates = useCallback(
     (u: ConverseResponse['updates']) => {
       if (u.destinations) setAnswer('destinations', u.destinations);
-      if (u.origin !== undefined && u.origin !== null) setAnswer('origin', u.origin);
+      if (isSet(u.origin)) setAnswer('origin', u.origin);
       if (u.dates) setAnswer('dateRange', u.dates);
       if (u.travelers !== undefined && u.travelers !== null) setAnswer('travelers', u.travelers);
       if (u.budget !== undefined && u.budget !== null) setAnswer('budget', u.budget);
       if (u.budgetPerPerson !== undefined && u.budgetPerPerson !== null)
         setAnswer('budgetPerPerson', u.budgetPerPerson);
-      if (u.vibe !== undefined && u.vibe !== null) setAnswer('vibe', u.vibe);
+      if (isSet(u.vibe)) setAnswer('vibe', u.vibe);
       if (u.returnToHome !== undefined && u.returnToHome !== null)
         setAnswer('returnToHome', u.returnToHome);
-      if (u.notes !== undefined && u.notes !== null) setAnswer('extraNotes', u.notes);
+      if (isSet(u.notes)) setAnswer('extraNotes', u.notes);
       setAnswer('planningMode', 'destination');
     },
     [setAnswer],
