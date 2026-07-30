@@ -187,9 +187,15 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
 
   return (
     <div className="px-4 pt-3 pb-0">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      {/* No flex-wrap here: long AI-built route titles ("Berlin → Florence →
+          Barcelona → Madrid") used to widen the left block until the price
+          pills + buttons wrapped onto a second row, breaking the header
+          alignment. Instead the left column shrinks (flex-1 + min-w-0) and
+          the title truncates within it, so the right cluster stays pinned
+          top-right, aligned with the meta row. */}
+      <div className="flex items-start justify-between gap-4">
         {/* Left: meta + title stacked tight */}
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3 flex-wrap text-xs mb-0.5">
             <div className="flex items-center gap-2 text-[#2e6bc4] uppercase tracking-[0.18em] font-medium">
               <Sparkles size={12} />
@@ -228,11 +234,9 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
           )}
         </div>
 
-        {/* Right: toggle stacked above cost cards + save button. ml-auto
-            keeps this block pinned to the right even when flex-wrap drops
-            it onto its own row — without it, a wrapped stats row jumped to
-            the left edge and read as broken. */}
-        <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-auto">
+        {/* Right: toggle stacked above cost cards + save button. Never
+            wraps below the title — the row above is no-wrap by design. */}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
           {/* Total / Per-person pill toggle — sits above the cards so it doesn't widen the row */}
           {showToggle && (
             <div

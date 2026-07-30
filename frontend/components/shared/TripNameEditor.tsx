@@ -130,7 +130,7 @@ export default function TripNameEditor({
       // Non-owners still get a button so the explanation is reachable by
       // keyboard, but it shouldn't advertise itself as an edit affordance.
       title={canRename ? 'Rename this trip' : 'Only the trip owner can rename this trip'}
-      className={`group/name inline-flex items-center gap-1.5 min-w-0 text-left ${
+      className={`group/name inline-flex items-center gap-1.5 min-w-0 max-w-full text-left ${
         canRename ? 'cursor-text' : 'cursor-default'
       } ${saving ? 'opacity-60' : ''}`}
     >
