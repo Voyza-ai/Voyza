@@ -15,7 +15,7 @@ dates (2026-07-20), never "last week"._
 |---|---|---|
 | All Aboard | 🔑 **INTEGRATED** — live in searchTrains (test env) | 2026-07-29 |
 | Omio | 🔁 follow-up sent | 2026-07-27 |
-| Junction | ✅ replied — call scheduling | 2026-07-27 |
+| Junction | ⏸️ went quiet mid-scheduling — final note ~08-07, then park | 2026-07-31 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
@@ -78,20 +78,28 @@ dates (2026-07-20), never "last week"._
 - **Next:** wait. If still silent past ~2026-08-10, deprioritize — All Aboard
   and Junction cover the same ground.
 
-### Junction  ✅
+### Junction  ⏸️ went quiet mid-scheduling
 - **For:** multimodal API (rail + flights). Email-only access.
 - **Sent:** 2026-07-13 to deploy@junctionconnect.com
 - **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
 - **2026-07-27: Hervé Gilg (hg@junctionconnect.com) replied within minutes** —
-  wants a call, offered Tue 2026-07-28 or Wed 2026-07-29.
-- **2026-07-27:** availability sent — Wed 12–1 pm ET or after 5:30 pm ET,
-  both founders attending.
-- **2026-07-28 (night):** no confirmation yet — follow-up sent, timed to top
-  his morning inbox. New preference: **Friday 2026-07-31, flexible on time**
-  (both founders free); Wed 12–1 pm ET kept as backup.
-- **Next:** he picks a time → prep sheet before the call, both founders on.
-  Prep: volume story (~200 bookings, study-abroad students), commission model,
-  what we need (sandbox, EU rail coverage), ask about their pricing/terms.
+  wants a call, offered Wed 2026-07-29 12:15 pm ET.
+- **2026-07-28:** we rescheduled (co-founder conflict) — asked for Thu same
+  time or Fri flexible. **No reply since; he'd replied in minutes before
+  the reschedule.**
+- **2026-07-31 (3:50 am, his morning):** nudge sent — next week, preferably
+  Mon or Fri, flexible; mentioned first rail integration shipped. Silent.
+- **2026-08-03:** two unanswered emails in a row → deliberately waiting,
+  no third ping this week. Note: August = Europe holiday season; and with
+  All Aboard integrated, Junction is now a nice-to-have second provider,
+  not critical path.
+- **Next:** if still silent by 2026-08-07, ONE final zero-pressure note
+  (scheduled ~9:45 am his time): no scheduling ask, "no rush, door open
+  whenever your calendar opens up." Then park. Warm welcome if he ever
+  revives the thread; call prep notes preserved below.
+- Prep (if call happens): volume story (~200 bookings, study-abroad
+  students), service-fee model (post-Carl), All Aboard integration story,
+  what we need (sandbox, EU rail coverage), their pricing/terms.
 
 ### Trainline Partner API  📤
 - **For:** the long-term ceiling — 270+ operators, 45 countries.
@@ -164,6 +172,11 @@ dates (2026-07-20), never "last week"._
 ## Response log
 
 _Append a line whenever anything happens, newest first._
+
+- 2026-08-03 — Junction: still silent after the 07-28 reschedule and the
+  07-31 nudge (two unanswered). Decision: no third ping this week; one
+  final zero-pressure note ~08-07 if nothing, then park. August holidays
+  likely a factor; All Aboard integration lowers the stakes.
 
 - 2026-07-29 — **ALL ABOARD SANDBOX GRANTED** (Carl): account live at
   allaboard.eu/agent (email OTP), test-scoped API keys from Dashboard, docs
