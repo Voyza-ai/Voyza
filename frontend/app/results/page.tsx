@@ -444,7 +444,13 @@ function ResultsPageInner() {
             matches the canvas on ordinary laptop windows — at the old
             breakpoint anything under 1024px dropped the chat below the
             content, which read as a different layout from the rest of the app. */}
-        <aside className="md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 flex md:mt-3">
+        {/* Stacked on mobile, the chat has no width to be bounded by, so it
+            grew to its natural height and left the content above it a sliver —
+            the Map tab came out 77px tall, most of that covered by the tile
+            attribution. Cap it below `md` so the content above always keeps
+            the larger share; from `md` up it docks to the right and the cap
+            is irrelevant. */}
+        <aside className="max-h-[45vh] md:max-h-none md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 flex md:mt-3">
           <AIChatPanel trip={currentTrip} />
         </aside>
       </div>

@@ -15,15 +15,20 @@ import {
 } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { geocodeCities, GeoPoint } from '@/lib/geocode';
+import { unwrapLons, centroid } from '@/lib/mapBounds';
+import { visitOrderLabel } from '@/lib/visitOrder';
 import { getCityColor, HOME_COLOR } from '@/lib/cityColors';
 import {
   buildCitySpots,
+  buildRecommendedSpots,
   geocodeSpots,
   distanceKm,
   CITY_FRAME_KM,
   type Spot,
   type SpotKind,
+  type Suggestion,
 } from '@/lib/citySpots';
+import { searchActivities, searchRestaurants } from '@/lib/api';
 
 /**
  * Map tab — the trip drawn on the Earth.
@@ -230,11 +235,113 @@ type PinPoint = {
  * the same thing. One colour + icon per kind.
  */
 /**
- * Opening a city is an explicit act, so its spots show immediately — the map
- * zooms to fit them rather than making you zoom in to find them. Zooming back
- * out past this leaves the city and returns to the trip overview.
+ * Zoom thresholds for the itinerary level of detail.
+ *
+ * A city's spots belong to city scale, so the zoom decides when they appear —
+ * scrolling into Tokyo shows them the same as clicking its pin does. Clicking
+ * stays as a shortcut that flies you there; it is no longer the only way in.
+ *
+ * The two values differ on purpose. One shared threshold makes the view flap
+ * between overview and city on the tiniest scroll while the camera sits on the
+ * boundary, so entering needs a closer zoom than leaving: the band between
+ * them holds whatever is already on screen.
+ *
+ * ENTER 10 is roughly "one metro area fills the map"; EXIT 9 is roughly
+ * "a region". The old single threshold of 8 was region-and-a-half scale, which
+ * is why a city's spots stayed drawn over two full zoom-out steps.
  */
-const CITY_EXIT_ZOOM = 8;
+const CITY_ENTER_ZOOM = 10;
+const CITY_EXIT_ZOOM = 9;
+
+/**
+ * Below this, individual cities collapse into one pin per country — the top
+ * rung of the ladder: countries → cities → the places inside a city.
+ *
+ * It earns its keep on trips that are actually spread out. A Philadelphia →
+ * Japan trip with "Show home" on frames near zoom 1, where four Japanese city
+ * dots overlap into an unreadable smudge; "Japan · 4 stops" says the same
+ * thing legibly. A trip that fits in one region never frames this far out and
+ * simply never sees this tier.
+ */
+const COUNTRY_ZOOM = 5;
+
+/**
+ * Padding for a framing move, clamped to the size of the map.
+ *
+ * The itinerary panel floats over the left edge, so framing has to reserve its
+ * width or pins land underneath it. But a fixed 272px reservation is most of a
+ * narrow pane, and what's left can be too small to fit the trip at all: a
+ * Paris → Singapore → Stockholm trip spans 101° of longitude, which in ~110
+ * usable pixels needs a zoom below 0. `fitBounds` clamps at the floor and
+ * silently drops a city off the edge — Singapore simply wasn't on the map.
+ *
+ * So padding is a share of the viewport, never a fixed cost. On a roomy map it
+ * is the panel's real width; on a cramped one it shrinks and the trip still
+ * fits, which matters more than keeping a pin clear of an overlay.
+ */
+/** The itinerary panel's rendered width. */
+const PANEL_W = 236;
+/**
+ * Padding positions a marker's ANCHOR, but a marker is drawn around it — a
+ * country pill is ~90px wide and centred, so a point sitting exactly on the
+ * padding line still has half its pill over the panel.
+ */
+const MARKER_ALLOWANCE = 70;
+/**
+ * Below this map width the panel cannot be afforded: reserving its width plus
+ * marker clearance would take more than half the map, leaving too little to
+ * frame the trip in. The panel closes itself instead — see `panelFits`.
+ */
+const MIN_MAP_W_FOR_PANEL = (PANEL_W + MARKER_ALLOWANCE) * 2;
+
+/** Whether a map this wide can show the panel without starving the framing. */
+const panelFits = (mapWidth: number) => mapWidth >= MIN_MAP_W_FOR_PANEL;
+
+function framePadding(
+  map: maplibregl.Map,
+  panelOpen: boolean,
+  base = { top: 56, bottom: 56, side: 56, panel: PANEL_W },
+) {
+  const el = map.getContainer();
+  const w = el.clientWidth || 1;
+  const h = el.clientHeight || 1;
+  const side = Math.min(base.side, Math.round(w * 0.08));
+  const left = panelOpen
+    ? Math.min(base.panel + MARKER_ALLOWANCE, Math.round(w * 0.5))
+    : side;
+  return {
+    top: Math.min(base.top, Math.round(h * 0.1)),
+    bottom: Math.min(base.bottom, Math.round(h * 0.1)),
+    right: side,
+    left: Math.max(left, side),
+  };
+}
+
+/**
+ * Cache key for a city's resolved spots. Identity, not position — the trip can
+ * be reordered or have a city inserted while the map is open, and everything
+ * downstream (which places belong here) follows the city, not its slot.
+ */
+const cityCacheKey = (city?: { name: string; country: string }) =>
+  city ? `${city.name}|${city.country}` : '';
+
+/**
+ * Bounds that take the SHORT way round the globe.
+ *
+ * Extending a LngLatBounds point by point always spans west-to-east through
+ * longitude 0, so a Philadelphia (-75) → Tokyo (+140) trip is treated as 215°
+ * wide and framed across the Atlantic, with every Japanese city off-screen.
+ * The trip actually spans 145° the other way, over the Pacific.
+ *
+ * The longitude maths lives in lib/mapBounds so it can be unit-tested.
+ */
+function shortestBounds(points: GeoPoint[]): maplibregl.LngLatBounds {
+  const bounds = new maplibregl.LngLatBounds();
+  if (points.length === 0) return bounds;
+  const lons = unwrapLons(points.map((p) => p.lon));
+  points.forEach((p, i) => bounds.extend([lons[i], p.lat]));
+  return bounds;
+}
 
 const SPOT_STYLE: Record<SpotKind, { color: string; label: string; paths: string[] }> = {
   airport: {
@@ -286,6 +393,61 @@ const SPOT_LABEL_MAX = 130;
  * by IHG") are clipped so one hotel can't span the city; hovering lifts the
  * pin above its neighbours and shows the name in full.
  */
+/**
+ * A country standing in for the cities inside it. Deliberately a pill rather
+ * than a dot: at this zoom a dot says nothing, while "Japan · 4 stops" tells
+ * you what the trip covers before you've zoomed into anything.
+ */
+function makeCountryEl(
+  country: string,
+  position: string,
+  stopsLabel: string,
+  stops: number,
+): HTMLDivElement {
+  const el = document.createElement('div');
+  el.style.cssText = 'cursor:pointer;';
+  el.title = `${country} — ${stops === 1 ? 'stop' : 'stops'} ${stopsLabel}. Click to zoom in.`;
+
+  const pill = document.createElement('div');
+  // No transform here. MapLibre's `anchor: 'center'` already centres the marker
+  // element on its coordinate; a second translate(-50%,-50%) shifted every pill
+  // up and left by half its own width, parking "Netherlands" over the UK.
+  pill.style.cssText = `
+    display:flex;align-items:center;gap:6px;white-space:nowrap;
+    background:#fff;border:1.5px solid ${BLUE.boundary};border-radius:9999px;
+    padding:4px 10px;box-shadow:0 2px 8px rgba(23,43,77,0.16);
+    font:600 12px/1 system-ui,sans-serif;color:${BLUE.textStrong};
+  `;
+
+  const name = document.createElement('span');
+  name.textContent = country;
+  pill.appendChild(name);
+
+  // The trip's visit order, matching the numbers on the city pins one zoom
+  // level in. A stop count here would collide with that numbering: two
+  // one-stop countries would both read "1".
+  const badge = document.createElement('span');
+  badge.textContent = position;
+  badge.style.cssText = `
+    display:inline-flex;align-items:center;justify-content:center;
+    min-width:17px;height:17px;padding:0 5px;border-radius:9999px;
+    background:${BLUE.water};color:${BLUE.textStrong};
+    font:700 10.5px/1 system-ui,sans-serif;
+  `;
+  pill.appendChild(badge);
+  el.appendChild(pill);
+
+  el.addEventListener('mouseenter', () => {
+    pill.style.borderColor = BLUE.textStrong;
+    el.style.zIndex = '20';
+  });
+  el.addEventListener('mouseleave', () => {
+    pill.style.borderColor = BLUE.boundary;
+    el.style.zIndex = '';
+  });
+  return el;
+}
+
 function makeSpotEl(spot: Spot): HTMLDivElement {
   const style = SPOT_STYLE[spot.kind];
   const el = document.createElement('div');
@@ -306,14 +468,33 @@ function makeSpotEl(spot: Spot): HTMLDivElement {
   el.appendChild(label);
 
   const disc = document.createElement('div');
+  // A suggestion is drawn hollow and dashed, in the same colour as the kind it
+  // belongs to. Same family, clearly not part of the plan — the map must never
+  // let "where you're going" and "where you could go" read alike.
   disc.style.cssText = `
     width:24px;height:24px;border-radius:9999px;
-    background:#fff;border:2px solid ${style.color};
+    background:${spot.recommended ? 'rgba(255,255,255,0.82)' : '#fff'};
+    border:2px ${spot.recommended ? 'dashed' : 'solid'} ${style.color};
     display:flex;align-items:center;justify-content:center;
-    box-shadow:0 1px 5px rgba(0,0,0,0.2);cursor:default;
+    box-shadow:0 1px 5px rgba(0,0,0,${spot.recommended ? 0.12 : 0.2});cursor:default;
+    ${spot.recommended ? 'opacity:0.9;' : ''}
   `;
   disc.innerHTML = spotSvg(spot.kind);
   el.appendChild(disc);
+
+  if (spot.recommended) {
+    // Small star so the distinction survives at a glance, and in greyscale.
+    const star = document.createElement('div');
+    star.textContent = '★';
+    star.style.cssText = `
+      position:absolute;top:-5px;right:-5px;font-size:11px;line-height:1;
+      color:${style.color};text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 2px #fff;
+      pointer-events:none;
+    `;
+    el.appendChild(star);
+    label.style.borderStyle = 'dashed';
+    label.style.color = '#5a6b8a';
+  }
 
   // Hover reveals the full name and lifts it clear of any neighbour it
   // happens to be sitting behind.
@@ -444,12 +625,23 @@ export default function MapView({ trip }: MapViewProps) {
   const [missing, setMissing] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
+  // Read by the framing code so the padding is current, WITHOUT making the
+  // panel a framing trigger. Depending on `panelOpen` directly meant closing
+  // and reopening the itinerary flew the camera back to the trip bounds every
+  // time, throwing away wherever the user had navigated to.
+  const panelOpenRef = useRef(true);
+  // True when the panel was closed BY the layout rather than by the user, so
+  // it can be restored on widening without overriding a deliberate close.
+  const autoClosedRef = useRef(false);
   const [includeHome, setIncludeHome] = useState(false);
   const [ready, setReady] = useState(false);
   const [styleKey, setStyleKey] = useState<StyleKey>(readStoredStyle);
   const [styleMenuOpen, setStyleMenuOpen] = useState(false);
   // Bumped after a theme swap so the route layer (wiped by setStyle) re-adds.
   const [styleEpoch, setStyleEpoch] = useState(0);
+  // Current camera zoom, mirrored into React so the country/city tier can
+  // render from it. Updated on zoomend/moveend, never per animation frame.
+  const [zoomLevel, setZoomLevel] = useState(2);
 
   // ─── Spot state (the places inside one city) ───
   // Which city's spots we're showing, whether the zoom is close enough to show
@@ -464,11 +656,32 @@ export default function MapView({ trip }: MapViewProps) {
   // at trip zoom — below the exit threshold — so any stray `zoomend` would
   // close the city the moment it opened.
   const cityFramedRef = useRef(false);
+  // Set when the city opened because the user zoomed into it rather than
+  // clicking. They are already driving the camera, so the framing effect must
+  // not yank it somewhere else underneath them.
+  const enteredByZoomRef = useRef(false);
+  // The viewport listener is registered once on the map, so it reads pins
+  // through a ref rather than closing over the first render's array.
+  const pinsRef = useRef<PinPoint[]>([]);
+  // Set by the map-create effect; lets other effects re-run the level-of-detail
+  // check when something other than the camera changes.
+  const syncRef = useRef<() => void>(() => {});
   const [spots, setSpots] = useState<Spot[]>([]);
   const [spotsLoading, setSpotsLoading] = useState(false);
   const [spotsDropped, setSpotsDropped] = useState<string[]>([]);
-  const spotCacheRef = useRef<Map<number, { spots: Spot[]; dropped: string[] }>>(new Map());
+  const spotCacheRef = useRef<Map<string, { spots: Spot[]; dropped: string[] }>>(new Map());
   const spotMarkersRef = useRef<maplibregl.Marker[]>([]);
+
+  // ─── Recommendations (places near the city that AREN'T in the plan) ───
+  // Opt-in, not automatic. Each suggestion costs a rate-limited geocode on top
+  // of the itinerary's own, and quietly doubling a 15-second wait to show
+  // things nobody asked for is the wrong default.
+  const [recsOn, setRecsOn] = useState(false);
+  const [recs, setRecs] = useState<Spot[]>([]);
+  const [recsLoading, setRecsLoading] = useState(false);
+  const recCacheRef = useRef<Map<string, Spot[]>>(new Map());
+  const recMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const countryMarkersRef = useRef<maplibregl.Marker[]>([]);
 
   const shellRef = useRef<HTMLDivElement | null>(null);
   // Keep the mount-time theme stable so the create effect never re-runs on switch.
@@ -480,10 +693,30 @@ export default function MapView({ trip }: MapViewProps) {
   const hasHome = !!trip.origin?.city;
 
   // Names in visit order; home first when the trip has an origin anchor.
+  //
+  // `query` is what the geocoder is asked, and it carries the country. A bare
+  // city name resolves to whatever the world considers most prominent, which
+  // is not always a city: "Nara" comes back as the US National Archives in
+  // Washington DC, putting a Japan trip's pin on the wrong continent and
+  // stretching the map's bounds across the Atlantic.
   const names = useMemo(() => {
-    const list: { name: string; kind: 'home' | 'city'; cityIndex: number }[] = [];
-    if (trip.origin?.city) list.push({ name: trip.origin.city, kind: 'home', cityIndex: -1 });
-    trip.cities.forEach((c, i) => list.push({ name: c.name, kind: 'city', cityIndex: i }));
+    const list: { name: string; query: string; kind: 'home' | 'city'; cityIndex: number }[] = [];
+    if (trip.origin?.city) {
+      list.push({
+        name: trip.origin.city,
+        query: trip.origin.city,
+        kind: 'home',
+        cityIndex: -1,
+      });
+    }
+    trip.cities.forEach((c, i) =>
+      list.push({
+        name: c.name,
+        query: c.country ? `${c.name}, ${c.country}` : c.name,
+        kind: 'city',
+        cityIndex: i,
+      }),
+    );
     return list;
   }, [trip.origin?.city, trip.cities]);
 
@@ -498,29 +731,118 @@ export default function MapView({ trip }: MapViewProps) {
         style,
         center: [10, 30],
         zoom: 2,
-        minZoom: 2,
+        // Low enough to frame a trip that crosses half the planet. At 2 the
+        // camera could not zoom out far enough to fit "Show home" on a
+        // Philadelphia → Japan trip: fitBounds clamped at the floor and left
+        // the home pin off the edge. The itinerary panel floats over the map
+        // and its padding claims ~45% of the width, so the fit needs room
+        // below 1 as well.
+        minZoom: 0,
         attributionControl: { compact: true },
       });
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-      map.on('load', () => {
-        addScrim(map!);
+      // `load` is the normal signal, `idle` the backstop. A map constructed
+      // while its container is still zero-height can finish its style but
+      // never complete a first render, so `load` never arrives and the map
+      // stays permanently blank with no pins — nothing recovers it, because
+      // every marker effect is gated on `ready`. `idle` fires whenever the
+      // map settles, so whichever happens first wins.
+      let readied = false;
+      const markReady = () => {
+        if (readied || !map) return;
+        readied = true;
+        addScrim(map);
         setReady(true);
-      });
-      // Zooming back out to trip scale means you've left the city — drop out of
-      // the city view so the overview isn't littered with its spots.
+      };
+      map.on('load', markReady);
+      map.on('idle', markReady);
+      // The level of detail follows the camera: zoom into a city and its spots
+      // appear, zoom back out to trip scale and they go away again. Clicking a
+      // pin is a shortcut to the same state, not the only route into it.
       //
-      // `zoomend`, NOT `zoom`: the continuous event also fires on the early
-      // frames of a zoom-IN animation, where the camera is still below the exit
-      // threshold. Listening to it cleared the city the instant it was opened.
-      map.on('zoomend', () => {
-        if (
-          activeCityRef.current !== null &&
-          cityFramedRef.current &&
-          map!.getZoom() < CITY_EXIT_ZOOM
-        ) {
-          setActiveCityIndex(null);
+      // `zoomend`/`moveend`, NOT the continuous `zoom`/`move`: those also fire
+      // on the early frames of a zoom-IN animation, where the camera is still
+      // below the threshold, which cleared the city the instant it opened.
+      const syncCityToViewport = () => {
+        const m = mapRef.current;
+        if (!m) return;
+        const z = m.getZoom();
+        // Drives the country/city tier. Panning re-fires this with the same
+        // zoom, and React bails on an unchanged number, so it costs nothing.
+        setZoomLevel(z);
+        const active = activeCityRef.current;
+        const bounds = m.getBounds();
+        const centre = m.getCenter();
+        const cityPins = pinsRef.current.filter((p) => p.kind === 'city');
+
+        // Nearest city to the middle of the screen, ignoring any that aren't
+        // actually on it — zooming into empty ocean should open nothing.
+        let best: PinPoint | null = null;
+        let bestKm = Infinity;
+        for (const p of cityPins) {
+          if (!bounds.contains([p.point.lon, p.point.lat])) continue;
+          const km = distanceKm({ lat: centre.lat, lon: centre.lng }, p.point);
+          if (km < bestKm) {
+            bestKm = km;
+            best = p;
+          }
         }
-      });
+
+        if (active !== null) {
+          // Leaving: only once the camera has settled, so a stray event mid
+          // zoom-in can't close a city that is still being framed.
+          if (z < CITY_EXIT_ZOOM && cityFramedRef.current) {
+            setActiveCityIndex(null);
+            return;
+          }
+          // "Am I still in this city?" is a question about distance, not about
+          // the centroid being on screen. Framing a city zooms to its SPOTS,
+          // and the city's own centroid often sits outside that tight box —
+          // judged by `contains` the map would decide you had left Nara the
+          // moment it finished flying you into Nara. Allow the visible radius
+          // plus a town's worth of slack.
+          const ne = bounds.getNorthEast();
+          const viewRadiusKm = distanceKm(
+            { lat: centre.lat, lon: centre.lng },
+            { lat: ne.lat, lon: ne.lng },
+          );
+          const activePin = cityPins.find((p) => p.cityIndex === active);
+          const stillHere =
+            !!activePin &&
+            distanceKm({ lat: centre.lat, lon: centre.lng }, activePin.point) <=
+              viewRadiusKm + CITY_FRAME_KM;
+          if (stillHere) return;
+
+          // Panned off this city. Onto another one — follow it.
+          if (best && z >= CITY_ENTER_ZOOM) {
+            enteredByZoomRef.current = true;
+            setActiveCityIndex(best.cityIndex);
+            return;
+          }
+          // Onto nothing at all. Without this you stay stuck in the city you
+          // just left: its spots keep rendering off-screen while you look at
+          // open sea, because the zoom never dropped far enough to exit.
+          // Guarded on `cityFramedRef` so a click-entry isn't closed during
+          // the framing move, when the city can briefly sit out of bounds.
+          if (cityFramedRef.current) setActiveCityIndex(null);
+          return;
+        }
+
+        if (z >= CITY_ENTER_ZOOM && best) {
+          // Entered by zoom, so the exit is armed immediately — there is no
+          // framing move to wait for.
+          enteredByZoomRef.current = true;
+          cityFramedRef.current = true;
+          setActiveCityIndex(best.cityIndex);
+        }
+      };
+      map.on('zoomend', syncCityToViewport);
+      map.on('moveend', syncCityToViewport);
+      // Also callable from outside: the camera is not the only thing that can
+      // leave the view and the level of detail disagreeing. A theme swap
+      // rebuilds the style and drops the open city while the camera stays put
+      // at city zoom, and no move event follows to put it right.
+      syncRef.current = syncCityToViewport;
       mapRef.current = map;
     });
     return () => {
@@ -535,13 +857,20 @@ export default function MapView({ trip }: MapViewProps) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    geocodeCities(names.map((n) => n.name)).then((points) => {
+    geocodeCities(names.map((n) => n.query)).then((points) => {
       if (cancelled) return;
       const resolved: PinPoint[] = [];
       const failed: string[] = [];
       points.forEach((p, i) => {
-        if (p) resolved.push({ ...names[i], point: p });
-        else failed.push(names[i].name);
+        // Pins carry the display name, not the country-qualified query.
+        if (p) {
+          resolved.push({
+            name: names[i].name,
+            kind: names[i].kind,
+            cityIndex: names[i].cityIndex,
+            point: p,
+          });
+        } else failed.push(names[i].name);
       });
       setPins(resolved);
       setMissing(failed);
@@ -558,8 +887,80 @@ export default function MapView({ trip }: MapViewProps) {
   );
 
   // Route legs in visit order; close the loop home on round-trips.
+  // ─── Country tier: cities grouped by the country they're in ───
+  const countryPins = useMemo(() => {
+    const groups = new Map<string, { points: GeoPoint[]; cityIndexes: number[] }>();
+    for (const p of pins) {
+      if (p.kind !== 'city') continue;
+      const country = trip.cities[p.cityIndex]?.country?.trim();
+      if (!country) continue;
+      const g = groups.get(country) ?? { points: [], cityIndexes: [] };
+      g.points.push(p.point);
+      g.cityIndexes.push(p.cityIndex);
+      groups.set(country, g);
+    }
+    const out: { country: string; point: GeoPoint; cityIndexes: number[] }[] = [];
+    groups.forEach((g, country) => {
+      out.push({
+        country,
+        point: centroid(g.points),
+        cityIndexes: [...g.cityIndexes].sort((a, b) => a - b),
+      });
+    });
+    // In the order the trip reaches them, so the countries can be numbered
+    // 1..n and the list reads as the journey rather than as a lookup table.
+    out.sort((a, b) => a.cityIndexes[0] - b.cityIndexes[0]);
+    return out;
+  }, [pins, trip.cities]);
+
+  // Which tier the camera is on. Countries once zoomed out past the threshold,
+  // on any trip with more than one stop. The win isn't only fewer pins — at
+  // continental zoom "France / Netherlands / Czechia" reads far better than
+  // three anonymous numbered dots overlapping each other, even though it is
+  // the same count. A single-stop trip keeps its city, since naming the
+  // country there tells you strictly less.
+  const showCountries =
+    activeCityIndex === null &&
+    zoomLevel < COUNTRY_ZOOM &&
+    countryPins.length > 0 &&
+    pins.filter((p) => p.kind === 'city').length > 1;
+
   const legs = useMemo(() => {
     const ordered = [...pins].sort((a, b) => a.cityIndex - b.cityIndex);
+    // At the country tier the pins are country pills, so a route drawn through
+    // city coordinates floats free of them — a line to nowhere. Redraw it
+    // country to country instead, collapsing consecutive stops in the same
+    // country into one node, so the dashed path still reads as the journey.
+    if (showCountries) {
+      const byCountry = new Map(countryPins.map((c) => [c.country, c.point]));
+      const seq: [number, number][] = [];
+      let last = '';
+      for (const p of ordered) {
+        if (p.kind === 'home') continue;
+        const country = trip.cities[p.cityIndex]?.country?.trim();
+        const point = country ? byCountry.get(country) : undefined;
+        if (!country || !point || country === last) continue;
+        seq.push([point.lat, point.lon]);
+        last = country;
+      }
+      const homePin = pins.find((p) => p.kind === 'home');
+      if (homePin && includeHome) {
+        seq.unshift([homePin.point.lat, homePin.point.lon]);
+        if (trip.returnToHome !== false && seq.length > 1) {
+          seq.push([homePin.point.lat, homePin.point.lon]);
+        }
+      }
+      const outC: { coords: [number, number][]; home: boolean }[] = [];
+      for (let i = 0; i < seq.length - 1; i++) {
+        const isHomeLeg =
+          !!homePin &&
+          ((seq[i][0] === homePin.point.lat && seq[i][1] === homePin.point.lon) ||
+            (seq[i + 1][0] === homePin.point.lat && seq[i + 1][1] === homePin.point.lon));
+        outC.push({ coords: arc(seq[i], seq[i + 1]), home: isHomeLeg });
+      }
+      return outC;
+    }
+
     const path = ordered.map((p) => [p.point.lat, p.point.lon] as [number, number]);
     const home = pins.find((p) => p.kind === 'home');
     if (home && trip.returnToHome !== false && path.length > 1) {
@@ -574,7 +975,7 @@ export default function MapView({ trip }: MapViewProps) {
       out.push({ coords: arc(path[i], path[i + 1]), home: isHomeLeg });
     }
     return out;
-  }, [pins, trip.returnToHome]);
+  }, [pins, trip.returnToHome, trip.cities, showCountries, countryPins, includeHome]);
 
   // ─── Draw the route line ───
   useEffect(() => {
@@ -638,6 +1039,8 @@ export default function MapView({ trip }: MapViewProps) {
     const map = mapRef.current;
     const target = pins.find((p) => p.cityIndex === index && p.kind === 'city');
     if (!map || !target) return;
+    // Clicked, not zoomed — the framing move below is wanted.
+    enteredByZoomRef.current = false;
     setActiveCityIndex(index);
     // Deliberately NO camera move here. Opening a city used to jump the map to
     // zoom 11, trickle pins in for up to ~25s, then move a SECOND time to fit
@@ -646,19 +1049,72 @@ export default function MapView({ trip }: MapViewProps) {
     // are known. If they're already cached that happens instantly.
   }, [pins]);
 
-  // Keep the listener's mirror in step. Opening a different city (or closing
-  // one) means it hasn't been framed yet.
+  /**
+   * Zoom from a country down to the cities inside it — the middle step of the
+   * drill-down. Deliberately stops at city scale rather than opening a city:
+   * with several stops in the country there is no single right one to open,
+   * and the choice belongs to the traveller.
+   */
+  const focusCountry = useCallback(
+    (cityIndexes: number[]) => {
+      const map = mapRef.current;
+      if (!map) return;
+      const points = pins
+        .filter((p) => p.kind === 'city' && cityIndexes.includes(p.cityIndex))
+        .map((p) => p.point);
+      if (points.length === 0) return;
+
+      const padding = framePadding(map, panelOpenRef.current);
+      if (points.length === 1) {
+        map.easeTo({
+          center: [points[0].lon, points[0].lat],
+          zoom: Math.max(COUNTRY_ZOOM + 1.5, 7),
+          padding,
+          duration: 650,
+        });
+        return;
+      }
+      map.fitBounds(shortestBounds(points), { padding, maxZoom: 9, duration: 650 });
+    },
+    [pins],
+  );
+
+  // Keep the listener's mirrors in step.
+  useEffect(() => {
+    pinsRef.current = pins;
+  }, [pins]);
+
+  useEffect(() => {
+    panelOpenRef.current = panelOpen;
+  }, [panelOpen]);
+
+  // Re-check the level of detail after changes the camera doesn't announce —
+  // a theme swap, the pin set being rebuilt, the map first becoming ready.
+  // Without this the map can sit at city zoom showing the trip overview.
+  useEffect(() => {
+    if (!ready) return;
+    syncRef.current();
+  }, [ready, styleEpoch, pins]);
+
   useEffect(() => {
     activeCityRef.current = activeCityIndex;
-    cityFramedRef.current = false;
+    // A city entered by zoom is framed by definition — the user's own camera
+    // put it on screen, so the exit is armed at once. One entered by click has
+    // no camera move yet, and must not be closed before the framing lands.
+    cityFramedRef.current = activeCityIndex !== null && enteredByZoomRef.current;
   }, [activeCityIndex]);
 
   // City dots belong to the trip overview. Inside a city the itinerary spots
   // are the subject, and the big numbered dot just sits on top of them.
-  const visibleCityPins = useMemo(
-    () => (activeCityIndex === null ? pins : []),
-    [pins, activeCityIndex],
-  );
+  // Zoomed right out, the countries stand in for them.
+  const visibleCityPins = useMemo(() => {
+    if (activeCityIndex !== null) return [];
+    // Home belongs to no country, so the grouping can't stand in for it. Drop
+    // it here and it vanishes at exactly the zoom where a New York → Japan
+    // trip most needs to show where it starts from.
+    if (showCountries) return pins.filter((p) => p.kind === 'home');
+    return pins;
+  }, [pins, activeCityIndex, showCountries]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -693,7 +1149,13 @@ export default function MapView({ trip }: MapViewProps) {
       setSpotsLoading(false);
       return;
     }
-    const cached = spotCacheRef.current.get(activeCityIndex);
+    // Keyed by the city itself, NOT its position. Positions are not stable:
+    // reordering the trip (or inserting a city) leaves index 2 pointing at a
+    // different city, and an index-keyed cache then hands the newcomer the
+    // previous occupant's places — Osaka's panel listing Kyoto's temples.
+    const cacheKey = cityCacheKey(trip.cities[activeCityIndex]);
+    if (!cacheKey) return;
+    const cached = spotCacheRef.current.get(cacheKey);
     if (cached) {
       setSpots(cached.spots);
       setSpotsDropped(cached.dropped);
@@ -705,7 +1167,7 @@ export default function MapView({ trip }: MapViewProps) {
 
     const seeds = buildCitySpots(trip, activeCityIndex);
     if (seeds.length === 0) {
-      spotCacheRef.current.set(activeCityIndex, { spots: [], dropped: [] });
+      spotCacheRef.current.set(cacheKey, { spots: [], dropped: [] });
       setSpots([]);
       setSpotsDropped([]);
       return;
@@ -717,7 +1179,7 @@ export default function MapView({ trip }: MapViewProps) {
     geocodeSpots(seeds, centerPin.point)
       .then((res) => {
         // Cache regardless of cancellation — the work is done and valid.
-        spotCacheRef.current.set(activeCityIndex, res);
+        spotCacheRef.current.set(cacheKey, res);
         if (cancelled) return;
         setSpots(res.spots);
         setSpotsDropped(res.dropped);
@@ -742,6 +1204,72 @@ export default function MapView({ trip }: MapViewProps) {
     [activeCityIndex, spots],
   );
 
+  // ─── Resolve recommendations for the open city (opt-in, cached per city) ───
+  useEffect(() => {
+    if (activeCityIndex === null || !recsOn) {
+      setRecs([]);
+      setRecsLoading(false);
+      return;
+    }
+    const city = trip.cities[activeCityIndex];
+    const key = cityCacheKey(city);
+    if (!key) return;
+    const cached = recCacheRef.current.get(key);
+    if (cached) {
+      setRecs(cached);
+      setRecsLoading(false);
+      return;
+    }
+    const centerPin = pins.find((p) => p.cityIndex === activeCityIndex && p.kind === 'city');
+    if (!centerPin) return;
+
+    let cancelled = false;
+    setRecsLoading(true);
+    setRecs([]);
+    (async () => {
+      // Ask for both kinds together; either can fail without sinking the other.
+      const [acts, rests] = await Promise.all([
+        searchActivities({ city: city.name, country: city.country }).catch(() => []),
+        searchRestaurants({ city: city.name, country: city.country }).catch(() => []),
+      ]);
+      const suggestions: Suggestion[] = [
+        ...acts.map((a) => ({ name: a.name, detail: a.reason ? 'Suggested' : undefined })),
+        ...rests.map((r) => ({
+          name: r.name,
+          detail: [r.cuisine, r.priceRange].filter(Boolean).join(' · ') || 'Suggested',
+          kindHint: 'restaurant' as const,
+        })),
+      ];
+      const seeds = buildRecommendedSpots(city, suggestions);
+      if (seeds.length === 0) {
+        recCacheRef.current.set(key, []);
+        if (!cancelled) setRecs([]);
+        return;
+      }
+      const res = await geocodeSpots(seeds, centerPin.point);
+      // `geocodeSpots` returns plain seeds; carry the flag back through so the
+      // marker renderer still knows these are suggestions.
+      const flagged = res.spots.map((s) => ({ ...s, recommended: true }));
+      recCacheRef.current.set(key, flagged);
+      if (!cancelled) setRecs(flagged);
+    })()
+      .catch(() => {
+        if (!cancelled) setRecs([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRecsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCityIndex, recsOn, pins, trip]);
+
+  const visibleRecs = useMemo(
+    () => (activeCityIndex !== null && recsOn ? recs : []),
+    [activeCityIndex, recsOn, recs],
+  );
+
   /**
    * Frame the open city around its own spots, so every pin is separated
    * instead of clumped. The airport is excluded from the fit — it sits ~25km
@@ -751,6 +1279,10 @@ export default function MapView({ trip }: MapViewProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || activeCityIndex === null || spotsLoading) return;
+    // The user zoomed here themselves — they are driving the camera, and
+    // moving it under them to "frame" what they are already looking at reads
+    // as the map fighting the scroll. Only a click asks to be flown somewhere.
+    if (enteredByZoomRef.current) return;
     const centre = pins.find((p) => p.cityIndex === activeCityIndex && p.kind === 'city');
     // Frame on what's actually in town: the airport sits ~25km out, and a day
     // trip can be 100km+ away. Including either zooms the view out until the
@@ -785,12 +1317,12 @@ export default function MapView({ trip }: MapViewProps) {
       // Extra room on the left: the itinerary panel floats over the map there,
       // and without this a spot (and its name) lands underneath it. Top gets a
       // little more too, since each pin carries its label above it.
-      padding: { top: 86, bottom: 70, right: 70, left: panelOpen ? 272 : 70 },
+      padding: framePadding(map, panelOpenRef.current, { top: 86, bottom: 70, side: 70, panel: 272 }),
       maxZoom: 15,
       duration: 700,
     });
     map.once('moveend', framed);
-  }, [activeCityIndex, spots, spotsLoading, ready, pins, panelOpen]);
+  }, [activeCityIndex, spots, spotsLoading, ready, pins]);
 
   /**
    * Nudge spot pins that land on top of each other.
@@ -803,7 +1335,11 @@ export default function MapView({ trip }: MapViewProps) {
    */
   const declutterSpots = useCallback(() => {
     const map = mapRef.current;
-    const markers = spotMarkersRef.current;
+    // Both layers together. They occupy the same city at the same zoom, so
+    // decluttering them separately just means each set avoids itself and then
+    // lands on the other — in Milan that put the hotel, Luini, the Duomo and
+    // the Pinacoteca in one unreadable knot.
+    const markers = [...spotMarkersRef.current, ...recMarkersRef.current];
     if (!map || markers.length < 2) return;
     const RADIUS = 27;
     const placed: { x: number; y: number }[] = [];
@@ -850,6 +1386,97 @@ export default function MapView({ trip }: MapViewProps) {
       spotMarkersRef.current = [];
     };
   }, [visibleSpots, ready, declutterSpots]);
+
+  /**
+   * Nudge country pills off each other.
+   *
+   * The spot version walks a ring, which suits small round pins. These are
+   * wide name-plates — ~110px across and ~28px tall — so a ring just slides
+   * them sideways into the next one. On a nine-country European tour that
+   * left Switzerland, Germany, Austria, Italy and Hungary in one unreadable
+   * heap. They separate vertically instead, alternating up and down from the
+   * true position so the pill stays near the country it names.
+   */
+  const declutterCountries = useCallback(() => {
+    const map = mapRef.current;
+    const markers = countryMarkersRef.current;
+    if (!map || markers.length < 2) return;
+    const HALF_W = 62;
+    const STEP = 30;
+    const placed: { x: number; y: number }[] = [];
+    for (const marker of markers) {
+      marker.setOffset([0, 0]);
+      const base = map.project(marker.getLngLat());
+      let dy = 0;
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        const clash = placed.some(
+          (p) => Math.abs(p.x - base.x) < HALF_W * 2 && Math.abs(p.y - (base.y + dy)) < STEP,
+        );
+        if (!clash) break;
+        // ±30, ±60, ±90 … so a pill never drifts far from its own country.
+        const step = Math.ceil(attempt / 2) * STEP;
+        dy = attempt % 2 === 1 ? -step : step;
+      }
+      marker.setOffset([0, dy]);
+      placed.push({ x: base.x, y: base.y + dy });
+    }
+  }, []);
+
+  // Country markers. Clicking one drills down to the cities inside it.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const shown = showCountries ? countryPins : [];
+    countryMarkersRef.current.forEach((m) => m.remove());
+    countryMarkersRef.current = shown.map((c, i) => {
+      // Numbered 1..n as countries, matching the panel and the "3 countries"
+      // header. The city-level stop numbers live in the tooltip.
+      const el = makeCountryEl(
+        c.country,
+        String(i + 1),
+        visitOrderLabel(c.cityIndexes),
+        c.cityIndexes.length,
+      );
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        focusCountry(c.cityIndexes);
+      });
+      return new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([c.point.lon, c.point.lat])
+        .addTo(map);
+    });
+    const raf = requestAnimationFrame(declutterCountries);
+    map.on('zoomend', declutterCountries);
+    return () => {
+      cancelAnimationFrame(raf);
+      map.off('zoomend', declutterCountries);
+      countryMarkersRef.current.forEach((m) => m.remove());
+      countryMarkersRef.current = [];
+    };
+  }, [showCountries, countryPins, ready, focusCountry, declutterCountries]);
+
+  // Recommendation markers, kept in their own layer so toggling them off never
+  // disturbs the itinerary's pins.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    recMarkersRef.current.forEach((m) => m.remove());
+    recMarkersRef.current = visibleRecs.map((spot) =>
+      new maplibregl.Marker({ element: makeSpotEl(spot), anchor: 'center' })
+        .setLngLat([spot.point.lon, spot.point.lat])
+        .addTo(map),
+    );
+    // Re-run the shared declutter now this layer exists, and keep it in step
+    // on zoom — otherwise suggestions sit on top of the itinerary's own pins.
+    const raf = requestAnimationFrame(declutterSpots);
+    map.on('zoomend', declutterSpots);
+    return () => {
+      cancelAnimationFrame(raf);
+      map.off('zoomend', declutterSpots);
+      recMarkersRef.current.forEach((m) => m.remove());
+      recMarkersRef.current = [];
+    };
+  }, [visibleRecs, ready, declutterSpots]);
 
   // ─── Hide the basemap's own labels for the trip's cities ───
   // Each trip city is already labelled by its numbered pin; without this the
@@ -906,16 +1533,15 @@ export default function MapView({ trip }: MapViewProps) {
     // frames pins underneath it — on a Paris/Amsterdam/Prague trip Amsterdam
     // landed fully behind the panel. Reserve the panel's width on the left,
     // exactly as the city-level framing below already does.
-    const padding = { top: 56, bottom: 56, right: 56, left: panelOpen ? 272 : 56 };
+    const padding = framePadding(map, panelOpenRef.current);
 
     if (usable.length === 1) {
       map.jumpTo({ center: [usable[0].point.lon, usable[0].point.lat], zoom: 7, padding });
       return;
     }
-    const bounds = new maplibregl.LngLatBounds();
-    usable.forEach((p) => bounds.extend([p.point.lon, p.point.lat]));
+    const bounds = shortestBounds(usable.map((p) => p.point));
     map.fitBounds(bounds, { padding, maxZoom: 9, animate: false });
-  }, [pins, includeHome, panelOpen]);
+  }, [pins, includeHome]);
 
   // Re-frame when the pin set or the home toggle changes.
   useEffect(() => {
@@ -936,7 +1562,31 @@ export default function MapView({ trip }: MapViewProps) {
     let first = true;
     let raf = 0;
     const ro = new ResizeObserver(() => {
+      // Always tell MapLibre the box changed, including on the very first
+      // observation. It caches its canvas size, so a map built before the
+      // container had height stays that size until something says otherwise —
+      // and skipping the first callback outright skipped exactly the event
+      // that would have fixed it.
+      mapRef.current?.resize();
+
+      // Give the map back its width when the panel no longer fits. Below the
+      // threshold there isn't room for the trip AND the panel, and the panel
+      // would sit on top of the westernmost stop. Reopens itself when there's
+      // room again — but only if IT closed the panel, never overriding a
+      // deliberate close.
+      const mapW = mapRef.current?.getContainer().clientWidth ?? 0;
+      if (mapW > 0) {
+        if (!panelFits(mapW) && panelOpenRef.current) {
+          autoClosedRef.current = true;
+          setPanelOpen(false);
+        } else if (panelFits(mapW) && autoClosedRef.current && !panelOpenRef.current) {
+          autoClosedRef.current = false;
+          setPanelOpen(true);
+        }
+      }
       if (first) {
+        // Don't re-frame on the initial observation, though: the opening fit
+        // is already on its way and would only fight it.
         first = false;
         return;
       }
@@ -951,9 +1601,19 @@ export default function MapView({ trip }: MapViewProps) {
   }, [fitToTrip]);
 
   const togglePanel = useCallback(() => {
+    // Deliberately no re-frame. This used to re-fit once the panel finished
+    // animating, so the padding matched its new width — but that threw the
+    // camera back to the trip bounds on every open and close, losing wherever
+    // the user had navigated to. Showing and hiding an overlay is not a
+    // request to move the map. The padding still applies at the moments that
+    // genuinely frame something: first fit, opening a city, drilling into a
+    // country.
+    //
+    // A manual toggle also cancels any auto-close, so widening the window
+    // later doesn't spring the panel back open against the user's wishes.
+    autoClosedRef.current = false;
     setPanelOpen((v) => !v);
-    setTimeout(() => fitToTrip(), 240);
-  }, [fitToTrip]);
+  }, []);
 
   /** The city currently opened in the panel, if any. */
   const activeCity = activeCityIndex !== null ? trip.cities[activeCityIndex] : undefined;
@@ -998,7 +1658,11 @@ export default function MapView({ trip }: MapViewProps) {
     <div ref={shellRef} className="relative h-full min-h-0">
       {/* ─── Itinerary panel — floats OVER the map, closes with the ✕ ─── */}
       <aside
-        className={`absolute top-3 left-3 z-[600] w-[236px] max-h-[calc(100%-1.5rem)] hidden md:flex flex-col transition-all duration-200 ease-out ${
+        // Capped at 40% of the map. At a fixed 236px the panel is more than
+        // half of a narrow pane, and then no amount of framing padding can
+        // both clear it and fit a widely-spread trip — one of the two has to
+        // break, and both did in turn.
+        className={`absolute top-3 left-3 z-[600] w-[236px] max-w-[40%] max-h-[calc(100%-1.5rem)] hidden md:flex flex-col transition-all duration-200 ease-out ${
           panelOpen
             ? 'opacity-100 translate-x-0 pointer-events-auto'
             : 'opacity-0 -translate-x-2 pointer-events-none'
@@ -1022,13 +1686,17 @@ export default function MapView({ trip }: MapViewProps) {
                 </span>
               </button>
             ) : (
-              <span className="text-[12px] font-semibold text-gray-800">Itinerary</span>
+              <span className="text-[12px] font-semibold text-gray-800">
+                {showCountries ? 'Countries' : 'Itinerary'}
+              </span>
             )}
             <div className="flex items-center gap-1.5 flex-shrink-0">
               <span className="text-[11px] text-gray-400">
                 {activeCity
                   ? `${nightsBetween(activeCity.dates?.arrival, activeCity.dates?.departure)}n`
-                  : `${trip.cities.length} ${trip.cities.length === 1 ? 'stop' : 'stops'}`}
+                  : showCountries
+                    ? `${countryPins.length} ${countryPins.length === 1 ? 'country' : 'countries'}`
+                    : `${trip.cities.length} ${trip.cities.length === 1 ? 'stop' : 'stops'}`}
               </span>
               <button
                 onClick={togglePanel}
@@ -1083,10 +1751,109 @@ export default function MapView({ trip }: MapViewProps) {
                   Couldn&apos;t place: {spotsDropped.join(', ')}
                 </p>
               )}
+
+              {/* ── Suggestions: places here that aren't in the plan ── */}
+              <div className="border-t border-gray-100 mt-1.5 pt-1.5">
+                <button
+                  onClick={() => setRecsOn((v) => !v)}
+                  className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                  title={
+                    recsOn
+                      ? 'Hide suggested places'
+                      : 'Find well-known places here that aren’t in your plan'
+                  }
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-[11px]" style={{ color: '#94a3b8' }}>
+                      ★
+                    </span>
+                    <span className="text-[11.5px] font-medium text-gray-700">
+                      Also worth seeing
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-gray-400">
+                    {recsOn ? 'Hide' : 'Show'}
+                  </span>
+                </button>
+
+                {recsOn && recsLoading && (
+                  <p className="px-2 py-1.5 text-[11px] text-gray-400">Looking around…</p>
+                )}
+                {recsOn && !recsLoading && recs.length === 0 && (
+                  <p className="px-2 py-1.5 text-[11px] text-gray-400">
+                    Nothing to suggest beyond what you&apos;ve already planned.
+                  </p>
+                )}
+                {recsOn &&
+                  recs.map((spot, i) => (
+                    <button
+                      key={`rec-${spot.name}-${i}`}
+                      onClick={() => flyToSpot(spot)}
+                      title={`Show ${spot.name} on the map`}
+                      className="w-full text-left flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <span
+                        className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+                        style={{
+                          border: `2px dashed ${SPOT_STYLE[spot.kind].color}`,
+                          background: 'rgba(255,255,255,0.82)',
+                        }}
+                        dangerouslySetInnerHTML={{ __html: spotSvg(spot.kind, 9) }}
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-[11.5px] text-gray-600 leading-snug">
+                          {spot.name}
+                        </span>
+                        {spot.detail && (
+                          <span className="block text-[10px] text-gray-400 truncate">
+                            {spot.detail}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+              </div>
             </div>
           )}
 
-          {!activeCity && (
+          {/* ── Country tier: the panel follows the map. Listing four cities
+                 while the map shows three country pills reads as two different
+                 views of the same trip disagreeing with each other. ── */}
+          {!activeCity && showCountries && (
+            <div className="flex-1 min-h-0 overflow-y-auto px-1.5 py-1.5">
+              {countryPins.map((c, i) => (
+                <button
+                  key={c.country}
+                  onClick={() => focusCountry(c.cityIndexes)}
+                  title={`${c.country} — ${c.cityIndexes.length === 1 ? 'stop' : 'stops'} ${visitOrderLabel(c.cityIndexes)}. Zoom in.`}
+                  className="w-full text-left flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  {/* The country's position in the journey, 1..n — so the list
+                      counts up to the "N countries" in the header. Which stops
+                      those are is in the subtitle and the tooltip. */}
+                  <span
+                    className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                    style={{ background: BLUE.water, color: BLUE.textStrong }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[12px] font-medium text-gray-800 truncate">
+                      {c.country}
+                    </span>
+                    <span className="block text-[10px] text-gray-400 truncate">
+                      {c.cityIndexes.map((i) => trip.cities[i]?.name).filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                </button>
+              ))}
+              <p className="px-2 pt-1.5 text-[10px] text-gray-400">
+                Zoom in to see individual stops.
+              </p>
+            </div>
+          )}
+
+          {!activeCity && !showCountries && (
           <div className="flex-1 min-h-0 overflow-y-auto px-1.5 py-1.5">
             {hasHome && (
               <button
