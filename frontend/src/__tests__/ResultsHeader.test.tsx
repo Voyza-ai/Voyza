@@ -80,4 +80,24 @@ describe('ResultsHeader', () => {
     render(<ResultsHeader trip={trip} />);
     expect(screen.getByText(/1 traveler$/)).toBeInTheDocument();
   });
+
+  it('long AI-route titles cannot wrap the price cluster onto a second row', () => {
+    // Describe-chat trips are titled with the full route ("Berlin → Florence
+    // → Barcelona → Madrid"), which used to widen the left column until the
+    // flex-wrap header dropped the toggle/pills/buttons below the title.
+    const trip = buildTrip({
+      title: 'Berlin → Florence → Barcelona → Madrid → Lisbon → Porto',
+    });
+    const { container } = render(<ResultsHeader trip={trip} />);
+    const row = container.querySelector('.justify-between') as HTMLElement;
+    expect(row).toBeTruthy();
+    // The row must never be allowed to wrap, and must top-align both sides.
+    expect(row.className).not.toContain('flex-wrap');
+    expect(row.className).toContain('items-start');
+    // The left column must be shrinkable so the title truncates inside it
+    // instead of forcing the row wide.
+    const left = row.firstElementChild as HTMLElement;
+    expect(left.className).toContain('flex-1');
+    expect(left.className).toContain('min-w-0');
+  });
 });

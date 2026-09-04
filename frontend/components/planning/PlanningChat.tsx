@@ -12,6 +12,8 @@ import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput } from '@/lib/parseDate';
 import { parseLocal, toIso } from '@/lib/dateHelpers';
 import { buildDayTransportContext } from '@/lib/dayScheduleDefaults';
+import { countryForCity } from '@/data/worldCities';
+import { vibesFromAnswer } from '@/lib/vibeMap';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
@@ -1018,7 +1020,9 @@ export default function PlanningChat() {
 
       return {
         name,
-        country: '',
+        // Fill from the world-cities dataset / the user's vibe answer so
+        // AI-planned cards match the preset cards (country line + chips).
+        country: countryForCity(name),
         dates: cityDates,
         transportIn,
         transportOut: emptyTransport,
@@ -1027,7 +1031,7 @@ export default function PlanningChat() {
         selectedHotelIndex: 0,
         activities: [],
         restaurants: [],
-        vibes: [],
+        vibes: vibesFromAnswer(answers.vibe),
       };
     });
 

@@ -76,4 +76,18 @@ describe('preset itineraries catalog', () => {
       expect(presetNights(p)).toBeGreaterThan(0);
     }
   });
+
+  test('every preset city ships complete card data (country, vibes, hotel)', () => {
+    // The results/browse cards render country lines, vibe chips, and hotel
+    // rows straight from this data — a preset added without them would
+    // silently render bare cards, the same bug AI-planned trips had.
+    for (const p of PRESET_ITINERARIES) {
+      for (const c of p.cities) {
+        expect(c.country).toBeTruthy();
+        expect(c.vibes.length).toBeGreaterThan(0);
+        expect(c.hotel.name).toBeTruthy();
+        expect(c.activities.length).toBeGreaterThan(0);
+      }
+    }
+  });
 });

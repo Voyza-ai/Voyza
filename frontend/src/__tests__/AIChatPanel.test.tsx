@@ -320,4 +320,29 @@ describe('AIChatPanel', () => {
     render(<AIChatPanel trip={buildTrip({ savings: 0 })} />);
     expect(screen.getByText(/You're working on a 2-city trip/)).toBeInTheDocument();
   });
+
+  it('keeps suggestion chips visible when the date-shift tip adds a second bubble', () => {
+    const trip = buildTrip({
+      dateShiftSuggestion: {
+        newStartDate: '2026-08-28',
+        dayOffset: 2,
+        savings: 3230,
+      },
+    } as any);
+    render(<AIChatPanel trip={trip} />);
+    // Both the heads-up bubble AND the chips must show.
+    expect(screen.getByText(/Heads up/)).toBeInTheDocument();
+    expect(screen.getByText('Why this order of cities?')).toBeInTheDocument();
+  });
+
+  it('hides suggestion chips once the user sends a message', async () => {
+    mockedPlanChat.mockResolvedValue({ type: 'answer', reply: 'OK' });
+    render(<AIChatPanel trip={buildTrip()} />);
+    const input = screen.getByPlaceholderText('Ask about your trip...');
+    fireEvent.change(input, { target: { value: 'Make it cheaper' } });
+    fireEvent.submit(input.closest('form')!);
+    await waitFor(() =>
+      expect(screen.queryByText('Why this order of cities?')).not.toBeInTheDocument(),
+    );
+  });
 });

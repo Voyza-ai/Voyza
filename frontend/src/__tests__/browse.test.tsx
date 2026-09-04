@@ -1,9 +1,16 @@
 import './mocks';
 import { mockPush } from './mocks';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import BrowsePage from '@/app/browse/page';
 import { PRESET_ITINERARIES, presetNights, presetCost } from '@/data/presetItineraries';
+import { saveTrip } from '@/lib/api';
+
+const setGeolocation = (impl: any) =>
+  Object.defineProperty(global.navigator, 'geolocation', {
+    value: impl,
+    configurable: true,
+  });
 
 const NIGHTS_MAX = Math.max(...PRESET_ITINERARIES.map(presetNights));
 const COST_MAX = Math.ceil(Math.max(...PRESET_ITINERARIES.map(presetCost)) / 100) * 100;
@@ -28,6 +35,13 @@ const apply = () =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+afterEach(() => {
+  // Remove any geolocation mock so other tests see jsdom's default (undefined).
+  // @ts-expect-error cleanup
+  delete global.navigator.geolocation;
+  localStorage.removeItem('bluemurr-use-location');
 });
 
 describe('BrowsePage filtering scenarios', () => {
@@ -142,6 +156,94 @@ describe('BrowsePage filtering scenarios', () => {
     for (const p of PRESET_ITINERARIES) {
       expect(screen.getByText(p.title)).toBeInTheDocument();
     }
+  });
+
+  test('saving with location granted uses the nearest airport city as origin', async () => {
+    setGeolocation({
+      // Boston city center — nearest airport city should be Boston, not NYC.
+      getCurrentPosition: (ok: any) =>
+        ok({ coords: { latitude: 42.36, longitude: -71.06 } }),
+    });
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveTrip).toHaveBeenCalled());
+    const payload = (saveTrip as jest.Mock).mock.calls[0][0];
+    expect(payload.origin.city).toBe('Boston');
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith('/results?tripId=trip-123'),
+    );
+  });
+
+  test('saving with location denied falls back to the JFK default', async () => {
+    setGeolocation({
+      getCurrentPosition: (_ok: any, err: any) => err({ code: 1 }),
+    });
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveTrip).toHaveBeenCalled());
+    const payload = (saveTrip as jest.Mock).mock.calls[0][0];
+    expect(payload.origin).toEqual({ city: 'New York', airports: ['JFK'] });
+  });
+
+  test('saving without geolocation support falls back to the JFK default', async () => {
+    // jsdom default: navigator.geolocation is undefined.
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveTrip).toHaveBeenCalled());
+    const payload = (saveTrip as jest.Mock).mock.calls[0][0];
+    expect(payload.origin).toEqual({ city: 'New York', airports: ['JFK'] });
+  });
+
+  test('location toggle off skips the browser prompt and saves with JFK', async () => {
+    const getCurrentPosition = jest.fn((ok: any) =>
+      ok({ coords: { latitude: 42.36, longitude: -71.06 } }),
+    );
+    setGeolocation({ getCurrentPosition });
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    // Toggle is on by default; turn it off.
+    const toggle = screen.getByRole('switch', { name: /use my location/i });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveTrip).toHaveBeenCalled());
+    // The browser was never asked, and the trip departs from the default.
+    expect(getCurrentPosition).not.toHaveBeenCalled();
+    const payload = (saveTrip as jest.Mock).mock.calls[0][0];
+    expect(payload.origin).toEqual({ city: 'New York', airports: ['JFK'] });
+  });
+
+  test('location toggle persists via localStorage', () => {
+    localStorage.setItem('bluemurr-use-location', 'off');
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    // Remembered off across page loads.
+    const toggle = screen.getByRole('switch', { name: /use my location/i });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    // Turning it back on clears the stored opt-out.
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(localStorage.getItem('bluemurr-use-location')).toBeNull();
+    // And off again writes it back.
+    fireEvent.click(toggle);
+    expect(localStorage.getItem('bluemurr-use-location')).toBe('off');
+  });
+
+  test('location toggle on keeps the detection flow working', async () => {
+    setGeolocation({
+      getCurrentPosition: (ok: any) =>
+        ok({ coords: { latitude: 42.36, longitude: -71.06 } }),
+    });
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveTrip).toHaveBeenCalled());
+    const payload = (saveTrip as jest.Mock).mock.calls[0][0];
+    expect(payload.origin.city).toBe('Boston');
   });
 
   test('save modal asks for travelers and updates the price live', () => {

@@ -936,6 +936,7 @@ export function presetCost(preset: PresetItinerary): number {
 export function buildPresetTrip(
   preset: PresetItinerary,
   travelers: number = preset.travelers,
+  origin?: { city: string; airports: string[] },
 ): Trip {
   const start = new Date();
   start.setDate(start.getDate() + 30);
@@ -980,9 +981,10 @@ export function buildPresetTrip(
     travelers,
     cities,
     savingsTips: [],
-    // Default home anchor — every preset starts from New York (JFK).
-    // Users change it on their saved copy via the canvas home card.
-    origin: { city: 'New York', airports: ['JFK'] },
+    // Home anchor — the caller's detected location when available,
+    // otherwise every preset starts from New York (JFK). Users change
+    // it on their saved copy via the canvas home card.
+    origin: origin ?? { city: 'New York', airports: ['JFK'] },
     returnToHome: true,
   };
 }

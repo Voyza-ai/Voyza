@@ -159,6 +159,7 @@ EXTRACTION RULES
 
 FLOW
 - Minimum to finish (ALL four required): ≥1 destination city, dates, travelers, AND origin (the city they're flying FROM). Origin is NOT optional — without it there's no departure point for the flight search, so ALWAYS ask "where are you flying from?" if it's still unknown, before you ever go 'ready'. Budget and vibe: worth ONE ask each; respect a skip ("no budget" → budget stays null, move on, never ask again — note the skip in notes as "budget: skipped" style).
+- Non-null fields in KNOWN are settled facts the user already provided (possibly via UI controls rather than chat). NEVER re-ask for them, NEVER claim you don't have them, and NEVER return a different or empty value for them in updates — leave a field out (or null) unless THIS message changes it.
 - 'show_budget_slider' / 'show_vibe_picker' mean "I am ASKING for this field and it is still unknown". NEVER use them when the latest message already ANSWERS that field — "culture vibes" answers vibe: extract updates.vibe='culture' and move ON (never show the vibe picker back at them; same for a stated budget number and the slider).
 - After extracting, re-check completeness against KNOWN + your updates: if destinations, dates, travelers AND origin are all present and you've already covered (asked or been told) budget and vibe, the action is 'ready' — not another question. If origin is still missing, ask for it (action 'ask') no matter what else is done.
 - When the minimums are met (including anything just provided), action 'ready' and a short wrap-up line like "That's everything I need — give it a look and hit Find my trip." The UI shows the recap; do NOT recite every detail yourself.
@@ -200,9 +201,20 @@ export async function converse(params: {
       throw new AppError(503, 'assistant_unavailable', { reason: 'malformed_output' });
     }
 
+    // The model sometimes emits "" instead of null for string fields it has
+    // no value for. An empty string is NOT an update — passing it through
+    // lets it overwrite facts the user already gave (a detected origin was
+    // erased this way and the planner re-asked for it). Empty → null.
+    const updates = { ...(input.updates ?? {}) };
+    for (const key of ['origin', 'vibe', 'notes'] as const) {
+      if (typeof updates[key] === 'string' && updates[key].trim() === '') {
+        updates[key] = null;
+      }
+    }
+
     return {
       reply: input.reply,
-      updates: input.updates ?? {},
+      updates,
       action: input.action,
       quickReplies: Array.isArray(input.quickReplies) ? input.quickReplies.slice(0, 4) : undefined,
     };

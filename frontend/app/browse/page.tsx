@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -41,6 +41,9 @@ import {
   resolveCanvasTripId,
   type CanvasIntent,
 } from '@/lib/canvasHandoff';
+import { detectNearestAirportCity } from '@/lib/nearestAirport';
+import { getOriginAirports } from '@/lib/originAirports';
+import { getUseLocationPref, setUseLocationPref } from '@/lib/locationPref';
 
 const VIBES: Array<{ key: Vibe; label: string }> = [
   { key: 'beach', label: 'Beach' },
@@ -74,6 +77,26 @@ export default function BrowsePage() {
   const [travelers, setTravelers] = useState(2);
   const [showLogin, setShowLogin] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Origin detected from the browser's location prompt at save time.
+  // Kept in state so the post-login resume saves with the same origin.
+  const [detectedOrigin, setDetectedOrigin] = useState<
+    { city: string; airports: string[] } | undefined
+  >(undefined);
+  const [locating, setLocating] = useState(false);
+  // App-side location switch — the browser permission can't be revoked by
+  // the site, so this is how a user who picked "always allow" opts back out.
+  // Initialized in an effect (not the useState initializer) so server and
+  // client render the same default and hydration stays clean.
+  const [useLocation, setUseLocation] = useState(true);
+  useEffect(() => setUseLocation(getUseLocationPref()), []);
+  const toggleUseLocation = () => {
+    const next = !useLocation;
+    setUseLocation(next);
+    setUseLocationPref(next);
+    // Forget any previously detected origin so a post-login save after
+    // toggling off falls back to the JFK default.
+    if (!next) setDetectedOrigin(undefined);
+  };
   const [query, setQuery] = useState('');
 
   // Deferred filters: the sidebar controls edit a DRAFT; nothing filters
@@ -117,8 +140,11 @@ export default function BrowsePage() {
   // A preset is an unsaved trip — reuse the same intent machinery the
   // results page uses, so login (password AND Google OAuth) resumes
   // straight into the save.
-  const buildIntent = (preset: PresetItinerary): CanvasIntent => {
-    const trip = buildPresetTrip(preset, travelers);
+  const buildIntent = (
+    preset: PresetItinerary,
+    origin?: { city: string; airports: string[] },
+  ): CanvasIntent => {
+    const trip = buildPresetTrip(preset, travelers, origin);
     return {
       savedId: null,
       payload: trip,
@@ -130,18 +156,45 @@ export default function BrowsePage() {
     };
   };
 
+  // Ask for the user's location at save time. The browser shows its native
+  // permission prompt (allow while visiting / allow this time / never) —
+  // granted maps the coords to the nearest major airport city, anything
+  // else (denied, unsupported, no match, timeout) keeps the JFK default.
+  const detectOrigin = async (): Promise<
+    { city: string; airports: string[] } | undefined
+  > => {
+    // User turned location off in the app — never even ask the browser.
+    if (!useLocation) return undefined;
+    setLocating(true);
+    try {
+      const result = await detectNearestAirportCity();
+      if (!result.ok) return undefined;
+      const origin = {
+        city: result.city.city,
+        // Empty for single-airport cities — the backend resolves the IATA
+        // code from the city name, same as a typed planner answer.
+        airports: getOriginAirports(result.city.city),
+      };
+      setDetectedOrigin(origin);
+      return origin;
+    } finally {
+      setLocating(false);
+    }
+  };
+
   // Save the preset to the user's trips (same saveTrip flow as a planned
   // trip, so it lands in their history), then open the results page for it
   // where they can edit freely.
   const saveAndOpen = async (preset: PresetItinerary) => {
+    const origin = await detectOrigin();
     if (!user) {
-      stashCanvasIntent(buildIntent(preset));
+      stashCanvasIntent(buildIntent(preset, origin));
       setShowLogin(true);
       return;
     }
     setSaving(true);
     try {
-      const tripId = await resolveCanvasTripId(buildIntent(preset));
+      const tripId = await resolveCanvasTripId(buildIntent(preset, origin));
       if (tripId) router.push(`/results?tripId=${tripId}`);
     } catch {
       // save failed — stay on browse
@@ -155,7 +208,7 @@ export default function BrowsePage() {
     if (!selected) return;
     setSaving(true);
     try {
-      const tripId = await resolveCanvasTripId(buildIntent(selected));
+      const tripId = await resolveCanvasTripId(buildIntent(selected, detectedOrigin));
       clearCanvasIntent();
       if (tripId) router.push(`/results?tripId=${tripId}`);
     } catch {
@@ -633,9 +686,40 @@ export default function BrowsePage() {
                         <Plus size={12} />
                       </button>
                     </div>
-                    <span className="text-[11px] text-gray-400 hidden sm:inline">
-                      Saves to your trips
-                    </span>
+                    {/* Location switch — same pill language as the travelers
+                        control. Off = never ask the browser, depart from the
+                        New York (JFK) default. */}
+                    <button
+                      role="switch"
+                      aria-checked={useLocation}
+                      aria-label="Use my location"
+                      onClick={toggleUseLocation}
+                      title={
+                        useLocation
+                          ? 'We pick your nearest departure airport when you save. Click to turn off.'
+                          : 'Location is off — trips depart from New York (JFK). Click to turn on.'
+                      }
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-colors"
+                      style={{ background: '#f0f4f8', border: '1px solid rgba(0,0,0,0.08)' }}
+                    >
+                      <MapPin
+                        size={13}
+                        style={{ color: useLocation ? '#2563eb' : '#9ca3af' }}
+                      />
+                      <span className="text-[12px] text-gray-600 hidden sm:inline">
+                        Use my location
+                      </span>
+                      <span
+                        aria-hidden
+                        className="relative inline-flex w-8 h-[18px] rounded-full transition-colors"
+                        style={{ background: useLocation ? '#2563eb' : '#d1d5db' }}
+                      >
+                        <span
+                          className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-all"
+                          style={{ left: useLocation ? '18px' : '2px' }}
+                        />
+                      </span>
+                    </button>
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -646,12 +730,20 @@ export default function BrowsePage() {
                     </button>
                     <button
                       onClick={() => saveAndOpen(selected)}
-                      disabled={saving}
+                      disabled={saving || locating}
                       className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-50"
                       style={{ background: '#2563eb' }}
                     >
-                      {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                      {saving ? 'Finding flights…' : 'Save'}
+                      {saving || locating ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Save size={13} />
+                      )}
+                      {locating
+                        ? 'Finding your nearest airport…'
+                        : saving
+                          ? 'Finding flights…'
+                          : 'Save'}
                     </button>
                   </div>
                 </div>

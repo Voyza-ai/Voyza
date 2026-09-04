@@ -13,14 +13,14 @@ dates (2026-07-20), never "last week"._
 
 | Provider | Status | Sent |
 |---|---|---|
-| All Aboard | ✅ in conversation — sandbox offered | 2026-07-13 |
-| Omio | 📤 awaiting reply | 2026-07-13 |
-| Junction | 📤 awaiting reply | 2026-07-13 |
+| All Aboard | 🔑 **INTEGRATED** — live in searchTrains (test env) | 2026-07-29 |
+| Omio | 🔁 follow-up sent | 2026-07-27 |
+| Junction | ⏸️ went quiet mid-scheduling — final note ~08-07, then park | 2026-07-31 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
 | Duffel live token | 🔲 not started | — |
-| Kiwi Tequila | 📤 awaiting reply | 2026-07-16 |
+| Kiwi Tequila | 🔁 follow-up sent | 2026-07-27 |
 | Booking.com affiliate | 🔲 not started | — |
 | Travelpayouts | 📝 draft ready | — |
 | Direct Ferries | 📝 draft ready | — |
@@ -35,22 +35,71 @@ dates (2026-07-20), never "last week"._
 - **2026-07-25: co-founder Carl Törnqvist replied** — positive ("multi-leg
   comparison angle is a good fit"), asked for booking volume projections +
   monetization model, and offered sandbox access either way.
-- **Next:** send the drafted reply (honest pre-revenue numbers, commission
-  model, sandbox ask, BlueMurr rebrand note) from carl's thread. Then wire
-  sandbox key into `.env` when it arrives.
+- **2026-07-27: reply sent** — volume projection (~200 bookings first months,
+  study-abroad students), commission + later subscription model, sandbox ask,
+  call offer, BlueMurr rename note (no link yet — v1 not done).
+- **2026-07-28: Carl replied** — key correction: **no commissions in rail**.
+  All Aboard's revenue is booking fees; API prices are net (parity with
+  operator sites). BlueMurr earns by adding its own margin/service fee on
+  top. Asked if that still works for our model.
+- **2026-07-28: reply sent** — confirmed the model works for us (we set our
+  own service fee), asked for a rough booking-fee example for a typical
+  one-way ticket, and asked for sandbox access whenever ready.
+- **2026-07-29: SANDBOX GRANTED.** Carl's reply, all details:
+  - **Booking fee:** standard leisure rate **1% + €2 per completed booking**
+    (€25 ticket → €2.25 fee, €60 → €2.60, €150 → €3.50). Nothing upfront,
+    no monthly fees; charged retroactively via monthly reconciliation.
+  - **Sandbox login:** allaboard.eu/agent with gohil072004@gmail.com —
+    passwordless, one-time code per sign-in. **Issue API keys from the
+    Dashboard, test-scoped to start.**
+  - **Docs:** docs.allaboard.eu · inventory list: docs.allaboard.eu/inventory
+  - **Timeline:** a couple of months to build/explore, then a go-live plan
+    for real bookings. **Company registration NOT needed to build — only for
+    the agreement before go-live** (this is where the EIN lands).
+  - Integration call bookable anytime via his link.
+- **2026-07-29 (same day): INTEGRATION SHIPPED.** Test-scoped key in
+  `backend/.env`; `services/allaboard.ts` registered as a train provider.
+  Live-verified: Eurostar Paris→Amsterdam $39.89, Trenitalia Rome→Florence
+  from $14.70. First real rail data for FR/IT/ES/Benelux/UK.
+- **Next:** exercise it through real trip plans, then book Carl's
+  integration call (his link) to review + ask about offer-pricing latency
+  (cold getJourneyOffer can exceed 30s; their cache warms after).
+- **Model note for pricing later:** displayed rail prices will sit slightly
+  above operator sites (their 1% + €2 + our service fee). Keep our fee
+  small; the value is one-app multi-leg booking.
 - **Note:** best odds of the bunch — developer-first company, public docs.
   First provider breakthrough; prioritize this thread.
 
-### Omio  📤
+### Omio  🔁
 - **For:** rail + bus search, 1,000+ operators. Multimodal hedge.
 - **Sent:** 2026-07-13 by direct email (their salesportal form was broken;
   said so in the email)
-- **Next:** wait. Nudge after ~2026-07-20 if silent.
+- **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
+- **Next:** wait. If still silent past ~2026-08-10, deprioritize — All Aboard
+  and Junction cover the same ground.
 
-### Junction  📤
+### Junction  ⏸️ went quiet mid-scheduling
 - **For:** multimodal API (rail + flights). Email-only access.
 - **Sent:** 2026-07-13 to deploy@junctionconnect.com
-- **Next:** wait. Nudge after ~2026-07-20 if silent.
+- **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
+- **2026-07-27: Hervé Gilg (hg@junctionconnect.com) replied within minutes** —
+  wants a call, offered Wed 2026-07-29 12:15 pm ET.
+- **2026-07-28:** we rescheduled (co-founder conflict) — asked for Thu same
+  time or Fri flexible. **No reply since; he'd replied in minutes before
+  the reschedule.**
+- **2026-07-31 (3:50 am, his morning):** nudge sent — next week, preferably
+  Mon or Fri, flexible; mentioned first rail integration shipped. Silent.
+- **2026-08-03:** two unanswered emails in a row → deliberately waiting,
+  no third ping this week. Note: August = Europe holiday season; and with
+  All Aboard integrated, Junction is now a nice-to-have second provider,
+  not critical path.
+- **Next:** if still silent by 2026-08-07, ONE final zero-pressure note
+  (scheduled ~9:45 am his time): no scheduling ask, "no rush, door open
+  whenever your calendar opens up." Then park. Warm welcome if he ever
+  revives the thread; call prep notes preserved below.
+- Prep (if call happens): volume story (~200 bookings, study-abroad
+  students), service-fee model (post-Carl), All Aboard integration story,
+  what we need (sandbox, EU rail coverage), their pricing/terms.
 
 ### Trainline Partner API  📤
 - **For:** the long-term ceiling — 270+ operators, 45 countries.
@@ -81,13 +130,15 @@ dates (2026-07-20), never "last week"._
 - **Next:** complete business verification in the Duffel dashboard.
   Same EIN conversation as Rail Europe unblocks this.
 
-### Kiwi Tequila  📤
+### Kiwi Tequila  🔁
 - **For:** LCC flights (Ryanair) that Duffel misses.
 - **Sent:** 2026-07-16 — emailed affiliates@kiwi.com. Tequila's portal no
   longer offers open self-serve signup (login is magic-link only; the page
   directs new affiliates to that address).
-- **Next:** wait; nudge after ~2026-07-23 if silent. When the key arrives →
-  Claude integrates it as the second flight source (plan step F3).
+- **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
+- **Next:** wait. When the key arrives → Claude integrates it as the second
+  flight source (plan step F3). If silent past ~2026-08-10, fall back to
+  Travelpayouts for LCC coverage.
 
 ### Booking.com affiliate  🔲
 - **For:** commission on the hotel links we already show. Biggest easy revenue.
@@ -122,6 +173,35 @@ dates (2026-07-20), never "last week"._
 
 _Append a line whenever anything happens, newest first._
 
+- 2026-08-03 — Junction: still silent after the 07-28 reschedule and the
+  07-31 nudge (two unanswered). Decision: no third ping this week; one
+  final zero-pressure note ~08-07 if nothing, then park. August holidays
+  likely a factor; All Aboard integration lowers the stakes.
+
+- 2026-07-29 — **ALL ABOARD SANDBOX GRANTED** (Carl): account live at
+  allaboard.eu/agent (email OTP), test-scoped API keys from Dashboard, docs
+  at docs.allaboard.eu. Fee: 1% + €2/booking, nothing upfront. ~2 months to
+  build, company registration only needed at go-live. First real rail API. 🎉
+
+- 2026-07-28 — **Carl (All Aboard) replied**: no commissions in rail — their
+  revenue is booking fees, API prices are net, we earn via our own service
+  fee on top. Reply sent same day: model works, asked for a booking-fee
+  example + sandbox access. (Also: disregard their duplicate email.)
+
+- 2026-07-27 — **Junction replied minutes after the nudge** (Hervé Gilg,
+  hg@junctionconnect.com): wants a call, offered Tue 07-28 or Wed 07-29.
+
+- 2026-07-27 — Follow-up nudges sent to Omio, Junction, and Kiwi (Gohil, same
+  threads as the originals). Each mentions the Voyza → BlueMurr rename.
+
+- 2026-07-27 — **All Aboard reply sent** (Gohil, same thread): ~200 bookings
+  projected for first months via study-abroad students, commission model +
+  possible subscription, sandbox access requested, call offered, BlueMurr
+  rename mentioned. Awaiting sandbox credentials.
+
+- 2026-07-25 — **All Aboard replied** (Carl Törnqvist, co-founder): positive fit,
+  wants volume projections + monetization model, sandbox access offered.
+
 - 2026-07-16 — Kiwi affiliates emailed (Gohil): Tequila portal no longer has
   open signup, page directs new affiliates to affiliates@kiwi.com.
 
@@ -134,10 +214,6 @@ _Append a line whenever anything happens, newest first._
   EIN/business document we don't have yet. Unblock = get EIN (sole prop works).
 
 - 2026-07-13 — All Aboard join form submitted (Gohil).
-
-- 2026-07-25 — **All Aboard replied** (Carl Törnqvist, co-founder): positive fit,
-  wants volume projections + monetization model, sandbox access offered.
-  Reply drafted; sending once bluemurr.com is live (done 2026-07-26).
 
 - _[date]_ — Trainline partner inquiry submitted (friend). No response as of
   2026-07-13.

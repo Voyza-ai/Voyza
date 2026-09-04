@@ -14,6 +14,7 @@ import dynamic from 'next/dynamic';
 // Leaflet touches `window` at import time — load the map client-side only.
 const MapView = dynamic(() => import('@/components/results/MapView'), { ssr: false });
 import AIChatPanel from '@/components/results/AIChatPanel';
+import { countryForCity } from '@/data/worldCities';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
@@ -90,6 +91,12 @@ function ResultsPageInner() {
           // if the backend is an older deploy without buildTripFromDb.
           const fullTrip = data.trip;
           if (fullTrip && Array.isArray(fullTrip.cities) && fullTrip.cities[0]?.transportIn) {
+            // AI-planned trips saved before the country fix have none — fill
+            // from the world-cities dataset so their cards match presets.
+            fullTrip.cities = fullTrip.cities.map((c: any) => ({
+              ...c,
+              country: c.country || countryForCity(c.name),
+            }));
             setTrip(fullTrip);
             setLoading(false);
             return;
@@ -129,7 +136,9 @@ function ResultsPageInner() {
                 ];
             return {
               name: c.name,
-              country: c.country ?? '',
+              // Older AI-planned trips were saved without a country — fill
+              // it from the world-cities dataset so their cards match presets.
+              country: c.country || countryForCity(c.name),
               dates: { arrival: c.arrival_date ?? '', departure: c.departure_date ?? '' },
               hotel,
               hotels: hotelsArr,

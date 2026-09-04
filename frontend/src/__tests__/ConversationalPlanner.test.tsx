@@ -254,6 +254,53 @@ describe('ConversationalPlanner', () => {
       expect(await screen.findByText(/New York it is/)).toBeInTheDocument();
     });
 
+    it('keeps the detected origin in known state on every later turn', async () => {
+      // Regression: the AI asked "where are you flying from?" several turns
+      // after the location chip already answered it.
+      setGeolocation({
+        getCurrentPosition: (ok: any) =>
+          ok({ coords: { latitude: 39.95, longitude: -75.17 } }), // Philadelphia
+      });
+      mockedConverse.mockResolvedValue({ reply: 'Got it!', updates: {}, action: 'ask' });
+
+      render(<ConversationalPlanner {...baseProps} />);
+      fireEvent.click(screen.getByText('Use my location'));
+      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(1));
+
+      await sendText('train friendly trip in Europe');
+      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(2));
+      await sendText('give me some suggestions');
+      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(3));
+
+      // EVERY call after the chip must carry the origin as known.
+      for (const call of mockedConverse.mock.calls.slice(1)) {
+        expect(call[0].known.origin).toBe('Philadelphia');
+      }
+      expect(useTripStore.getState().answers.origin).toBe('Philadelphia');
+    });
+
+    it('an empty-string origin update never erases a collected origin', async () => {
+      // The model sometimes returns "" instead of null for fields the user
+      // didn't mention this turn — that must not clobber the real origin.
+      setGeolocation({
+        getCurrentPosition: (ok: any) =>
+          ok({ coords: { latitude: 39.95, longitude: -75.17 } }),
+      });
+      mockedConverse.mockResolvedValue({
+        reply: 'Nice, Europe by train!',
+        updates: { origin: '' } as any,
+        action: 'ask',
+      });
+
+      render(<ConversationalPlanner {...baseProps} />);
+      fireEvent.click(screen.getByText('Use my location'));
+      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(1));
+      await sendText('train friendly trip in Europe');
+      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(2));
+
+      expect(useTripStore.getState().answers.origin).toBe('Philadelphia');
+    });
+
     it('denied: shows a friendly fallback and never calls the AI', async () => {
       setGeolocation({
         getCurrentPosition: (_ok: any, err: any) => err({ code: 1 }),
