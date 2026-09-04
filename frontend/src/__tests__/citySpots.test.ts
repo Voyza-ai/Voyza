@@ -5,6 +5,11 @@ import {
   cleanSpotQuery,
   distanceKm,
   buildCitySpots,
+  headWords,
+  isSettlement,
+  normalizeName,
+  samePlace,
+  buildRecommendedSpots,
   MAX_SPOT_KM,
 } from '@/lib/citySpots';
 import type { Trip } from '@/lib/types';
@@ -213,5 +218,151 @@ describe('buildCitySpots', () => {
   it('survives missing activities/restaurants', () => {
     const trip = tripWith({}, { activities: undefined, restaurants: undefined });
     expect(() => buildCitySpots(trip, 0)).not.toThrow();
+  });
+});
+
+// The two-word head is the last resort for names where every word is
+// capitalised, so `properNounPrefix` has no descriptive tail to trim. Query
+// forms below were all confirmed against live Nominatim.
+describe('headWords', () => {
+  it('shortens an all-capitalised title that the full query cannot resolve', () => {
+    // "Todai-ji Great Buddha Hall, Nara, Japan" misses; "Todai-ji Great" finds 東大寺.
+    expect(headWords('Todai-ji Great Buddha Hall')).toBe('Todai-ji Great');
+  });
+
+  it('keeps two words for a landmark whose full name misses', () => {
+    // "Golden Gate Bridge Vista Point" misses; "Golden Gate" resolves.
+    expect(headWords('Golden Gate Bridge Vista Point')).toBe('Golden Gate');
+  });
+
+  it('never returns a single word', () => {
+    // One word is the trap: "Tokyo" resolves to Tokyo Station, which would pin
+    // "Tokyo Skytree Observation Deck" kilometres from the tower.
+    expect(headWords('Tokyo Skytree Observation Deck')).toBe('Tokyo Skytree');
+  });
+
+  it('gives nothing when the name is already short enough', () => {
+    // Nothing to shorten — earlier passes already asked for exactly this.
+    expect(headWords('Todai-ji')).toBe('');
+    expect(headWords('Nara Park')).toBe('');
+  });
+
+  it('cuts at a bracket rather than emitting a dangling fragment', () => {
+    // Naively the head would be "Kinkaku-ji (Golden". Cutting at the bracket
+    // leaves one word, which the earlier pass already tried — so: nothing new.
+    expect(headWords('Kinkaku-ji (Golden Pavilion) at dawn')).toBe('');
+  });
+
+  it('handles extra whitespace', () => {
+    expect(headWords('  Todai-ji   Great   Buddha  Hall ')).toBe('Todai-ji Great');
+  });
+});
+
+describe('isSettlement', () => {
+  it('rejects a city that a shortened query landed on', () => {
+    expect(isSettlement('place', 'city')).toBe(true);
+    expect(isSettlement('boundary', 'administrative')).toBe(true);
+  });
+
+  it('accepts real places you can visit', () => {
+    expect(isSettlement('historic', 'heritage')).toBe(false);
+    expect(isSettlement('tourism', 'attraction')).toBe(false);
+    expect(isSettlement('amenity', 'place_of_worship')).toBe(false);
+    expect(isSettlement('leisure', 'park')).toBe(false);
+    expect(isSettlement('bridge', 'yes')).toBe(false);
+  });
+
+  it('does not reject a non-administrative boundary', () => {
+    expect(isSettlement('boundary', 'national_park')).toBe(false);
+  });
+
+  it('copes with missing OSM fields', () => {
+    expect(isSettlement(undefined, undefined)).toBe(false);
+  });
+});
+
+describe('normalizeName / samePlace', () => {
+  it('ignores accents, case and punctuation', () => {
+    expect(samePlace('Café de Flore', 'cafe de flore')).toBe(true);
+    expect(samePlace('Sacré-Cœur', 'Sacre Coeur')).toBe(true);
+  });
+
+  it('treats a bracketed alias as the same place', () => {
+    // The suggestion engine and the itinerary spell these differently.
+    expect(samePlace('Kinkaku-ji (Golden Pavilion)', 'Kinkaku-ji')).toBe(true);
+  });
+
+  it('treats a fuller form as the same place', () => {
+    expect(samePlace('Todai-ji', 'Todai-ji Great Buddha Hall')).toBe(true);
+  });
+
+  it('keeps genuinely different places apart', () => {
+    expect(samePlace('Kinkaku-ji', 'Ginkaku-ji')).toBe(false);
+    expect(samePlace('Nara Park', 'Ueno Park')).toBe(false);
+  });
+
+  it('does not match on empty input', () => {
+    expect(samePlace('', 'Louvre')).toBe(false);
+  });
+});
+
+describe('buildRecommendedSpots', () => {
+  const city = (over: any = {}) => ({
+    name: 'Kyoto',
+    country: 'Japan',
+    activities: ['Kinkaku-ji (Golden Pavilion)'],
+    restaurants: [{ name: 'Nishiki Warai', cuisine: 'Okonomiyaki', priceRange: '$' }],
+    hotel: hotel('Royal Park Kyoto Sanjo'),
+    hotels: [hotel('Royal Park Kyoto Sanjo')],
+    selectedHotelIndex: 0,
+    ...over,
+  }) as any;
+
+  it('marks every seed as recommended and scopes the query', () => {
+    const seeds = buildRecommendedSpots(city(), [{ name: 'Ginkaku-ji' }]);
+    expect(seeds).toHaveLength(1);
+    expect(seeds[0].recommended).toBe(true);
+    expect(seeds[0].query).toContain('Kyoto, Japan');
+  });
+
+  it('never suggests something already in the itinerary', () => {
+    const seeds = buildRecommendedSpots(city(), [
+      { name: 'Kinkaku-ji' },          // already planned, differently spelled
+      { name: 'Nishiki Warai' },       // already a restaurant here
+      { name: 'Royal Park Kyoto Sanjo' }, // already the hotel
+      { name: 'Ginkaku-ji' },          // genuinely new
+    ]);
+    expect(seeds.map((s) => s.name)).toEqual(['Ginkaku-ji']);
+  });
+
+  it('de-dupes suggestions against each other', () => {
+    const seeds = buildRecommendedSpots(city(), [
+      { name: 'Ginkaku-ji' },
+      { name: 'ginkaku-ji' },
+    ]);
+    expect(seeds).toHaveLength(1);
+  });
+
+  it('caps the number of pins', () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ name: `Place ${i}` }));
+    expect(buildRecommendedSpots(city(), many).length).toBeLessThanOrEqual(6);
+    expect(buildRecommendedSpots(city(), many, 3)).toHaveLength(3);
+  });
+
+  it('keeps a supplied kind and detail', () => {
+    const seeds = buildRecommendedSpots(city(), [
+      { name: 'Menbaka Fire Ramen', detail: 'Ramen · $$', kindHint: 'restaurant' },
+    ]);
+    expect(seeds[0].kind).toBe('restaurant');
+    expect(seeds[0].detail).toBe('Ramen · $$');
+  });
+
+  it('classifies from the wording when no kind is given', () => {
+    expect(buildRecommendedSpots(city(), [{ name: 'Nijo Castle' }])[0].kind).toBe('sightseeing');
+  });
+
+  it('survives a missing city and blank names', () => {
+    expect(buildRecommendedSpots(undefined, [{ name: 'X' }])).toEqual([]);
+    expect(buildRecommendedSpots(city(), [{ name: '  ' }])).toEqual([]);
   });
 });

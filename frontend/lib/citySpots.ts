@@ -33,6 +33,13 @@ export type SpotSeed = {
   detail?: string;
   /** Full geocoder query, city/country-scoped. */
   query: string;
+  /**
+   * A suggestion rather than part of the plan. Same kinds and colours as the
+   * itinerary's own spots — it's still a restaurant or a sight — but drawn as
+   * an outline so the map never blurs "where you're going" with "where you
+   * could go".
+   */
+  recommended?: boolean;
 };
 
 /** A spot that resolved to real coordinates. */
@@ -141,6 +148,40 @@ export function cleanSpotQuery(text: string): string {
       .replace(/\s*[-–—,]\s*$/, '')
       .trim()
   );
+}
+
+/**
+ * The first `count` words of a name.
+ *
+ * Last resort when the proper-noun prefix still doesn't resolve, which happens
+ * when every word is capitalised so there is no descriptive tail to trim:
+ * "Todai-ji Great Buddha Hall" keeps its whole self as the prefix and misses,
+ * while "Todai-ji Great" finds 東大寺.
+ *
+ * Two words, never one. A single word is often just the city, and the result
+ * looks like a real place rather than an obvious miss — "Tokyo" resolves to
+ * Tokyo Station, which would pin "Tokyo Skytree Observation Deck" six km from
+ * the tower. At two words "Tokyo Skytree" resolves correctly on its own.
+ */
+export function headWords(text: string, count = 2): string {
+  // Cut at a bracket first, so the head can't end up as "Kinkaku-ji (Golden".
+  const base = text.split('(')[0];
+  const words = base.trim().split(/\s+/).filter(Boolean);
+  // Nothing left to shorten — the earlier passes already asked for this much.
+  if (words.length <= count) return '';
+  return words.slice(0, count).join(' ').replace(/[,&]$/, '').trim();
+}
+
+/**
+ * True when a geocoder hit is a settlement or administrative area rather than
+ * a place you can visit. A shortened query can land on the city itself; a pin
+ * on the town hall labelled "Todai-ji Great Buddha Hall" is worse than an
+ * honest "couldn't place".
+ */
+export function isSettlement(osmClass?: string, osmType?: string): boolean {
+  if (osmClass === 'place') return true;
+  if (osmClass === 'boundary' && osmType === 'administrative') return true;
+  return false;
 }
 
 /**
@@ -263,6 +304,97 @@ export function buildCitySpots(trip: Trip, cityIndex: number): SpotSeed[] {
 }
 
 /**
+ * Loose name comparison for "is this already in the plan?".
+ *
+ * The suggestion engine and the itinerary rarely spell a place identically —
+ * "Kinkaku-ji (Golden Pavilion)" vs "Kinkaku-ji", "Café de Flore" vs "Cafe de
+ * Flore". Strip accents, brackets, punctuation and case so those collapse
+ * together; otherwise the map recommends somewhere already planned.
+ */
+export function normalizeName(text: string): string {
+  return (
+    text
+      .normalize('NFD')
+      // Strip combining accents that NFD just split off (é → e).
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      // Ligatures and stroked letters survive NFD, so spell them out by hand.
+      // Without this "Sacré-Cœur" normalises to "sacre c ur" and never matches
+      // the "Sacre Coeur" an itinerary is likely to contain.
+      .replace(/œ/g, 'oe')
+      .replace(/æ/g, 'ae')
+      .replace(/ß/g, 'ss')
+      .replace(/ø/g, 'o')
+      .replace(/ł/g, 'l')
+      .replace(/[đð]/g, 'd')
+      .replace(/þ/g, 'th')
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+  );
+}
+
+/**
+ * True when two names refer to the same place, allowing for one being a fuller
+ * form of the other ("Kinkaku-ji" vs "Kinkaku-ji Golden Pavilion").
+ */
+export function samePlace(a: string, b: string): boolean {
+  const x = normalizeName(a);
+  const y = normalizeName(b);
+  if (!x || !y) return false;
+  return x === y || x.startsWith(`${y} `) || y.startsWith(`${x} `);
+}
+
+/** One suggested place, before it is turned into a seed. */
+export type Suggestion = { name: string; detail?: string; kindHint?: SpotKind };
+
+/**
+ * Seeds for places in a city that are NOT in its itinerary — the "you could
+ * also…" layer.
+ *
+ * Capped on purpose. Each costs a rate-limited geocode (~1/sec), and a city
+ * view carrying twenty extra pins stops being a plan and becomes a directory.
+ */
+export function buildRecommendedSpots(
+  city: City | undefined,
+  suggestions: Suggestion[],
+  limit = 6,
+): SpotSeed[] {
+  if (!city) return [];
+  const scope = [city.name, city.country].filter(Boolean).join(', ');
+
+  // Everything already planned here, so a suggestion never duplicates it.
+  const planned: string[] = [
+    ...(city.activities ?? []).map((a) => String(a ?? '')),
+    ...(city.restaurants ?? []).map((r) => r?.name ?? ''),
+    effectiveHotelName(city)?.name ?? '',
+  ].filter(Boolean);
+
+  const seeds: SpotSeed[] = [];
+  const seen = new Set<string>();
+
+  for (const s of suggestions) {
+    const name = String(s?.name ?? '').trim();
+    if (!name) continue;
+    if (planned.some((p) => samePlace(p, name))) continue;
+    const key = normalizeName(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+
+    const kind = s.kindHint ?? classifySpot(name);
+    seeds.push({
+      kind,
+      name,
+      detail: s.detail || (kind === 'sightseeing' ? 'Sight' : 'Activity'),
+      query: `${cleanSpotQuery(name)}, ${scope}`,
+      recommended: true,
+    });
+    if (seeds.length >= limit) break;
+  }
+  return seeds;
+}
+
+/**
  * Geocode seeds and keep only the ones that landed near the city. Returns the
  * resolved spots plus the names that were dropped, so the UI can be honest
  * about what it couldn't place.
@@ -274,8 +406,12 @@ export async function geocodeSpots(
   if (seeds.length === 0) return { spots: [], dropped: [] };
 
   /** Turn a geocoder hit into a Spot, or null if it fails the sanity checks. */
-  const accept = (seed: SpotSeed, p: GeoPlace | null): Spot | null => {
+  const accept = (seed: SpotSeed, p: GeoPlace | null, shortened = false): Spot | null => {
     if (!p || distanceKm(cityCenter, p) > MAX_SPOT_KM) return null;
+    // A shortened query can match the city itself instead of the place in it.
+    // Only guard the shortened passes: a spot legitimately named after a
+    // district should still resolve when its full name was asked for.
+    if (shortened && isSettlement(p.osmClass, p.osmType)) return null;
     // An airport query that resolved to something that isn't an airport (a bus
     // stop named "Aerodrome", say) is a wrong pin, not a useful one.
     if (seed.kind === 'airport' && p.osmClass !== 'aeroway') return null;
@@ -293,8 +429,14 @@ export async function geocodeSpots(
   };
 
   const resolved: Spot[] = [];
-  const dropped: string[] = [];
+  // Collected as seeds so the airport can be filtered out at the end: it is
+  // the one spot the app infers rather than the traveller entering it, and
+  // plenty of cities simply have no airport. "Couldn't place: Nara airport"
+  // reads as a failure when the honest answer is that Nara has no airport.
+  const droppedSeeds: SpotSeed[] = [];
   const retry: { seed: SpotSeed; query: string }[] = [];
+  // Seeds that fell through the first two passes and get one last, shorter try.
+  const third: SpotSeed[] = [];
 
   const first = await geocodeCities(seeds.map((s) => s.query));
   first.forEach((p, i) => {
@@ -317,7 +459,7 @@ export async function geocodeSpots(
     if (prefix && scoped.toLowerCase() !== seed.query.toLowerCase()) {
       retry.push({ seed, query: scoped });
     } else {
-      dropped.push(seed.name);
+      third.push(seed);
     }
   });
 
@@ -325,14 +467,49 @@ export async function geocodeSpots(
     const second = await geocodeCities(retry.map((r) => r.query));
     second.forEach((p, i) => {
       const { seed } = retry[i];
-      const ok = accept(seed, p);
+      const ok = accept(seed, p, true);
       if (ok) resolved.push(ok);
-      else dropped.push(seed.name);
+      else third.push(seed);
+    });
+  }
+
+  // Third chance: the first two words. Reached only when the proper-noun
+  // prefix was the whole name — an all-capitalised title like "Todai-ji Great
+  // Buddha Hall", which no amount of country-scoping resolves because the
+  // descriptive tail is what the geocoder chokes on.
+  const heads = third
+    .map((seed) => {
+      const parts = seed.query.split(', ');
+      const country = parts.length > 1 ? parts[parts.length - 1] : '';
+      const head = headWords(seed.name);
+      if (!head) return null;
+      const query = country ? `${head}, ${country}` : head;
+      // Don't spend a lookup repeating something already asked.
+      if (query.toLowerCase() === seed.query.toLowerCase()) return null;
+      if (query.toLowerCase() === (properNounPrefix(seed.name) + ', ' + country).toLowerCase()) {
+        return null;
+      }
+      return { seed, query };
+    })
+    .filter((x): x is { seed: SpotSeed; query: string } => x !== null);
+
+  const skippedHead = third.filter((s) => !heads.some((h) => h.seed === s));
+  skippedHead.forEach((s) => droppedSeeds.push(s));
+
+  if (heads.length > 0) {
+    const thirdPass = await geocodeCities(heads.map((h) => h.query));
+    thirdPass.forEach((p, i) => {
+      const { seed } = heads[i];
+      const ok = accept(seed, p, true);
+      if (ok) resolved.push(ok);
+      else droppedSeeds.push(seed);
     });
   }
 
   // The retry pass appends out of sequence — restore itinerary order.
   const order = new Map(seeds.map((s, i) => [s.name, i]));
   resolved.sort((a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0));
+  // Report only what the traveller actually put in the itinerary.
+  const dropped = droppedSeeds.filter((s) => s.kind !== 'airport').map((s) => s.name);
   return { spots: resolved, dropped };
 }
