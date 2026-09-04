@@ -25,11 +25,11 @@ export type SuggestDestinationsInput = {
   extras?: string;
 };
 
-export const DESTINATION_SUGGESTIONS_SYSTEM_PROMPT = `You are Voyza's destination recommendation engine. Suggest 3-5 real destinations matching the traveler's vibe, origin, budget, and travel window.
+export const DESTINATION_SUGGESTIONS_SYSTEM_PROMPT = `You are BlueMurr's destination recommendation engine. Suggest 3-5 real destinations matching the traveler's vibe, origin, budget, and travel window.
 
 RULES:
 1. Suggest only real, currently-accessible destinations.
-2. NEVER invent specific prices. Give rough total-cost ranges based on general seasonal knowledge. Voyza's booking APIs will provide exact prices.
+2. NEVER invent specific prices. Give rough total-cost ranges based on general seasonal knowledge. BlueMurr's booking APIs will provide exact prices.
 3. Match destinations honestly to the vibe.
 4. Factor in the travel month — avoid off-season or monsoon windows unless they still work for the vibe.
 5. Factor in origin reachability within the trip length.

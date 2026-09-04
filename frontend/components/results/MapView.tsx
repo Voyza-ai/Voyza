@@ -33,6 +33,9 @@ import {
  * passes — the previous raster basemap baked every road and label into the
  * image, so "country borders only when zoomed out" was impossible on it.
  *
+ * Reads the same trip object as the flowchart, so canvas / BlueMurr-AI edits
+ * re-render pins and route automatically.
+ *
  * Framing rule: the map fits the DESTINATIONS, not the home anchor. A New
  * York → Europe trip should open on Europe, where the itinerary actually is;
  * including home in the bounds squeezed five European cities into a ~50px
@@ -97,9 +100,9 @@ const MINOR_COUNTRY_MINZOOM = 5;
 
 const POSITRON = 'https://tiles.openfreemap.org/styles/positron';
 
-// Voyza blue palette — recolours the (greyscale) positron basemap to match
+// BlueMurr blue palette — recolours the (greyscale) positron basemap to match
 // the app's brand blue and the #f0f4f8 page wash, so the map reads as part of
-// Voyza rather than a generic OSM tile set.
+// BlueMurr rather than a generic OSM tile set.
 const BLUE = {
   land: '#eef3fb',
   water: '#bcd4f0',
@@ -114,7 +117,7 @@ const BLUE = {
   halo: '#f4f7fc',
 };
 
-function applyVoyzaBlue(style: any) {
+function applyBlueMurrBlue(style: any) {
   // Assign each paint property only on layers of the matching type — a
   // source-layer like 'waterway' has BOTH a line and a symbol layer, and
   // setting line-color on the symbol one makes MapLibre reject the whole style.
@@ -152,11 +155,13 @@ function applyVoyzaBlue(style: any) {
   }
 }
 
-// Pickable basemap themes. `bluify` recolours the base to the Voyza palette;
-// `swatch` is the little colour chip in the picker.
+// Pickable basemap themes. `bluify` recolours the base to the BlueMurr palette;
+// `swatch` is the little colour chip in the picker. The `voyza` key itself is a
+// lowercase internal — it's the persisted localStorage value, and renaming it
+// would silently reset every user's saved theme choice.
 type StyleKey = 'voyza' | 'light';
 const STYLES: Record<StyleKey, { label: string; url: string; swatch: string; bluify?: boolean }> = {
-  voyza: { label: 'Voyza', url: POSITRON, swatch: '#bcd4f0', bluify: true },
+  voyza: { label: 'BlueMurr', url: POSITRON, swatch: '#bcd4f0', bluify: true },
   light: { label: 'Light', url: POSITRON, swatch: '#e7e7ea' },
 };
 const STYLE_STORAGE_KEY = 'voyza.mapStyle';
@@ -198,7 +203,7 @@ function loadMapStyle(key: StyleKey): Promise<maplibregl.StyleSpecification | st
         // Rank-3 country layer (label_country_3 / …_other) — the microstates.
         else if (sl === 'place' && /country.*(3|other|minor)/i.test(id)) raise(MINOR_COUNTRY_MINZOOM);
       }
-      if (cfg.bluify) applyVoyzaBlue(style);
+      if (cfg.bluify) applyBlueMurrBlue(style);
       return style as maplibregl.StyleSpecification;
     })
     // Any failure (offline, CORS) falls back to the stock URL so the map still
@@ -897,14 +902,20 @@ export default function MapView({ trip }: MapViewProps) {
     const usable = framed.length > 0 ? framed : pins;
     if (usable.length === 0) return;
 
+    // The itinerary panel floats OVER the map's left edge, so uniform padding
+    // frames pins underneath it — on a Paris/Amsterdam/Prague trip Amsterdam
+    // landed fully behind the panel. Reserve the panel's width on the left,
+    // exactly as the city-level framing below already does.
+    const padding = { top: 56, bottom: 56, right: 56, left: panelOpen ? 272 : 56 };
+
     if (usable.length === 1) {
-      map.jumpTo({ center: [usable[0].point.lon, usable[0].point.lat], zoom: 7 });
+      map.jumpTo({ center: [usable[0].point.lon, usable[0].point.lat], zoom: 7, padding });
       return;
     }
     const bounds = new maplibregl.LngLatBounds();
     usable.forEach((p) => bounds.extend([p.point.lon, p.point.lat]));
-    map.fitBounds(bounds, { padding: 40, maxZoom: 9, animate: false });
-  }, [pins, includeHome]);
+    map.fitBounds(bounds, { padding, maxZoom: 9, animate: false });
+  }, [pins, includeHome, panelOpen]);
 
   // Re-frame when the pin set or the home toggle changes.
   useEffect(() => {

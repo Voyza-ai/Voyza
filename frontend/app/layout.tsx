@@ -3,9 +3,9 @@ import '@/styles/globals.css';
 import AuthProvider from '@/components/shared/AuthProvider';
 
 export const metadata: Metadata = {
-  title: 'Voyza — The Smartest Way to Travel',
+  title: 'BlueMurr — The Smartest Way to Travel',
   description:
-    'Less money, less searching, more vibes. Voyza finds the cheapest way to take any trip — optimizing across flights and trains simultaneously.',
+    'Less money, less searching, more vibes. BlueMurr finds the cheapest way to take any trip — optimizing across flights and trains simultaneously.',
 };
 
 export default function RootLayout({

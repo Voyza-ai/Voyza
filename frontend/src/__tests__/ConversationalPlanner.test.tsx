@@ -203,4 +203,78 @@ describe('ConversationalPlanner', () => {
     expect(contents).toContain('thinking about portugal');
     expect(contents).toContain('Portugal is lovely!');
   });
+
+  describe('Use my location', () => {
+    const setGeolocation = (impl: any) =>
+      Object.defineProperty(global.navigator, 'geolocation', {
+        value: impl,
+        configurable: true,
+      });
+
+    afterEach(() => {
+      // @ts-expect-error cleanup
+      delete global.navigator.geolocation;
+    });
+
+    it('offers the location chip until an origin is known', () => {
+      render(<ConversationalPlanner {...baseProps} />);
+      expect(screen.getByText('Use my location')).toBeInTheDocument();
+    });
+
+    it('hides the chip once origin is set', () => {
+      useTripStore.setState({ answers: { origin: 'Boston' } });
+      render(<ConversationalPlanner {...baseProps} />);
+      expect(screen.queryByText('Use my location')).not.toBeInTheDocument();
+    });
+
+    it('granted: sets origin + airports and announces through the conversation', async () => {
+      setGeolocation({
+        getCurrentPosition: (ok: any) =>
+          ok({ coords: { latitude: 40.73, longitude: -73.99 } }),
+      });
+      mockedConverse.mockResolvedValue({
+        reply: 'New York it is — where are you headed?',
+        updates: { origin: 'New York' },
+        action: 'ask',
+      });
+
+      render(<ConversationalPlanner {...baseProps} />);
+      fireEvent.click(screen.getByText('Use my location'));
+
+      await waitFor(() => {
+        expect(mockedConverse).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: "I'm starting from New York (detected from my location)",
+          }),
+        );
+      });
+      const a = useTripStore.getState().answers;
+      expect(a.origin).toBe('New York');
+      expect(a.originAirports).toContain('JFK');
+      expect(await screen.findByText(/New York it is/)).toBeInTheDocument();
+    });
+
+    it('denied: shows a friendly fallback and never calls the AI', async () => {
+      setGeolocation({
+        getCurrentPosition: (_ok: any, err: any) => err({ code: 1 }),
+      });
+      render(<ConversationalPlanner {...baseProps} />);
+      fireEvent.click(screen.getByText('Use my location'));
+
+      expect(
+        await screen.findByText(/couldn't get your location/i),
+      ).toBeInTheDocument();
+      expect(mockedConverse).not.toHaveBeenCalled();
+      // Flow not blocked — chip still available for retry, typing still works.
+      expect(screen.getByText('Use my location')).toBeInTheDocument();
+    });
+
+    it('unsupported browser: explains and falls back to typing', async () => {
+      render(<ConversationalPlanner {...baseProps} />);
+      fireEvent.click(screen.getByText('Use my location'));
+      expect(
+        await screen.findByText(/doesn't support location sharing/i),
+      ).toBeInTheDocument();
+    });
+  });
 });

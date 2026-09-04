@@ -4,6 +4,7 @@ import {
   presetDurationBucket,
   presetBudgetBucket,
   presetVibes,
+  presetCostFor,
   buildPresetTrip,
 } from '@/data/presetItineraries';
 
@@ -49,6 +50,21 @@ describe('preset itineraries catalog', () => {
     for (const p of PRESET_ITINERARIES) {
       expect(presetVibes(p).length).toBeGreaterThan(0);
     }
+  });
+
+
+  test('buildPresetTrip honors a chosen party size', () => {
+    const preset = PRESET_ITINERARIES[0];
+    const trip = buildPresetTrip(preset, 4);
+    expect(trip.travelers).toBe(4);
+    expect(trip.totalCost).toBe(presetCostFor(preset, 4));
+    // 4 people = 2 rooms + 2x transport — must cost more than the default 2.
+    expect(trip.totalCost).toBeGreaterThan(presetCostFor(preset, 2));
+  });
+
+  test('solo traveler costs less than a pair (per-person transport)', () => {
+    const preset = PRESET_ITINERARIES[0];
+    expect(presetCostFor(preset, 1)).toBeLessThan(presetCostFor(preset, 2));
   });
 
   test('built trips chain dates city-to-city with no gaps', () => {

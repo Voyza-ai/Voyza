@@ -13,7 +13,7 @@ dates (2026-07-20), never "last week"._
 
 | Provider | Status | Sent |
 |---|---|---|
-| All Aboard | 📤 awaiting reply | 2026-07-13 |
+| All Aboard | ✅ in conversation — sandbox offered | 2026-07-13 |
 | Omio | 📤 awaiting reply | 2026-07-13 |
 | Junction | 📤 awaiting reply | 2026-07-13 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
@@ -29,12 +29,17 @@ dates (2026-07-20), never "last week"._
 
 ## Rail (data + booking)
 
-### All Aboard  📤
+### All Aboard  ✅
 - **For:** EU rail — SNCF, Renfe, NS, Vy, UK operators. Search + booking.
 - **Sent:** 2026-07-13 via the join form (allaboard.eu/join)
-- **Next:** wait. If silent past ~2026-07-20, nudge tech@allaboard.eu
-  ([email draft](RAIL_API_APPLICATIONS.md#1-all-aboard--signup-form--email-best-bet))
+- **2026-07-25: co-founder Carl Törnqvist replied** — positive ("multi-leg
+  comparison angle is a good fit"), asked for booking volume projections +
+  monetization model, and offered sandbox access either way.
+- **Next:** send the drafted reply (honest pre-revenue numbers, commission
+  model, sandbox ask, BlueMurr rebrand note) from carl's thread. Then wire
+  sandbox key into `.env` when it arrives.
 - **Note:** best odds of the bunch — developer-first company, public docs.
+  First provider breakthrough; prioritize this thread.
 
 ### Omio  📤
 - **For:** rail + bus search, 1,000+ operators. Multimodal hedge.
@@ -129,6 +134,10 @@ _Append a line whenever anything happens, newest first._
   EIN/business document we don't have yet. Unblock = get EIN (sole prop works).
 
 - 2026-07-13 — All Aboard join form submitted (Gohil).
+
+- 2026-07-25 — **All Aboard replied** (Carl Törnqvist, co-founder): positive fit,
+  wants volume projections + monetization model, sandbox access offered.
+  Reply drafted; sending once bluemurr.com is live (done 2026-07-26).
 
 - _[date]_ — Trainline partner inquiry submitted (friend). No response as of
   2026-07-13.

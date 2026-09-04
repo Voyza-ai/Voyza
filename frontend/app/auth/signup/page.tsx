@@ -78,7 +78,7 @@ export default function SignupPage() {
       <div className="w-full max-w-md bg-white rounded-xl shadow-sm border border-gray-100 p-8">
         <div className="text-center mb-6">
           <Link href="/" className="text-2xl font-bold" style={{ color: '#2563eb' }}>
-            VOYZA
+            BlueMurr
           </Link>
           <h1 className="text-gray-900 text-lg font-medium mt-3">Create your account</h1>
         </div>

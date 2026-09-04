@@ -2,7 +2,7 @@
  * searchLegOptions — fetch top N flight/train options for a single leg,
  * optionally filtered by a time window (earliest/latest depart/arrive).
  *
- * Used by the Voyza AI chat when a user sets a transport constraint
+ * Used by the BlueMurr AI chat when a user sets a transport constraint
  * ("no flights before 5pm") — we re-search the leg with the window
  * applied and present real alternatives in the proposal card, instead
  * of just silently storing a constraint to honor "later".

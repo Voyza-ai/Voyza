@@ -23,6 +23,9 @@ const setVibe = (value: string) =>
     target: { value },
   });
 
+const apply = () =>
+  fireEvent.click(screen.getByRole('button', { name: /apply filters/i }));
+
 beforeEach(() => {
   jest.clearAllMocks();
 });
@@ -58,20 +61,33 @@ describe('BrowsePage filtering scenarios', () => {
     expect(screen.getByText('Japan Golden Route')).toBeInTheDocument();
   });
 
+  test('filters do not take effect until Apply is clicked', () => {
+    render(<BrowsePage />);
+    setSlider(/trip length/i, 5);
+    // Draft only — everything still visible.
+    expect(screen.getByText('Japan Golden Route')).toBeInTheDocument();
+    expect(screen.getByText(/Unapplied changes/i)).toBeInTheDocument();
+    apply();
+    expect(screen.queryByText('Japan Golden Route')).not.toBeInTheDocument();
+  });
+
   test('length slider filters to short trips and slides back to Any', () => {
     render(<BrowsePage />);
     setSlider(/trip length/i, 5);
+    apply();
     expect(screen.getByText('Paris Long Weekend')).toBeInTheDocument();
     expect(screen.getByText('Reykjavik Adventure Weekend')).toBeInTheDocument();
     expect(screen.getByText('Lisbon & Sintra Escape')).toBeInTheDocument();
     expect(screen.queryByText('Japan Golden Route')).not.toBeInTheDocument();
     setSlider(/trip length/i, NIGHTS_MAX);
+    apply();
     expect(screen.getByText('Japan Golden Route')).toBeInTheDocument();
   });
 
   test('budget slider filters out expensive trips', () => {
     render(<BrowsePage />);
     setSlider(/budget/i, 1000);
+    apply();
     expect(screen.getByText('Paris Long Weekend')).toBeInTheDocument();
     expect(screen.queryByText('Grand Asia Expedition')).not.toBeInTheDocument();
     expect(screen.queryByText('Mediterranean Odyssey')).not.toBeInTheDocument();
@@ -80,9 +96,11 @@ describe('BrowsePage filtering scenarios', () => {
   test('vibe dropdown filters by vibe', () => {
     render(<BrowsePage />);
     setVibe('beach');
+    apply();
     expect(screen.getByText('Greek Island Escape')).toBeInTheDocument();
     expect(screen.queryByText('Imperial Europe by Rail')).not.toBeInTheDocument();
     setVibe('');
+    apply();
     expect(screen.getByText('Imperial Europe by Rail')).toBeInTheDocument();
   });
 
@@ -90,6 +108,7 @@ describe('BrowsePage filtering scenarios', () => {
     render(<BrowsePage />);
     search('food');
     setSlider(/trip length/i, 5);
+    apply();
     expect(screen.getByText('Lisbon & Sintra Escape')).toBeInTheDocument();
     expect(screen.queryByText('Southeast Asia Adventure')).not.toBeInTheDocument();
   });
@@ -98,6 +117,7 @@ describe('BrowsePage filtering scenarios', () => {
     render(<BrowsePage />);
     search('iceland'); // only Reykjavik matches (~$760)
     setSlider(/budget/i, 700); // below its cost
+    apply();
     expect(screen.getByText(/No trips match these filters/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Clear filters$/i }));
     expect(screen.getByText('Reykjavik Adventure Weekend')).toBeInTheDocument();
@@ -106,6 +126,7 @@ describe('BrowsePage filtering scenarios', () => {
   test('sidebar count reflects the filtered set', () => {
     render(<BrowsePage />);
     setSlider(/trip length/i, 5);
+    apply();
     expect(
       screen.getByText(new RegExp(`3 of ${PRESET_ITINERARIES.length} itineraries shown`)),
     ).toBeInTheDocument();
@@ -116,9 +137,23 @@ describe('BrowsePage filtering scenarios', () => {
     setSlider(/trip length/i, 5);
     setVibe('beach');
     setSlider(/budget/i, COST_MAX - 100);
+    apply();
     fireEvent.click(screen.getByRole('button', { name: /clear all/i }));
     for (const p of PRESET_ITINERARIES) {
       expect(screen.getByText(p.title)).toBeInTheDocument();
     }
+  });
+
+  test('save modal asks for travelers and updates the price live', () => {
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    // Modal opens with the preset default of 2 travelers.
+    expect(screen.getByText('Travelers')).toBeInTheDocument();
+    expect(screen.getByText('2 travelers')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /more travelers/i }));
+    fireEvent.click(screen.getByRole('button', { name: /more travelers/i }));
+    expect(screen.getByText('4 travelers')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /fewer travelers/i }));
+    expect(screen.getByText('3 travelers')).toBeInTheDocument();
   });
 });

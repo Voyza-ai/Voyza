@@ -50,7 +50,7 @@ export default function SuggestedCitiesPanel({
   return (
     <>
       {/* Pull-out tab — docked to the LEFT edge while the panel is closed
-          (the right side belongs to the Voyza AI chat). Labeled (icon +
+          (the right side belongs to the BlueMurr AI chat). Labeled (icon +
           vertical text) so it reads as "there's a Suggested Cities drawer
           here", not an anonymous 8px chevron strip. */}
       <AnimatePresence>

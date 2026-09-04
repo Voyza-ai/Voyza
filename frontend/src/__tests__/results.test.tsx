@@ -56,7 +56,7 @@ describe('ResultsPage', () => {
   it('renders AI chat panel alongside the flowchart', () => {
     useTripStore.setState({ currentTrip: buildTrip() });
     render(<ResultsPage />);
-    expect(screen.getByText('Voyza AI')).toBeInTheDocument();
+    expect(screen.getByText('BlueMurr AI')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Ask about your trip...')).toBeInTheDocument();
   });
 
