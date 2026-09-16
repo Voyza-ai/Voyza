@@ -36,7 +36,7 @@ type OptimizedRoute = {
  * the user real money. Surfaced as a banner on the results page so the
  * primary itinerary is never blocked on this computation.
  */
-export type DateShiftSuggestion = {
+export type DateShiftOption = {
   /** Offset from the user's requested start date, in days. Negative = earlier. */
   dayOffset: number;
   /** ISO date after applying the offset. */
@@ -45,6 +45,16 @@ export type DateShiftSuggestion = {
   newTotalCost: number;
   /** USD saved compared to the user's requested start date. */
   savings: number;
+};
+
+/**
+ * Headline fields describe the single best shift (kept flat for backward
+ * compatibility with saved trips and older clients); `options` lists every
+ * shift that clears the savings thresholds, best first — the results
+ * header shows these as a "pick your dates" menu.
+ */
+export type DateShiftSuggestion = DateShiftOption & {
+  options?: DateShiftOption[];
 };
 
 /**
@@ -382,28 +392,39 @@ async function findDateShiftSuggestion(
   );
 
   const valid = shifted.filter((s): s is { offset: number; startDate: string; cost: number } => s !== null && s.cost > 0);
-  if (valid.length === 0) return undefined;
+  return pickDateShiftOptions(valid, baselineCost);
+}
 
-  // Pick the cheapest offset
-  valid.sort((a, b) => a.cost - b.cost);
-  const best = valid[0];
-  const savings = baselineCost - best.cost;
-
-  // Only surface a suggestion if the savings are meaningful:
-  // - at least $50 absolute savings, AND
-  // - at least 5% of the baseline cost
+/**
+ * Turns priced date-shift candidates into a suggestion with up to 3 options.
+ * Pure selection logic, exported for tests. Every option clears BOTH
+ * thresholds ($50 and 5% of baseline) so each row shown to the user is a
+ * shift that genuinely saves real money — never a rounding artifact.
+ */
+export function pickDateShiftOptions(
+  candidates: Array<{ offset: number; startDate: string; cost: number }>,
+  baselineCost: number,
+): DateShiftSuggestion | undefined {
   const MIN_SAVINGS_USD = 50;
   const MIN_SAVINGS_PCT = 0.05;
-  if (savings < MIN_SAVINGS_USD || savings / baselineCost < MIN_SAVINGS_PCT) {
-    return undefined;
-  }
+  const MAX_OPTIONS = 3;
 
-  return {
-    dayOffset: best.offset,
-    newStartDate: best.startDate,
-    newTotalCost: Math.round(best.cost * 100) / 100,
-    savings: Math.round(savings * 100) / 100,
-  };
+  const options: DateShiftOption[] = candidates
+    .map((c) => ({
+      dayOffset: c.offset,
+      newStartDate: c.startDate,
+      newTotalCost: Math.round(c.cost * 100) / 100,
+      savings: Math.round((baselineCost - c.cost) * 100) / 100,
+    }))
+    .filter(
+      (o) =>
+        o.savings >= MIN_SAVINGS_USD && o.savings / baselineCost >= MIN_SAVINGS_PCT,
+    )
+    .sort((a, b) => b.savings - a.savings)
+    .slice(0, MAX_OPTIONS);
+
+  if (options.length === 0) return undefined;
+  return { ...options[0], options };
 }
 
 /**

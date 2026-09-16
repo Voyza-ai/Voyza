@@ -1,6 +1,6 @@
 import './mocks';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import ResultsHeader from '@/components/results/ResultsHeader';
 import { buildTrip } from './fixtures';
 
@@ -79,6 +79,60 @@ describe('ResultsHeader', () => {
     const trip = buildTrip({ travelers: 1 });
     render(<ResultsHeader trip={trip} />);
     expect(screen.getByText(/1 traveler$/)).toBeInTheDocument();
+  });
+
+  it('savings pill opens a menu of real date-shift options', () => {
+    const trip = buildTrip({
+      totalCost: 1711,
+      savings: 0,
+      dateShiftSuggestion: {
+        dayOffset: -2,
+        newStartDate: '2026-09-30',
+        newTotalCost: 1456,
+        savings: 255,
+        options: [
+          { dayOffset: -2, newStartDate: '2026-09-30', newTotalCost: 1456, savings: 255 },
+          { dayOffset: 1, newStartDate: '2026-10-03', newTotalCost: 1531, savings: 180 },
+          { dayOffset: 2, newStartDate: '2026-10-04', newTotalCost: 1601, savings: 110 },
+        ],
+      },
+    } as any);
+    render(<ResultsHeader trip={trip} />);
+    fireEvent.click(screen.getByText(/You can save/i));
+    expect(screen.getByText('Cheaper start dates')).toBeInTheDocument();
+    expect(screen.getByText('2 days earlier')).toBeInTheDocument();
+    expect(screen.getByText('1 day later')).toBeInTheDocument();
+    expect(screen.getByText('2 days later')).toBeInTheDocument();
+    expect(screen.getByText('save $255')).toBeInTheDocument();
+    expect(screen.getByText('save $180')).toBeInTheDocument();
+    expect(screen.getByText('save $110')).toBeInTheDocument();
+    // Dates rendered human-readable.
+    expect(screen.getByText(/starts Wed, Sep 30/)).toBeInTheDocument();
+  });
+
+  it('older trips with only the flat suggestion get a one-entry menu', () => {
+    const trip = buildTrip({
+      totalCost: 1000,
+      savings: 0,
+      dateShiftSuggestion: {
+        dayOffset: 2,
+        newStartDate: '2026-08-28',
+        newTotalCost: 800,
+        savings: 200,
+      },
+    } as any);
+    render(<ResultsHeader trip={trip} />);
+    fireEvent.click(screen.getByText(/You can save/i));
+    expect(screen.getByText('Cheaper start dates')).toBeInTheDocument();
+    expect(screen.getByText('2 days later')).toBeInTheDocument();
+    expect(screen.getByText('save $200')).toBeInTheDocument();
+  });
+
+  it('without a date-shift suggestion the pill is not clickable', () => {
+    const trip = buildTrip({ savings: 249 });
+    render(<ResultsHeader trip={trip} />);
+    fireEvent.click(screen.getByText(/You can save/i));
+    expect(screen.queryByText('Cheaper start dates')).not.toBeInTheDocument();
   });
 
   it('long AI-route titles cannot wrap the price cluster onto a second row', () => {

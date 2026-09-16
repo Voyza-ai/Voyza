@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Users, TrendingDown, Sparkles, PenSquare, MessageSquare } from 'lucide-react';
+import { Calendar, Users, TrendingDown, Sparkles, PenSquare, MessageSquare, ChevronDown } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { useCountUp } from '@/lib/useCountUp';
@@ -169,6 +169,39 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
     });
   })();
 
+  // Date-shift options menu on the savings pill. Newer trips carry an
+  // options[] array (every shift that clears the savings thresholds);
+  // older saved trips only have the flat headline suggestion, which we
+  // treat as a one-entry menu so the pill stays clickable for them too.
+  const shiftOptions = (() => {
+    const s = trip.dateShiftSuggestion;
+    if (!s) return [];
+    return s.options && s.options.length > 0 ? s.options : [s];
+  })();
+  const [shiftMenuOpen, setShiftMenuOpen] = useState(false);
+  const shiftMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!shiftMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!shiftMenuRef.current?.contains(e.target as Node)) setShiftMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [shiftMenuOpen]);
+
+  const offsetLabel = (dayOffset: number) => {
+    const n = Math.abs(dayOffset);
+    return `${n} day${n === 1 ? '' : 's'} ${dayOffset < 0 ? 'earlier' : 'later'}`;
+  };
+  const niceFullDate = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
   // Per-person vs total display toggle is global (read from tripStore) so
   // every price across the results page — flights, hotels, transit, savings —
   // flips together with the header pill.
@@ -294,24 +327,83 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
             )}
           </div>
 
-          {/* Savings */}
-          <div
-            className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
-            style={{
-              background: 'linear-gradient(180deg, rgba(52,211,153,0.08) 0%, rgba(52,211,153,0.02) 100%)',
-              borderColor: 'rgba(52,211,153,0.25)',
-            }}
-          >
-            <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
-              <TrendingDown size={9} />
-              <span>You can save</span>
-            </div>
-            <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
-              ${animatedSavings.toLocaleString()}
-            </div>
-            <div className="text-[#22c088]/50 text-[9px]">
-              {shiftIsBest ? `by starting ${shiftDateNice}` : 'vs default routing'}
-            </div>
+          {/* Savings — clickable when date-shift options exist: opens a
+              menu of alternative start dates with their real, re-priced
+              savings (the optimizer scored each shifted date already). */}
+          <div className="relative" ref={shiftMenuRef}>
+            <button
+              type="button"
+              onClick={() => shiftOptions.length > 0 && setShiftMenuOpen((v) => !v)}
+              disabled={shiftOptions.length === 0}
+              title={
+                shiftOptions.length > 0
+                  ? 'See which start dates would save you money'
+                  : undefined
+              }
+              className={`flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px] text-left transition-all ${
+                shiftOptions.length > 0 ? 'cursor-pointer hover:brightness-95' : 'cursor-default'
+              }`}
+              style={{
+                background: 'linear-gradient(180deg, rgba(52,211,153,0.08) 0%, rgba(52,211,153,0.02) 100%)',
+                borderColor: 'rgba(52,211,153,0.25)',
+              }}
+            >
+              <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
+                <TrendingDown size={9} />
+                <span>You can save</span>
+                {shiftOptions.length > 0 && (
+                  <ChevronDown
+                    size={9}
+                    className={`transition-transform ${shiftMenuOpen ? 'rotate-180' : ''}`}
+                  />
+                )}
+              </div>
+              <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
+                ${animatedSavings.toLocaleString()}
+              </div>
+              <div className="text-[#22c088]/50 text-[9px]">
+                {shiftIsBest ? `by starting ${shiftDateNice}` : 'vs default routing'}
+              </div>
+            </button>
+
+            {shiftMenuOpen && shiftOptions.length > 0 && (
+              <div
+                className="absolute right-0 top-full mt-2 w-[264px] bg-white border rounded-xl shadow-lg z-50 overflow-hidden"
+                style={{ borderColor: 'rgba(52,211,153,0.35)' }}
+              >
+                <div className="px-3 pt-2.5 pb-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
+                  Cheaper start dates
+                </div>
+                {shiftOptions.map((opt) => {
+                  const optSavings =
+                    priceMode === 'total'
+                      ? Math.round(opt.savings)
+                      : Math.round(opt.savings / travelers);
+                  return (
+                    <div
+                      key={opt.dayOffset}
+                      className="px-3 py-2 border-t border-gray-100 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-medium text-gray-800">
+                          {offsetLabel(opt.dayOffset)}
+                        </div>
+                        <div className="text-[10px] text-gray-500">
+                          starts {niceFullDate(opt.newStartDate)}
+                        </div>
+                      </div>
+                      <div className="text-[#22c088] text-[13px] font-semibold tabular-nums flex-shrink-0">
+                        save ${optSavings.toLocaleString()}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="px-3 py-2 border-t border-gray-100 text-[10px] text-gray-400">
+                  Use “Adjust trip” to replan with a new start date — prices
+                  are live and can change.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Edit in Canvas — saves the trip first if needed and then

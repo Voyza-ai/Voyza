@@ -147,6 +147,14 @@ export type Trip = {
     newStartDate: string;
     newTotalCost: number;
     savings: number;
+    /** Every shift that saves real money, best first (max 3). Older saved
+     *  trips only carry the flat headline fields above. */
+    options?: Array<{
+      dayOffset: number;
+      newStartDate: string;
+      newTotalCost: number;
+      savings: number;
+    }>;
   };
   createdAt?: string;
   ownerId?: string;

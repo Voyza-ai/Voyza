@@ -62,7 +62,7 @@ jest.mock('../services/trains', () => ({
   ]),
 }));
 
-import { optimize } from '../services/optimizer';
+import { optimize, pickDateShiftOptions } from '../services/optimizer';
 
 describe('optimize', () => {
   beforeEach(() => {
@@ -136,4 +136,56 @@ describe('optimize', () => {
     expect(result.routes.length).toBeLessThanOrEqual(3);
     expect(result.bestRoute.ordering).toHaveLength(6);
   }, 60000);
+});
+
+describe('pickDateShiftOptions', () => {
+  // Baseline trip cost $2,000 → thresholds: ≥$50 AND ≥5% ($100).
+  const BASELINE = 2000;
+  const cand = (offset: number, cost: number) => ({
+    offset,
+    startDate: `2026-10-0${4 + offset}`,
+    cost,
+  });
+
+  it('returns every qualifying shift, best savings first, headline = best', () => {
+    const result = pickDateShiftOptions(
+      [cand(-2, 1850), cand(-1, 1700), cand(1, 1880), cand(2, 1500)],
+      BASELINE,
+    );
+    expect(result).toBeDefined();
+    // All four qualify ($500, $300, $150, $120) — top 3 kept, $120 dropped.
+    expect(result!.options!.map((o) => o.savings)).toEqual([500, 300, 150]);
+    expect(result!.options!.map((o) => o.dayOffset)).toEqual([2, -1, -2]);
+    // Headline mirrors the best option (backward-compatible flat fields).
+    expect(result!.dayOffset).toBe(2);
+    expect(result!.savings).toBe(500);
+    expect(result!.newTotalCost).toBe(1500);
+  });
+
+  it('caps the menu at 3 options', () => {
+    const result = pickDateShiftOptions(
+      [cand(-2, 1800), cand(-1, 1700), cand(1, 1600), cand(2, 1500)],
+      BASELINE,
+    );
+    expect(result!.options).toHaveLength(3);
+    // The weakest qualifier ($200 at -2) is the one dropped.
+    expect(result!.options!.map((o) => o.savings)).toEqual([500, 400, 300]);
+  });
+
+  it('drops shifts below the $50 or 5% thresholds — no fake savings rows', () => {
+    const result = pickDateShiftOptions(
+      // $500 qualifies; $80 fails the 5% bar ($100); $30 fails both.
+      [cand(-1, 1500), cand(1, 1920), cand(2, 1970)],
+      BASELINE,
+    );
+    expect(result!.options).toHaveLength(1);
+    expect(result!.options![0].savings).toBe(500);
+  });
+
+  it('returns undefined when nothing saves meaningful money', () => {
+    expect(
+      pickDateShiftOptions([cand(-1, 1980), cand(1, 2100)], BASELINE),
+    ).toBeUndefined();
+    expect(pickDateShiftOptions([], BASELINE)).toBeUndefined();
+  });
 });
