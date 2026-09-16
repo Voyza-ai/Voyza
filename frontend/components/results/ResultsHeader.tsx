@@ -193,6 +193,53 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
     const n = Math.abs(dayOffset);
     return `${n} day${n === 1 ? '' : 's'} ${dayOffset < 0 ? 'earlier' : 'later'}`;
   };
+
+  const addDaysIso = (iso: string, days: number) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    const date = new Date(y, (m || 1) - 1, (d || 1) + days);
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${date.getFullYear()}-${mm}-${dd}`;
+  };
+
+  // Clicking an option replans the SAME trip at the shifted dates: stage
+  // the planner answers (from live answers when resuming, else rebuilt
+  // from the trip itself so saved trips work in a fresh session), then
+  // let /plan?resume=1&autorun=1 run the real search and land back on
+  // results. Savings shown are from the optimizer's earlier re-pricing;
+  // the replan fetches live prices, which is why we re-search rather
+  // than just relabeling the dates on the current itinerary.
+  const applyDateShift = (opt: { dayOffset: number; newStartDate: string }) => {
+    const store = useTripStore.getState();
+    const a = store.answers;
+
+    let endISO: string | undefined;
+    if (a.dateRange?.start && a.dateRange?.end) {
+      endISO = addDaysIso(a.dateRange.end, opt.dayOffset);
+    } else {
+      const lastCity = trip.cities[trip.cities.length - 1];
+      if (lastCity?.dates?.departure) {
+        endISO = addDaysIso(lastCity.dates.departure, opt.dayOffset);
+      }
+    }
+    if (!endISO) return;
+
+    if (!a.destinations?.length) {
+      store.setAnswer('destinations', trip.cities.map((c) => c.name));
+    }
+    if (!a.travelers) store.setAnswer('travelers', trip.travelers);
+    if (!a.origin && trip.origin?.city) {
+      store.setAnswer('origin', trip.origin.city);
+      store.setAnswer('originAirports', trip.origin.airports ?? []);
+    }
+    if (a.returnToHome == null && trip.returnToHome != null) {
+      store.setAnswer('returnToHome', trip.returnToHome);
+    }
+    store.setAnswer('dateRange', { start: opt.newStartDate, end: endISO });
+    store.setAnswer('planningMode', 'destination');
+    setShiftMenuOpen(false);
+    router.push('/plan?resume=1&autorun=1');
+  };
   const niceFullDate = (iso: string) => {
     const [y, m, d] = iso.split('-').map(Number);
     return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', {
@@ -380,9 +427,12 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
                       ? Math.round(opt.savings)
                       : Math.round(opt.savings / travelers);
                   return (
-                    <div
+                    <button
+                      type="button"
                       key={opt.dayOffset}
-                      className="px-3 py-2 border-t border-gray-100 flex items-center justify-between gap-2"
+                      onClick={() => applyDateShift(opt)}
+                      title="Replan this trip starting on this date"
+                      className="w-full px-3 py-2 border-t border-gray-100 flex items-center justify-between gap-2 text-left transition-colors hover:bg-emerald-50/60 cursor-pointer"
                     >
                       <div className="min-w-0">
                         <div className="text-[12px] font-medium text-gray-800">
@@ -395,12 +445,12 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
                       <div className="text-[#22c088] text-[13px] font-semibold tabular-nums flex-shrink-0">
                         save ${optSavings.toLocaleString()}
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
                 <div className="px-3 py-2 border-t border-gray-100 text-[10px] text-gray-400">
-                  Use “Adjust trip” to replan with a new start date — prices
-                  are live and can change.
+                  Picking a date replans your trip with live prices — the
+                  final savings can differ slightly.
                 </div>
               </div>
             )}

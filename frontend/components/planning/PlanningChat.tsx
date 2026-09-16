@@ -2114,6 +2114,32 @@ export default function PlanningChat() {
     }
   };
 
+  // One-click date-shift replans (the "Cheaper start dates" menu on the
+  // results header) land here as /plan?resume=1&autorun=1 with the shifted
+  // answers already staged in the store. Skip every picker, drop a status
+  // bubble, and kick the exact same search the "Find my trip" button runs.
+  // If the staged answers are somehow incomplete, do nothing — the page
+  // behaves like a normal resume and the user finishes in the chat.
+  const autorunRef = useRef(false);
+  useEffect(() => {
+    if (autorunRef.current) return;
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('autorun') !== '1') return;
+    const staged = useTripStore.getState().answers;
+    if (validateTripInputs(staged).length > 0) return;
+    autorunRef.current = true;
+    setShowIntent(false);
+    setMessages([
+      {
+        id: nextId(),
+        role: 'assistant',
+        content: `Recalculating your trip starting ${staged.dateRange?.start ?? 'on the new date'} — searching flights, trains, and hotels with the shifted dates...`,
+      },
+    ]);
+    handleFindTrip();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="relative flex flex-col h-screen" style={{ background: '#0f0f1a' }}>
       {/* Subtle vibe background shift */}

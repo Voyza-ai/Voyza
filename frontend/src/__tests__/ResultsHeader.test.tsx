@@ -110,6 +110,36 @@ describe('ResultsHeader', () => {
     expect(screen.getByText(/starts Wed, Sep 30/)).toBeInTheDocument();
   });
 
+  it('clicking an option stages shifted answers and routes to the autorun replan', () => {
+    const { useTripStore } = require('@/store/tripStore');
+    useTripStore.setState({ answers: {} });
+    const trip = buildTrip({
+      travelers: 2,
+      dateShiftSuggestion: {
+        dayOffset: -2,
+        newStartDate: '2026-06-13',
+        newTotalCost: 1456,
+        savings: 255,
+        options: [
+          { dayOffset: -2, newStartDate: '2026-06-13', newTotalCost: 1456, savings: 255 },
+        ],
+      },
+    } as any);
+    render(<ResultsHeader trip={trip} />);
+    fireEvent.click(screen.getByText(/You can save/i));
+    fireEvent.click(screen.getByText('2 days earlier'));
+
+    const a = useTripStore.getState().answers;
+    // Start = the option's date; end = trip's last departure shifted -2
+    // (fixture ends 2026-06-20 → 2026-06-18).
+    expect(a.dateRange).toEqual({ start: '2026-06-13', end: '2026-06-18' });
+    // Rebuilt from the trip since the store had no planner answers.
+    expect(a.destinations).toEqual(['Rome', 'Florence']);
+    expect(a.travelers).toBe(2);
+    const { mockPush } = require('./mocks');
+    expect(mockPush).toHaveBeenCalledWith('/plan?resume=1&autorun=1');
+  });
+
   it('older trips with only the flat suggestion get a one-entry menu', () => {
     const trip = buildTrip({
       totalCost: 1000,
