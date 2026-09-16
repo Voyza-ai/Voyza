@@ -173,6 +173,9 @@ export default function PlanningChat() {
       ]);
       window.setTimeout(() => {
         if (!mountedRef.current) return;
+        // An armed autorun (one-click date-shift replan) owns the screen —
+        // its searching state replaces the picker; don't summon it back.
+        if (autorunArmedRef.current) return;
         setShowIntent(true);
       }, 500);
     }
@@ -2121,6 +2124,7 @@ export default function PlanningChat() {
   // If the staged answers are somehow incomplete, do nothing — the page
   // behaves like a normal resume and the user finishes in the chat.
   const autorunRef = useRef(false);
+  const autorunArmedRef = useRef(false);
   const [autorunPending, setAutorunPending] = useState(false);
 
   // Detect + restore on mount. The sessionStorage snapshot is the primary
@@ -2144,6 +2148,7 @@ export default function PlanningChat() {
     const urlFlag =
       new URLSearchParams(window.location.search).get('autorun') === '1';
     if (!snapshot && !urlFlag) return;
+    autorunArmedRef.current = true; // suppress the delayed intent picker
 
     if (snapshot) {
       const set = useTripStore.getState().setAnswer;
@@ -2157,7 +2162,13 @@ export default function PlanningChat() {
   // Fire once the restored answers are in this render's closure.
   useEffect(() => {
     if (!autorunPending || autorunRef.current) return;
-    if (validateTripInputs(answers).length > 0) return; // incomplete → normal flow
+    if (validateTripInputs(answers).length > 0) {
+      // Staged answers incomplete — disarm and hand back the normal flow.
+      autorunArmedRef.current = false;
+      setAutorunPending(false);
+      setShowIntent(true);
+      return;
+    }
     autorunRef.current = true;
     setAutorunPending(false);
     setShowIntent(false);
@@ -2171,6 +2182,16 @@ export default function PlanningChat() {
     handleFindTrip();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autorunPending, answers]);
+
+  // If the auto-run search fails, hand the screen back to the normal flow
+  // so the error bubble isn't a dead end (the picker returns below it).
+  useEffect(() => {
+    if (autorunRef.current && !findTripLoading && findTripError && !intent) {
+      autorunArmedRef.current = false;
+      setShowIntent(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findTripLoading, findTripError, intent]);
 
   return (
     <div className="relative flex flex-col h-screen" style={{ background: '#0f0f1a' }}>
@@ -2316,8 +2337,8 @@ export default function PlanningChat() {
             ))}
           </AnimatePresence>
 
-          {/* Intent picker */}
-          {showIntent && !intent && (
+          {/* Intent picker — hidden while an auto-run search owns the page */}
+          {showIntent && !intent && !findTripLoading && (
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
@@ -2326,6 +2347,19 @@ export default function PlanningChat() {
               className="mt-2"
             >
               <IntentPicker onSelect={handleIntentSelect} />
+            </motion.div>
+          )}
+
+          {/* Auto-run searching state — the date-shift replan has no chat
+              mode mounted, so its progress renders here instead. */}
+          {findTripLoading && !intent && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-3 flex items-center gap-2.5 text-sm text-gray-400"
+            >
+              <Loader2 size={16} className="animate-spin" style={{ color: '#4f8ef7' }} />
+              <span>{findTripStatus || 'Searching flights, trains, and hotels...'}</span>
             </motion.div>
           )}
 

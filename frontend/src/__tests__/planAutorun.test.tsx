@@ -73,6 +73,29 @@ describe('PlanningChat autorun (one-click date-shift replan)', () => {
     expect(call.origin).toBe('New York');
   });
 
+  it('shows a searching state instead of the intent picker while running', async () => {
+    window.history.pushState({}, '', '/plan?resume=1&autorun=1');
+    sessionStorage.setItem('bluemurr-autorun', JSON.stringify(stagedAnswers));
+    // Search never resolves — freeze the in-flight state.
+    mockedOptimize.mockReturnValue(new Promise(() => {}) as any);
+
+    const { findByText, queryByText } = render(<PlanningChat />);
+    expect(await findByText(/Searching flights, trains, and hotels|Finding the best routes/)).toBeInTheDocument();
+    // Wait past the 500ms delayed greeting timer — the picker must stay away.
+    await new Promise((r) => setTimeout(r, 600));
+    expect(queryByText('I know where I want to go')).not.toBeInTheDocument();
+  });
+
+  it('restores the intent picker when the autorun search fails', async () => {
+    window.history.pushState({}, '', '/plan?resume=1&autorun=1');
+    sessionStorage.setItem('bluemurr-autorun', JSON.stringify(stagedAnswers));
+    // beforeEach mock: optimize rejects → error bubble → picker returns.
+
+    const { findByText } = render(<PlanningChat />);
+    expect(await findByText(/ran into a problem/)).toBeInTheDocument();
+    expect(await findByText('I know where I want to go')).toBeInTheDocument();
+  });
+
   it('does not autorun without the autorun param (normal resume)', async () => {
     window.history.pushState({}, '', '/plan?resume=1');
     useTripStore.setState({ answers: stagedAnswers });
