@@ -2121,24 +2121,56 @@ export default function PlanningChat() {
   // If the staged answers are somehow incomplete, do nothing — the page
   // behaves like a normal resume and the user finishes in the chat.
   const autorunRef = useRef(false);
+  const [autorunPending, setAutorunPending] = useState(false);
+
+  // Detect + restore on mount. The sessionStorage snapshot is the primary
+  // signal — client-side navigations can present a stale window.location
+  // during the first render, which both hides the ?autorun=1 flag AND lets
+  // the plan page's reset wipe the staged store answers. The snapshot
+  // survives either failure mode; firing is deferred to the next render so
+  // handleFindTrip closes over the restored answers, not the wiped ones.
   useEffect(() => {
-    if (autorunRef.current) return;
     if (typeof window === 'undefined') return;
-    if (new URLSearchParams(window.location.search).get('autorun') !== '1') return;
-    const staged = useTripStore.getState().answers;
-    if (validateTripInputs(staged).length > 0) return;
+    let snapshot: Record<string, unknown> | null = null;
+    try {
+      const raw = sessionStorage.getItem('bluemurr-autorun');
+      if (raw) {
+        snapshot = JSON.parse(raw);
+        sessionStorage.removeItem('bluemurr-autorun'); // one shot
+      }
+    } catch {
+      // storage blocked — fall through to the URL flag
+    }
+    const urlFlag =
+      new URLSearchParams(window.location.search).get('autorun') === '1';
+    if (!snapshot && !urlFlag) return;
+
+    if (snapshot) {
+      const set = useTripStore.getState().setAnswer;
+      for (const [key, value] of Object.entries(snapshot)) {
+        if (value !== undefined && value !== null) set(key as any, value as any);
+      }
+    }
+    setAutorunPending(true);
+  }, []);
+
+  // Fire once the restored answers are in this render's closure.
+  useEffect(() => {
+    if (!autorunPending || autorunRef.current) return;
+    if (validateTripInputs(answers).length > 0) return; // incomplete → normal flow
     autorunRef.current = true;
+    setAutorunPending(false);
     setShowIntent(false);
     setMessages([
       {
         id: nextId(),
         role: 'assistant',
-        content: `Recalculating your trip starting ${staged.dateRange?.start ?? 'on the new date'} — searching flights, trains, and hotels with the shifted dates...`,
+        content: `Recalculating your trip starting ${answers.dateRange?.start ?? 'on the new date'} — searching flights, trains, and hotels with the shifted dates...`,
       },
     ]);
     handleFindTrip();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [autorunPending, answers]);
 
   return (
     <div className="relative flex flex-col h-screen" style={{ background: '#0f0f1a' }}>

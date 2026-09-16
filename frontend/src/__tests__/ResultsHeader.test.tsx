@@ -138,6 +138,12 @@ describe('ResultsHeader', () => {
     expect(a.travelers).toBe(2);
     const { mockPush } = require('./mocks');
     expect(mockPush).toHaveBeenCalledWith('/plan?resume=1&autorun=1');
+    // A snapshot must also be written so the planner can restore the
+    // staged answers even if the plan page's reset wipes the store.
+    const snapshot = JSON.parse(sessionStorage.getItem('bluemurr-autorun')!);
+    expect(snapshot.dateRange).toEqual({ start: '2026-06-13', end: '2026-06-18' });
+    expect(snapshot.destinations).toEqual(['Rome', 'Florence']);
+    sessionStorage.clear();
   });
 
   it('older trips with only the flat suggestion get a one-entry menu', () => {

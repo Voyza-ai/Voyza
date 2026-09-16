@@ -224,19 +224,50 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
     }
     if (!endISO) return;
 
-    if (!a.destinations?.length) {
-      store.setAnswer('destinations', trip.cities.map((c) => c.name));
+    // The canvas origin handoff is a third source for the home city when
+    // neither the planner answers nor the trip payload carry one.
+    const storedOrigin = (() => {
+      try {
+        const id = (trip as any).id;
+        if (!id) return null;
+        const raw = localStorage.getItem(`voyza-origin-${id}`);
+        return raw ? (JSON.parse(raw)?.origin ?? null) : null;
+      } catch {
+        return null;
+      }
+    })();
+
+    const staged = {
+      destinations: a.destinations?.length
+        ? a.destinations
+        : trip.cities.map((c) => c.name),
+      travelers: a.travelers || trip.travelers,
+      origin: a.origin ?? trip.origin?.city ?? storedOrigin?.city ?? undefined,
+      originAirports:
+        (a.originAirports?.length ? a.originAirports : undefined) ??
+        trip.origin?.airports ??
+        storedOrigin?.airports ??
+        [],
+      returnToHome: a.returnToHome ?? trip.returnToHome ?? true,
+      dateRange: { start: opt.newStartDate, end: endISO },
+      planningMode: 'destination' as const,
+      budget: a.budget,
+      budgetPerPerson: a.budgetPerPerson,
+      vibe: a.vibe,
+    };
+
+    // Stage in the store AND snapshot to sessionStorage: the /plan page
+    // wipes the store on entry whenever its reset check reads a stale
+    // URL mid-navigation (client transitions can lag), so the planner's
+    // autorun restores from this snapshot after any such wipe.
+    for (const [key, value] of Object.entries(staged)) {
+      if (value !== undefined) store.setAnswer(key as any, value as any);
     }
-    if (!a.travelers) store.setAnswer('travelers', trip.travelers);
-    if (!a.origin && trip.origin?.city) {
-      store.setAnswer('origin', trip.origin.city);
-      store.setAnswer('originAirports', trip.origin.airports ?? []);
+    try {
+      sessionStorage.setItem('bluemurr-autorun', JSON.stringify(staged));
+    } catch {
+      // Storage blocked — the store staging still covers the normal case.
     }
-    if (a.returnToHome == null && trip.returnToHome != null) {
-      store.setAnswer('returnToHome', trip.returnToHome);
-    }
-    store.setAnswer('dateRange', { start: opt.newStartDate, end: endISO });
-    store.setAnswer('planningMode', 'destination');
     setShiftMenuOpen(false);
     router.push('/plan?resume=1&autorun=1');
   };
