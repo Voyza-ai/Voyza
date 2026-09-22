@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
-import type { TrainOffer } from './trains';
+import type { ProviderTrainOffer } from './trains';
 
 /**
  * All Aboard (allaboard.eu) — European rail search via their GraphQL API.
@@ -69,9 +69,15 @@ function normalizeForMatch(s: string | undefined | null): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
-// city name (lowercased) → location uid, or null when All Aboard doesn't
-// know the city. Nulls are cached too so unknown cities cost one lookup.
-const locationCache = new Map<string, string | null>();
+// city name (lowercased) → the lookup's PROMISE, resolving to a location uid
+// or null when All Aboard doesn't know the city. Caching the promise rather
+// than the settled uid is what makes this cache work under the optimizer's
+// fan-out: the key used to be written only AFTER the gql await, so every
+// concurrent caller for the same city missed and fired its own getLocations
+// — 960 lookups for 5 distinct cities on a 5-city trip. Nulls are cached
+// too so unknown cities cost one lookup; rejections are evicted so one
+// transient failure doesn't poison the city for the process's lifetime.
+const locationCache = new Map<string, Promise<string | null>>();
 
 /** Exposed for tests. */
 export function clearLocationCache(): void {
@@ -84,14 +90,28 @@ type AaLocation = { uid: string; name: string };
  * Resolve a city name to an All Aboard location uid. Their search returns
  * fuzzy matches (querying "Paris" can surface "Palermo" too), so we only
  * accept a result whose name actually corresponds to the requested city.
+ *
+ * Concurrent callers for the same city share one in-flight lookup — see
+ * locationCache above for why that matters.
  */
-export async function getAllAboardLocationUid(
+export function getAllAboardLocationUid(
   city: string,
   session: string,
 ): Promise<string | null> {
   const key = city.toLowerCase();
-  if (locationCache.has(key)) return locationCache.get(key) ?? null;
+  const hit = locationCache.get(key);
+  if (hit) return hit;
 
+  const lookup = resolveLocationUid(city, session);
+  locationCache.set(key, lookup);
+  lookup.catch(() => {
+    // Don't cache failures — the next caller should get a fresh attempt.
+    if (locationCache.get(key) === lookup) locationCache.delete(key);
+  });
+  return lookup;
+}
+
+async function resolveLocationUid(city: string, session: string): Promise<string | null> {
   const data = await gql<{ getLocations: AaLocation[] }>(
     `query($q: String!) { getLocations(query: $q) { uid name } }`,
     { q: city },
@@ -106,7 +126,6 @@ export async function getAllAboardLocationUid(
       return got === want || got.startsWith(want) || want.startsWith(got);
     }) ?? null;
 
-  locationCache.set(key, match?.uid ?? null);
   return match?.uid ?? null;
 }
 
@@ -151,7 +170,7 @@ function pickOfferCandidates(count: number): number[] {
   return [0, Math.floor(count / 2), count - 1];
 }
 
-export async function searchAllAboard(params: SearchParams): Promise<TrainOffer[]> {
+export async function searchAllAboard(params: SearchParams): Promise<ProviderTrainOffer[]> {
   if (!env.ALLABOARD_API_KEY) return [];
   const { origin, destination, date } = params;
   const session = randomUUID();
@@ -193,10 +212,25 @@ export async function searchAllAboard(params: SearchParams): Promise<TrainOffer[
     );
     if (journeys.length === 0) return [];
 
-    // Live-price a spread of the day's journeys. One ADULT passenger keeps
-    // prices per-person (same semantics as the Deutsche Bahn fares); USD is
-    // requested natively so no FX conversion is needed. Amounts arrive in
-    // cents. Failures are per-journey and non-fatal.
+    // Live-price a spread of the day's journeys. USD is requested natively so
+    // no FX conversion is needed. Amounts arrive in cents. Failures are
+    // per-journey and non-fatal.
+    //
+    // The offer is requested for the WHOLE PARTY — one ADULT entry per
+    // traveller — so any group pricing the operator applies is in the number
+    // we get back. Verified on the sandbox 2026-09-21 (Paris→Lyon, same
+    // journey: 1 adult $53.88, 2 adults $107.77, ratio 2.0002), which was the
+    // precondition for doing this: if the amount had not scaled with the
+    // passenger count, dividing it would have silently produced a fraction of
+    // the real fare.
+    //
+    // The `ProviderTrainOffer` contract stays PER-PERSON (same as Deutsche
+    // Bahn, whose API takes no passenger count and is scaled ×N downstream),
+    // so the party total is divided by the party here and `toPartyTotal` in
+    // searchTrains multiplies it straight back — their exact figure, and no
+    // path on which it can be multiplied twice.
+    const party = Math.max(1, Math.floor(params.travelers) || 1);
+    const passengers = Array.from({ length: party }, () => '{type: ADULT}').join(', ');
     const candidates = pickOfferCandidates(journeys.length);
     const priced = new Map<number, number>();
     await Promise.all(
@@ -204,7 +238,7 @@ export async function searchAllAboard(params: SearchParams): Promise<TrainOffer[
         try {
           const offerData = await gql<{ getJourneyOffer: AaJourneyOffer }>(
             `query($j: ID!) {
-              getJourneyOffer(journey: $j, passengers: [{type: ADULT}], currency: "USD") {
+              getJourneyOffer(journey: $j, passengers: [${passengers}], currency: "USD") {
                 itinerary {
                   ... on SegmentCollection { offers { id price { amount currency } } }
                 }
@@ -218,7 +252,7 @@ export async function searchAllAboard(params: SearchParams): Promise<TrainOffer[
             .flatMap((item) => item.offers ?? [])
             .map((o) => o.price?.amount)
             .filter((a): a is number => typeof a === 'number' && a > 0);
-          if (amounts.length > 0) priced.set(idx, Math.min(...amounts) / 100);
+          if (amounts.length > 0) priced.set(idx, Math.min(...amounts) / 100 / party);
         } catch (err: any) {
           logger.warn('All Aboard offer pricing failed (non-fatal)', {
             message: err?.message,
@@ -228,7 +262,7 @@ export async function searchAllAboard(params: SearchParams): Promise<TrainOffer[
       }),
     );
 
-    const toOffer = (j: AaJourney, idx: number): TrainOffer | null => {
+    const toOffer = (j: AaJourney, idx: number): ProviderTrainOffer | null => {
       const segs = segmentsOf(j.itinerary);
       const dep = segs[0]?.departureAt;
       const arr = segs[segs.length - 1]?.arrivalAt;
@@ -240,18 +274,18 @@ export async function searchAllAboard(params: SearchParams): Promise<TrainOffer[
       const operators = [
         ...new Set(segs.map((s) => s.operator?.name).filter(Boolean)),
       ] as string[];
-      const price = priced.get(idx) ?? null;
+      const pricePerPerson = priced.get(idx) ?? null;
       return {
         id: `aa-${j.id}`,
-        price,
+        pricePerPerson,
         currency: 'USD',
         departure: dep,
         arrival: arr,
         durationMinutes,
         operator: operators.join(' + ') || 'Rail operator',
         trainType: 'train',
-        bookingUrl: 'https://allaboard.eu',
-        limitedCoverage: price == null,
+        bookingUrl: null,
+        limitedCoverage: pricePerPerson == null,
       };
     };
 
@@ -260,7 +294,7 @@ export async function searchAllAboard(params: SearchParams): Promise<TrainOffer[
     const all = journeys
       .map(toOffer)
       .map((offer, idx) => ({ offer, idx }))
-      .filter((x): x is { offer: TrainOffer; idx: number } => x.offer != null);
+      .filter((x): x is { offer: ProviderTrainOffer; idx: number } => x.offer != null);
     const pricedOffers = all.filter((x) => priced.has(x.idx)).map((x) => x.offer);
     const unpricedOffers = all
       .filter((x) => !priced.has(x.idx))

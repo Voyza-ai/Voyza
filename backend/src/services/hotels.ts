@@ -161,12 +161,28 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     // Convert all non-USD prices to USD before returning.
     // Booking frequently ignores filter_by_currency=USD and returns
     // local currency for `min_total_price`, so we normalize here.
+    //
+    // A price we can't convert is DROPPED, not relabelled. Everything
+    // downstream assumes HotelResult.price is dollars — the trip total, the
+    // maxPrice filter right below, and the frontend, which prints a literal
+    // `$` and never reads `currency` — so keeping 800,000 COP under a 'USD'
+    // label poisons the total AND makes maxPrice throw away the whole city.
+    // Dropping is the only honest option until the UI can render a foreign
+    // currency.
     const { convertToUsd } = await import('./currency');
-    hotels = await Promise.all(
-      hotels.map(async (h) => {
+    const converted = await Promise.all(
+      hotels.map(async (h): Promise<HotelResult | null> => {
         if (!h.currency || h.currency === 'USD') return h;
         const usdTotal = await convertToUsd(h.price, h.currency);
         const usdPerNight = await convertToUsd(h.pricePerNight, h.currency);
+        if (usdTotal === null || usdPerNight === null) {
+          logger.warn('Hotel dropped — no USD rate for its currency', {
+            city,
+            hotel: h.name,
+            currency: h.currency,
+          });
+          return null;
+        }
         return {
           ...h,
           price: usdTotal,
@@ -175,6 +191,7 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
         };
       }),
     );
+    hotels = converted.filter((h): h is HotelResult => h !== null);
 
     if (maxPrice !== undefined) {
       hotels = hotels.filter((h) => h.price <= maxPrice);

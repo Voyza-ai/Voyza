@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { searchFlights, getIataCode } from '../services/flights';
+import { clampToFuture } from '../utils/dates';
 
 const router = Router();
 
@@ -77,7 +78,7 @@ router.post(
   '/home-legs',
   asyncHandler(async (req, res) => {
     const input = homeLegsSchema.parse(req.body);
-    const { buildHomeLeg, clampToFuture } = await import('../services/optimizer');
+    const { buildHomeLeg } = await import('../services/optimizer');
 
     const [outboundLeg, returnLeg] = await Promise.all([
       input.outbound

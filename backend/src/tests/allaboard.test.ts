@@ -79,15 +79,26 @@ const offerResponse = (cents: number[]) => ({
 
 /** Route fetch calls by query content so parallel calls stay deterministic. */
 const routeFetch = (
-  handlers: Array<{ match: (body: string) => boolean; data: any }>,
+  handlers: Array<{ match: (body: string) => boolean; data: any | ((body: string) => any) }>,
 ) => {
   mockFetch.mockImplementation((_url: string, init: any) => {
     const body = init?.body ?? '';
     const handler = handlers.find((h) => h.match(body));
     if (!handler) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
-    return Promise.resolve(gqlOk(handler.data));
+    return Promise.resolve(gqlOk(typeof handler.data === 'function' ? handler.data(body) : handler.data));
   });
 };
+
+/** How many passengers a getJourneyOffer request asked for. */
+const adultsRequested = (body: string) => (body.match(/\{type: ADULT\}/g) ?? []).length;
+
+/**
+ * Like the real sandbox, the fare scales with the passenger count (measured
+ * 2026-09-21: ratio 2.0002 for 2 adults). `perPersonCents` is what ONE adult
+ * would pay; the fake returns that × the adults actually requested.
+ */
+const partyOfferResponse = (perPersonCents: number[]) => (body: string) =>
+  offerResponse(perPersonCents.map((c) => c * adultsRequested(body)));
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -122,7 +133,7 @@ describe('searchAllAboard', () => {
     { match: (b: string) => b.includes('getLocations') && b.includes('Paris'), data: parisLocations },
     { match: (b: string) => b.includes('getLocations') && b.includes('Amsterdam'), data: amsterdamLocations },
     { match: (b: string) => b.includes('getJourneys'), data: journeysResponse },
-    { match: (b: string) => b.includes('getJourneyOffer'), data: offerResponse([3985, 10133, 18786]) },
+    { match: (b: string) => b.includes('getJourneyOffer'), data: partyOfferResponse([3985, 10133, 18786]) },
   ];
 
   const params = { origin: 'Paris', destination: 'Amsterdam', date: '2026-08-19', travelers: 2 };
@@ -131,8 +142,17 @@ describe('searchAllAboard', () => {
     routeFetch(happyHandlers());
     const offers = await searchAllAboard(params);
     expect(offers.length).toBeGreaterThan(0);
+    // All Aboard returns no link at the offer stage (confirmed by them); the
+    // old value here was their marketing homepage.
+    expect(offers.every((o) => o.bookingUrl === null)).toBe(true);
     const cheapest = offers[0];
-    expect(cheapest.price).toBe(39.85); // 3985 cents, cheapest of the three fares
+    // Per-person is the provider contract — searchTrains scales to the party.
+    // params.travelers is 2, so the request carried two ADULTs, the fake
+    // returned 7970 cents for the pair, and the adapter hands back 39.85.
+    expect(cheapest.pricePerPerson).toBe(39.85);
+    const offerCalls = mockFetch.mock.calls.filter(([, init]: any) => String(init?.body).includes('getJourneyOffer'));
+    expect(offerCalls.length).toBeGreaterThan(0);
+    expect(offerCalls.every(([, init]: any) => adultsRequested(String(init?.body)) === 2)).toBe(true);
     expect(cheapest.currency).toBe('USD');
     expect(cheapest.limitedCoverage).toBe(false);
     expect(cheapest.operator).toContain('Eurostar');
@@ -149,7 +169,7 @@ describe('searchAllAboard', () => {
   it('prices all journeys when there are 3 or fewer (spread selection)', async () => {
     routeFetch(happyHandlers());
     const offers = await searchAllAboard(params);
-    const priced = offers.filter((o) => o.price != null);
+    const priced = offers.filter((o) => o.pricePerPerson != null);
     expect(priced).toHaveLength(3);
   });
 
@@ -194,7 +214,7 @@ describe('searchAllAboard', () => {
     ]);
     const offers = await searchAllAboard(params);
     expect(offers.length).toBeGreaterThan(0);
-    expect(offers.every((o) => o.price === null && o.limitedCoverage)).toBe(true);
+    expect(offers.every((o) => o.pricePerPerson === null && o.limitedCoverage)).toBe(true);
   });
 
   it('skips journeys with empty itineraries', async () => {
@@ -232,7 +252,7 @@ describe('provider registry integration', () => {
           return Promise.resolve(gqlOk(amsterdamLocations));
         if (body.includes('getJourneys')) return Promise.resolve(gqlOk(journeysResponse));
         if (body.includes('getJourneyOffer'))
-          return Promise.resolve(gqlOk(offerResponse([3985])));
+          return Promise.resolve(gqlOk(partyOfferResponse([3985])(body)));
       }
       // Deutsche Bahn path: fail fast, provider returns [] non-fatally.
       return Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) });
@@ -253,11 +273,15 @@ describe('provider registry integration', () => {
       origin: 'Paris',
       destination: 'Amsterdam',
       date: '2026-08-19',
-      travelers: 1,
+      travelers: 2,
     }).then((offers: any[]) => {
       const aa = offers.filter((o) => o.id.startsWith('aa-'));
       expect(aa.length).toBeGreaterThan(0);
-      expect(aa[0].price).toBe(39.85);
+      // $39.85 is ONE adult's Eurostar fare; two travellers book two seats.
+      // Party total is the unit every price leaves the backend in, so a
+      // per-person fare arriving here unchanged is the headline bug.
+      expect(aa[0].price).toBe(79.7);
+      expect(aa[0].pricePerPerson).toBeUndefined();
     });
   });
 });

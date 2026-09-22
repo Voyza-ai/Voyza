@@ -11,9 +11,22 @@ import { logger } from '../utils/logger';
 type RateCache = {
   rates: Record<string, number>; // currency → rate relative to USD (1 USD = N currency)
   fetchedAt: number;
+  /**
+   * How long this entry may be reused. Per-entry rather than global so a
+   * failed fetch can't pin the fallback table for a full day — see
+   * FALLBACK_TTL_MS.
+   */
+  ttlMs: number;
 };
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+/**
+ * Retry window after a failed fetch. Short on purpose: FALLBACK_RATES covers
+ * 33 currencies, so for as long as it's the active table every OTHER currency
+ * is unconvertible and its offers get dropped. One transient FX blip must not
+ * cost us COP/PEN/NGN/… pricing for 24 hours.
+ */
+const FALLBACK_TTL_MS = 5 * 60 * 1000; // 5m
 let cache: RateCache | null = null;
 let inflightFetch: Promise<RateCache> | null = null;
 
@@ -65,18 +78,23 @@ async function fetchRates(): Promise<RateCache> {
     return {
       rates: data.rates,
       fetchedAt: Date.now(),
+      ttlMs: CACHE_TTL_MS,
     };
   } catch (err: any) {
-    logger.warn('Currency API failed, using fallback rates', { message: err?.message });
+    logger.warn('Currency API failed, using fallback rates', {
+      message: err?.message,
+      retryInMs: FALLBACK_TTL_MS,
+    });
     return {
       rates: FALLBACK_RATES,
       fetchedAt: Date.now(),
+      ttlMs: FALLBACK_TTL_MS,
     };
   }
 }
 
 async function getRates(): Promise<RateCache> {
-  if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) return cache;
+  if (cache && Date.now() - cache.fetchedAt < cache.ttlMs) return cache;
   if (inflightFetch) return inflightFetch;
 
   inflightFetch = fetchRates().then((fresh) => {
@@ -89,12 +107,21 @@ async function getRates(): Promise<RateCache> {
 
 /**
  * Convert an amount in `fromCurrency` to USD.
- * If the currency is unknown or the rate is missing, the amount is returned
- * unchanged so that worst-case we just display the raw price.
  *
- * Returns `Math.round(amount * 100) / 100` — 2-decimal precision.
+ * Returns `null` when we have no rate for the currency. It deliberately does
+ * NOT pass the amount through: every caller relabels the result 'USD', and
+ * the whole app downstream (trip totals, maxPrice filters, the frontend,
+ * which prints a hardcoded `$` and never reads the currency field) treats
+ * these numbers as dollars. A pass-through therefore turned 800,000 COP into
+ * "$800,000". Callers decide what an unconvertible price means for them —
+ * drop the offer, or mark it unpriced — but none of them may relabel it.
+ *
+ * On success returns `Math.round(amount * 100) / 100` — 2-decimal precision.
  */
-export async function convertToUsd(amount: number, fromCurrency: string): Promise<number> {
+export async function convertToUsd(
+  amount: number,
+  fromCurrency: string,
+): Promise<number | null> {
   if (!Number.isFinite(amount) || amount === 0) return amount;
   const code = fromCurrency?.toUpperCase().trim();
   if (!code || code === 'USD') return Math.round(amount * 100) / 100;
@@ -102,8 +129,8 @@ export async function convertToUsd(amount: number, fromCurrency: string): Promis
   const { rates } = await getRates();
   const rate = rates[code] ?? FALLBACK_RATES[code];
   if (!rate || rate <= 0) {
-    logger.warn('Unknown currency, returning amount as-is', { code, amount });
-    return Math.round(amount * 100) / 100;
+    logger.warn('Unknown currency — cannot convert to USD', { code, amount });
+    return null;
   }
 
   // rates are "1 USD = N <currency>", so to go from foreign → USD divide
@@ -114,18 +141,26 @@ export async function convertToUsd(amount: number, fromCurrency: string): Promis
  * Batch conversion helper — converts a list of numbers at once using
  * a single rate lookup. Useful when converting many offers from the
  * same currency (e.g. a page of hotels all priced in JPY).
+ *
+ * Returns `null` for the whole batch when we have no rate, for the same
+ * reason `convertToUsd` does: the batch is one currency, so it's all-or
+ * -nothing, and a silent pass-through would be relabelled 'USD' by the
+ * caller.
  */
 export async function convertManyToUsd(
   amounts: number[],
   fromCurrency: string,
-): Promise<number[]> {
+): Promise<number[] | null> {
   if (amounts.length === 0) return [];
   const code = fromCurrency?.toUpperCase().trim();
   if (!code || code === 'USD') return amounts.map((a) => Math.round(a * 100) / 100);
 
   const { rates } = await getRates();
   const rate = rates[code] ?? FALLBACK_RATES[code];
-  if (!rate || rate <= 0) return amounts.map((a) => Math.round(a * 100) / 100);
+  if (!rate || rate <= 0) {
+    logger.warn('Unknown currency — cannot convert batch to USD', { code, count: amounts.length });
+    return null;
+  }
 
   return amounts.map((a) =>
     Number.isFinite(a) && a !== 0 ? Math.round((a / rate) * 100) / 100 : a,

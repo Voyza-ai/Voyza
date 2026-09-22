@@ -438,6 +438,63 @@ Tasks deferred from the current chat work:
 - [ ] Gate premium features (higher activity counts? offline export?)
 - [ ] Cancel subscription on account deletion
 
+### Feature: Real rail booking (All Aboard)
+Context: rail legs ship with **no** booking link. Neither provider returns one
+at the search/offer stage — All Aboard confirmed it in writing (2026-09) and
+their docs agree: booking is an API flow, and the only URL in it is the hosted
+payment page. Until 2026-09 we filled the field with their marketing homepage;
+persisted trips are scrubbed at read time (`tripShape.ts`).
+Sources: docs.allaboard.eu/tickets/book-tickets · /payments/ · /payments/fees ·
+/refunds/ (not yet read).
+
+**The flow (docs, verbatim operation names):**
+1. `createBooking(offerIds, passengers)` — from the `getJourneyOffer` offer we
+   already fetch. Returns booking id + a `requirements` field saying what this
+   operator needs per passenger. **Bookings expire** — honour `expiresAt`.
+2. `updateBooking(id, passengers)` — firstName, lastName, birthDate,
+   nationality, email/phone; exactly one `isContactPerson`. YOUTH/SENIOR need
+   `birthDate`/`age`. Some operators want passport.
+3. `updateBooking(id, selections)` — only when the offer is part of an offer
+   set (must select from every collection in one call, or none).
+4. `updatePart(id, booking, placeProperties)` — seat preferences, when offered.
+5. `setTicketDelivery(offerId, method)` — `E_TICKET` | `TICKET_ON_DEPARTURE`.
+6. `createOrder(booking)` — **up to 30s**; docs recommend their WebSocket.
+7. `createPayment(orderId, successUrl, cancelUrl)` → `url` — All Aboard's
+   hosted page (cards, Apple Pay, Google Pay). Customer pays there; order
+   finalises automatically; they land on our `successUrl`.
+8. `node(id: order)` — tickets arrive **15+ minutes later** as `PdfTicket.url`,
+   `CheckInResource.url`, or a `TicketOnDeparture` reference. Needs a
+   "tickets pending" state and a poll/notification, not a synchronous result.
+
+**Money (decided by the docs, not open any more):**
+- Use the **payment gateway**, not wallet/invoice. The customer pays the
+  operator fare on All Aboard's page → BlueMurr never touches card data, never
+  fronts a fare, and gets no PCI scope. Wallet/invoice mean *we* pay and
+  collect separately, i.e. our own payment stack and seller-of-travel exposure.
+- **Revenue = a service fee we configure** (fixed, %, per ticket, or mix),
+  added to the customer's total at checkout and remitted to us monthly. There
+  is no fare markup mechanism. All Aboard's own commission is per contract, not
+  in the API. Monthly reconciliation nets our commission, their fees, service
+  fees collected, and refunds.
+
+- [ ] Passenger details form driven by `requirements` (varies per operator)
+- [ ] Booking → order → payment redirect, with `expiresAt` countdown and the
+      30s order wait handled (WebSocket or patient polling)
+- [ ] Post-payment: order status page, ticket retrieval via `node`, store the
+      ticket URLs on the trip, notify when they land (15+ min)
+- [ ] Refunds/cancellation — read /refunds/ first; design with the payment flow
+- [ ] Decide the service fee and sign commercial terms (commission is per contract)
+- [ ] Party fares — **answered empirically 2026-09-21** on the test gateway:
+      `getJourneyOffer` with N `ADULT`s returns the party total (Paris→Lyon,
+      same journey: 1 adult $53.88, 2 adults $107.77, ratio 2.0002). So pass
+      `travelers` adults in `allaboard.ts` and let their total be the total;
+      keep ×N only for Deutsche Bahn, whose API takes no passenger count.
+- [~] API key: **test gateway** (confirmed 2026-09-21) — fares seen in dev are
+      test-gateway numbers. Need a production key before launch; validity was
+      described as mid-November to year end, confirm renewal.
+- [~] Seller-of-travel compliance: same questions as in-app flight booking —
+      do them together.
+
 ### Feature: Real regional train APIs
 - [ ] Replace static Japan table with real-time JR data (Navitime partner API)
 - [ ] Korail integration for Korea

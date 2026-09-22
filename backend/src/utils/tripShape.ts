@@ -32,6 +32,31 @@ function formatDuration(minutes: number | null | undefined): string {
   return `${m}m`;
 }
 
+/**
+ * Booking links we used to fabricate for rail legs — the providers' marketing
+ * homepages, not bookings. Trips saved before that was fixed still carry them
+ * in transports.booking_url and inside transports.alternatives, so they are
+ * scrubbed on the way out rather than left to mislead. A read-time scrub
+ * beats a one-off UPDATE: it also covers rows restored from a backup.
+ */
+const FABRICATED_BOOKING_URLS = new Set([
+  'https://allaboard.eu',
+  'https://www.bahn.de/buchung/start',
+]);
+
+export function scrubFabricatedBookingUrl<T extends string | null | undefined>(url: T): T | undefined {
+  return url && FABRICATED_BOOKING_URLS.has(url) ? undefined : url;
+}
+
+function scrubAlternatives(alts: unknown): any[] | undefined {
+  if (!Array.isArray(alts)) return undefined;
+  return alts.map((a) =>
+    a && typeof a === 'object' && 'bookingUrl' in a
+      ? { ...a, bookingUrl: scrubFabricatedBookingUrl((a as any).bookingUrl) }
+      : a,
+  );
+}
+
 function buildTransport(t: DbTransport, fromName: string, toName: string) {
   return {
     mode: (t.mode ?? 'flight') as 'flight' | 'train',
@@ -48,8 +73,8 @@ function buildTransport(t: DbTransport, fromName: string, toName: string) {
     currency: t.currency ?? 'USD',
     carrierCode: t.carrier_code ?? undefined,
     flightNumber: t.flight_number ?? undefined,
-    alternatives: Array.isArray(t.alternatives) ? t.alternatives : undefined,
-    bookingUrl: t.booking_url ?? undefined,
+    alternatives: scrubAlternatives(t.alternatives),
+    bookingUrl: scrubFabricatedBookingUrl(t.booking_url) ?? undefined,
   };
 }
 

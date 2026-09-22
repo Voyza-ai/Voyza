@@ -3,9 +3,18 @@ import { getSupabase } from './supabase';
 import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
 import { getStaticIata } from '../data/cityAirports';
+import { parseIsoDuration } from '../utils/duration';
+import { elapsedMinutesBetween } from '../utils/localTime';
 
 export type FlightOffer = {
   id: string;
+  /**
+   * PARTY TOTAL in USD — Duffel's `total_amount` is the fare for every
+   * passenger on the offer request, and we ask for one adult per traveler.
+   * This is the unit every price crosses the API boundary in; the
+   * frontend's per-person toggle divides by `travelers`
+   * (frontend/lib/tripTotals.ts `displayAmount`).
+   */
   price: number;
   currency: string;
   departure: string;
@@ -63,26 +72,70 @@ function errorStatus(err: any): number | undefined {
 }
 
 /**
+ * Never sleep longer than this inside a request. A wait that retries slightly
+ * early beats holding the optimize open for an hour because a proxy sent
+ * `retry-after: 3600`.
+ */
+const MAX_RETRY_DELAY_MS = 2 * 60 * 1000;
+/** ~2001-09-09 in unix seconds. A "delta" this large is really a timestamp. */
+const EPOCH_SECONDS_FLOOR = 1_000_000_000;
+
+function clampRetryDelay(ms: number): number {
+  if (!Number.isFinite(ms)) return 0;
+  return Math.min(Math.max(0, Math.round(ms)), MAX_RETRY_DELAY_MS);
+}
+
+/**
+ * Interpret one rate-limit header value as a delay in ms.
+ *
+ * Numeric FIRST, `Date.parse` second. The reverse order silently destroyed
+ * the delta-seconds form, because `Date.parse` accepts bare digit strings —
+ * measured on node v24.6: '60' → 1960-01-01, '120' → year 120, '2' →
+ * 2001-02-01, while '30' → NaN. Those are all in the past, so
+ * `Math.max(0, at - Date.now())` returned 0 and the numeric branch below was
+ * unreachable for exactly those values: a `ratelimit-reset: 60` produced a
+ * 0-1000ms sleep, all 4 withRetry attempts landed inside the same exhausted
+ * window within ~2s, and the home legs came back empty — the precise failure
+ * the comment below says this function prevents. (Digits like '45' or '3600'
+ * parsed to a FUTURE year and were wrong in the other direction.)
+ */
+function parseResetHeader(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const num = Number(trimmed);
+    // Delta-seconds, unless it's big enough to be unix epoch seconds —
+    // some proxies normalise `ratelimit-reset` to an absolute timestamp.
+    const ms = num >= EPOCH_SECONDS_FLOOR ? num * 1000 - Date.now() : num * 1000;
+    return clampRetryDelay(ms);
+  }
+
+  // Non-numeric means an absolute time: Duffel's ISO timestamp, or the
+  // HTTP-date that RFC 9110 also allows for retry-after.
+  const at = Date.parse(trimmed);
+  if (Number.isNaN(at)) return null;
+  return clampRetryDelay(at - Date.now());
+}
+
+/**
  * When Duffel rate-limits, it says when the window resets (ratelimit-reset,
  * ISO timestamp — with retry-after seconds as a fallback). Sleeping until
  * THEN beats blind exponential backoff: under a sustained per-minute limit,
  * blind 2s/4s retries all land inside the same exhausted window and the
  * call dies pointlessly.
+ *
+ * Exported for tests — this parsing is where the backoff used to collapse to
+ * ~0ms, so it's worth covering directly rather than through timing.
  */
-function retryDelayFromHeaders(err: any): number | null {
+export function retryDelayFromHeaders(err: any): number | null {
   const headers = err?.headers;
   const get = typeof headers?.get === 'function' ? (k: string) => headers.get(k) : () => null;
-  const reset = get('ratelimit-reset');
-  if (reset) {
-    const at = Date.parse(reset);
-    if (!Number.isNaN(at)) return Math.max(0, at - Date.now());
-    const secs = Number(reset);
-    if (!Number.isNaN(secs)) return secs * 1000;
-  }
-  const retryAfter = get('retry-after');
-  if (retryAfter) {
-    const secs = Number(retryAfter);
-    if (!Number.isNaN(secs)) return secs * 1000;
+  for (const name of ['ratelimit-reset', 'retry-after']) {
+    const raw = get(name);
+    if (raw == null || raw === '') continue;
+    const delay = parseResetHeader(String(raw));
+    if (delay != null) return delay;
   }
   return null;
 }
@@ -158,6 +211,51 @@ export async function searchFlights(params: SearchFlightsParams): Promise<Flight
   return cachedSearch(key, () => searchFlightsUncached(params));
 }
 
+/**
+ * How long a Duffel slice actually takes, in minutes — or null when the
+ * payload doesn't let us know.
+ *
+ * The order matters. `departing_at` / `arriving_at` carry NO UTC offset:
+ * they are local wall-clock times at each airport. Subtracting them parses
+ * both in the SERVER's zone and throws the airport-to-airport timezone
+ * difference away, which is how NRT 21:00 JST → HNL 09:00 HST reported -720
+ * minutes — a blank duration on the card, a door-to-door time that beat
+ * every train, and a negative number cached for two hours. Eastbound was
+ * wrong the other way: JFK 22:00 → LHR 10:00+1 reported 12h for a 7h flight.
+ *
+ * So we ask the airline first (Duffel exposes an ISO 8601 `duration` on the
+ * slice, which already includes layovers) and only fall back to arithmetic —
+ * anchored to each airport's real tz-database zone, which Duffel also ships
+ * in the payload — when no provider duration is there.
+ */
+export function sliceDurationMinutes(slice: any): number | null {
+  const segments: any[] = slice?.segments ?? [];
+  const firstSegment = segments[0];
+  const lastSegment = segments[segments.length - 1];
+
+  // 1. The airline's own number for the whole slice, layovers included.
+  const sliceDuration = parseIsoDuration(slice?.duration);
+  if (sliceDuration != null && sliceDuration > 0) return sliceDuration;
+
+  // 2. A single-segment slice IS its only segment, so that duration is the
+  //    same figure by definition. (Multi-segment slices are skipped here —
+  //    summing segments would silently drop the connection time.)
+  if (segments.length === 1) {
+    const segmentDuration = parseIsoDuration(firstSegment?.duration);
+    if (segmentDuration != null && segmentDuration > 0) return segmentDuration;
+  }
+
+  // 3. Timestamp arithmetic, done properly: each endpoint is resolved in the
+  //    zone of its own airport. No offset table — `time_zone` is part of
+  //    Duffel's airport object on every segment.
+  return elapsedMinutesBetween(
+    firstSegment?.departing_at,
+    lastSegment?.arriving_at,
+    firstSegment?.origin?.time_zone,
+    lastSegment?.destination?.time_zone,
+  );
+}
+
 async function searchFlightsUncached(params: SearchFlightsParams): Promise<FlightOffer[]> {
   const { origin, destination, date, travelers, cabinClass } = params;
   const duffel = getDuffel();
@@ -173,6 +271,8 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
               departure_date: date,
             } as any,
           ],
+          // One adult per traveler, which is what makes `total_amount`
+          // below a party total — the unit every price in the app uses.
           passengers: Array.from({ length: travelers }, () => ({ type: 'adult' as const })),
           cabin_class: (cabinClass as any) || 'economy',
           return_offers: true,
@@ -188,9 +288,10 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
       const lastSegment = slice?.segments?.[slice.segments.length - 1];
       const carrier = firstSegment?.operating_carrier ?? firstSegment?.marketing_carrier ?? {};
 
-      const depTime = new Date(firstSegment?.departing_at ?? date);
-      const arrTime = new Date(lastSegment?.arriving_at ?? date);
-      const durationMinutes = Math.round((arrTime.getTime() - depTime.getTime()) / 60000);
+      // 0 means "unknown" here, matching the rest of the codebase. It is
+      // never a real flight length, and compareLeg refuses to cache it or
+      // let it win a speed tiebreak.
+      const durationMinutes = sliceDurationMinutes(slice) ?? 0;
 
       // Real bookable deep link. Duffel doesn't expose a public offer-redirect
       // page — the old `https://duffel.com/redirect/offers/...` URL 404s. Until
@@ -216,15 +317,43 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
       };
     });
 
-    // Normalize all prices to USD
+    // One line per search, not per offer: if this fires, Duffel gave us
+    // neither an ISO duration nor airport time zones for this route and the
+    // affected cards will show no duration at all.
+    const unknownDurations = mapped.filter((o) => o.durationMinutes <= 0).length;
+    if (unknownDurations > 0) {
+      logger.warn('Duffel offers with no usable duration', {
+        unknownDurations,
+        totalOffers: mapped.length,
+        origin,
+        destination,
+        date,
+      });
+    }
+
+    // Normalize all prices to USD. An offer we can't convert is dropped
+    // rather than relabelled: compareLeg's cheapest/priceDifference, the
+    // optimizer's totals and every `$` in the UI all read FlightOffer.price
+    // as dollars, so a pass-through would let a 4,000,000 IDR fare "lose"
+    // a price comparison against a $300 one and land in the trip total.
     const { convertToUsd } = await import('./currency');
-    return await Promise.all(
-      mapped.map(async (o) => {
+    const converted = await Promise.all(
+      mapped.map(async (o): Promise<FlightOffer | null> => {
         if (!o.currency || o.currency === 'USD') return o;
         const usd = await convertToUsd(o.price, o.currency);
+        if (usd === null) {
+          logger.warn('Flight offer dropped — no USD rate for its currency', {
+            offerCurrency: o.currency,
+            origin,
+            destination,
+            date,
+          });
+          return null;
+        }
         return { ...o, price: usd, currency: 'USD' };
       }),
     );
+    return converted.filter((o): o is FlightOffer => o !== null);
   } catch (err: any) {
     if (err instanceof AppError) throw err;
     // DuffelError extends Error but calls super() with NO message — the
