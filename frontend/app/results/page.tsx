@@ -208,9 +208,16 @@ function ResultsPageInner() {
     if (!currentTrip || hotelsFetchedRef.current) return;
     hotelsFetchedRef.current = true;
 
-    currentTrip.cities.forEach((city, idx) => {
+    currentTrip.cities.forEach((city) => {
       // Skip if city already has hotels populated (e.g. from backend optimizer)
       if (city.hotels.length > 1) return;
+
+      // Identify the visit, not its position: the search resolves seconds
+      // later, and by then the optimizer or a drag-reorder may have moved
+      // this city. A repeat visit (Paris → Rome → Paris) shares a name but
+      // never an arrival date, so name + arrival is the stable key.
+      const visitName = city.name;
+      const visitArrival = city.dates.arrival;
 
       searchHotels({
         city: city.name,
@@ -227,6 +234,12 @@ function ResultsPageInner() {
             area: '',
             bookingUrl: r.bookingUrl,
           }));
+          const idx = useTripStore
+            .getState()
+            .currentTrip?.cities.findIndex(
+              (c) => c.name === visitName && c.dates.arrival === visitArrival,
+            ) ?? -1;
+          if (idx < 0) return; // visit removed while the search was in flight
           updateCity(idx, {
             hotels,
             hotel: hotels[0],
