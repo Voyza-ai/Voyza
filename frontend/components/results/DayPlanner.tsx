@@ -23,7 +23,13 @@ type DayPlannerProps = {
   trip: Trip;
   /** ISO date string for the day to display */
   date: string;
-  /** The city this day belongs to */
+  /**
+   * The city this day belongs to. MUST be read live out of `trip.cities`
+   * by the caller on every render — this component renders its events as
+   * `city.schedule?.[date]`, and every store schedule action replaces the
+   * City object, so a snapshot captured once (e.g. held in a parent's
+   * useState) renders pre-write data and makes edits look like no-ops.
+   */
   city: City;
   cityIndex: number;
   onClose: () => void;

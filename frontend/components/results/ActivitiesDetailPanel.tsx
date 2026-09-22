@@ -158,7 +158,12 @@ export default function ActivitiesDetailPanel({
           className={`px-7 py-6 overflow-y-auto min-h-0 ${scrollCls}`}
           style={{ borderRight: `4px solid ${color.border}` }}
         >
+          {/* `key` is load-bearing. The list holds `editingIdx` and the
+              add-form draft in local state, and its writers target the
+              cityIndex on screen — remounting per city stops one city's
+              in-flight edit from being saved onto the next city's list. */}
           <ActivityList
+            key={cityIndex}
             activities={city.activities}
             cityIndex={cityIndex}
             color={color}
@@ -173,7 +178,11 @@ export default function ActivitiesDetailPanel({
           className={`px-7 py-6 overflow-y-auto min-h-0 ${scrollCls}`}
           style={{ background: `${color.text}06` }}
         >
+          {/* Same reason as ActivityList above — and more urgent here: the
+              edit's name input has no onBlur, so a city switch leaves the
+              edit open on the new city's row. */}
           <RestaurantList
+            key={cityIndex}
             restaurants={city.restaurants}
             cityIndex={cityIndex}
             color={color}

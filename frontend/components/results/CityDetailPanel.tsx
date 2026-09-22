@@ -331,9 +331,13 @@ export default function CityDetailPanel({
             ))}
           </div>
 
-          {/* Custom hotel form */}
+          {/* Custom hotel form — `key` is load-bearing. The form seeds its five
+              fields from `current` in useState initialisers, which only run on
+              mount; without a remount per city it keeps the previous city's
+              name/amount while Cancel and "Use this stay" write to the city on
+              screen. */}
           <CustomHotelForm
-            cityIndex={cityIndex}
+            key={cityIndex}
             nights={nights}
             color={color}
             current={city.customHotel}
@@ -584,7 +588,6 @@ function CustomHotelForm({
   onSave,
   onClear,
 }: {
-  cityIndex: number;
   nights: number;
   color: { bg: string; text: string; border: string; name: string };
   current?: import('@/lib/types').CustomHotel;
