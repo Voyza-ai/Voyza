@@ -266,22 +266,19 @@ router.get(
       (citiesByTrip[c.trip_id] ??= []).push(c);
     }
 
-    // 4. Owner display info for shared trips ("Shared by …").
+    // 4. Owner display info for shared trips ("Shared by …"). Name only —
+    // everyone with an accepted membership reads this list, share-link
+    // viewers included, and the owner's email address is not theirs to
+    // have (same rule as GET /api/canvas/:tripId/members and the GDPR
+    // export in users.ts). The card falls back to "someone" without a name.
     const ownerIds = Array.from(new Set((sharedTrips ?? []).map((t: any) => t.user_id)));
-    const ownersById: Record<string, { name: string | null; email: string | null }> = {};
+    const ownersById: Record<string, { name: string | null }> = {};
     if (ownerIds.length > 0) {
       const { data: profiles } = await supabase
         .from('user_profiles')
         .select('id, full_name')
         .in('id', ownerIds);
-      const nameById: Record<string, string | null> = {};
-      for (const p of profiles ?? []) nameById[p.id] = p.full_name ?? null;
-      // Emails live in auth, not user_profiles — fetch per distinct owner
-      // (usually just one or two) so the card can attribute the trip.
-      for (const oid of ownerIds) {
-        const { data: auth } = await supabase.auth.admin.getUserById(oid);
-        ownersById[oid] = { name: nameById[oid] ?? null, email: auth?.user?.email ?? null };
-      }
+      for (const p of profiles ?? []) ownersById[p.id] = { name: p.full_name ?? null };
     }
 
     const enrich = (t: any, extra: Record<string, unknown> = {}) => {
@@ -301,12 +298,11 @@ router.get(
     res.json({
       trips: (owned ?? []).map((t: any) => enrich(t)),
       shared: (sharedTrips ?? []).map((t: any) => {
-        const owner = ownersById[t.user_id] ?? { name: null, email: null };
+        const owner = ownersById[t.user_id] ?? { name: null };
         const { user_id, ...rest } = t;
         return enrich(rest, {
           role: roleByTrip[t.id] ?? 'viewer',
           owner_name: owner.name,
-          owner_email: owner.email,
         });
       }),
     });
@@ -588,8 +584,11 @@ router.post(
         date_shift_suggestion: null,
         cloned_from_trip_id: source.id,
         // Cloned trips default to private — the new owner decides if
-        // THEY want their copy discoverable.
-        allow_clones: true,
+        // THEY want their copy discoverable. Cloning is opt-in too: this
+        // used to hard-code `true`, which handed every copy a permission
+        // its new owner never granted (and would have made the new
+        // `allow_clones` default in migration 009 a no-op for clones).
+        allow_clones: false,
         allow_recommendations: true,
         is_public: false,
       })

@@ -19,9 +19,13 @@ type Suggestion = {
   created_at: string;
 };
 
+/** Identity we put on the wire for presence + cursors. Deliberately no
+ *  email: the trip's channel is joined by everyone on it, share-link
+ *  viewers included, so anything tracked here is readable by all of them
+ *  — and one collaborator's address is not theirs to have (the same rule
+ *  GET /api/canvas/:tripId/members and the GDPR export follow). */
 export type PresenceUser = {
   id: string;
-  email: string | null;
   name: string | null;
 };
 
@@ -45,6 +49,7 @@ export type CursorEvent = {
   x: number;
   y: number;
   actor: string;
+  /** Profile name only — never an email (see PresenceUser). */
   name: string | null;
   ts: number;
 };
@@ -174,7 +179,7 @@ export function useCanvasRealtime(
             const id = m.id ?? key;
             // Dedupe by user id — multiple tabs/devices of the same person
             // collapse into one avatar.
-            if (!byId.has(id)) byId.set(id, { id, email: m.email ?? null, name: m.name ?? null });
+            if (!byId.has(id)) byId.set(id, { id, name: m.name ?? null });
           }
         }
         setPresence(Array.from(byId.values()));
@@ -235,7 +240,10 @@ export function useCanvasRealtime(
         x,
         y,
         actor: userRef.current?.id ?? 'unknown',
-        name: userRef.current?.name ?? userRef.current?.email ?? null,
+        // Profile name only — this is broadcast to every person on the
+        // channel, share-link viewers included, and rendered next to the
+        // cursor. A nameless person shows as "Someone", not their email.
+        name: userRef.current?.name ?? null,
         ts: Date.now(),
       },
     });

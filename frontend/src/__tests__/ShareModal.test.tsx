@@ -40,6 +40,7 @@ const member = (over: Partial<any> = {}) => ({
   createdAt: '2026-07-01T00:00:00Z',
   email: 'pal@test.com',
   fullName: 'Pal Smith',
+  displayName: 'Pal Smith',
   avatarUrl: null,
   pending: false,
   inviteToken: null,
@@ -154,7 +155,7 @@ describe('ShareModal', () => {
     mockedListMembers.mockResolvedValue({
       members: [
         member({ id: 'accepted', pending: false, userId: 'u2' }),
-        member({ id: 'pending', pending: true, userId: null, email: 'new@test.com', fullName: null }),
+        member({ id: 'pending', pending: true, userId: null, email: 'new@test.com', fullName: null, displayName: 'new@test.com' }),
       ] as any,
     });
     jest.spyOn(window, 'confirm').mockReturnValue(true);
@@ -176,7 +177,7 @@ describe('ShareModal', () => {
   it('shows a Copy-link button for a pending personal invite (owner only)', async () => {
     mockedListMembers.mockResolvedValue({
       members: [
-        member({ id: 'inv', pending: true, userId: null, fullName: null, email: 'new@test.com', inviteToken: 'tok-xyz' }),
+        member({ id: 'inv', pending: true, userId: null, fullName: null, email: 'new@test.com', displayName: 'new@test.com', inviteToken: 'tok-xyz' }),
       ] as any,
     });
     render(<ShareModal {...baseProps} />);
@@ -185,5 +186,21 @@ describe('ShareModal', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       expect.stringContaining('share=tok-xyz'),
     );
+  });
+
+  it('renders a row whose email was redacted by its label, never as a blank line', async () => {
+    // What a NON-owner gets from /members: every other person's email is
+    // null, displayName always present. The list must stay readable.
+    mockedListMembers.mockResolvedValue({
+      members: [
+        member({ id: 'named', email: null, displayName: 'Pal Smith' }),
+        member({ id: 'nameless', userId: 'u3', email: null, fullName: null, displayName: 'Member' }),
+      ] as any,
+    });
+    render(<ShareModal {...baseProps} />);
+    expect(await screen.findByText('Pal Smith')).toBeInTheDocument();
+    expect(screen.getByText('Member')).toBeInTheDocument();
+    // No address anywhere in the DOM for a redacted row.
+    expect(screen.queryByText('pal@test.com')).not.toBeInTheDocument();
   });
 });

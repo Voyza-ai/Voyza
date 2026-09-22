@@ -721,7 +721,14 @@ export type TripMember = {
   role: 'owner' | 'editor' | 'suggester' | 'viewer';
   acceptedAt: string | null;
   createdAt: string;
-  /** Real email for accepted members; invited_email for pending invites. */
+  /** Always-present label to render for this member: their profile name,
+   *  else their email when we're allowed to see it, else a neutral
+   *  "Member" / "Pending invite". */
+  displayName: string;
+  /** Real email for accepted members, invited_email for pending invites —
+   *  for the trip OWNER. Everyone else gets null here on every row but
+   *  their own, so a share-link viewer can't harvest the other
+   *  collaborators' addresses. */
   email: string | null;
   fullName: string | null;
   avatarUrl: string | null;

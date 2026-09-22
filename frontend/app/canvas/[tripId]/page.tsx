@@ -82,7 +82,8 @@ export default function CanvasPage() {
       user
         ? {
             id: user.id,
-            email: user.email ?? null,
+            // Profile name only — presence is broadcast to everyone on the
+            // trip's channel (share-link viewers included), so no email.
             name: ((user.user_metadata?.full_name as string) || null),
           }
         : null,
@@ -1225,9 +1226,12 @@ export default function CanvasPage() {
           )
             .slice(0, 6)
             .map((p) => {
-              const label = p.name || p.email || '?';
-              const initials = (p.name || p.email || '?')
-                .split(/[\s@]+/)
+              // Presence carries names only now — no email to fall back on
+              // (and no local part to split on). A nameless collaborator
+              // reads as "Someone" with a "?" chip; you always read as "You".
+              const label = p.name || 'Someone';
+              const initials = (p.name || '?')
+                .split(/\s+/)
                 .map((w: string) => w[0])
                 .join('')
                 .toUpperCase()

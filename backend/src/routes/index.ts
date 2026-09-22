@@ -4,15 +4,17 @@ import health from './health';
 import flights from './flights';
 import trains from './trains';
 import hotels from './hotels';
-import ai from './ai';
 import plan from './plan';
 import canvas from './canvas';
 import trips from './trips';
 import users from './users';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireAuth } from '../middleware/auth';
+import { AppError } from '../middleware/error';
 import { compareLeg } from '../services/compareLeg';
+import { getCachedLegPrices } from '../services/legCache';
 import { optimize } from '../services/optimizer';
+import { getSupabase } from '../services/supabase';
 
 const router = Router();
 
@@ -24,7 +26,6 @@ router.use('/health', health);
 router.use('/flights', flights);
 router.use('/trains', trains);
 router.use('/hotels', hotels);
-router.use('/ai', ai);
 router.use('/plan', plan);
 router.use('/canvas', requireAuth, canvas);
 router.use('/trips', requireAuth, trips);
@@ -95,18 +96,44 @@ router.post(
   }),
 );
 
+// ─── GET /api/optimize/:tripId ───────────────────────────────
+// Cached leg prices for a SAVED trip. Trip-scoped, so it takes the same
+// gate as GET /api/trips/:id — requireAuth plus an owner-or-member check.
+// Before this it was anonymous and filtered `leg_price_cache.origin` (a
+// city NAME) by a trip id, so a real trip id matched nothing while
+// `GET /api/optimize/rome` dumped 20 cache rows — `raw_response` and all
+// — to any caller. See services/legCache.ts for the actual lookup.
 router.get(
   '/optimize/:tripId',
+  requireAuth,
   asyncHandler(async (req, res) => {
-    // Return cached result from Supabase
-    const { getSupabase } = require('../services/supabase');
+    const user = (req as any).user;
     const supabase = getSupabase();
-    const { data } = await supabase
-      .from('leg_price_cache')
-      .select('*')
-      .eq('origin', req.params.tripId)
-      .limit(20);
-    res.json({ cached: data ?? [] });
+
+    const { data: trip, error } = await supabase
+      .from('trips')
+      .select('id, user_id')
+      .eq('id', req.params.tripId)
+      .single();
+
+    if (error || !trip) {
+      throw new AppError(404, 'Trip not found');
+    }
+
+    // RLS handles access control, but verify ownership/membership
+    if (trip.user_id !== user.id) {
+      const { data: member } = await supabase
+        .from('group_members')
+        .select('id')
+        .eq('trip_id', trip.id)
+        .eq('user_id', user.id)
+        .single();
+      if (!member) {
+        throw new AppError(403, 'Access denied');
+      }
+    }
+
+    res.json({ cached: await getCachedLegPrices(trip.id) });
   }),
 );
 
