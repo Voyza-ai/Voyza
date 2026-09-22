@@ -194,11 +194,11 @@ export default function DayPlanner({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 md:pr-[340px] lg:pr-[380px]"
     >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/15"
         onClick={onClose}
       />
 
@@ -208,7 +208,7 @@ export default function DayPlanner({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 16, scale: 0.97 }}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-        className="relative w-full max-w-4xl max-h-[92vh] flex flex-col rounded-2xl border-2 shadow-2xl overflow-hidden"
+        className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl border-2 shadow-2xl overflow-hidden"
         style={{ background: color.bg, borderColor: color.border }}
       >
         {/* Top accent */}
