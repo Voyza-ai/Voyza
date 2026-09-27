@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { getSupabase } from '../services/supabase';
 import { AppError } from '../middleware/error';
+import { createNotification } from '../services/notifications';
 
 const router = Router();
 
@@ -223,6 +224,21 @@ router.delete(
 
     const scheduled = new Date(nowIso);
     scheduled.setDate(scheduled.getDate() + 30);
+
+    // Self-notification with the grace-period details. Fresh path only —
+    // re-submitting an already-scheduled deletion must not re-notify.
+    const deletionDateNice = scheduled.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    await createNotification({
+      userId: user.id,
+      type: 'account_deletion_scheduled',
+      title: 'Account deletion scheduled',
+      body: `Your account will be permanently anonymized on ${deletionDateNice}. You can cancel any time before then from your account settings.`,
+      data: { deletedAt: nowIso, scheduledDeletionAt: scheduled.toISOString() },
+    });
 
     res.json({
       success: true,

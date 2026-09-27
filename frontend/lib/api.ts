@@ -802,3 +802,58 @@ export async function applyRoleToMembers(
     body: JSON.stringify({ role }),
   });
 }
+
+// ─── Notifications ───────────────────────────────────────────
+
+/** "App" prefix avoids clashing with the DOM's built-in Notification. */
+export type AppNotification = {
+  id: string;
+  type:
+    | 'account_deletion_scheduled'
+    | 'trip_owner_anonymized'
+    | 'ownership_transferred'
+    | 'suggestion_decided'
+    | 'canvas_invite';
+  title: string;
+  body: string | null;
+  data: Record<string, any>;
+  read_at: string | null;
+  created_at: string;
+};
+
+export async function getNotifications(
+  limit = 30,
+): Promise<{ notifications: AppNotification[]; unreadCount: number }> {
+  return apiFetch<{ notifications: AppNotification[]; unreadCount: number }>(
+    `/api/notifications?limit=${limit}`,
+  );
+}
+
+export async function markNotificationRead(
+  id: string,
+): Promise<{ notification: AppNotification }> {
+  return apiFetch<{ notification: AppNotification }>(`/api/notifications/${id}`, {
+    method: 'PATCH',
+  });
+}
+
+export async function markAllNotificationsRead(): Promise<{ success: boolean; updated: number }> {
+  return apiFetch<{ success: boolean; updated: number }>(`/api/notifications/read-all`, {
+    method: 'PATCH',
+  });
+}
+
+export async function deleteNotification(id: string): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(`/api/notifications/${id}`, { method: 'DELETE' });
+}
+
+/** Clone a shared trip into the caller's own account (used by the
+ *  trip-owner-anonymized notification's "Clone trip" action). */
+export async function cloneTrip(
+  tripId: string,
+): Promise<{ tripId: string; trip: any; clonedFrom: string }> {
+  return apiFetch<{ tripId: string; trip: any; clonedFrom: string }>(
+    `/api/trips/${tripId}/clone`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+}

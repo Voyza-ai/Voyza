@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
 import LoginModal from '@/components/shared/LoginModal';
+import NotificationBell from '@/components/shared/NotificationBell';
 
 type NavbarProps = {
   minimal?: boolean;
@@ -71,6 +72,7 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
 
       {/* Right side — the auth corner */}
       <div className="flex items-center gap-4">
+      {user && <NotificationBell />}
       {user ? (
         <div className="relative" ref={dropdownRef}>
           <button

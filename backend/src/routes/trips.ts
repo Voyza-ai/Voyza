@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { getSupabase } from '../services/supabase';
+import { createNotification } from '../services/notifications';
 import { AppError } from '../middleware/error';
 import { parseDurationMinutes } from '../utils/duration';
 import { buildTripFromDb } from '../utils/tripShape';
@@ -735,7 +736,7 @@ router.post(
 
     const { data: trip } = await supabase
       .from('trips')
-      .select('user_id')
+      .select('user_id, title')
       .eq('id', req.params.id)
       .single();
     if (!trip) throw new AppError(404, 'Trip not found');
@@ -778,6 +779,15 @@ router.post(
       .from('group_members')
       .update({ role: 'owner' })
       .eq('id', targetMember.id);
+
+    // Tell the new owner.
+    await createNotification({
+      userId: newOwnerId,
+      type: 'ownership_transferred',
+      title: 'You are now the owner of a trip',
+      body: `Ownership of "${trip.title ?? 'a trip'}" was transferred to you.`,
+      data: { tripId: req.params.id, tripTitle: trip.title ?? null, previousOwnerId: user.id },
+    });
 
     res.json({
       success: true,

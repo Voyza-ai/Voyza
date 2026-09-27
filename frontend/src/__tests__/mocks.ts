@@ -75,6 +75,7 @@ jest.mock('@/lib/supabase', () => ({
       subscribe: jest.fn().mockReturnValue('SUBSCRIBED'),
       unsubscribe: jest.fn(),
     }),
+    removeChannel: jest.fn(),
   },
   getCurrentUser: jest.fn().mockResolvedValue(null),
   getAuthHeader: jest.fn().mockResolvedValue({}),
@@ -145,6 +146,11 @@ jest.mock('@/lib/api', () => ({
   getTrips: jest.fn().mockResolvedValue({ trips: [] }),
   getTrip: jest.fn().mockResolvedValue({ trip: {} }),
   deleteTrip: jest.fn().mockResolvedValue({ success: true }),
+  getNotifications: jest.fn().mockResolvedValue({ notifications: [], unreadCount: 0 }),
+  markNotificationRead: jest.fn().mockResolvedValue({ notification: {} }),
+  markAllNotificationsRead: jest.fn().mockResolvedValue({ success: true, updated: 0 }),
+  deleteNotification: jest.fn().mockResolvedValue({ success: true }),
+  cloneTrip: jest.fn().mockResolvedValue({ tripId: 'trip-clone-1', trip: {}, clonedFrom: 'trip-1' }),
 }));
 
 // Mock styled-jsx (used by Flowchart)

@@ -43,6 +43,16 @@ jest.mock('@/components/shared/LoginModal', () => {
   };
 });
 
+// The bell fetches + subscribes to realtime; this suite is standalone (no
+// shared mocks), so stub it out — it has its own notificationBell.test.tsx.
+jest.mock('@/components/shared/NotificationBell', () => {
+  const React = require('react');
+  return {
+    __esModule: true,
+    default: () => React.createElement('div', { 'data-testid': 'notification-bell' }),
+  };
+});
+
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import Navbar from '@/components/shared/Navbar';

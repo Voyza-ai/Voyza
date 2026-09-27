@@ -9,6 +9,7 @@ import plan from './plan';
 import canvas from './canvas';
 import trips from './trips';
 import users from './users';
+import notifications from './notifications';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireAuth } from '../middleware/auth';
 import { compareLeg } from '../services/compareLeg';
@@ -29,6 +30,7 @@ router.use('/plan', plan);
 router.use('/canvas', requireAuth, canvas);
 router.use('/trips', requireAuth, trips);
 router.use('/users', requireAuth, users);
+router.use('/notifications', requireAuth, notifications);
 
 // ─── Compare Leg ─────────────────────────────────────────────
 const compareLegSchema = z.object({

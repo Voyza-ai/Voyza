@@ -5,6 +5,7 @@ import { AppError } from '../middleware/error';
 import { getSupabase } from '../services/supabase';
 import { compareLeg } from '../services/compareLeg';
 import { searchHotels } from '../services/hotels';
+import { createNotification } from '../services/notifications';
 import { env } from '../config/env';
 import { parseDurationMinutes } from '../utils/duration';
 import { resolveTripTitle } from '../utils/tripShape';
@@ -658,6 +659,24 @@ router.patch(
       }
     }
 
+    // Tell the suggester what happened to their proposal — unless the
+    // owner is deciding their own suggestion (no self-notify).
+    if (suggestion?.suggested_by && suggestion.suggested_by !== user.id) {
+      await createNotification({
+        userId: suggestion.suggested_by,
+        type: 'suggestion_decided',
+        title:
+          status === 'approved'
+            ? 'Your suggestion was approved'
+            : 'Your suggestion was declined',
+        body:
+          status === 'approved'
+            ? 'The trip owner approved your suggestion — it has been applied to the canvas.'
+            : 'The trip owner declined your suggestion.',
+        data: { tripId, suggestionId, suggestionType: suggestion.type, status },
+      });
+    }
+
     res.json({ suggestion });
   }),
 );
@@ -710,6 +729,35 @@ router.post(
           .single();
 
     const inviteLink = `${env.FRONTEND_URL}/canvas/join/${data?.invite_token}`;
+
+    // If the invited email already has an account, drop the invite into
+    // their bell (invites previously had NO delivery mechanism at all —
+    // the owner had to copy-paste the link). No account yet → nothing to
+    // notify; they'll join through the link like before.
+    const { data: invitedUserId } = await supabase.rpc('get_user_id_by_email', {
+      p_email: email,
+    });
+    if (invitedUserId && invitedUserId !== user.id) {
+      const { data: tripRow } = await supabase
+        .from('trips')
+        .select('title')
+        .eq('id', tripId)
+        .single();
+      await createNotification({
+        userId: invitedUserId,
+        type: 'canvas_invite',
+        title: 'You were invited to collaborate on a trip',
+        body: `${user.email ?? 'A trip owner'} invited you to "${tripRow?.title ?? 'a trip'}" as ${role}.`,
+        data: {
+          tripId,
+          tripTitle: tripRow?.title ?? null,
+          role,
+          invitedBy: user.id,
+          link: `/canvas/join/${data?.invite_token}`,
+        },
+      });
+    }
+
     res.status(201).json({ member: data, inviteLink });
   }),
 );
@@ -1236,6 +1284,20 @@ router.post(
       invited_email: user.email ?? null,
       role: 'editor',
       accepted_at: new Date().toISOString(),
+    });
+
+    // Tell the new owner.
+    const { data: tripRow } = await supabase
+      .from('trips')
+      .select('title')
+      .eq('id', tripId)
+      .single();
+    await createNotification({
+      userId: member.user_id,
+      type: 'ownership_transferred',
+      title: 'You are now the owner of a trip',
+      body: `Ownership of "${tripRow?.title ?? 'a trip'}" was transferred to you.`,
+      data: { tripId, tripTitle: tripRow?.title ?? null, previousOwnerId: user.id },
     });
 
     res.json({ success: true, newOwnerUserId: member.user_id });
