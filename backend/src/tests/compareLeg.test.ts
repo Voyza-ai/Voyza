@@ -28,6 +28,12 @@ jest.mock('../services/supabase', () => {
       insertedRows.push(...(Array.isArray(rows) ? rows : [rows]));
       return Promise.resolve({ data: null });
     });
+    // The cache write is an upsert (007 made the leg key unique); record the
+    // same way so assertions about what gets persisted still see the rows.
+    chain.upsert = jest.fn((rows: any[]) => {
+      insertedRows.push(...(Array.isArray(rows) ? rows : [rows]));
+      return Promise.resolve({ data: null });
+    });
     // Make limit resolve like a promise too
     chain.then = (fn: any) => Promise.resolve({ data: [] }).then(fn);
     return chain;

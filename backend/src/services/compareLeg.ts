@@ -292,31 +292,26 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
 
   if (cacheRows.length > 0) {
     try {
-      const { error } = await supabase.from('leg_price_cache').insert(cacheRows);
+      // UPSERT, not insert. 007_leg_price_cache_unique.sql makes
+      // (origin, destination, travel_date, mode, travelers) unique, so a plain
+      // insert is rejected 23505 the moment a leg is searched again — and the
+      // case that bites is an EXPIRED row: the read filters on
+      // `expires_at >= now()` and misses it, the providers are queried again,
+      // and the fresh price can then never be written because the stale row
+      // still occupies the key. The leg's cache would be dead from its first
+      // expiry onward. Conflicting on the same key overwrites the stale row
+      // in place, which also removes the need for the old prune-after-insert.
+      const { error } = await supabase
+        .from('leg_price_cache')
+        .upsert(cacheRows, { onConflict: 'origin,destination,travel_date,mode,travelers' });
       if (error) {
         // supabase-js reports failures in `error`, it doesn't throw — the old
         // bare try/catch swallowed nothing and told us nothing.
-        logger.warn('leg_price_cache insert failed (non-fatal)', {
+        logger.warn('leg_price_cache upsert failed (non-fatal)', {
           errMessage: error.message,
           origin,
           destination,
         });
-      } else {
-        // Supersede our own older rows for exactly the keys we just wrote.
-        // The write is an insert, not an upsert, because leg_price_cache has
-        // no unique key to conflict on (007_leg_price_cache_unique.sql adds
-        // one, unapplied). Without this prune every repeat search of a leg
-        // inside the 2h window left another row behind and the table grew
-        // without bound. It runs AFTER the insert and only on strictly-older
-        // rows, so it can never leave a leg with no cached price.
-        await supabase
-          .from('leg_price_cache')
-          .delete()
-          .eq('origin', origin.toLowerCase())
-          .eq('destination', destination.toLowerCase())
-          .eq('travel_date', date)
-          .in('mode', cacheRows.map((r) => r.mode))
-          .lt('fetched_at', fetchedAt);
       }
     } catch (err: any) {
       logger.warn('leg_price_cache write failed (non-fatal)', {

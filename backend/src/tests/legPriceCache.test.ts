@@ -62,6 +62,18 @@ function makeChain(): any {
       for (const r of newRows) rows.push({ id: `row-${rows.length + 1}`, ...r });
       return Promise.resolve({ data: newRows });
     },
+    // Mirrors 007's unique key: a row matching on
+    // (origin, destination, travel_date, mode, travelers) is REPLACED, not
+    // duplicated — which is what keeps an expired leg refreshable.
+    upsert: (newRows: Row[]) => {
+      const KEY = ['origin', 'destination', 'travel_date', 'mode', 'travelers'];
+      for (const r of newRows) {
+        const i = rows.findIndex((e) => KEY.every((k) => e[k] === r[k]));
+        if (i >= 0) rows[i] = { ...rows[i], ...r };
+        else rows.push({ id: `row-${rows.length + 1}`, ...r });
+      }
+      return Promise.resolve({ data: newRows });
+    },
   };
   return chain;
 }
