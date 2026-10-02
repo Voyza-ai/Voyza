@@ -8,14 +8,32 @@ jest.mock('../config/env', () => ({
 }));
 
 jest.mock('../services/supabase', () => {
+  // Rows handed to .insert() are recorded so tests can assert on what
+  // actually gets written to leg_price_cache.
+  const insertedRows: any[] = [];
   const createChain = (): any => {
     const chain: any = {};
-    const methods = ['select', 'eq', 'gte', 'limit', 'single', 'insert', 'upsert', 'order'];
+    const methods = [
+      'select', 'eq', 'gte', 'limit', 'single', 'insert', 'upsert', 'order',
+      // compareLeg now prunes superseded cache rows after a successful
+      // insert, so the chain has to answer delete/in/lt too.
+      'delete', 'in', 'lt',
+    ];
     for (const m of methods) {
       chain[m] = jest.fn().mockReturnValue(chain);
     }
     chain.single = jest.fn().mockResolvedValue({ data: null });
     chain.limit = jest.fn().mockReturnValue(chain);
+    chain.insert = jest.fn((rows: any[]) => {
+      insertedRows.push(...(Array.isArray(rows) ? rows : [rows]));
+      return Promise.resolve({ data: null });
+    });
+    // The cache write is an upsert (007 made the leg key unique); record the
+    // same way so assertions about what gets persisted still see the rows.
+    chain.upsert = jest.fn((rows: any[]) => {
+      insertedRows.push(...(Array.isArray(rows) ? rows : [rows]));
+      return Promise.resolve({ data: null });
+    });
     // Make limit resolve like a promise too
     chain.then = (fn: any) => Promise.resolve({ data: [] }).then(fn);
     return chain;
@@ -24,6 +42,7 @@ jest.mock('../services/supabase', () => {
     getSupabase: () => ({
       from: () => createChain(),
     }),
+    __insertedRows: insertedRows,
   };
 });
 
@@ -39,6 +58,7 @@ jest.mock('../services/trains', () => ({
 import { compareLeg } from '../services/compareLeg';
 const { searchFlights } = require('../services/flights');
 const { searchTrains } = require('../services/trains');
+const { __insertedRows: insertedRows } = require('../services/supabase');
 
 describe('compareLeg', () => {
   beforeEach(() => {
@@ -147,6 +167,54 @@ describe('compareLeg', () => {
     });
 
     expect(result.recommendation).toBe('flight');
+  });
+
+  it('refuses to let a bogus flight duration win the speed tiebreak', async () => {
+    // -720 is what NRT→HNL produced when local-time timestamps were
+    // subtracted across the date line. -720 + 180 overhead = -540 "minutes"
+    // door-to-door beat every train and took the within-10% price tiebreak.
+    searchFlights.mockResolvedValue([
+      { id: 'f1', price: 100, durationMinutes: -720, carrier: 'A', carrierCode: 'A', departure: '', arrival: '', currency: 'USD', stops: 0, bookingUrl: '', raw: {} },
+    ]);
+    searchTrains.mockResolvedValue([
+      { id: 't1', price: 95, durationMinutes: 120, operator: 'B', trainType: 'IC', departure: '', arrival: '', currency: 'EUR', bookingUrl: '', limitedCoverage: false },
+    ]);
+
+    const result = await compareLeg({
+      origin: 'A',
+      destination: 'B',
+      date: '2026-06-01',
+      travelers: 1,
+    });
+
+    // Can't compare on time, so no "fastest" claim and the tiebreak is a
+    // no-op — the cheaper option (the train, at $95) stands.
+    expect(result.fastest).toBe('unavailable');
+    expect(result.cheapest).toBe('train');
+    expect(result.recommendation).toBe('train');
+    expect(result.timeDifference).toBe(0);
+  });
+
+  it('never persists a non-positive duration to leg_price_cache', async () => {
+    insertedRows.length = 0;
+
+    searchFlights.mockResolvedValue([
+      { id: 'f1', price: 100, durationMinutes: -720, carrier: 'A', carrierCode: 'A', departure: '', arrival: '', currency: 'USD', stops: 0, bookingUrl: '', raw: {} },
+    ]);
+    searchTrains.mockResolvedValue([]);
+
+    await compareLeg({
+      origin: 'A',
+      destination: 'B',
+      date: '2026-06-01',
+      travelers: 1,
+    });
+
+    const flightRow = insertedRows.find((r: any) => r.mode === 'flight');
+    expect(flightRow).toBeDefined();
+    // The row is still cached for its price; only the duration is withheld.
+    expect(flightRow.price).toBe(100);
+    expect(flightRow.duration_minutes).toBeNull();
   });
 
   it('returns unavailable when both are unavailable', async () => {

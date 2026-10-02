@@ -23,6 +23,16 @@ async function fetchWithTimeout(url: string, timeoutMs = DB_TIMEOUT_MS): Promise
 
 export type TrainOffer = {
   id: string;
+  /**
+   * PARTY TOTAL in USD — the fare for all `travelers` on the booking, or
+   * null when no provider returned a fare. This is the unit every price
+   * crosses the API boundary in: Duffel's `total_amount` is already the
+   * whole passenger set, and the frontend's per-person toggle just divides
+   * by `travelers` (frontend/lib/tripTotals.ts `displayAmount`).
+   *
+   * Providers quote ONE adult — see `ProviderTrainOffer`. `searchTrains` is
+   * the only place the two units meet.
+   */
   price: number | null;
   currency: string;
   departure: string;
@@ -30,7 +40,16 @@ export type TrainOffer = {
   durationMinutes: number;
   operator: string;
   trainType: string;
-  bookingUrl: string;
+  /**
+   * Always null today. Neither rail provider returns a booking link at the
+   * search/offer stage — All Aboard confirmed it in writing: booking is an
+   * API flow (createBooking → createOrder → createPayment), and only the
+   * last step yields a URL. We used to fill this with the providers'
+   * marketing homepages, which sent users to a page where they had to start
+   * their search over. null lets the UI show its no-link state instead.
+   * See ROADMAP.md → "Real rail booking (All Aboard)".
+   */
+  bookingUrl: string | null;
   /**
    * True when we can't fully price-compare this journey — currently means
    * the provider returned no fare. Derived from REAL data, not a country
@@ -38,6 +57,25 @@ export type TrainOffer = {
    * without can't, so the optimizer should lean on the priced option.
    */
   limitedCoverage: boolean;
+};
+
+/**
+ * What a train provider returns, named for its unit. Every rail source we
+ * query quotes a single adult: All Aboard asks for `[{type: ADULT}]`, and
+ * the Deutsche Bahn /journeys endpoint takes no passenger count at all. So
+ * a provider deliberately cannot produce a `TrainOffer` — it has no `price`
+ * field to fill in — and `searchTrains` is the only place per-person is
+ * scaled to the party total. That makes a double-multiply a type error
+ * rather than a convention someone has to remember.
+ *
+ * If a provider is ever asked for the real party fare (All Aboard's
+ * getJourneyOffer does take a passengers array, so it can be), that
+ * provider must NOT go through `toPartyTotal` — declare the unit on its
+ * registry entry at that point. Today every provider is per-person.
+ */
+export type ProviderTrainOffer = Omit<TrainOffer, 'price'> & {
+  /** ONE adult's fare in USD, or null when the provider returned no fare. */
+  pricePerPerson: number | null;
 };
 
 /**
@@ -142,7 +180,7 @@ interface TrainProvider {
   id: string;
   /** 'none' skips this provider for the route; anything else queries it. */
   coverage(params: SearchTrainsParams): Coverage;
-  search(params: SearchTrainsParams): Promise<TrainOffer[]>;
+  search(params: SearchTrainsParams): Promise<ProviderTrainOffer[]>;
 }
 
 /**
@@ -150,7 +188,7 @@ interface TrainProvider {
  * the real API result + station-match filter decide whether there's actually
  * a journey — no hardcoded country list claiming coverage we don't have.
  */
-async function searchDeutscheBahn(params: SearchTrainsParams): Promise<TrainOffer[]> {
+async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderTrainOffer[]> {
   const { origin, destination, date } = params;
 
   try {
@@ -196,41 +234,60 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<TrainOffe
       return ok;
     });
 
-    const mapped = journeys.map((journey: any, idx: number) => {
-      const legs = journey.legs ?? [];
-      const firstLeg = legs[0];
-      const lastLeg = legs[legs.length - 1];
+    const mapped: ProviderTrainOffer[] = journeys.map(
+      (journey: any, idx: number): ProviderTrainOffer => {
+        const legs = journey.legs ?? [];
+        const firstLeg = legs[0];
+        const lastLeg = legs[legs.length - 1];
 
-      const depTime = firstLeg?.departure ? new Date(firstLeg.departure) : new Date(date);
-      const arrTime = lastLeg?.arrival ? new Date(lastLeg.arrival) : depTime;
-      const durationMinutes = Math.round((arrTime.getTime() - depTime.getTime()) / 60000);
+        const depTime = firstLeg?.departure ? new Date(firstLeg.departure) : new Date(date);
+        const arrTime = lastLeg?.arrival ? new Date(lastLeg.arrival) : depTime;
+        const durationMinutes = Math.round((arrTime.getTime() - depTime.getTime()) / 60000);
 
-      const price = journey.price?.amount ? parseFloat(journey.price.amount) : null;
-      const operator = firstLeg?.line?.operator?.name ?? firstLeg?.line?.name ?? 'Unknown';
-      const trainType = firstLeg?.line?.productName ?? firstLeg?.line?.product ?? 'train';
+        // Per-person by construction: the /journeys URL above carries no
+        // passenger count, so DB REST always quotes one adult. There is no
+        // way to ask it for a party fare — `searchTrains` scales it.
+        const pricePerPerson = journey.price?.amount ? parseFloat(journey.price.amount) : null;
+        const operator = firstLeg?.line?.operator?.name ?? firstLeg?.line?.name ?? 'Unknown';
+        const trainType = firstLeg?.line?.productName ?? firstLeg?.line?.product ?? 'train';
 
-      return {
-        id: `db-${fromId}-${toId}-${idx}`,
-        price,
-        currency: journey.price?.currency ?? 'EUR',
-        departure: firstLeg?.departure ?? '',
-        arrival: lastLeg?.arrival ?? '',
-        durationMinutes,
-        operator,
-        trainType,
-        bookingUrl: 'https://www.bahn.de/buchung/start',
-        // Honest, data-derived: a journey with no fare can't be price-compared.
-        limitedCoverage: price == null,
-      };
-    });
+        return {
+          id: `db-${fromId}-${toId}-${idx}`,
+          pricePerPerson,
+          currency: journey.price?.currency ?? 'EUR',
+          departure: firstLeg?.departure ?? '',
+          arrival: lastLeg?.arrival ?? '',
+          durationMinutes,
+          operator,
+          trainType,
+          bookingUrl: null,
+          // Honest, data-derived: a journey with no fare can't be price-compared.
+          limitedCoverage: pricePerPerson == null,
+        };
+      },
+    );
 
-    // Convert all prices to USD (DB REST returns EUR)
+    // Convert all prices to USD (DB REST returns EUR). If we have no rate for
+    // the fare's currency we keep the journey but drop the FARE:
+    // `pricePerPerson: null` + `limitedCoverage: true` is exactly the
+    // existing, documented "can't be price-compared" state, so compareLeg
+    // already leans on the priced option and the card stops short of
+    // inventing a dollar figure. Relabelling the raw amount 'USD' would
+    // instead let it win the cheapest comparison.
     const { convertToUsd } = await import('./currency');
     return await Promise.all(
-      mapped.map(async (t: any) => {
-        if (t.price == null || !t.currency || t.currency === 'USD') return t;
-        const usd = await convertToUsd(t.price, t.currency);
-        return { ...t, price: usd, currency: 'USD' };
+      mapped.map(async (t) => {
+        if (t.pricePerPerson == null || !t.currency || t.currency === 'USD') return t;
+        const usd = await convertToUsd(t.pricePerPerson, t.currency);
+        if (usd === null) {
+          logger.warn('Train fare unpriced — no USD rate for its currency', {
+            currency: t.currency,
+            origin,
+            destination,
+          });
+          return { ...t, pricePerPerson: null, limitedCoverage: true };
+        }
+        return { ...t, pricePerPerson: usd, currency: 'USD' };
       }),
     );
   } catch (err: any) {
@@ -261,12 +318,136 @@ const trainProviders: TrainProvider[] = [
 ];
 
 /**
+ * Scale a provider's per-person fare into the party total that leaves the
+ * backend. THE ONLY PLACE rail prices get multiplied — providers hand over
+ * `pricePerPerson`, this hands back `price`, and the compiler won't let a
+ * provider skip the step.
+ *
+ * Why multiply here rather than ask each provider for N passengers: DB REST
+ * can't be asked at all, and a mix of asked-for and multiplied providers is
+ * exactly how a double-multiply ships. European rail is priced per seat
+ * below group-booking sizes, so N × the adult fare is the real party price.
+ *
+ * `travelers` is floored at 1 on purpose: a zero/NaN count would otherwise
+ * multiply every fare to $0, and a $0 leg reads as a free train instead of
+ * a data gap (the same trap the price-0 sort in legOptions.ts avoids).
+ */
+function toPartyTotal(offer: ProviderTrainOffer, travelers: number): TrainOffer {
+  const { pricePerPerson, ...rest } = offer;
+  const party = Math.max(1, Math.floor(travelers) || 1);
+  return {
+    ...rest,
+    price:
+      pricePerPerson == null ? null : Math.round(pricePerPerson * party * 100) / 100,
+  };
+}
+
+/**
+ * Global cap on concurrent train searches — the same gate flights.ts puts
+ * in front of Duffel, sized for a coarser unit of work. One slot here is a
+ * whole route's provider fan-out: All Aboard spends up to 6 requests per
+ * route (2 location lookups, 1 getJourneys, 3 getJourneyOffer) and
+ * Deutsche Bahn another 3, where MAX_CONCURRENT_SEARCHES gates a single
+ * Duffel call — so 8 slots is roughly the same order of concurrent
+ * provider requests as that 6.
+ *
+ * Why it's needed: the optimizer fans out over every candidate ordering
+ * (120 orderings × 4 legs = 480 concurrent compareLeg calls for a 5-city
+ * trip). The dedupe below collapses those to ~80 distinct legs, but
+ * ungated those 80 still fire ~240 getJourneyOffer calls at once — the
+ * request allaboard.ts documents as "30s+ cold" — and the provider sheds
+ * the burst, so the legs come back with no fare at all.
+ */
+const MAX_CONCURRENT_TRAIN_SEARCHES = 8;
+let activeTrainSearches = 0;
+const trainSearchWaiters: Array<() => void> = [];
+
+async function withTrainSearchSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (activeTrainSearches >= MAX_CONCURRENT_TRAIN_SEARCHES) {
+    await new Promise<void>((resolve) => trainSearchWaiters.push(resolve));
+  }
+  activeTrainSearches++;
+  try {
+    return await fn();
+  } finally {
+    activeTrainSearches--;
+    trainSearchWaiters.shift()?.();
+  }
+}
+
+/**
+ * Dedupe + short-TTL cache for train searches — the same pattern
+ * flights.ts uses for Duffel, for the same reason. The optimizer scores
+ * many orderings that all need the SAME leg (same origin/destination/date):
+ * a 5-city trip makes 480 searchTrains calls for 80 distinct legs. No cache
+ * downstream can absorb that — compareLeg's Supabase read happens before
+ * any of its writes, and All Aboard's location cache is keyed per city, not
+ * per leg. Concurrent duplicates share one in-flight promise; failures are
+ * evicted immediately so retries stay possible.
+ */
+const TRAIN_SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
+const trainSearchCache = new Map<string, { at: number; promise: Promise<TrainOffer[]> }>();
+
+function cachedTrainSearch(
+  key: string,
+  run: () => Promise<TrainOffer[]>,
+): Promise<TrainOffer[]> {
+  const hit = trainSearchCache.get(key);
+  if (hit && Date.now() - hit.at < TRAIN_SEARCH_CACHE_TTL_MS) return hit.promise;
+
+  const promise = run();
+  trainSearchCache.set(key, { at: Date.now(), promise });
+  promise.catch(() => {
+    // Don't cache failures — the next caller should get a fresh attempt.
+    if (trainSearchCache.get(key)?.promise === promise) trainSearchCache.delete(key);
+  });
+
+  // Opportunistic sweep so long-running processes don't accumulate entries.
+  if (trainSearchCache.size > 500) {
+    const cutoff = Date.now() - TRAIN_SEARCH_CACHE_TTL_MS;
+    for (const [k, v] of trainSearchCache) {
+      if (v.at < cutoff) trainSearchCache.delete(k);
+    }
+  }
+  return promise;
+}
+
+/** Exposed for tests. */
+export function clearTrainSearchCache(): void {
+  trainSearchCache.clear();
+}
+
+/**
  * Query every train provider that covers the route, in parallel, and merge.
  * A provider failure is non-fatal (returns []), so one outage can't take
  * down the others. Empty result = no real train data → caller shows the
  * honest "no live train data" state.
+ *
+ * Deduped and concurrency-gated (see above): the optimizer asks for the same
+ * leg once per candidate ordering, and the raw fan-out swamps both providers.
+ *
+ * Fares arrive per-person from the providers and leave as party totals —
+ * see `toPartyTotal`. The cache key carries `travelers`, so a normalised
+ * result is only ever reused for the same party size.
  */
 export async function searchTrains(params: SearchTrainsParams): Promise<TrainOffer[]> {
+  const { origin, destination, date, travelers, originCountry, destinationCountry } = params;
+  // Both providers resolve city names case-insensitively, so normalise them
+  // into the key — otherwise "Rome" and "rome" each pay for their own search.
+  const key = [
+    origin.toLowerCase(),
+    destination.toLowerCase(),
+    date,
+    travelers,
+    originCountry ?? '',
+    destinationCountry ?? '',
+  ].join('|');
+  return cachedTrainSearch(key, () =>
+    withTrainSearchSlot(() => searchTrainsUncached(params)),
+  );
+}
+
+async function searchTrainsUncached(params: SearchTrainsParams): Promise<TrainOffer[]> {
   const active = trainProviders.filter((p) => p.coverage(params) !== 'none');
   const results = await Promise.all(
     active.map((p) =>
@@ -275,9 +456,9 @@ export async function searchTrains(params: SearchTrainsParams): Promise<TrainOff
           provider: p.id,
           message: err?.message,
         });
-        return [] as TrainOffer[];
+        return [] as ProviderTrainOffer[];
       }),
     ),
   );
-  return results.flat();
+  return results.flat().map((offer) => toPartyTotal(offer, params.travelers));
 }

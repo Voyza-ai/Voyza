@@ -10,7 +10,12 @@ jest.mock('../config/env', () => ({
 jest.mock('../services/supabase', () => {
   const createChain = (): any => {
     const chain: any = {};
-    const methods = ['select', 'eq', 'gte', 'limit', 'single', 'insert', 'upsert', 'order'];
+    const methods = [
+      'select', 'eq', 'gte', 'limit', 'single', 'insert', 'upsert', 'order',
+      // compareLeg now prunes superseded cache rows after a successful
+      // insert, so the chain has to answer delete/in/lt too.
+      'delete', 'in', 'lt',
+    ];
     for (const m of methods) {
       chain[m] = jest.fn().mockReturnValue(chain);
     }

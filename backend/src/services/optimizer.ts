@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
 import { getOriginAirports } from '../data/originAirports';
+import { addDays, clampToFuture, todayIso } from '../utils/dates';
 
 type CityInput = {
   name: string;
@@ -27,7 +28,16 @@ type OptimizedLeg = {
 
 type OptimizedRoute = {
   ordering: string[];
+  /** Sum of the prices we actually found. A leg with no offer adds nothing. */
   totalCost: number;
+  /**
+   * Ranking-only cost: `totalCost` plus UNAVAILABLE_LEG_PENALTY for every
+   * leg — inter-city OR home — whose search came back empty. Sorting on
+   * this instead of totalCost is what stops an ordering with a missing
+   * $700 outbound from beating one where every flight exists. Never shown
+   * to the user; the frontend reads totalCost, which stays real money.
+   */
+  rankCost: number;
   legs: OptimizedLeg[];
 };
 
@@ -41,9 +51,19 @@ export type DateShiftSuggestion = {
   dayOffset: number;
   /** ISO date after applying the offset. */
   newStartDate: string;
-  /** Total leg cost with the shifted dates. */
+  /**
+   * Inter-city leg total with the shifted dates. Home flights are NOT
+   * included — see `savings`.
+   */
   newTotalCost: number;
-  /** USD saved compared to the user's requested start date. */
+  /**
+   * USD saved on the inter-city legs compared to the user's requested start
+   * date. Both sides of that subtraction are the same legs on the same
+   * per-city night schedule, so it is a like-for-like number. Home flights
+   * are deliberately left out of both sides: re-pricing them for four extra
+   * start dates is eight more Duffel searches right before buildHomeLeg
+   * needs the rate-limit window.
+   */
   savings: number;
 };
 
@@ -136,6 +156,28 @@ type OptimizeParams = {
 const DEFAULT_NIGHTS_PER_CITY = 2;
 
 /**
+ * Ranking penalty for a leg whose search came back with nothing (neither
+ * flight nor train for an inter-city hop; no offers at all for a home leg).
+ * Without it a missing leg costs `Math.min(Infinity, Infinity) → 0`, so the
+ * optimizer happily picks a "$200 trip" with two nonexistent segments over
+ * a $900 one where everything exists. Large enough to swamp any real fare
+ * difference, and it only ever lands in `rankCost` — the user-facing
+ * totalCost stays the sum of prices we actually found.
+ */
+const UNAVAILABLE_LEG_PENALTY = 5000;
+
+/**
+ * Hard cap on how many origin airports one home-leg search fans out to.
+ * Each entry is its own Duffel offer-request and the array comes from the
+ * caller: /api/optimize and /api/flights/home-legs both take
+ * `originAirports` straight from the request body, and their schemas bound
+ * each string's length, not the array's. originAirports.ts documents 1-3
+ * codes per metro ("keep the array <=3 long"), so anything past the third
+ * is a mistake or abuse.
+ */
+const MAX_HOME_AIRPORTS = 3;
+
+/**
  * Distribute a total night count across N cities.
  *
  * Spreads nights as evenly as possible, putting leftover nights on the
@@ -167,40 +209,6 @@ function getPermutations<T>(arr: T[]): T[][] {
     }
   }
   return result;
-}
-
-function nearestNeighborRoute(
-  cities: CityInput[],
-  startIdx: number,
-  distanceFn: (a: string, b: string) => number,
-): string[] {
-  const visited = new Set<number>();
-  const route: string[] = [];
-  let current = startIdx;
-
-  visited.add(current);
-  route.push(cities[current].name);
-
-  while (visited.size < cities.length) {
-    let nearest = -1;
-    let nearestDist = Infinity;
-
-    for (let i = 0; i < cities.length; i++) {
-      if (visited.has(i)) continue;
-      const dist = distanceFn(cities[current].name, cities[i].name);
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = i;
-      }
-    }
-
-    if (nearest === -1) break;
-    visited.add(nearest);
-    route.push(cities[nearest].name);
-    current = nearest;
-  }
-
-  return route;
 }
 
 /**
@@ -247,31 +255,67 @@ function isCountryClustered(ordering: string[], cityMap: Map<string, CityInput>)
 }
 
 /**
- * Advance a date by N days without mutating the input. Returns an
- * ISO YYYY-MM-DD string.
+ * Candidate orderings for trips too large to permute (6 cities = 720
+ * orderings, each one a full round of leg searches).
+ *
+ * The previous heuristic ran nearest-neighbor over
+ * `|hash(nameA) - hash(nameB)|` — a pseudo-distance with no relation to
+ * geography — and, unlike the ≤5-city path, never applied
+ * isCountryClustered. Six cities across Japan and China came back
+ * interleaved (Tokyo → Beijing → Osaka → Shanghai → …): exactly the shape
+ * the clustering filter exists to reject.
+ *
+ * There are no city coordinates in the backend, so rather than invent a
+ * distance we build up to three orderings that are country-clustered BY
+ * CONSTRUCTION and let the real leg prices rank them:
+ *
+ *   1. country blocks in the order the user first mentioned them
+ *   2. the whole sequence reversed (still clustered — different first and
+ *      last city, so different home legs)
+ *   3. the largest country block first (the long stay up front)
+ *
+ * Cities whose country we don't know form one trailing block, so they stay
+ * contiguous instead of splitting a known one. Duplicates are dropped —
+ * with a single country block the three collapse into two sequences, and
+ * each duplicate would cost another full round of searches.
  */
-function addDays(iso: string, days: number): string {
-  const d = new Date(iso);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
-}
-
-/**
- * Ensure a date is not in the past. Flight/train APIs return empty results
- * (or outright errors) for past dates, so when the user's chosen start date
- * + per-leg offset lands before today we shift it to tomorrow to keep the
- * optimizer running instead of silently failing with zero-cost legs.
- */
-export function clampToFuture(iso: string): string {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const candidate = new Date(iso);
-  if (candidate.getTime() < today.getTime()) {
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
+function countryGroupedOrderings(cities: CityInput[]): string[][] {
+  const UNKNOWN = '??';
+  const blocks: string[][] = [];
+  const byCountry = new Map<string, string[]>();
+  for (const city of cities) {
+    const key = countryOf(city) ?? UNKNOWN;
+    let block = byCountry.get(key);
+    if (!block) {
+      block = [];
+      byCountry.set(key, block);
+      blocks.push(block);
+    }
+    block.push(city.name);
   }
-  return iso;
+
+  const unknownBlock = byCountry.get(UNKNOWN);
+  const inOrder = unknownBlock
+    ? [...blocks.filter((b) => b !== unknownBlock), unknownBlock]
+    : blocks;
+  // Stable sort — same-size blocks keep first-mention order.
+  const largestFirst = [...inOrder].sort((a, b) => b.length - a.length);
+
+  const candidates: string[][] = [
+    inOrder.flat(),
+    inOrder.flat().reverse(),
+    largestFirst.flat(),
+  ];
+
+  const seen = new Set<string>();
+  const unique: string[][] = [];
+  for (const candidate of candidates) {
+    const key = candidate.join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(candidate);
+  }
+  return unique;
 }
 
 /**
@@ -331,77 +375,94 @@ async function scoreRoute(
 
   const resolvedLegs = await Promise.all(legPromises);
 
-  // Heavy penalty for legs where neither flight nor train came back. Without
-  // it `Math.min(Infinity, Infinity) → Infinity → 0` made broken legs look
-  // FREE, so the optimizer would happily pick a "$200 trip" with two missing
-  // segments over a $900 one where everything actually exists. Penalty is
-  // large enough to swamp any real fare difference but is only used for
-  // ranking — the user-facing trip totalCost is recomputed downstream from
-  // real prices, so this never leaks into the displayed bill.
-  const UNAVAILABLE_LEG_PENALTY = 5000;
+  // Two totals, deliberately: `totalCost` is real money (a leg we couldn't
+  // price adds nothing, which is also all the UI can show for it), while
+  // `rankCost` charges UNAVAILABLE_LEG_PENALTY for it so broken orderings
+  // sort last instead of looking free.
+  let totalCost = 0;
+  let rankCost = 0;
+  for (const leg of resolvedLegs) {
+    if (leg.cost === Infinity) {
+      rankCost += UNAVAILABLE_LEG_PENALTY;
+    } else {
+      totalCost += leg.cost;
+      rankCost += leg.cost;
+    }
+  }
 
-  const totalCost = resolvedLegs.reduce((sum, leg) => {
-    const cost = leg.cost === Infinity ? UNAVAILABLE_LEG_PENALTY : leg.cost;
-    return sum + cost;
-  }, 0);
-
-  return { ordering, totalCost, legs: resolvedLegs };
+  return { ordering, totalCost, rankCost, legs: resolvedLegs };
 }
 
 /**
  * Probe a handful of ±1 / ±2 day offsets from the user's requested start
  * date and return the biggest-savings offset (if any saves > threshold).
  * Runs in parallel so the wait is ~the time of one extra scoreRoute call.
+ *
+ * `baselineLegsCost` must be the winning route's inter-city leg total at
+ * the requested start date, priced on the same `nightsArray` we probe with
+ * (the caller guarantees it is > 0 and that every leg priced). It used to
+ * be the route's full totalCost — home flights included — while the probe
+ * re-scored the inter-city legs only, on a 2-nights-per-city schedule the
+ * user was never going to travel. The gap between those two numbers is
+ * mostly a transatlantic airfare, so the tip promised several hundred (or
+ * thousand) dollars for moving the trip one day.
  */
 async function findDateShiftSuggestion(
   bestOrdering: string[],
   requestedStartDate: string,
-  baselineCost: number,
+  baselineLegsCost: number,
   travelers: number,
   cityMap: Map<string, CityInput>,
+  nightsArray: number[],
 ): Promise<DateShiftSuggestion | undefined> {
   const offsets = [-2, -1, 1, 2];
 
   // Skip offsets that would land in the past (users can't book for yesterday)
-  const today = new Date().toISOString().split('T')[0];
-  const candidateOffsets = offsets.filter((o) => {
-    const candidate = addDays(requestedStartDate, o);
-    return candidate >= today;
-  });
+  const today = todayIso();
+  const candidateOffsets = offsets.filter((o) => addDays(requestedStartDate, o) >= today);
 
   const shifted = await Promise.all(
     candidateOffsets.map(async (offset) => {
       const startDate = addDays(requestedStartDate, offset);
       try {
-        const route = await scoreRoute(bestOrdering, startDate, travelers, cityMap);
-        return { offset, startDate, cost: route.totalCost };
+        // Same nights array as the real trip → the same leg dates, just
+        // shifted, so these searches reuse the caches the scoring pass
+        // warmed instead of pricing dates nobody will travel.
+        const route = await scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsArray);
+        return { offset, startDate, route };
       } catch {
         return null;
       }
     }),
   );
 
-  const valid = shifted.filter((s): s is { offset: number; startDate: string; cost: number } => s !== null && s.cost > 0);
+  // Only an offset where EVERY leg priced can be compared with the
+  // baseline — an unavailable leg contributes $0 to totalCost, which would
+  // otherwise read as that leg's whole fare "saved".
+  const valid = shifted.filter(
+    (s): s is { offset: number; startDate: string; route: OptimizedRoute } =>
+      s !== null && s.route.totalCost > 0 && s.route.legs.every((leg) => leg.cost !== Infinity),
+  );
   if (valid.length === 0) return undefined;
 
   // Pick the cheapest offset
-  valid.sort((a, b) => a.cost - b.cost);
+  valid.sort((a, b) => a.route.totalCost - b.route.totalCost);
   const best = valid[0];
-  const savings = baselineCost - best.cost;
+  const savings = baselineLegsCost - best.route.totalCost;
 
   // Only surface a suggestion if the savings are meaningful:
   // - at least $50 absolute savings, AND
   // - at least 5% of the baseline cost
   const MIN_SAVINGS_USD = 50;
   const MIN_SAVINGS_PCT = 0.05;
-  if (savings < MIN_SAVINGS_USD || savings / baselineCost < MIN_SAVINGS_PCT) {
+  if (savings < MIN_SAVINGS_USD || savings / baselineLegsCost < MIN_SAVINGS_PCT) {
     return undefined;
   }
 
   return {
     dayOffset: best.offset,
     newStartDate: best.startDate,
-    newTotalCost: Math.round(best.cost * 100) / 100,
+    newTotalCost: Math.round(best.route.totalCost * 100) / 100,
     savings: Math.round(savings * 100) / 100,
   };
 }
@@ -436,6 +497,22 @@ type HomeFlightOffer = {
   destAirport: string;
 };
 
+/**
+ * Normalize, dedupe and cap a caller-supplied origin airport list. Every
+ * home-leg search goes through this, so the cap holds for /api/optimize
+ * and /api/flights/home-legs alike.
+ */
+function homeAirportsFor(originAirports: string[]): string[] {
+  const codes = new Set<string>();
+  for (const raw of originAirports) {
+    const iata = raw.trim().toUpperCase();
+    if (!iata) continue;
+    codes.add(iata);
+    if (codes.size >= MAX_HOME_AIRPORTS) break;
+  }
+  return [...codes];
+}
+
 async function searchHomeFlights(params: {
   originAirports: string[];
   tripCity: string;
@@ -445,7 +522,10 @@ async function searchHomeFlights(params: {
   /** Max offers to return (sorted cheapest-first). Default 1 (legacy behavior). */
   limit?: number;
 }): Promise<HomeFlightOffer[]> {
-  const { originAirports, tripCity, date, travelers, reverse, limit = 1 } = params;
+  const { tripCity, date, travelers, reverse, limit = 1 } = params;
+  // Cap the fan-out — one Duffel offer-request per airport, and the array
+  // comes straight from the request body.
+  const originAirports = homeAirportsFor(params.originAirports);
   if (originAirports.length === 0) return [];
 
   let cityIata: string;
@@ -511,6 +591,13 @@ async function searchHomeFlights(params: {
  * cheapest for LGA/EWR). The full multi-airport fan-out is reserved
  * for buildHomeLeg on just the winning permutation. Drops the total
  * call count by ~3x for multi-airport origins like NYC/LHR/Tokyo.
+ *
+ * Returns Infinity — not 0 — when nothing came back (IATA lookup failed,
+ * every per-airport search threw, or there simply are no offers), the
+ * same way scoreRoute reports an unpriceable inter-city leg. Callers must
+ * charge UNAVAILABLE_LEG_PENALTY for it: the old `?? 0` scored a
+ * nonexistent home flight as FREE, so the "cheapest" ordering was often
+ * the one whose outbound doesn't exist.
  */
 async function estimateHomeLegCost(params: {
   originAirports: string[];
@@ -527,7 +614,7 @@ async function estimateHomeLegCost(params: {
     reverse: params.reverse ?? false,
     limit: 1,
   });
-  return found[0]?.price ?? 0;
+  return found[0]?.price ?? Infinity;
 }
 
 /**
@@ -562,7 +649,9 @@ export async function buildHomeLeg(params: {
   if (offers.length === 0 && params.originCity) {
     try {
       const metro = await getIataCode(params.originCity);
-      if (metro && !params.originAirports.includes(metro)) {
+      // Compare against the capped list — with a longer array the metro
+      // code could sit past the cap, i.e. never actually searched.
+      if (metro && !homeAirportsFor(params.originAirports).includes(metro.toUpperCase())) {
         offers = await searchHomeFlights({
           originAirports: [metro],
           tripCity: params.destinationCity,
@@ -690,15 +779,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       logger.warn('Country clustering filter removed all orderings — falling back');
     }
   } else {
-    // Nearest-neighbor heuristic with 3 seeds for larger trips.
-    const simpleDistFn = (a: string, b: string) => {
-      const hash = (s: string) =>
-        s.split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0);
-      return Math.abs(hash(a) - hash(b));
-    };
-
-    const seeds = [0, Math.floor(cities.length / 2), cities.length - 1];
-    orderings = seeds.map((seed) => nearestNeighborRoute(cities, seed, simpleDistFn));
+    // Too many cities to permute — score a few orderings that are
+    // country-clustered by construction and let real leg prices pick.
+    orderings = countryGroupedOrderings(cities);
   }
 
   // Step 3: score each permutation.
@@ -708,50 +791,84 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // candidate below (it depends on which city ends up first, so it's
   // different across permutations). The return leg (last_city→home) is
   // added similarly when returnToHome=true.
-  const routes = await Promise.all(
-    orderings.map(async (ordering) => {
-      const baseRoute = await scoreRoute(ordering, startDate, travelers, cityMap, nightsArray);
-      if (!hasOrigin) return baseRoute;
+  //
+  // Kept in one closure because Step 5's naive baseline has to be priced
+  // EXACTLY the same way — same nights, same dates, same home legs — or
+  // the subtraction that produces savingsVsNaive compares two different
+  // things.
+  const scoreOrderingWithHomeLegs = async (ordering: string[]): Promise<OptimizedRoute> => {
+    const baseRoute = await scoreRoute(ordering, startDate, travelers, cityMap, nightsArray);
+    if (!hasOrigin || resolvedOriginAirports.length === 0) return baseRoute;
 
-      // Outbound leg: home → first destination, on the trip's start date.
-      const outboundCost = await estimateHomeLegCost({
+    // Outbound leg: home → first destination, on the trip's start date.
+    const homeCosts: number[] = [
+      await estimateHomeLegCost({
         originAirports: resolvedOriginAirports,
         destinationCity: ordering[0],
         date: clampToFuture(startDate),
         travelers,
-      });
+      }),
+    ];
 
-      // Return leg: last destination → home. Uses the departure date of
-      // the last city (when they'd be leaving it to go home).
-      let returnCost = 0;
-      if (returnToHome) {
-        const lastIdx = ordering.length - 1;
-        const lastCityDepartDate = clampToFuture(
-          addDays(startDate, totalNightsResolved),
-        );
-        returnCost = await estimateHomeLegCost({
+    // Return leg: last destination → home. Uses the departure date of
+    // the last city (when they'd be leaving it to go home).
+    if (returnToHome) {
+      const lastIdx = ordering.length - 1;
+      const lastCityDepartDate = clampToFuture(addDays(startDate, totalNightsResolved));
+      homeCosts.push(
+        await estimateHomeLegCost({
           originAirports: resolvedOriginAirports,
           destinationCity: ordering[lastIdx],
           date: lastCityDepartDate,
           travelers,
           reverse: true, // last_city → home, not home → last_city
-        });
+        }),
+      );
+    }
+
+    // Same money/ranking split as scoreRoute. A home leg we couldn't price
+    // used to add 0 to the total, so an ordering whose outbound doesn't
+    // exist looked hundreds of dollars cheaper than one whose outbound
+    // does, won the sort, and then buildHomeLeg returned null for it — the
+    // user got a "search failed" outbound card and a total missing an
+    // entire airfare.
+    let totalCost = baseRoute.totalCost;
+    let rankCost = baseRoute.rankCost;
+    for (const cost of homeCosts) {
+      if (cost === Infinity) {
+        rankCost += UNAVAILABLE_LEG_PENALTY;
+      } else {
+        totalCost += cost;
+        rankCost += cost;
       }
+    }
 
-      return {
-        ...baseRoute,
-        totalCost: baseRoute.totalCost + outboundCost + returnCost,
-      };
-    }),
-  );
+    return { ...baseRoute, totalCost, rankCost };
+  };
 
-  // Step 4: sort by totalCost, keep top 3
-  routes.sort((a, b) => a.totalCost - b.totalCost);
+  const routes = await Promise.all(orderings.map((ordering) => scoreOrderingWithHomeLegs(ordering)));
+
+  // Step 4: sort by rankCost (real prices plus a penalty for any leg that
+  // came back empty), keep top 3. Sorting on totalCost let a missing leg,
+  // priced at $0, win.
+  routes.sort((a, b) => a.rankCost - b.rankCost);
   const topRoutes = routes.slice(0, 3);
 
-  // Step 5: compute savings vs naive (user's original ordering)
+  // Step 5: compute savings vs naive (user's original ordering).
+  //
+  // The naive ordering is normally one of the candidates we just scored,
+  // so reuse that result rather than re-pricing it. The old re-score
+  // called scoreRoute with no nightsArray and no home legs, so on every
+  // trip with an origin it compared a legs-only naive total against a best
+  // total that included two airfares: the difference was negative,
+  // Math.max clamped it, and savingsVsNaive was $0 for every such trip.
   const naiveOrdering = cities.map((c) => c.name);
-  const naiveRoute = await scoreRoute(naiveOrdering, startDate, travelers, cityMap);
+  const naiveKey = naiveOrdering.join('|');
+  const naiveRoute =
+    routes.find((r) => r.ordering.join('|') === naiveKey) ??
+    (await scoreOrderingWithHomeLegs(naiveOrdering));
+  // Money, not rankCost, on both sides: an unpriced leg counts as $0 here,
+  // which under-promises rather than inventing a $5000 "saving".
   const savingsVsNaive = Math.max(0, naiveRoute.totalCost - topRoutes[0].totalCost);
 
   // Step 6: assign arrival/departure dates for the best ordering using
@@ -759,13 +876,13 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // aligned with the dates we actually queried during scoring.
   const dates: Record<string, { arrival: string; departure: string }> = {};
   const bestOrdering = topRoutes[0].ordering;
-  let cursor = new Date(startDate);
+  let cursor = startDate;
 
   bestOrdering.forEach((cityName, i) => {
-    const arrival = cursor.toISOString().split('T')[0];
-    cursor.setDate(cursor.getDate() + (nightsArray[i] ?? DEFAULT_NIGHTS_PER_CITY));
-    const departure = cursor.toISOString().split('T')[0];
+    const arrival = cursor;
+    const departure = addDays(cursor, nightsArray[i] ?? DEFAULT_NIGHTS_PER_CITY);
     dates[cityName] = { arrival, departure };
+    cursor = departure;
   });
 
   // Step 7: date-shift suggestion — probe a few ±1/±2 day offsets on the
@@ -773,13 +890,22 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // Runs in parallel; any failures silently skip this feature.
   let dateShiftSuggestion: DateShiftSuggestion | undefined;
   try {
-    if (topRoutes[0].totalCost > 0) {
+    // Baseline = the winning route's inter-city legs at the requested
+    // dates, which is exactly what the probe re-prices. Skipped when any
+    // leg is unpriced (its $0 would read as a saving) or when there are no
+    // legs at all (single-city trips — only the home flights move there,
+    // and we don't re-price those).
+    const winningLegs = topRoutes[0].legs;
+    const allLegsPriced = winningLegs.every((leg) => leg.cost !== Infinity);
+    const baselineLegsCost = winningLegs.reduce((sum, leg) => sum + leg.cost, 0);
+    if (winningLegs.length > 0 && allLegsPriced && baselineLegsCost > 0) {
       dateShiftSuggestion = await findDateShiftSuggestion(
         bestOrdering,
         startDate,
-        topRoutes[0].totalCost,
+        baselineLegsCost,
         travelers,
         cityMap,
+        nightsArray,
       );
     }
   } catch (err: any) {

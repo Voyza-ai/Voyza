@@ -24,6 +24,8 @@
  *     real pricing happens downstream in the optimizer)
  */
 
+import { createHash } from 'crypto';
+import { APIError } from '@anthropic-ai/sdk';
 import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
 import { logger } from '../utils/logger';
 import {
@@ -85,6 +87,19 @@ const TEMPERATURE = 0.7;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Max entries before the LRU-ish map starts evicting. Guard against unbounded growth. */
 const CACHE_MAX_ENTRIES = 500;
+/** Backoff between retries, multiplied by the attempt number. */
+const RETRY_BASE_DELAY_MS = 250;
+/**
+ * How long a fallback result is cached. Deliberately tiny compared to
+ * CACHE_TTL_MS: long enough that an Anthropic outage costs one set of
+ * attempts per key per minute instead of a fresh set on every request, short
+ * enough that we serve real suggestions again within a minute of recovery.
+ */
+const FALLBACK_CACHE_TTL_MS = 60 * 1000;
+
+async function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // ─── Cache abstraction ───────────────────────────────────────
 // Kept behind a minimal interface so future swaps (Redis / Upstash /
@@ -92,7 +107,8 @@ const CACHE_MAX_ENTRIES = 500;
 
 interface SuggesterCache {
   get(key: string): SuggestDestinationsResult | undefined;
-  set(key: string, value: SuggestDestinationsResult): void;
+  /** `ttlMs` defaults to CACHE_TTL_MS; failures pass a much shorter one. */
+  set(key: string, value: SuggestDestinationsResult, ttlMs?: number): void;
 }
 
 type CacheEntry = { value: SuggestDestinationsResult; expiresAt: number };
@@ -110,14 +126,16 @@ class InMemoryCache implements SuggesterCache {
     return entry.value;
   }
 
-  set(key: string, value: SuggestDestinationsResult): void {
+  set(key: string, value: SuggestDestinationsResult, ttlMs: number = CACHE_TTL_MS): void {
     // Evict oldest entry when at cap. Not true LRU (insertion-order), but
-    // good enough since the key space is bounded by the coarse bucketing.
+    // good enough: the coarse bucketing keeps the key space small for every
+    // dimension except free-form `extras`, and CACHE_MAX_ENTRIES is what
+    // bounds that one.
     if (this.store.size >= CACHE_MAX_ENTRIES) {
       const firstKey = this.store.keys().next().value;
       if (firstKey) this.store.delete(firstKey);
     }
-    this.store.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+    this.store.set(key, { value, expiresAt: Date.now() + ttlMs });
   }
 }
 
@@ -140,7 +158,30 @@ function buildCacheKey(input: SuggestDestinationsInput): string {
   const budgetBucket = Math.round(input.budgetPerPerson / 100) * 100;
   const monthBucket = extractMonthBucket(input.travelWindow);
   const tripType = input.tripType;
-  return `${vibeNorm}__${originNorm}__${budgetBucket}__${monthBucket}__${input.partySize}__${tripType}`;
+  const extrasNorm = normalizeExtras(input.extras);
+  return `${vibeNorm}__${originNorm}__${budgetBucket}__${monthBucket}__${input.partySize}__${tripType}__${extrasNorm}`;
+}
+
+/**
+ * Normalize the free-form `extras` note for the cache key.
+ *
+ * This is the "new dimension" the warning above is about, and it was missing:
+ * `extras` IS a prompt input (buildDestinationSuggestionsUserMessage appends
+ * "Extras: …"), so leaving it out served user B user A's suggestions AND a
+ * reasoning_summary written from A's free-text notes, while silently ignoring
+ * B's own accessibility constraint. Correctness bug and cross-user leak.
+ *
+ * Case and whitespace are collapsed so trivially different phrasings share an
+ * entry; punctuation is left alone, since anything more aggressive risks
+ * re-merging notes that actually differ. The digest keeps the key bounded —
+ * `extras` is unbounded client text (the route's zod schema sets no max) — and
+ * the readable prefix keeps keys debuggable.
+ */
+function normalizeExtras(extras: string | undefined): string {
+  const norm = (extras ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!norm) return 'none';
+  const digest = createHash('sha1').update(norm).digest('hex').slice(0, 12);
+  return `${norm.slice(0, 120)}#${digest}`;
 }
 
 /**
@@ -438,9 +479,18 @@ export async function suggestDestinationsForVibe(
         lastErr = err;
         logger.warn('suggestDestinationsForVibe: attempt failed', {
           attempt: attempts,
+          status: err instanceof APIError ? err.status : undefined,
           message: err?.message,
         });
-        // fall through to retry
+        // Only a malformed *response* is worth another call. Every APIError is
+        // either permanent (400/401/403/404 — the identical request fails the
+        // identical way) or already retried by the SDK, which retries
+        // 408/409/429/5xx and connection errors twice on its own. Retrying
+        // those here turned one request into up to 9 HTTP calls, so an
+        // Anthropic outage or a bad key cost 3x what it should.
+        if (err instanceof APIError || attempts >= MAX_ATTEMPTS) break;
+        // Small backoff so two bad parses don't fire back-to-back.
+        await sleep(RETRY_BASE_DELAY_MS * attempts);
       }
     }
   }
@@ -457,15 +507,20 @@ export async function suggestDestinationsForVibe(
     tier_up_suggestion: null,
     meta: {
       cacheHit: false,
-      // Clamp: after the for loop exits via the guard, `attempts` holds
-      // MAX_ATTEMPTS + 1. Cap it so logs/analytics report the truthful
-      // "tried N times, all failed" number.
+      // Clamp: `attempts` holds the real count when we broke out early, and
+      // MAX_ATTEMPTS + 1 when the for-loop guard ended it. Cap it so
+      // logs/analytics report the truthful "tried N times, all failed".
       attempts: Math.min(attempts, MAX_ATTEMPTS),
       parseSuccess: false,
       fallbackUsed: true,
       durationMs: Date.now() - started,
     },
   };
+  // Cache the failure briefly so an outage doesn't re-pay for every request.
+  // Only when a key is configured: with no key the fallback is deterministic
+  // and free, so caching it would just occupy an entry. A later hit reports
+  // cacheHit: true alongside fallbackUsed: true, which is the truth.
+  if (anthropic) cache.set(cacheKey, result, FALLBACK_CACHE_TTL_MS);
   logSuggesterCall({ input, result, cacheHit: false, lastError: String(lastErr ?? 'no-api-key') });
   return result;
 }
