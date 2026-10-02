@@ -84,6 +84,18 @@ describe('CanvasCityCard', () => {
     render(<CanvasCityCard city={city} {...baseProps} />);
     // "Select hotel" should not appear when it's a placeholder
     expect(screen.queryByText('Select hotel')).not.toBeInTheDocument();
+    expect(screen.queryByText('Stay')).not.toBeInTheDocument();
+  });
+
+  it('hides hotel section when the city has no hotel at all', () => {
+    // What a saved city with no hotel data looks like after the DB read
+    // (buildTripFromDb defaults to an empty name, not "Select hotel").
+    const city = buildCity({
+      hotels: [],
+      hotel: { name: '', rating: 0, pricePerNight: 0, area: '' },
+    });
+    render(<CanvasCityCard city={city} {...baseProps} />);
+    expect(screen.queryByText('Stay')).not.toBeInTheDocument();
   });
 
   it('handles very long city name', () => {

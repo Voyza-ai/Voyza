@@ -7,7 +7,8 @@ import { compareLeg } from '../services/compareLeg';
 import { searchHotels } from '../services/hotels';
 import { env } from '../config/env';
 import { parseDurationMinutes } from '../utils/duration';
-import { resolveTripTitle } from '../utils/tripShape';
+import { buildTripFromDb, resolveTripTitle } from '../utils/tripShape';
+import { redactMemberIdentity, MemberRequester } from '../utils/memberVisibility';
 
 const router = Router();
 
@@ -103,89 +104,27 @@ router.post(
       .select('*')
       .eq('trip_id', tripId);
 
-    // Transform DB rows back into the frontend City shape
+    // Transform DB rows back into the frontend City shape.
+    //
+    // ONE mapper for every read path: buildTripFromDb. This endpoint used to
+    // reshape the rows itself, and that copy was lossy — it collapsed
+    // `hotels` to the single legacy `hotel`, reset `selectedHotelIndex` to 0,
+    // returned `vibes` as empty, dropped `customHotel` altogether, and wired
+    // transports by array position with only a handful of their columns. The
+    // save handler then wrote those defaults straight back over the real
+    // rows, so opening a trip here and saving it destroyed the user's hotel
+    // options, their pick, their custom stay and their vibes — the same
+    // class of bug as the canvas erasing trips.title (see resolveTripTitle).
     let frontendCities: any[];
 
     if (useClientCities) {
-      // Client sent cities — could be frontend shape or DB shape
+      // Client sent cities — could be frontend shape or DB shape.
       const isDbShape = clientCities[0]?.arrival_date !== undefined;
-      if (isDbShape) {
-        // Transform from DB shape
-        frontendCities = clientCities.map((c: any, idx: number) => {
-          const hotel = c.hotel ?? { name: 'Select hotel', rating: 0, pricePerNight: 0, area: '' };
-          return {
-            name: c.name,
-            country: c.country ?? '',
-            dates: { arrival: c.arrival_date ?? '', departure: c.departure_date ?? '' },
-            hotel,
-            hotels: [hotel],
-            selectedHotelIndex: 0,
-            activities: c.activities ?? [],
-            restaurants: c.restaurants ?? [],
-            vibes: [],
-            colorIndex: c.color_index ?? idx,
-            schedule: c.schedule ?? {},
-            transportIn: c.transportIn ?? { mode: 'flight', operator: '', duration: '', price: 0 },
-            transportOut: c.transportOut ?? { mode: 'flight', operator: '', duration: '', price: 0 },
-          };
-        });
-      } else {
-        // Already in frontend shape
-        frontendCities = clientCities;
-      }
+      frontendCities = isDbShape
+        ? buildTripFromDb(trip, clientCities, transports ?? []).cities
+        : clientCities; // already in frontend shape — pass through untouched
     } else {
-      frontendCities = (cities ?? []).map((c: any, idx: number) => {
-        const hotel = c.hotel ?? { name: 'Select hotel', rating: 0, pricePerNight: 0, area: '' };
-        return {
-          name: c.name,
-          country: c.country ?? '',
-          dates: { arrival: c.arrival_date ?? '', departure: c.departure_date ?? '' },
-          hotel,
-          hotels: [hotel],
-          selectedHotelIndex: 0,
-          activities: c.activities ?? [],
-          restaurants: c.restaurants ?? [],
-          vibes: [],
-          colorIndex: c.color_index ?? idx,
-          schedule: c.schedule ?? {},
-          transportIn: { mode: 'flight', operator: '', duration: '', price: 0 },
-          transportOut: { mode: 'flight', operator: '', duration: '', price: 0 },
-        };
-      });
-    }
-
-    // Attach transport data to the correct city's transportOut
-    for (const t of transports ?? []) {
-      const fromIdx = frontendCities.findIndex((_: any, i: number) => {
-        const cityRow = (cities ?? [])[i];
-        return cityRow?.id === t.from_city_id;
-      });
-      if (fromIdx >= 0) {
-        frontendCities[fromIdx].transportOut = {
-          mode: t.mode ?? 'flight',
-          operator: t.operator ?? '',
-          duration: t.duration_minutes ? `${Math.floor(t.duration_minutes / 60)}h ${t.duration_minutes % 60}m` : '',
-          price: t.price ?? 0,
-          departTime: t.depart_time ?? '',
-          arriveTime: t.arrive_time ?? '',
-          bookingUrl: t.booking_url ?? '',
-        };
-      }
-      const toIdx = frontendCities.findIndex((_: any, i: number) => {
-        const cityRow = (cities ?? [])[i];
-        return cityRow?.id === t.to_city_id;
-      });
-      if (toIdx >= 0) {
-        frontendCities[toIdx].transportIn = {
-          mode: t.mode ?? 'flight',
-          operator: t.operator ?? '',
-          duration: t.duration_minutes ? `${Math.floor(t.duration_minutes / 60)}h ${t.duration_minutes % 60}m` : '',
-          price: t.price ?? 0,
-          departTime: t.depart_time ?? '',
-          arriveTime: t.arrive_time ?? '',
-          bookingUrl: t.booking_url ?? '',
-        };
-      }
+      frontendCities = buildTripFromDb(trip, cities ?? [], transports ?? []).cities;
     }
 
     const state = {
@@ -223,6 +162,122 @@ router.get(
   }),
 );
 
+/**
+ * Replace a trip's cities + transports with the canvas's version.
+ *
+ * This used to be a DELETE followed by an INSERT with the insert error only
+ * logged, so an insert that failed after the delete had already gone
+ * through left the trip with NO cities — while the response still said
+ * `{ saved: true }`. The itinerary was gone and the user was told it saved.
+ *
+ * Preferred path is the `canvas_replace_trip_graph` Postgres function
+ * (supabase/migrations/010_canvas_replace_trip_graph.sql): a plpgsql
+ * function runs inside one transaction, so the delete and the insert land
+ * together or not at all. Transports are handed over keyed by city
+ * POSITION because the new city ids only exist once the function has
+ * inserted them; it resolves the ids itself.
+ *
+ * Until that migration is applied the fallback is NOT atomic, but it is
+ * ordered so the destructive half can never run on a failed write: the new
+ * cities go in FIRST and the old rows are removed only once that insert
+ * has succeeded. Worst case is a trip briefly carrying both generations of
+ * its cities (visible, recoverable) instead of none. On either path every
+ * error is thrown, so the client is never told a save worked when it
+ * didn't.
+ */
+async function replaceTripGraph(
+  tripId: string,
+  cityRows: Record<string, any>[],
+  transportRows: Record<string, any>[],
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const { data: cityCount, error: rpcError } = await supabase.rpc('canvas_replace_trip_graph', {
+    p_trip_id: tripId,
+    p_cities: cityRows,
+    p_transports: transportRows,
+  });
+  if (!rpcError) {
+    console.log('[canvas save] Replaced cities for trip', tripId, '—', cityCount, 'written');
+    return;
+  }
+
+  // Function not deployed yet (PostgREST reports an unknown RPC as
+  // PGRST202) — fall back to the ordered path below. Any other error is a
+  // real failed write and must reach the client.
+  const missingFn =
+    rpcError.code === 'PGRST202' ||
+    /canvas_replace_trip_graph/.test(rpcError.message ?? '');
+  if (!missingFn) {
+    throw new AppError(500, `Could not save the trip: ${rpcError.message}`);
+  }
+  console.warn(
+    '[canvas save] canvas_replace_trip_graph() missing — run supabase/migrations/010_canvas_replace_trip_graph.sql for an atomic save',
+  );
+
+  // Snapshot the rows we will be replacing BEFORE inserting, so the delete
+  // below only ever targets the old generation.
+  const { data: oldCities, error: oldCitiesError } = await supabase
+    .from('cities')
+    .select('id')
+    .eq('trip_id', tripId);
+  if (oldCitiesError) {
+    throw new AppError(500, `Could not read the trip's cities: ${oldCitiesError.message}`);
+  }
+  const { data: oldTransports, error: oldTransportsError } = await supabase
+    .from('transports')
+    .select('id')
+    .eq('trip_id', tripId);
+  if (oldTransportsError) {
+    throw new AppError(500, `Could not read the trip's transports: ${oldTransportsError.message}`);
+  }
+
+  // INSERT FIRST. If this fails the trip still has every one of its
+  // original rows, and the throw tells the client the save failed.
+  let insertedCities: any[] = [];
+  if (cityRows.length > 0) {
+    const { data, error } = await supabase.from('cities').insert(cityRows).select();
+    if (error) throw new AppError(500, `Could not save the trip's cities: ${error.message}`);
+    insertedCities = data ?? [];
+  }
+
+  // Only now remove the old generation — transports before cities, since
+  // transports FK to cities. Delete by id: a bulk .eq delete has row limits.
+  const oldTransportIds = (oldTransports ?? []).map((t: any) => t.id);
+  if (oldTransportIds.length > 0) {
+    const { error } = await supabase.from('transports').delete().in('id', oldTransportIds);
+    if (error) throw new AppError(500, `Could not replace the trip's transports: ${error.message}`);
+  }
+  const oldCityIds = (oldCities ?? []).map((c: any) => c.id);
+  if (oldCityIds.length > 0) {
+    const { error } = await supabase.from('cities').delete().in('id', oldCityIds);
+    if (error) throw new AppError(500, `Could not replace the trip's cities: ${error.message}`);
+  }
+  console.log('[canvas save] Inserted', insertedCities.length, 'cities for trip', tripId);
+
+  // Rebuild transports against the ids the insert handed back.
+  if (transportRows.length > 0) {
+    const idByPosition = new Map<number, string>();
+    for (const c of insertedCities) idByPosition.set(c.position, c.id);
+    const rows = transportRows
+      .map(({ from_position, to_position, ...rest }) => ({
+        ...rest,
+        from_city_id: idByPosition.get(from_position),
+        to_city_id: idByPosition.get(to_position),
+      }))
+      .filter((t) => t.from_city_id && t.to_city_id);
+    if (rows.length > 0) {
+      const { error } = await supabase.from('transports').insert(rows);
+      if (error) {
+        console.error('[canvas save] Failed to insert transports:', error.message, {
+          sample: rows[0],
+        });
+        throw new AppError(500, `Could not save the trip's transports: ${error.message}`);
+      }
+    }
+  }
+}
+
 // ─── POST /api/canvas/:tripId/save ──────────────────────────
 router.post(
   '/:tripId/save',
@@ -244,49 +299,12 @@ router.post(
 
     const supabase = getSupabase();
 
-    // Update canvas session — find existing and update, or insert new
-    const { data: existingSession } = await supabase
-      .from('canvas_sessions')
-      .select('id')
-      .eq('trip_id', tripId)
-      .order('saved_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (existingSession) {
-      // Update existing session
-      await supabase
-        .from('canvas_sessions')
-        .update({
-          state,
-          last_saved_by: user.id,
-          saved_at: new Date().toISOString(),
-        })
-        .eq('id', existingSession.id);
-
-      // Clean up any duplicate sessions for this trip
-      const { data: allSessions } = await supabase
-        .from('canvas_sessions')
-        .select('id')
-        .eq('trip_id', tripId)
-        .neq('id', existingSession.id);
-      if (allSessions && allSessions.length > 0) {
-        for (const s of allSessions) {
-          await supabase.from('canvas_sessions').delete().eq('id', s.id);
-        }
-      }
-    } else {
-      await supabase
-        .from('canvas_sessions')
-        .insert({
-          trip_id: tripId,
-          state,
-          last_saved_by: user.id,
-          saved_at: new Date().toISOString(),
-        });
-    }
-
-    // Apply canvas changes to live trip tables
+    // ── Prepare ──────────────────────────────────────────────
+    // Everything that enriches the state — placeholder activities and
+    // restaurants, hotel lookups, flight-vs-train comparisons — runs BEFORE
+    // any write, so the session we persist and the rows we write to the
+    // trip tables are the same thing, and a failure here leaves the saved
+    // trip untouched.
     if (state.cities && Array.isArray(state.cities)) {
       // Auto-generate activities and restaurants for cities that have none
       for (const city of state.cities) {
@@ -348,21 +366,101 @@ router.post(
         await Promise.all(hotelPromises);
       }
 
-      // Delete ALL existing transports first (they have FK to cities)
-      const { data: existingTransports } = await supabase.from('transports').select('id').eq('trip_id', tripId);
-      if (existingTransports && existingTransports.length > 0) {
-        const transportIds = existingTransports.map((t: any) => t.id);
-        await supabase.from('transports').delete().in('id', transportIds);
-      }
+      // For consecutive city pairs missing transport, auto-compare flights
+      // vs trains. This only needs city names and dates, so it runs up here
+      // and its result rides into the same save (it used to run between
+      // the city insert and the transport insert, which is why the trip
+      // tables and the session had to be written twice).
+      if (state.cities.length > 1) {
+        const comparePromises: Promise<void>[] = [];
 
-      // Delete ALL existing cities by ID (bulk .eq delete has row limits)
-      const { data: existingCities } = await supabase.from('cities').select('id').eq('trip_id', tripId);
-      if (existingCities && existingCities.length > 0) {
-        const cityIds = existingCities.map((c: any) => c.id);
-        const { error: delErr } = await supabase.from('cities').delete().in('id', cityIds);
-        if (delErr) console.error('[canvas save] Failed to delete cities:', delErr.message);
-        else console.log('[canvas save] Deleted', cityIds.length, 'existing cities');
+        for (let i = 0; i < state.cities.length - 1; i++) {
+          const t = state.cities[i].transportOut;
+          // Re-compare if: no transport, price is 0, or the destination changed
+          const currentTo = t?.to ?? '';
+          const expectedTo = state.cities[i + 1]?.name ?? '';
+          const needsCompare = !t || t.price <= 0 || (currentTo && expectedTo && currentTo.toLowerCase() !== expectedTo.toLowerCase());
+          if (needsCompare) {
+            const origin = state.cities[i].name;
+            const dest = state.cities[i + 1].name;
+            const date = state.cities[i].dates?.departure
+              || state.cities[i + 1].dates?.arrival
+              || new Date().toISOString().split('T')[0];
+            const idx = i;
+            comparePromises.push(
+              compareLeg({ origin, destination: dest, date, travelers: 1 })
+                .then((result) => {
+                  const best = result.recommendation === 'train' && result.trainOption
+                    ? { mode: 'train' as const, price: result.trainOption.price ?? 0, duration: result.trainOption.durationMinutes, operator: result.trainOption.operator ?? '' }
+                    : result.flightOption
+                      ? { mode: 'flight' as const, price: result.flightOption.price ?? 0, duration: result.flightOption.durationMinutes, operator: result.flightOption.carrier ?? '' }
+                      : null;
+                  if (best) {
+                    state.cities[idx].transportOut = {
+                      mode: best.mode,
+                      price: best.price,
+                      duration: `${Math.floor(best.duration / 60)}h ${best.duration % 60}m`,
+                      operator: best.operator,
+                      from: origin,
+                      to: dest,
+                    };
+                  }
+                })
+                .catch(() => {})
+            );
+          }
+        }
+
+        if (comparePromises.length > 0) {
+          await Promise.all(comparePromises);
+        }
       }
+    }
+
+    // Update canvas session — find existing and update, or insert new
+    const { data: existingSession } = await supabase
+      .from('canvas_sessions')
+      .select('id')
+      .eq('trip_id', tripId)
+      .order('saved_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (existingSession) {
+      // Update existing session
+      await supabase
+        .from('canvas_sessions')
+        .update({
+          state,
+          last_saved_by: user.id,
+          saved_at: new Date().toISOString(),
+        })
+        .eq('id', existingSession.id);
+
+      // Clean up any duplicate sessions for this trip
+      const { data: allSessions } = await supabase
+        .from('canvas_sessions')
+        .select('id')
+        .eq('trip_id', tripId)
+        .neq('id', existingSession.id);
+      if (allSessions && allSessions.length > 0) {
+        for (const s of allSessions) {
+          await supabase.from('canvas_sessions').delete().eq('id', s.id);
+        }
+      }
+    } else {
+      await supabase
+        .from('canvas_sessions')
+        .insert({
+          trip_id: tripId,
+          state,
+          last_saved_by: user.id,
+          saved_at: new Date().toISOString(),
+        });
+    }
+
+    // Apply canvas changes to live trip tables
+    if (state.cities && Array.isArray(state.cities)) {
       const cityRows = state.cities.map((city: any, idx: number) => ({
         trip_id: tripId,
         name: city.name,
@@ -382,110 +480,43 @@ router.post(
         restaurants: city.restaurants ?? [],
         schedule: city.schedule ?? {},
       }));
-      let insertedCities: any[] = [];
-      if (cityRows.length > 0) {
-        const { data, error: citiesErr } = await supabase.from('cities').insert(cityRows).select();
-        if (citiesErr) {
-          console.error('[canvas save] Failed to insert cities:', citiesErr.message);
+
+      // Legs are keyed by city POSITION rather than id: the ids of the
+      // cities above don't exist until they're written, and
+      // replaceTripGraph resolves them on whichever path it takes.
+      const transportRows: Record<string, any>[] = [];
+      for (let i = 0; i < state.cities.length - 1; i++) {
+        const t = state.cities[i].transportOut;
+        if (t && t.price > 0) {
+          transportRows.push({
+            trip_id: tripId,
+            from_position: i,
+            to_position: i + 1,
+            mode: t.mode ?? 'flight',
+            operator: t.operator ?? '',
+            price: t.price ?? 0,
+            // parseDurationMinutes handles "3h 37m" → 217 etc. The old
+            // parseInt("3h 37m") returned 3, which is why durations
+            // on saved trips showed as single-digit minutes.
+            duration_minutes: parseDurationMinutes(t.duration),
+            depart_time: t.departTime ?? null,
+            arrive_time: t.arriveTime ?? null,
+            depart_date: t.departDate ?? null,
+            layovers: typeof t.layovers === 'number' ? t.layovers : null,
+            stops: typeof t.stops === 'number' ? t.stops : null,
+            currency: t.currency ?? 'USD',
+            carrier_code: t.carrierCode ?? null,
+            flight_number: t.flightNumber ?? t.trainNumber ?? null,
+            alternatives: Array.isArray(t.alternatives) ? t.alternatives : null,
+            booking_url: t.bookingUrl ?? null,
+          });
         }
-        insertedCities = data ?? [];
-        console.log('[canvas save] Inserted', insertedCities.length, 'cities for trip', tripId);
       }
 
-      // Rebuild transports (already deleted above)
-      if (insertedCities.length > 1) {
-        // For consecutive city pairs missing transport, auto-compare flights vs trains
-        const updatedCities = [...state.cities];
-        const comparePromises: Promise<void>[] = [];
-
-        for (let i = 0; i < updatedCities.length - 1; i++) {
-          const t = updatedCities[i].transportOut;
-          // Re-compare if: no transport, price is 0, or the destination changed
-          const currentTo = t?.to ?? '';
-          const expectedTo = updatedCities[i + 1]?.name ?? '';
-          const needsCompare = !t || t.price <= 0 || (currentTo && expectedTo && currentTo.toLowerCase() !== expectedTo.toLowerCase());
-          if (needsCompare) {
-            const origin = updatedCities[i].name;
-            const dest = updatedCities[i + 1].name;
-            const date = updatedCities[i].dates?.departure
-              || updatedCities[i + 1].dates?.arrival
-              || new Date().toISOString().split('T')[0];
-            const idx = i;
-            comparePromises.push(
-              compareLeg({ origin, destination: dest, date, travelers: 1 })
-                .then((result) => {
-                  const best = result.recommendation === 'train' && result.trainOption
-                    ? { mode: 'train' as const, price: result.trainOption.price ?? 0, duration: result.trainOption.durationMinutes, operator: result.trainOption.operator ?? '' }
-                    : result.flightOption
-                      ? { mode: 'flight' as const, price: result.flightOption.price ?? 0, duration: result.flightOption.durationMinutes, operator: result.flightOption.carrier ?? '' }
-                      : null;
-                  if (best) {
-                    updatedCities[idx].transportOut = {
-                      mode: best.mode,
-                      price: best.price,
-                      duration: `${Math.floor(best.duration / 60)}h ${best.duration % 60}m`,
-                      operator: best.operator,
-                      from: origin,
-                      to: dest,
-                    };
-                  }
-                })
-                .catch(() => {})
-            );
-          }
-        }
-
-        // Wait for all transport comparisons to finish
-        if (comparePromises.length > 0) {
-          await Promise.all(comparePromises);
-          // Update canvas session state with the new transport data
-          state.cities = updatedCities;
-          await supabase
-            .from('canvas_sessions')
-            .update({ state, saved_at: new Date().toISOString() })
-            .eq('trip_id', tripId);
-        }
-
-        const transportRows: any[] = [];
-        for (let i = 0; i < insertedCities.length - 1; i++) {
-          const city = updatedCities[i];
-          const t = city.transportOut;
-          if (t && t.price > 0) {
-            transportRows.push({
-              trip_id: tripId,
-              from_city_id: insertedCities[i].id,
-              to_city_id: insertedCities[i + 1].id,
-              mode: t.mode ?? 'flight',
-              operator: t.operator ?? '',
-              price: t.price ?? 0,
-              // parseDurationMinutes handles "3h 37m" → 217 etc. The old
-              // parseInt("3h 37m") returned 3, which is why durations
-              // on saved trips showed as single-digit minutes.
-              duration_minutes: parseDurationMinutes(t.duration),
-              depart_time: t.departTime ?? null,
-              arrive_time: t.arriveTime ?? null,
-              depart_date: t.departDate ?? null,
-              layovers: typeof t.layovers === 'number' ? t.layovers : null,
-              stops: typeof t.stops === 'number' ? t.stops : null,
-              currency: t.currency ?? 'USD',
-              carrier_code: t.carrierCode ?? null,
-              flight_number: t.flightNumber ?? t.trainNumber ?? null,
-              alternatives: Array.isArray(t.alternatives) ? t.alternatives : null,
-              booking_url: t.bookingUrl ?? null,
-            });
-          }
-        }
-        if (transportRows.length > 0) {
-          const { error: transportError } = await supabase
-            .from('transports')
-            .insert(transportRows);
-          if (transportError) {
-            console.error('[canvas save] Failed to insert transports:', transportError.message, {
-              sample: transportRows[0],
-            });
-          }
-        }
-      }
+      // Atomic where the DB function exists; ordered insert-then-delete
+      // where it doesn't. Throws on any failure — the response below is
+      // only ever reached by a save that actually landed.
+      await replaceTripGraph(tripId, cityRows, transportRows);
     }
 
     // Update trip metadata
@@ -746,15 +777,19 @@ router.get(
 );
 
 // ─── GET /api/canvas/:tripId/members ─────────────────────────
-// List all collaborators on a trip, enriched with email + display
-// name + avatar so the frontend can actually render a member list
-// (transfer-ownership picker, canvas presence chips, etc.). Readable
-// by any group member.
+// List all collaborators on a trip, enriched with display name + avatar
+// (+ email, owner only) so the frontend can actually render a member
+// list (transfer-ownership picker, canvas presence chips, etc.).
+// Readable by any group member — which is exactly why email addresses
+// are gated: a viewer who joined off the share link was never vetted by
+// the owner and must not walk away with everyone else's address. The
+// rule and where it comes from live in utils/memberVisibility.ts.
 //
 // Enrichment strategy: for each row that has a `user_id` (accepted
-// invites), batch-lookup auth.users (for email) + user_profiles (for
-// name + avatar). Rows that are still pending invites (no user_id yet)
-// just expose `invited_email` — there's no accepted user to enrich.
+// invites), batch-lookup user_profiles (for name + avatar) and — only
+// when the requester is the owner — auth.users (for email). Rows that
+// are still pending invites (no user_id yet) carry `invited_email`;
+// the redaction step below decides who gets to see it.
 router.get(
   '/:tripId/members',
   asyncHandler(async (req, res) => {
@@ -776,6 +811,12 @@ router.get(
       new Set(members.map((m: any) => m.user_id).filter(Boolean) as string[]),
     );
 
+    // Only the owner ever receives another person's address (see
+    // utils/memberVisibility.ts), so don't even load them for anyone
+    // else — a non-owner's own address comes off their token instead.
+    const requester: MemberRequester = { role, userId: user.id, email: user.email ?? null };
+    const isOwner = role === 'owner';
+
     // Batch-fetch profile rows in a single query. Service-role has
     // access regardless of RLS, so we get email/name for anyone on
     // the trip without per-row round-trips.
@@ -794,12 +835,14 @@ router.get(
       // query — iterate getUserById for each member. Cheap: typical
       // trip has <10 collaborators, and each call is a single
       // indexed lookup on the service side.
-      await Promise.all(
-        userIds.map(async (uid) => {
-          const { data } = await supabase.auth.admin.getUserById(uid);
-          emailsById[uid] = data?.user?.email ?? null;
-        }),
-      );
+      if (isOwner) {
+        await Promise.all(
+          userIds.map(async (uid) => {
+            const { data } = await supabase.auth.admin.getUserById(uid);
+            emailsById[uid] = data?.user?.email ?? null;
+          }),
+        );
+      }
     }
 
     const enriched = members.map((m: any) => {
@@ -810,8 +853,9 @@ router.get(
         role: m.role,
         acceptedAt: m.accepted_at,
         createdAt: m.created_at,
-        // For pending invites (no user_id yet) expose invited_email only.
-        // For accepted members expose their real auth.users email.
+        // Pending invites (no user_id yet) carry invited_email; accepted
+        // members their real auth.users email (owner requester only —
+        // emailsById is empty otherwise). Redacted per requester below.
         email: m.user_id ? emailsById[m.user_id] ?? null : m.invited_email ?? null,
         fullName: profile?.fullName ?? null,
         avatarUrl: profile?.avatarUrl ?? null,
@@ -823,7 +867,7 @@ router.get(
 
     // The trip owner may have no group_members row (ownership lives on
     // trips.user_id) — synthesize an entry so "People with access" always
-    // shows them, with their real name/email.
+    // shows them, with their real name (and, to the owner, email).
     const hasOwnerRow = enriched.some((m: any) => m.role === 'owner');
     if (!hasOwnerRow) {
       const { data: trip } = await supabase
@@ -832,7 +876,11 @@ router.get(
         .eq('id', tripId)
         .single();
       if (trip?.user_id) {
-        const { data: ownerAuth } = await supabase.auth.admin.getUserById(trip.user_id);
+        // The only requester who may see this address IS the owner, so
+        // skip the admin lookup for everyone else.
+        const { data: ownerAuth } = isOwner
+          ? await supabase.auth.admin.getUserById(trip.user_id)
+          : { data: null };
         const { data: ownerProfile } = await supabase
           .from('user_profiles')
           .select('full_name, avatar_url')
@@ -853,11 +901,16 @@ router.get(
       }
     }
 
-    // inviteToken grants access — only the owner (who sends links) sees it
-    const requesterRole = await getMemberRole(tripId, user.id);
-    const safeMembers = enriched.map((mm: any) =>
-      requesterRole === 'owner' ? mm : { ...mm, inviteToken: null },
-    );
+    // Two things here are the owner's alone. inviteToken grants access,
+    // so only the owner (who sends links) sees it. And every OTHER
+    // person's email: this list is readable by every member, share-link
+    // viewers included. redactMemberIdentity nulls those out and adds
+    // `displayName` — the label the UI renders in the email's place, so
+    // a redacted row never collapses to a blank line.
+    const safeMembers = enriched.map((mm: any) => {
+      const visible = redactMemberIdentity(mm, requester);
+      return isOwner ? visible : { ...visible, inviteToken: null };
+    });
     res.json({ members: safeMembers });
   }),
 );

@@ -1,0 +1,80 @@
+-- 007: allow_clones defaults to false — cloning is opt-in
+--
+-- `trips.allow_clones` was `boolean not null default true`
+-- (../SCHEMA_SNAPSHOT.sql), so every trip ever created was cloneable by any
+-- authenticated caller who knew its id. The gate in
+-- backend/src/routes/trips.ts (POST /api/trips/:id/clone) reads
+--
+--   isOwner || isCollaborator || source.is_public || source.allow_clones
+--
+-- and that last term was true for everyone by default — the owner never
+-- opted in to anything. This flips the default so a new trip starts closed.
+--
+-- NEW ROWS ONLY. Existing rows keep the value they have; see the backfill
+-- block at the bottom, which is deliberately not part of this migration.
+--
+-- POST /api/trips omits allow_clones from its insert, so trips saved from
+-- the planner pick this default up immediately. The clone endpoint used to
+-- write `allow_clones: true` explicitly, which would have skipped the
+-- default entirely — that is fixed in the same change.
+--
+-- Run in the Supabase SQL editor (same as 001/002), or:
+--   supabase db push
+
+alter table public.trips
+  alter column allow_clones set default false;
+
+-- ─── Verify ───────────────────────────────────────────────────
+-- (1) column_default must read `false`:
+-- select column_name, column_default, is_nullable
+--   from information_schema.columns
+--  where table_schema = 'public'
+--    and table_name = 'trips'
+--    and column_name = 'allow_clones';
+--
+-- (2) Existing rows must be untouched — run this BEFORE and AFTER; the two
+--     result sets must be identical:
+-- select allow_clones, count(*) from public.trips group by 1 order by 1;
+--
+-- (3) Save a trip through the app, then confirm the new row lands closed:
+-- select id, title, allow_clones, created_at
+--   from public.trips order by created_at desc limit 5;
+
+-- ============================================================================
+-- ⚠️  OPT-IN BACKFILL — A SEPARATE DECISION, DELIBERATELY NOT EXECUTED HERE.
+--     Do NOT run this as part of applying 007. Recommendation: don't run it
+--     at all yet.
+-- ============================================================================
+-- Flipping the default only affects rows created from now on; every existing
+-- trip still has allow_clones = true. Turning those off is data-destructive
+-- in a way the product cannot undo:
+--
+--   • allow_clones = true is indistinguishable from an explicit owner
+--     opt-in. PATCH /api/trips/:id/permissions writes the very same value
+--     the default wrote, and there is no audit column, so a blanket UPDATE
+--     silently revokes real choices along with never-touched defaults.
+--   • There is no UI to turn it back on. frontend/lib/api.ts has no caller
+--     for PATCH /api/trips/:id/permissions, so anyone who loses cloning
+--     cannot restore it without a hand-rolled API call.
+--   • It buys less than it looks like. Because the gate is
+--     `isOwner || isCollaborator || source.is_public || source.allow_clones`,
+--     public trips and every collaborator (viewers included) can still
+--     clone regardless of this column.
+--
+-- The honest time to backfill is when the permissions toggle ships in the
+-- UI, so a user who notices can put it back. If the owner decides to do it
+-- before then, keep it narrow and reversible:
+--
+--   create table public.trips_allow_clones_backup_007 as
+--     select id, allow_clones from public.trips where allow_clones = true;
+--
+--   update public.trips
+--      set allow_clones = false
+--    where allow_clones = true
+--      and is_public = false;   -- public trips are cloneable either way
+--
+--   -- undo:
+--   -- update public.trips t
+--   --    set allow_clones = b.allow_clones
+--   --   from public.trips_allow_clones_backup_007 b
+--   --  where b.id = t.id;

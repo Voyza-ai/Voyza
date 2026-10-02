@@ -363,11 +363,14 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
                           className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-medium text-white flex-shrink-0"
                           style={{ background: '#64748b' }}
                         >
-                          {((m.fullName ?? m.email)?.[0] ?? '?').toUpperCase()}
+                          {((m.displayName || m.fullName || m.email)?.[0] ?? '?').toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-[12px] text-gray-800 truncate">
-                            {m.fullName ?? m.email ?? 'Member'}
+                            {/* displayName is the server's label and survives email
+                                redaction; the rest of the chain covers a backend
+                                deployed before the field existed. */}
+                            {m.displayName || m.fullName || m.email || 'Member'}
                           </div>
                           {m.fullName && m.email && (
                             <div className="text-[10px] text-gray-400 truncate">{m.email}</div>

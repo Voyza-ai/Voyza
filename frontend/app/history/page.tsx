@@ -23,7 +23,6 @@ type TripSummary = {
   // Present only on trips shared with me:
   role?: string;
   owner_name?: string | null;
-  owner_email?: string | null;
 };
 
 const STATUS_STYLES: Record<string, { label: string }> = {
@@ -69,7 +68,9 @@ function TripCard({
   onOpen: (trip: TripSummary) => void;
 }) {
   const status = STATUS_STYLES[trip.status] ?? STATUS_STYLES.active;
-  const sharedBy = trip.owner_name || trip.owner_email || 'someone';
+  // Name only — the API deliberately doesn't send the owner's email
+  // (their PII; everyone the trip is shared with reads this list).
+  const sharedBy = trip.owner_name || 'someone';
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
       <div
