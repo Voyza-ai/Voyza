@@ -35,6 +35,18 @@ const createTripSchema = z.object({
       newStartDate: z.string(),
       newTotalCost: z.number(),
       savings: z.number(),
+      // Alternative shifts (best first) — without this the save schema
+      // would silently strip the options menu off every saved trip.
+      options: z
+        .array(
+          z.object({
+            dayOffset: z.number(),
+            newStartDate: z.string(),
+            newTotalCost: z.number(),
+            savings: z.number(),
+          }),
+        )
+        .optional(),
     })
     .nullable()
     .optional(),

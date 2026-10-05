@@ -173,6 +173,9 @@ export default function PlanningChat() {
       ]);
       window.setTimeout(() => {
         if (!mountedRef.current) return;
+        // An armed autorun (one-click date-shift replan) owns the screen —
+        // its searching state replaces the picker; don't summon it back.
+        if (autorunArmedRef.current) return;
         setShowIntent(true);
       }, 500);
     }
@@ -2114,6 +2117,82 @@ export default function PlanningChat() {
     }
   };
 
+  // One-click date-shift replans (the "Cheaper start dates" menu on the
+  // results header) land here as /plan?resume=1&autorun=1 with the shifted
+  // answers already staged in the store. Skip every picker, drop a status
+  // bubble, and kick the exact same search the "Find my trip" button runs.
+  // If the staged answers are somehow incomplete, do nothing — the page
+  // behaves like a normal resume and the user finishes in the chat.
+  const autorunRef = useRef(false);
+  const autorunArmedRef = useRef(false);
+  const [autorunPending, setAutorunPending] = useState(false);
+
+  // Detect + restore on mount. The sessionStorage snapshot is the primary
+  // signal — client-side navigations can present a stale window.location
+  // during the first render, which both hides the ?autorun=1 flag AND lets
+  // the plan page's reset wipe the staged store answers. The snapshot
+  // survives either failure mode; firing is deferred to the next render so
+  // handleFindTrip closes over the restored answers, not the wiped ones.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let snapshot: Record<string, unknown> | null = null;
+    try {
+      const raw = sessionStorage.getItem('bluemurr-autorun');
+      if (raw) {
+        snapshot = JSON.parse(raw);
+        sessionStorage.removeItem('bluemurr-autorun'); // one shot
+      }
+    } catch {
+      // storage blocked — fall through to the URL flag
+    }
+    const urlFlag =
+      new URLSearchParams(window.location.search).get('autorun') === '1';
+    if (!snapshot && !urlFlag) return;
+    autorunArmedRef.current = true; // suppress the delayed intent picker
+
+    if (snapshot) {
+      const set = useTripStore.getState().setAnswer;
+      for (const [key, value] of Object.entries(snapshot)) {
+        if (value !== undefined && value !== null) set(key as any, value as any);
+      }
+    }
+    setAutorunPending(true);
+  }, []);
+
+  // Fire once the restored answers are in this render's closure.
+  useEffect(() => {
+    if (!autorunPending || autorunRef.current) return;
+    if (validateTripInputs(answers).length > 0) {
+      // Staged answers incomplete — disarm and hand back the normal flow.
+      autorunArmedRef.current = false;
+      setAutorunPending(false);
+      setShowIntent(true);
+      return;
+    }
+    autorunRef.current = true;
+    setAutorunPending(false);
+    setShowIntent(false);
+    setMessages([
+      {
+        id: nextId(),
+        role: 'assistant',
+        content: `Recalculating your trip starting ${answers.dateRange?.start ?? 'on the new date'} — searching flights, trains, and hotels with the shifted dates...`,
+      },
+    ]);
+    handleFindTrip();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autorunPending, answers]);
+
+  // If the auto-run search fails, hand the screen back to the normal flow
+  // so the error bubble isn't a dead end (the picker returns below it).
+  useEffect(() => {
+    if (autorunRef.current && !findTripLoading && findTripError && !intent) {
+      autorunArmedRef.current = false;
+      setShowIntent(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findTripLoading, findTripError, intent]);
+
   return (
     <div className="relative flex flex-col h-screen" style={{ background: '#0f0f1a' }}>
       {/* Subtle vibe background shift */}
@@ -2258,8 +2337,8 @@ export default function PlanningChat() {
             ))}
           </AnimatePresence>
 
-          {/* Intent picker */}
-          {showIntent && !intent && (
+          {/* Intent picker — hidden while an auto-run search owns the page */}
+          {showIntent && !intent && !findTripLoading && (
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
@@ -2268,6 +2347,19 @@ export default function PlanningChat() {
               className="mt-2"
             >
               <IntentPicker onSelect={handleIntentSelect} />
+            </motion.div>
+          )}
+
+          {/* Auto-run searching state — the date-shift replan has no chat
+              mode mounted, so its progress renders here instead. */}
+          {findTripLoading && !intent && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-3 flex items-center gap-2.5 text-sm text-gray-400"
+            >
+              <Loader2 size={16} className="animate-spin" style={{ color: '#4f8ef7' }} />
+              <span>{findTripStatus || 'Searching flights, trains, and hotels...'}</span>
             </motion.div>
           )}
 
