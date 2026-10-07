@@ -92,6 +92,25 @@ router.patch(
   }),
 );
 
+// ─── DELETE /api/notifications ───────────────────────────────
+// Clear ALL of the caller's notifications (the dropdown's "Clear all").
+router.delete(
+  '/',
+  asyncHandler(async (req, res) => {
+    const user = (req as any).user;
+    const supabase = getSupabase();
+
+    const { data, error } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('user_id', user.id)
+      .select('id');
+    if (error) throw new AppError(500, error.message);
+
+    res.json({ success: true, deleted: data?.length ?? 0 });
+  }),
+);
+
 // ─── DELETE /api/notifications/:id ───────────────────────────
 router.delete(
   '/:id',

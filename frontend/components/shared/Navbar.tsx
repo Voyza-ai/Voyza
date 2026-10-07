@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
 import LoginModal from '@/components/shared/LoginModal';
 import NotificationBell from '@/components/shared/NotificationBell';
+import DeleteAccountModal from '@/components/shared/DeleteAccountModal';
 
 type NavbarProps = {
   minimal?: boolean;
@@ -22,6 +23,7 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
   const signOut = useAuthStore((s) => s.signOut);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -105,6 +107,16 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
               >
                 Sign out
               </button>
+              <div className="border-t border-gray-100" />
+              <button
+                onClick={() => {
+                  setDropdownOpen(false);
+                  setDeleteOpen(true);
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+              >
+                Delete account
+              </button>
             </div>
           )}
         </div>
@@ -122,6 +134,7 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
       </div>
 
       <LoginModal isOpen={loginOpen} onClose={() => setLoginOpen(false)} />
+      <DeleteAccountModal isOpen={deleteOpen} onClose={() => setDeleteOpen(false)} />
     </nav>
   );
 }

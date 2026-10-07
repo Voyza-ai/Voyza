@@ -10,6 +10,7 @@ import canvas from './canvas';
 import trips from './trips';
 import users from './users';
 import notifications from './notifications';
+import email from './email';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireAuth } from '../middleware/auth';
 import { compareLeg } from '../services/compareLeg';
@@ -31,6 +32,9 @@ router.use('/canvas', requireAuth, canvas);
 router.use('/trips', requireAuth, trips);
 router.use('/users', requireAuth, users);
 router.use('/notifications', requireAuth, notifications);
+// No requireAuth: unsubscribe links arrive from emails (no session), and
+// run-jobs authenticates schedulers via the CRON_SECRET header itself.
+router.use('/email', email);
 
 // ─── Compare Leg ─────────────────────────────────────────────
 const compareLegSchema = z.object({

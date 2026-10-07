@@ -1,4 +1,4 @@
--- 006: In-app notifications
+-- 012: In-app notifications
 --
 -- ⚠️ Apply manually in the Supabase SQL editor (like 003–005). This migration
 -- references objects that exist in PROD but not in this repo's earlier

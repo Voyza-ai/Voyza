@@ -69,9 +69,9 @@ describe('ShareModal', () => {
     expect(screen.getByText('View only')).toBeInTheDocument();
     expect(screen.getByText('Owner confirms edits')).toBeInTheDocument();
     expect(screen.getByText('Full access')).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByDisplayValue('http://localhost/canvas/trip-1?share=tok-1')).toBeInTheDocument();
-    });
+    // The raw URL is no longer displayed — just a Copy link button.
+    await waitFor(() => expect(screen.getByText('Copy link')).toBeEnabled());
+    expect(screen.queryByDisplayValue(/share=tok-1/)).not.toBeInTheDocument();
   });
 
   it('changes the link mode when a mode card is clicked', async () => {
@@ -91,9 +91,7 @@ describe('ShareModal', () => {
 
   it('copies the link to the clipboard', async () => {
     render(<ShareModal {...baseProps} />);
-    await waitFor(() =>
-      expect(screen.getByDisplayValue(/share=tok-1/)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText('Copy link')).toBeEnabled());
     fireEvent.click(screen.getByText('Copy link'));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       'http://localhost/canvas/trip-1?share=tok-1',
@@ -123,6 +121,30 @@ describe('ShareModal', () => {
     await waitFor(() => {
       expect(mockedInvite).toHaveBeenCalledWith('trip-1', 'pal@test.com', 'editor');
     });
+  });
+
+  it('blocks inviting your own email (any casing) without calling the API', async () => {
+    render(<ShareModal {...baseProps} />);
+    // Logged-in user in the shared auth mock is test@test.com.
+    fireEvent.change(screen.getByPlaceholderText('friend@email.com'), {
+      target: { value: '  TEST@test.com ' },
+    });
+    fireEvent.click(screen.getByLabelText('Send invite'));
+    expect(screen.getByRole('alert')).toHaveTextContent("You can't invite yourself");
+    expect(mockedInvite).not.toHaveBeenCalled();
+
+    // Editing the email clears the error.
+    fireEvent.change(screen.getByPlaceholderText('friend@email.com'), {
+      target: { value: 'pal@test.com' },
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('labels the section "Friend invites" with no send-it-yourself copy', () => {
+    render(<ShareModal {...baseProps} />);
+    expect(screen.getByText('Friend invites')).toBeInTheDocument();
+    expect(screen.queryByText(/Personal invites/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/send it yourself/)).not.toBeInTheDocument();
   });
 
   it("shows the member's real NAME (not 'Member') and their email", async () => {
@@ -185,5 +207,41 @@ describe('ShareModal', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       expect.stringContaining('share=tok-xyz'),
     );
+  });
+
+  describe('as an editor (Google Docs-style sharing)', () => {
+    const editorProps = { ...baseProps, role: 'editor' };
+
+    it('can copy the link and invite friends', async () => {
+      mockedInvite.mockResolvedValue({ member: {} as any, inviteLink: 'x' });
+      render(<ShareModal {...editorProps} />);
+      await waitFor(() => expect(screen.getByText('Copy link')).toBeEnabled());
+      fireEvent.click(screen.getByText('Copy link'));
+      expect(navigator.clipboard.writeText).toHaveBeenCalled();
+
+      fireEvent.change(screen.getByPlaceholderText('friend@email.com'), {
+        target: { value: 'pal@test.com' },
+      });
+      fireEvent.click(screen.getByLabelText('Send invite'));
+      await waitFor(() =>
+        expect(mockedInvite).toHaveBeenCalledWith('trip-1', 'pal@test.com', 'editor'),
+      );
+    });
+
+    it('cannot change link mode, reset the link, or manage members', async () => {
+      mockedListMembers.mockResolvedValue({ members: [member()] as any });
+      render(<ShareModal {...editorProps} />);
+      expect(await screen.findByText('Pal Smith')).toBeInTheDocument();
+
+      // Read-only summary instead of the mode cards.
+      expect(screen.getByText(/Only the owner can change this/)).toBeInTheDocument();
+      expect(screen.queryByText('Full access')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Reset link/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Apply this access/)).not.toBeInTheDocument();
+      // No role select, transfer, or remove controls on member rows.
+      expect(screen.queryByLabelText(/Role for/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/the owner$/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^Remove /)).not.toBeInTheDocument();
+    });
   });
 });

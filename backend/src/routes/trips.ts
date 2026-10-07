@@ -766,19 +766,38 @@ router.post(
       .eq('id', req.params.id);
     if (tripErr) throw new AppError(500, tripErr.message);
 
-    // 2. Demote the previous owner's membership row to 'editor' so they
-    //    still have edit access but no ownership powers.
+    // 2. The new owner's membership rows go away — ownership lives on
+    //    trips.user_id ONLY. (This route used to promote the row to
+    //    role='owner' instead, which left a second, stale "owner" behind
+    //    after later transfers: the members list showed the wrong person
+    //    and the former owner kept owner powers.)
+    await supabase
+      .from('group_members')
+      .delete()
+      .eq('trip_id', req.params.id)
+      .eq('user_id', newOwnerId);
+
+    // 3. Sweep any other stale role='owner' rows on this trip.
     await supabase
       .from('group_members')
       .update({ role: 'editor' })
       .eq('trip_id', req.params.id)
-      .eq('user_id', user.id);
+      .eq('role', 'owner');
 
-    // 3. Promote the new owner's membership row.
+    // 4. Previous owner stays on as an editor — replace-then-insert so
+    //    repeat transfers can't stack duplicate rows.
     await supabase
       .from('group_members')
-      .update({ role: 'owner' })
-      .eq('id', targetMember.id);
+      .delete()
+      .eq('trip_id', req.params.id)
+      .eq('user_id', user.id);
+    await supabase.from('group_members').insert({
+      trip_id: req.params.id,
+      user_id: user.id,
+      invited_email: user.email ?? null,
+      role: 'editor',
+      accepted_at: new Date().toISOString(),
+    });
 
     // Tell the new owner.
     await createNotification({

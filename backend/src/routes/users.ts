@@ -4,6 +4,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { getSupabase } from '../services/supabase';
 import { AppError } from '../middleware/error';
 import { createNotification } from '../services/notifications';
+import { sendEmail, emailTemplates } from '../services/email';
 
 const router = Router();
 
@@ -236,9 +237,20 @@ router.delete(
       userId: user.id,
       type: 'account_deletion_scheduled',
       title: 'Account deletion scheduled',
-      body: `Your account will be permanently anonymized on ${deletionDateNice}. You can cancel any time before then from your account settings.`,
+      body: `Your account will be permanently anonymized on ${deletionDateNice}. You can cancel any time before then from your profile menu.`,
       data: { deletedAt: nowIso, scheduledDeletionAt: scheduled.toISOString() },
     });
+
+    // Email confirmation too (account-critical — sent regardless of email
+    // preferences; no-op when the transport isn't configured).
+    if (user.email) {
+      await sendEmail({
+        to: user.email,
+        userId: user.id,
+        type: 'deletion_scheduled',
+        ...emailTemplates.deletionScheduled(deletionDateNice),
+      });
+    }
 
     res.json({
       success: true,

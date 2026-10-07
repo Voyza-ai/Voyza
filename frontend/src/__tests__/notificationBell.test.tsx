@@ -9,6 +9,7 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
+  clearAllNotifications,
   cloneTrip,
   type AppNotification,
 } from '@/lib/api';
@@ -101,6 +102,32 @@ describe('NotificationBell', () => {
     expect(screen.queryByTestId('notification-badge')).not.toBeInTheDocument();
   });
 
+  it('Clear all empties the list and calls the API', async () => {
+    mockedGet.mockResolvedValue({
+      notifications: [n({ title: 'First' }), n({ title: 'Second', read_at: '2026-09-29T10:00:00Z' })],
+      unreadCount: 1,
+    });
+    render(<NotificationBell />);
+    await screen.findByTestId('notification-badge');
+
+    fireEvent.click(screen.getByLabelText(/Notifications/));
+    fireEvent.click(screen.getByText('Clear all'));
+
+    expect(clearAllNotifications as jest.Mock).toHaveBeenCalled();
+    expect(screen.queryByText('First')).not.toBeInTheDocument();
+    expect(screen.queryByText('Second')).not.toBeInTheDocument();
+    expect(screen.getByText(/all caught up/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('notification-badge')).not.toBeInTheDocument();
+  });
+
+  it('Clear all is disabled when the list is empty', async () => {
+    render(<NotificationBell />);
+    await waitFor(() => expect(mockedGet).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText(/Notifications/));
+    expect(screen.getByText('Clear all')).toBeDisabled();
+    expect(screen.getByText('Mark all read')).toBeDisabled();
+  });
+
   it('a realtime INSERT prepends the row and bumps the badge', async () => {
     render(<NotificationBell />);
     await waitFor(() => expect(mockedGet).toHaveBeenCalled());
@@ -131,6 +158,38 @@ describe('NotificationBell', () => {
     expect(mockedMarkRead).toHaveBeenCalledWith('n-own');
     expect(mockPush).toHaveBeenCalledWith('/canvas/trip-9');
     expect(screen.queryByTestId('notification-badge')).not.toBeInTheDocument();
+  });
+
+  it('a canvas invite navigates to the working join URL', async () => {
+    const item = n({
+      id: 'n-inv',
+      data: { tripId: 'trip-7', link: '/canvas/trip-7?share=tok-7' },
+    });
+    mockedGet.mockResolvedValue({ notifications: [item], unreadCount: 1 });
+    render(<NotificationBell />);
+    await screen.findByTestId('notification-badge');
+
+    fireEvent.click(screen.getByLabelText(/Notifications/));
+    fireEvent.click(screen.getByText('You were invited to collaborate on a trip'));
+
+    expect(mockPush).toHaveBeenCalledWith('/canvas/trip-7?share=tok-7');
+  });
+
+  it('heals legacy /canvas/join/ links into the real join URL (404 regression)', async () => {
+    // Early notifications stored a link to a frontend page that never
+    // existed; clicking them 404'd. The bell rebuilds the working URL.
+    const item = n({
+      id: 'n-legacy',
+      data: { tripId: 'trip-8', link: '/canvas/join/tok-legacy' },
+    });
+    mockedGet.mockResolvedValue({ notifications: [item], unreadCount: 1 });
+    render(<NotificationBell />);
+    await screen.findByTestId('notification-badge');
+
+    fireEvent.click(screen.getByLabelText(/Notifications/));
+    fireEvent.click(screen.getByText('You were invited to collaborate on a trip'));
+
+    expect(mockPush).toHaveBeenCalledWith('/canvas/trip-8?share=tok-legacy');
   });
 
   it('the anonymized-owner notification clones the trip and opens the copy', async () => {

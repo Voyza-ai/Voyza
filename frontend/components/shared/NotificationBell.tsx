@@ -20,6 +20,7 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
+  clearAllNotifications,
   cloneTrip,
   type AppNotification,
 } from '@/lib/api';
@@ -108,12 +109,21 @@ export default function NotificationBell() {
           router.push(`/canvas/${tripId}`);
         }
         break;
-      case 'canvas_invite':
-        if (n.data?.link) {
+      case 'canvas_invite': {
+        // Heal legacy rows: early notifications stored /canvas/join/<token>,
+        // a page that never existed on the frontend (404). Rebuild the real
+        // join URL — /canvas/<tripId>?share=<token> — from the same payload.
+        let link: string | undefined = n.data?.link;
+        if (link?.startsWith('/canvas/join/') && tripId) {
+          const token = link.split('/').pop();
+          link = `/canvas/${tripId}?share=${token}`;
+        }
+        if (link) {
           setOpen(false);
-          router.push(n.data.link);
+          router.push(link);
         }
         break;
+      }
       // account_deletion_scheduled + trip_owner_anonymized: mark-read only
       // (the latter's action is its explicit Clone button).
     }
@@ -138,6 +148,12 @@ export default function NotificationBell() {
     if (unreadCount === 0) return;
     storeMarkAllRead();
     markAllNotificationsRead().catch(() => {});
+  };
+
+  const handleClearAll = () => {
+    if (items.length === 0) return;
+    useNotificationsStore.getState().setAll([], 0);
+    clearAllNotifications().catch(() => {});
   };
 
   const handleDelete = (e: React.MouseEvent, n: AppNotification) => {
@@ -169,13 +185,24 @@ export default function NotificationBell() {
         <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-100 z-50 overflow-hidden">
           <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
             <span className="text-sm font-medium text-gray-800">Notifications</span>
-            <button
-              onClick={handleMarkAll}
-              disabled={unreadCount === 0}
-              className="text-[11px] text-[#2563eb] hover:text-[#1e50c8] disabled:text-gray-300 transition-colors"
-            >
-              Mark all read
-            </button>
+            <div className="flex items-center gap-3">
+              {/* Enabled only while something is UNREAD — clicking a row
+                  already marks it read, so a fully-read list grays this out. */}
+              <button
+                onClick={handleMarkAll}
+                disabled={unreadCount === 0}
+                className="text-[11px] text-[#2563eb] hover:text-[#1e50c8] disabled:text-gray-300 transition-colors"
+              >
+                Mark all read
+              </button>
+              <button
+                onClick={handleClearAll}
+                disabled={items.length === 0}
+                className="text-[11px] text-[#2563eb] hover:text-[#1e50c8] disabled:text-gray-300 transition-colors"
+              >
+                Clear all
+              </button>
+            </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto">

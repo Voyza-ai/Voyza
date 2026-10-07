@@ -141,6 +141,20 @@ describe('PATCH /api/notifications/:id', () => {
   });
 });
 
+describe('DELETE /api/notifications (clear all)', () => {
+  it('deletes every notification for the caller and reports the count', async () => {
+    responseQueue.push({ data: [{ id: 'n1' }, { id: 'n2' }], error: null });
+    const res = await request(app)
+      .delete('/api/notifications')
+      .set('Authorization', 'Bearer alice-token');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, deleted: 2 });
+    // Scoped to the caller, and NOT routed into /:id.
+    expect(calls.some((c) => c.method === 'eq' && c.args[0] === 'user_id' && c.args[1] === 'alice-id')).toBe(true);
+    expect(calls.some((c) => c.method === 'eq' && c.args[0] === 'id')).toBe(false);
+  });
+});
+
 describe('DELETE /api/notifications/:id', () => {
   it('deletes with user scoping', async () => {
     responseQueue.push({ error: null });

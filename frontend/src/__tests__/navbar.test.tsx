@@ -53,6 +53,17 @@ jest.mock('@/components/shared/NotificationBell', () => {
   };
 });
 
+// Same for the delete-account modal (fetches the profile on open) — it has
+// its own deleteAccountModal.test.tsx.
+jest.mock('@/components/shared/DeleteAccountModal', () => {
+  const React = require('react');
+  return {
+    __esModule: true,
+    default: ({ isOpen }: any) =>
+      React.createElement('div', { 'data-testid': 'delete-account-modal', 'data-open': String(isOpen) }),
+  };
+});
+
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import Navbar from '@/components/shared/Navbar';
