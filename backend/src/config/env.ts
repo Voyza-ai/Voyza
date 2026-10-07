@@ -47,6 +47,16 @@ const envSchema = z.object({
 
   // Frontend URL for invite links and redirects
   FRONTEND_URL: z.string().default('http://localhost:3000'),
+
+  // Email transport (Resend). No key → email silently disabled (in-app
+  // notifications still work). EMAIL_FROM's default is Resend's sandbox
+  // sender, usable before a domain is verified.
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().default('BlueMurr <onboarding@resend.dev>'),
+  // Public URL of THIS API (unsubscribe links in emails point here).
+  API_PUBLIC_URL: z.string().default('http://localhost:4000'),
+  // Shared secret for POST /api/email/run-jobs (grace reminders + digest).
+  CRON_SECRET: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

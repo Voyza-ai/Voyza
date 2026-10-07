@@ -5,6 +5,8 @@ import { AppError } from '../middleware/error';
 import { getSupabase } from '../services/supabase';
 import { compareLeg } from '../services/compareLeg';
 import { searchHotels } from '../services/hotels';
+import { createNotification } from '../services/notifications';
+import { sendEmail, emailTemplates, unsubscribeUrlFor } from '../services/email';
 import { env } from '../config/env';
 import { parseDurationMinutes } from '../utils/duration';
 import { buildTripFromDb, resolveTripTitle } from '../utils/tripShape';
@@ -34,7 +36,11 @@ async function getMemberRole(tripId: string, userId: string) {
 
   if (trip?.user_id === userId) return 'owner';
 
-  // Check group_members
+  // Check group_members. trips.user_id (above) is the ONLY source of
+  // ownership — a member row claiming 'owner' is stale debris from an old
+  // transfer implementation and must NOT grant owner powers (a former
+  // owner kept full control after handing a trip off this way). Clamp it
+  // to editor.
   const { data: member } = await supabase
     .from('group_members')
     .select('role')
@@ -42,6 +48,7 @@ async function getMemberRole(tripId: string, userId: string) {
     .eq('user_id', userId)
     .single();
 
+  if (member?.role === 'owner') return 'editor';
   return member?.role ?? null;
 }
 
@@ -689,6 +696,24 @@ router.patch(
       }
     }
 
+    // Tell the suggester what happened to their proposal — unless the
+    // owner is deciding their own suggestion (no self-notify).
+    if (suggestion?.suggested_by && suggestion.suggested_by !== user.id) {
+      await createNotification({
+        userId: suggestion.suggested_by,
+        type: 'suggestion_decided',
+        title:
+          status === 'approved'
+            ? 'Your suggestion was approved'
+            : 'Your suggestion was declined',
+        body:
+          status === 'approved'
+            ? 'The trip owner approved your suggestion — it has been applied to the canvas.'
+            : 'The trip owner declined your suggestion.',
+        data: { tripId, suggestionId, suggestionType: suggestion.type, status },
+      });
+    }
+
     res.json({ suggestion });
   }),
 );
@@ -707,9 +732,16 @@ router.post(
 
     const tripId = req.params.tripId as string;
     const memberRole = await getMemberRole(tripId, user.id);
-    if (memberRole !== 'owner') throw new AppError(403, 'Only the trip owner can invite');
+    // Owners and editors can invite (roles up to editor — the schema never
+    // allows granting owner). Suggesters/viewers can't share onward.
+    if (memberRole !== 'owner' && memberRole !== 'editor') {
+      throw new AppError(403, 'Only owners and editors can invite people');
+    }
 
     const { email, role } = inviteSchema.parse(req.body);
+    if (user.email && email.trim().toLowerCase() === user.email.toLowerCase()) {
+      throw new AppError(400, 'You cannot invite yourself');
+    }
     const supabase = getSupabase();
 
     // Re-inviting the same email updates the existing row (new role) —
@@ -740,7 +772,60 @@ router.post(
           .select()
           .single();
 
-    const inviteLink = `${env.FRONTEND_URL}/canvas/join/${data?.invite_token}`;
+    // /canvas/:tripId?share=<personal invite_token> is the ONLY working
+    // join URL: the canvas page feeds ?share= to POST /join-link, whose
+    // first branch claims a personal invite at the invited role. There is
+    // no /canvas/join/* page on the frontend — the old link shape 404'd.
+    const inviteLink = `${env.FRONTEND_URL}/canvas/${tripId}?share=${data?.invite_token}`;
+
+    // If the invited email already has an account, drop the invite into
+    // their bell (invites previously had NO delivery mechanism at all —
+    // the owner had to copy-paste the link). No account yet → nothing to
+    // notify; they'll join through the link like before.
+    const { data: invitedUserId } = await supabase.rpc('get_user_id_by_email', {
+      p_email: email,
+    });
+    const { data: tripRow } = await supabase
+      .from('trips')
+      .select('title')
+      .eq('id', tripId)
+      .single();
+    if (invitedUserId && invitedUserId !== user.id) {
+      await createNotification({
+        userId: invitedUserId,
+        type: 'canvas_invite',
+        title: 'You were invited to collaborate on a trip',
+        body: `${user.email ?? 'A trip owner'} invited you to "${tripRow?.title ?? 'a trip'}" as ${role}.`,
+        data: {
+          tripId,
+          tripTitle: tripRow?.title ?? null,
+          role,
+          invitedBy: user.id,
+          link: `/canvas/${tripId}?share=${data?.invite_token}`,
+        },
+      });
+    }
+
+    // Email the invite too — this works even when the invitee has no
+    // account yet (previously the ONLY delivery was the owner copy-pasting
+    // the link). Existing accounts get their stored preferences enforced
+    // and an unsubscribe footer; unknown emails get the type's default.
+    if (!invitedUserId || invitedUserId !== user.id) {
+      const tpl = emailTemplates.canvasInvite(
+        user.email ?? null,
+        tripRow?.title ?? null,
+        role,
+        inviteLink,
+        invitedUserId ? unsubscribeUrlFor(invitedUserId) : undefined,
+      );
+      await sendEmail({
+        to: email,
+        userId: invitedUserId ?? undefined,
+        type: 'canvas_invite',
+        ...tpl,
+      });
+    }
+
     res.status(201).json({ member: data, inviteLink });
   }),
 );
@@ -865,51 +950,56 @@ router.get(
       };
     });
 
-    // The trip owner may have no group_members row (ownership lives on
-    // trips.user_id) — synthesize an entry so "People with access" always
-    // shows them, with their real name (and, to the owner, email).
-    const hasOwnerRow = enriched.some((m: any) => m.role === 'owner');
-    if (!hasOwnerRow) {
-      const { data: trip } = await supabase
-        .from('trips')
-        .select('user_id, created_at')
-        .eq('id', tripId)
+    // Ownership lives on trips.user_id and ONLY there. Old transfer code
+    // used to leave group_members rows with role 'owner' behind, which made
+    // this list show the WRONG person as owner (and hid the real one). So:
+    // clamp any member row claiming 'owner' to editor, drop the true
+    // owner's own member row if one exists, and ALWAYS synthesize the
+    // owner entry from trips.user_id.
+    const { data: trip } = await supabase
+      .from('trips')
+      .select('user_id, created_at')
+      .eq('id', tripId)
+      .single();
+    const trueOwnerId = trip?.user_id ?? null;
+    const display = enriched
+      .filter((m: any) => !(trueOwnerId && m.userId === trueOwnerId))
+      .map((m: any) => (m.role === 'owner' ? { ...m, role: 'editor' } : m));
+    if (trueOwnerId) {
+      // Only the owner may see this address (utils/memberVisibility.ts),
+      // so skip the admin lookup for everyone else.
+      const { data: ownerAuth } = isOwner
+        ? await supabase.auth.admin.getUserById(trueOwnerId)
+        : { data: null };
+      const { data: ownerProfile } = await supabase
+        .from('user_profiles')
+        .select('full_name, avatar_url')
+        .eq('id', trueOwnerId)
         .single();
-      if (trip?.user_id) {
-        // The only requester who may see this address IS the owner, so
-        // skip the admin lookup for everyone else.
-        const { data: ownerAuth } = isOwner
-          ? await supabase.auth.admin.getUserById(trip.user_id)
-          : { data: null };
-        const { data: ownerProfile } = await supabase
-          .from('user_profiles')
-          .select('full_name, avatar_url')
-          .eq('id', trip.user_id)
-          .single();
-        enriched.unshift({
-          id: `owner-${trip.user_id}`,
-          userId: trip.user_id,
-          role: 'owner',
-          acceptedAt: trip.created_at,
-          createdAt: trip.created_at,
-          email: ownerAuth?.user?.email ?? null,
-          fullName: ownerProfile?.full_name ?? null,
-          avatarUrl: ownerProfile?.avatar_url ?? null,
-          pending: false,
-          inviteToken: null,
-        });
-      }
+      display.unshift({
+        id: `owner-${trueOwnerId}`,
+        userId: trueOwnerId,
+        role: 'owner',
+        acceptedAt: trip?.created_at,
+        createdAt: trip?.created_at,
+        email: ownerAuth?.user?.email ?? null,
+        fullName: ownerProfile?.full_name ?? null,
+        avatarUrl: ownerProfile?.avatar_url ?? null,
+        pending: false,
+        inviteToken: null,
+      });
     }
 
-    // Two things here are the owner's alone. inviteToken grants access,
-    // so only the owner (who sends links) sees it. And every OTHER
-    // person's email: this list is readable by every member, share-link
-    // viewers included. redactMemberIdentity nulls those out and adds
-    // `displayName` — the label the UI renders in the email's place, so
-    // a redacted row never collapses to a blank line.
-    const safeMembers = enriched.map((mm: any) => {
+    // Emails: every OTHER person's address is the owner's alone — this
+    // list is readable by every member, share-link viewers included.
+    // redactMemberIdentity nulls those out and adds `displayName`.
+    // inviteToken grants access, so only people who can invite see it:
+    // the owner and editors (editors can invite at roles up to editor, so
+    // a pending invite's link grants them nothing they couldn't create).
+    const canInvite = role === 'owner' || role === 'editor';
+    const safeMembers = display.map((mm: any) => {
       const visible = redactMemberIdentity(mm, requester);
-      return isOwner ? visible : { ...visible, inviteToken: null };
+      return canInvite ? visible : { ...visible, inviteToken: null };
     });
     res.json({ members: safeMembers });
   }),
@@ -1043,8 +1133,11 @@ router.get(
     const user = await getUserFromToken(req.headers.authorization);
     if (!user) throw new AppError(401, 'Authentication required');
     const tripId = req.params.tripId as string;
-    if ((await getMemberRole(tripId, user.id)) !== 'owner') {
-      throw new AppError(403, 'Only the trip owner can manage sharing');
+    // Owners AND editors can read/copy the link (Google Docs-style: editors
+    // can share). Changing the link's mode stays owner-only (PATCH below).
+    const shareRole = await getMemberRole(tripId, user.id);
+    if (shareRole !== 'owner' && shareRole !== 'editor') {
+      throw new AppError(403, 'Only owners and editors can share this trip');
     }
     const session = await findOrCreateSession(tripId);
     res.json({
@@ -1279,16 +1372,47 @@ router.post(
       .eq('id', tripId);
     if (tripErr) throw new AppError(500, 'Could not transfer the trip');
 
-    // 2. New owner's membership row goes away (ownership is via the trip).
-    await supabase.from('group_members').delete().eq('id', member.id);
+    // 2. New owner's membership rows go away (ownership is via the trip) —
+    //    by user_id, not just the clicked row, so duplicates from older
+    //    flows are swept too.
+    await supabase
+      .from('group_members')
+      .delete()
+      .eq('trip_id', tripId)
+      .eq('user_id', member.user_id);
 
-    // 3. Old owner stays on the trip as an editor.
+    // 3. Nobody else may hold a role='owner' member row — trips.user_id is
+    //    the only ownership record. Demote any stale ones (legacy transfer
+    //    implementations wrote these and they granted phantom owner powers).
+    await supabase
+      .from('group_members')
+      .update({ role: 'editor' })
+      .eq('trip_id', tripId)
+      .eq('role', 'owner');
+
+    // 4. Old owner stays on the trip as an editor (replace any existing
+    //    rows of theirs so this can't create duplicates).
+    await supabase.from('group_members').delete().eq('trip_id', tripId).eq('user_id', user.id);
     await supabase.from('group_members').insert({
       trip_id: tripId,
       user_id: user.id,
       invited_email: user.email ?? null,
       role: 'editor',
       accepted_at: new Date().toISOString(),
+    });
+
+    // Tell the new owner.
+    const { data: tripRow } = await supabase
+      .from('trips')
+      .select('title')
+      .eq('id', tripId)
+      .single();
+    await createNotification({
+      userId: member.user_id,
+      type: 'ownership_transferred',
+      title: 'You are now the owner of a trip',
+      body: `Ownership of "${tripRow?.title ?? 'a trip'}" was transferred to you.`,
+      data: { tripId, tripTitle: tripRow?.title ?? null, previousOwnerId: user.id },
     });
 
     res.json({ success: true, newOwnerUserId: member.user_id });

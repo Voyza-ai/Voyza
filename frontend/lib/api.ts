@@ -1,4 +1,4 @@
-import { getAuthHeader } from './supabase';
+import { getAuthHeader, refreshAuthHeader } from './supabase';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -18,21 +18,29 @@ export class ApiError extends Error {
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const authHeaders = await getAuthHeader();
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders,
-      ...options.headers,
-    },
-  });
+  const send = (authHeaders: Record<string, string>) =>
+    fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+        ...options.headers,
+      },
+    });
 
+  let res = await send(await getAuthHeader());
+
+  // A 401 usually means the access token went stale (long session, a tab
+  // that slept past expiry). Force-refresh the session and retry once.
+  // Never hard-redirect: background calls (e.g. the notification bell)
+  // used to send the whole page to /login — a route that doesn't exist —
+  // so a stale token showed up as a 404 on whatever page you were on.
   if (res.status === 401) {
-    if (typeof window !== 'undefined') {
-      window.location.href = '/login';
-    }
-    throw new Error('Unauthorized');
+    const refreshed = await refreshAuthHeader();
+    if (refreshed) res = await send(refreshed);
+  }
+  if (res.status === 401) {
+    throw new ApiError(401, 'Unauthorized');
   }
 
   if (!res.ok) {
@@ -693,6 +701,9 @@ export type UserProfile = {
     defaultTravelers?: number;
     emailNotifications?: boolean;
   };
+  /** 'pending_deletion' during the 30-day grace window. */
+  accountStatus?: 'active' | 'pending_deletion' | 'anonymized';
+  scheduledDeletionAt?: string | null;
 };
 
 export async function getCurrentUser(): Promise<UserProfile> {
@@ -708,10 +719,21 @@ export async function updateCurrentUser(
   });
 }
 
-export async function deleteCurrentUser(): Promise<{ success: boolean; deletedUserId: string }> {
-  return apiFetch<{ success: boolean; deletedUserId: string }>('/api/users/me', {
+export async function deleteCurrentUser(reason?: string): Promise<{
+  success: boolean;
+  accountStatus: string;
+  deletedAt: string;
+  scheduledDeletionAt: string;
+  alreadyScheduled: boolean;
+}> {
+  return apiFetch('/api/users/me', {
     method: 'DELETE',
+    body: JSON.stringify(reason ? { reason } : {}),
   });
+}
+
+export async function cancelAccountDeletion(): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>('/api/users/me/cancel-deletion', { method: 'POST' });
 }
 
 // ─── Trip collaboration members ─────────────────────────────
@@ -808,4 +830,65 @@ export async function applyRoleToMembers(
     method: 'PATCH',
     body: JSON.stringify({ role }),
   });
+}
+
+// ─── Notifications ───────────────────────────────────────────
+
+/** "App" prefix avoids clashing with the DOM's built-in Notification. */
+export type AppNotification = {
+  id: string;
+  type:
+    | 'account_deletion_scheduled'
+    | 'trip_owner_anonymized'
+    | 'ownership_transferred'
+    | 'suggestion_decided'
+    | 'canvas_invite';
+  title: string;
+  body: string | null;
+  data: Record<string, any>;
+  read_at: string | null;
+  created_at: string;
+};
+
+export async function getNotifications(
+  limit = 30,
+): Promise<{ notifications: AppNotification[]; unreadCount: number }> {
+  return apiFetch<{ notifications: AppNotification[]; unreadCount: number }>(
+    `/api/notifications?limit=${limit}`,
+  );
+}
+
+export async function markNotificationRead(
+  id: string,
+): Promise<{ notification: AppNotification }> {
+  return apiFetch<{ notification: AppNotification }>(`/api/notifications/${id}`, {
+    method: 'PATCH',
+  });
+}
+
+export async function markAllNotificationsRead(): Promise<{ success: boolean; updated: number }> {
+  return apiFetch<{ success: boolean; updated: number }>(`/api/notifications/read-all`, {
+    method: 'PATCH',
+  });
+}
+
+export async function deleteNotification(id: string): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(`/api/notifications/${id}`, { method: 'DELETE' });
+}
+
+export async function clearAllNotifications(): Promise<{ success: boolean; deleted: number }> {
+  return apiFetch<{ success: boolean; deleted: number }>(`/api/notifications`, {
+    method: 'DELETE',
+  });
+}
+
+/** Clone a shared trip into the caller's own account (used by the
+ *  trip-owner-anonymized notification's "Clone trip" action). */
+export async function cloneTrip(
+  tripId: string,
+): Promise<{ tripId: string; trip: any; clonedFrom: string }> {
+  return apiFetch<{ tripId: string; trip: any; clonedFrom: string }>(
+    `/api/trips/${tripId}/clone`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
 }

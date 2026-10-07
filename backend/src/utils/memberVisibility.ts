@@ -13,10 +13,11 @@
  * So: the owner sees every address, everybody else sees only their own, and
  * every other row comes back with `email: null`.
  *
- * Editors are deliberately NOT privileged here. Every management capability in
- * canvas.ts — invite, role change, apply-role, share link, transfer ownership,
- * and the `inviteToken` on this very response — is owner-only, so an address
- * belongs on the owner's side of that same line.
+ * Editors are deliberately NOT privileged here. Editors can share onward
+ * (copy the link, invite friends, see pending invite tokens), but every
+ * people-management capability — role change, apply-role, removal, transfer
+ * ownership — is owner-only, and a collaborator's address belongs on that
+ * owner-only side of the line.
  */
 
 /** One row of the enriched member list, as GET /:tripId/members builds it. */

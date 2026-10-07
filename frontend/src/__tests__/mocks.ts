@@ -75,6 +75,7 @@ jest.mock('@/lib/supabase', () => ({
       subscribe: jest.fn().mockReturnValue('SUBSCRIBED'),
       unsubscribe: jest.fn(),
     }),
+    removeChannel: jest.fn(),
   },
   getCurrentUser: jest.fn().mockResolvedValue(null),
   getAuthHeader: jest.fn().mockResolvedValue({}),
@@ -145,6 +146,32 @@ jest.mock('@/lib/api', () => ({
   getTrips: jest.fn().mockResolvedValue({ trips: [] }),
   getTrip: jest.fn().mockResolvedValue({ trip: {} }),
   deleteTrip: jest.fn().mockResolvedValue({ success: true }),
+  getNotifications: jest.fn().mockResolvedValue({ notifications: [], unreadCount: 0 }),
+  markNotificationRead: jest.fn().mockResolvedValue({ notification: {} }),
+  markAllNotificationsRead: jest.fn().mockResolvedValue({ success: true, updated: 0 }),
+  deleteNotification: jest.fn().mockResolvedValue({ success: true }),
+  clearAllNotifications: jest.fn().mockResolvedValue({ success: true, deleted: 0 }),
+  getCurrentUser: jest.fn().mockResolvedValue({
+    id: 'u1',
+    email: 'test@test.com',
+    fullName: null,
+    avatarUrl: null,
+    isPremium: false,
+    preferences: {},
+    accountStatus: 'active',
+    scheduledDeletionAt: null,
+  }),
+  deleteCurrentUser: jest.fn().mockResolvedValue({
+    success: true,
+    accountStatus: 'pending_deletion',
+    deletedAt: '2026-09-29T00:00:00Z',
+    scheduledDeletionAt: '2026-10-29T00:00:00Z',
+    alreadyScheduled: false,
+  }),
+  cancelAccountDeletion: jest.fn().mockResolvedValue({ success: true }),
+  // null-safe default: an unchanged role never toasts or locks the canvas.
+  getCanvasRole: jest.fn().mockResolvedValue({ role: 'editor' }),
+  cloneTrip: jest.fn().mockResolvedValue({ tripId: 'trip-clone-1', trip: {}, clonedFrom: 'trip-1' }),
 }));
 
 // Mock styled-jsx (used by Flowchart)

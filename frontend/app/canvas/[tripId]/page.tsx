@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState, useCallback, useMemo, useRef, Suspense } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
-import { Save, Share2, WifiOff, ArrowLeft, Sparkles, X, Send } from 'lucide-react';
+import { Save, Share2, WifiOff, ArrowLeft, Sparkles, X, Send, UserX } from 'lucide-react';
 import CanvasCityCard from '@/components/canvas/CanvasCityCard';
 import CanvasConnector from '@/components/canvas/CanvasConnector';
 import CanvasHomeCard from '@/components/canvas/CanvasHomeCard';
@@ -40,7 +40,17 @@ import { liveTripTotal } from '@/lib/tripTotals';
 import { summarizeCanvasChanges } from '@/lib/canvasDiff';
 import { Trip } from '@/lib/types';
 
+// Next.js 14 requires useSearchParams() to be wrapped in a <Suspense>
+// boundary (same pattern as the results page).
 export default function CanvasPage() {
+  return (
+    <Suspense fallback={null}>
+      <CanvasPageInner />
+    </Suspense>
+  );
+}
+
+function CanvasPageInner() {
   const params = useParams();
   const router = useRouter();
   const tripId = params.tripId as string;
@@ -50,6 +60,14 @@ export default function CanvasPage() {
   const storeCities = storeTrip?.cities;
 
   const [role, setRole] = useState<string>('viewer');
+  // Access gate overlay:
+  //  'removed'   — the owner removed this user while they were on the canvas
+  //  'no_access' — a fresh load by a signed-in user with no role (removed
+  //                earlier, or never invited — indistinguishable here, so
+  //                the copy stays neutral)
+  const [accessGate, setAccessGate] = useState<'removed' | 'no_access' | null>(null);
+  const setRemoved = (v: boolean) => setAccessGate(v ? 'removed' : null);
+  const removed = accessGate !== null;
   const [localState, setLocalState] = useState<any>(null);
   const [savedState, setSavedState] = useState<any>(null);
   const [saving, setSaving] = useState(false);
@@ -63,11 +81,16 @@ export default function CanvasPage() {
   // connectors render a spinner instead of a stale/empty price.
   const [refreshingLegs, setRefreshingLegs] = useState<string[]>([]);
   const [chatOpen, setChatOpen] = useState(true);
-  // Share-link join: token from ?share=… (read once; cleared after joining)
+  // Share-link join: token from ?share=… (read once; cleared after joining).
+  // Read from the ROUTER's search params, never window.location — during a
+  // client-side navigation (e.g. clicking an invite notification) the
+  // location object still shows the PREVIOUS page's URL at first render,
+  // so the token read as null, the join never ran, and the session load
+  // 403'd until a manual reload. useSearchParams always reflects the
+  // pushed URL.
+  const searchParams = useSearchParams();
   const [shareToken, setShareToken] = useState<string | null>(() =>
-    typeof window !== 'undefined'
-      ? new URLSearchParams(window.location.search).get('share')
-      : null,
+    searchParams.get('share'),
   );
   const [sessionNonce, setSessionNonce] = useState(0);
   // Timestamp of the newest applied live op — lets the session load and
@@ -153,13 +176,25 @@ export default function CanvasPage() {
     })();
   }, [shareToken, tripId, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load initial session
+  // Load initial session.
+  //
+  // Ordering guards — both fix real "failed on first visit, worked on
+  // reload" races:
+  //   1. Never load while auth is still resolving: a pre-auth load 401s,
+  //      shows the failure toast, and the user has to reload.
+  //   2. Never load while a share/invite token is pending — even before
+  //      `user` exists. The old guard (`shareToken && user`) let the load
+  //      race ahead of the membership claim whenever it ran pre-auth, so
+  //      arriving via an invite link 403'd once and then worked forever.
+  //      The join effect consumes the token and bumps sessionNonce.
+  const loadRetriedRef = useRef(false);
   useEffect(() => {
     if (!tripId) return;
-    // A pending share-link join changes our role — wait for it.
-    if (shareToken && user) return;
+    if (authLoading) return;
+    if (shareToken) return;
 
     (async () => {
+      setLoading(true);
       try {
         // First try creating/resuming the canvas session.
         // Pass store cities as fallback for trips with no cities in the DB.
@@ -256,13 +291,35 @@ export default function CanvasPage() {
         }
 
         await getCanvasSuggestions(tripId);
+        setLoading(false);
       } catch {
+        // One silent retry before surfacing an error: a just-claimed
+        // membership (invite/share join) can lag a beat behind the first
+        // session read. The retry re-runs this effect via sessionNonce.
+        if (!loadRetriedRef.current) {
+          loadRetriedRef.current = true;
+          setTimeout(() => setSessionNonce((n) => n + 1), 700);
+          return; // keep the loading spinner up through the retry
+        }
+        // Signed in but no role on this trip (e.g. removed earlier, then
+        // reopened an old link/notification) → friendly gate, not an error.
+        if (user) {
+          try {
+            const { role: myRole } = await getCanvasRole(tripId);
+            if (!myRole) {
+              setAccessGate('no_access');
+              setLoading(false);
+              return;
+            }
+          } catch {
+            // fall through to the generic error
+          }
+        }
         showToast('Failed to load canvas session', 'error');
-      } finally {
         setLoading(false);
       }
     })();
-  }, [tripId, sessionNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tripId, sessionNonce, authLoading, shareToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync realtime state (from other users). Applies to EVERY role —
   // editors save now, so the owner receives updates too. Two guards:
@@ -617,7 +674,13 @@ export default function CanvasPage() {
   const refreshRole = useCallback(async () => {
     try {
       const { role: fresh } = await getCanvasRole(tripId);
-      if (fresh && fresh !== roleRef.current) {
+      // No role at all = the owner removed us from this trip. Lock the
+      // canvas behind the "you've been removed" screen.
+      if (!fresh) {
+        setRemoved(true);
+        return;
+      }
+      if (fresh !== roleRef.current) {
         roleRef.current = fresh;
         setRole(fresh);
         showToast(
@@ -1298,7 +1361,7 @@ export default function CanvasPage() {
             {isConnected ? 'Live' : 'Reconnecting...'}
           </div>
 
-          {role === 'owner' && (
+          {(role === 'owner' || role === 'editor') && (
             <button
               onClick={() => setShowInvite(true)}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-medium transition-all hover:bg-gray-50"
@@ -1639,6 +1702,7 @@ export default function CanvasPage() {
       {/* ─── Share dialog (link modes + invites + member roles) ─── */}
       <ShareModal
         tripId={tripId}
+        role={role}
         isOpen={showInvite}
         onClose={() => setShowInvite(false)}
         onToast={showToast}
@@ -1650,6 +1714,33 @@ export default function CanvasPage() {
           setSessionNonce((n) => n + 1);
         }}
       />
+
+      {/* ─── Removed-from-trip gate: the owner removed this user live ─── */}
+      {removed && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-6 text-center">
+            <div className="mx-auto mb-3 w-11 h-11 rounded-full flex items-center justify-center bg-red-50">
+              <UserX size={20} className="text-red-500" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1.5">
+              {accessGate === 'removed'
+                ? "You've been removed from this trip"
+                : "You don't have access to this trip"}
+            </h2>
+            <p className="text-[13px] text-gray-500 mb-5">
+              {accessGate === 'removed'
+                ? 'The trip owner removed you from this canvas, so you no longer have access to it.'
+                : 'This trip isn’t shared with your account. Ask the trip owner for an invite if you think this is a mistake.'}
+            </p>
+            <button
+              onClick={() => router.push('/history')}
+              className="w-full px-4 py-2.5 rounded-xl text-[13px] font-medium text-white bg-[#2563eb] hover:brightness-110 transition-all"
+            >
+              Take me back to My Trips
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ─── Share-link sign-in gate: joining requires an account ─── */}
       <LoginModal
