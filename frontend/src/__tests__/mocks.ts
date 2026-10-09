@@ -169,6 +169,8 @@ jest.mock('@/lib/api', () => ({
     alreadyScheduled: false,
   }),
   cancelAccountDeletion: jest.fn().mockResolvedValue({ success: true }),
+  getPopularTrips: jest.fn().mockResolvedValue({ trips: [] }),
+  updateTripPermissions: jest.fn().mockResolvedValue({ permissions: {} }),
   // null-safe default: an unchanged role never toasts or locks the canvas.
   getCanvasRole: jest.fn().mockResolvedValue({ role: 'editor' }),
   cloneTrip: jest.fn().mockResolvedValue({ tripId: 'trip-clone-1', trip: {}, clonedFrom: 'trip-1' }),

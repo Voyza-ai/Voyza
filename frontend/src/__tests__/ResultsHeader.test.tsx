@@ -171,6 +171,18 @@ describe('ResultsHeader', () => {
     expect(screen.queryByText('Cheaper start dates')).not.toBeInTheDocument();
   });
 
+  it('says "Best price" instead of "You can save $0" when nothing is cheaper', () => {
+    // Stored total == live total and no date shift → nothing cheaper exists.
+    const base = buildTrip({ savings: 0, dateShiftSuggestion: undefined } as any);
+    const { liveTripTotal } = require('@/lib/tripTotals');
+    const trip = { ...base, totalCost: liveTripTotal(base) };
+    render(<ResultsHeader trip={trip} />);
+    expect(screen.getByText('Best price')).toBeInTheDocument();
+    expect(screen.getByText('for these dates')).toBeInTheDocument();
+    expect(screen.queryByText(/You can save/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('vs default routing')).not.toBeInTheDocument();
+  });
+
   it('long AI-route titles cannot wrap the price cluster onto a second row', () => {
     // Describe-chat trips are titled with the full route ("Berlin → Florence
     // → Barcelona → Madrid"), which used to widen the left column until the

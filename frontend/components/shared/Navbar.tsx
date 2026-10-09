@@ -97,6 +97,13 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
               >
                 My Trips
               </Link>
+              <Link
+                href="/explore"
+                onClick={() => setDropdownOpen(false)}
+                className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Explore trips
+              </Link>
               <div className="border-t border-gray-100" />
               <button
                 onClick={() => {

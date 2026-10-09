@@ -226,6 +226,16 @@ describe('ShareModal', () => {
     expect(screen.queryByText('pal@test.com')).not.toBeInTheDocument();
   });
 
+  it('marks your own row with (you) so same-named accounts are distinguishable', async () => {
+    // u1 is the signed-in user in the shared auth mock.
+    mockedListMembers.mockResolvedValue({
+      members: [member({ id: 'me', userId: 'u1' }), member({ id: 'other', userId: 'u9' })] as any,
+    });
+    render(<ShareModal {...baseProps} />);
+    expect(await screen.findByText('(you)')).toBeInTheDocument();
+    expect(screen.getAllByText('(you)')).toHaveLength(1);
+  });
+
   describe('as an editor (Google Docs-style sharing)', () => {
     const editorProps = { ...baseProps, role: 'editor' };
 
@@ -251,7 +261,11 @@ describe('ShareModal', () => {
       expect(await screen.findByText('Pal Smith')).toBeInTheDocument();
 
       // Read-only summary instead of the mode cards.
-      expect(screen.getByText(/Only the owner can change this/)).toBeInTheDocument();
+      expect(screen.getByText(/Only the owner can change link access or manage people/)).toBeInTheDocument();
+      expect(screen.getByText('editor')).toBeInTheDocument(); // "You're an editor"
+      // Proper sentence, not "can full access" (default mode in mocks is view).
+      expect(screen.getByText('view the trip')).toBeInTheDocument();
+      expect(screen.queryByText(/can full access/)).not.toBeInTheDocument();
       expect(screen.queryByText('Full access')).not.toBeInTheDocument();
       expect(screen.queryByText(/Reset link/)).not.toBeInTheDocument();
       expect(screen.queryByText(/Apply this access/)).not.toBeInTheDocument();

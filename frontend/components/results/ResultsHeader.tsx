@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Users, TrendingDown, Sparkles, PenSquare, MessageSquare, ChevronDown } from 'lucide-react';
+import { Calendar, Users, TrendingDown, Sparkles, PenSquare, MessageSquare, ChevronDown, CheckCircle2 } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { useCountUp } from '@/lib/useCountUp';
@@ -159,6 +159,9 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const shiftSavings = trip.dateShiftSuggestion?.savings ?? 0;
   const shiftIsBest = shiftSavings > liveSavings;
   const bestSavings = shiftIsBest ? shiftSavings : liveSavings;
+  // Nothing cheaper exists: neither the routing nor any nearby start date
+  // beats these prices. Say so positively instead of "You can save $0".
+  const nothingToSave = Math.round(bestSavings) <= 0;
   const shiftDateNice = (() => {
     const iso = trip.dateShiftSuggestion?.newStartDate;
     if (!iso) return '';
@@ -427,8 +430,8 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
               }}
             >
               <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
-                <TrendingDown size={9} />
-                <span>You can save</span>
+                {nothingToSave ? <CheckCircle2 size={9} /> : <TrendingDown size={9} />}
+                <span>{nothingToSave ? 'Price check' : 'You can save'}</span>
                 {shiftOptions.length > 0 && (
                   <ChevronDown
                     size={9}
@@ -437,10 +440,14 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
                 )}
               </div>
               <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
-                ${animatedSavings.toLocaleString()}
+                {nothingToSave ? 'Best price' : `$${animatedSavings.toLocaleString()}`}
               </div>
               <div className="text-[#22c088]/50 text-[9px]">
-                {shiftIsBest ? `by starting ${shiftDateNice}` : 'vs default routing'}
+                {nothingToSave
+                  ? 'for these dates'
+                  : shiftIsBest
+                    ? `by starting ${shiftDateNice}`
+                    : 'vs default routing'}
               </div>
             </button>
 

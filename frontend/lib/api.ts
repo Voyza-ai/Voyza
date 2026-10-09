@@ -892,3 +892,51 @@ export async function cloneTrip(
     { method: 'POST', body: JSON.stringify({}) },
   );
 }
+
+// ─── Trip discovery (Explore) ────────────────────────────────
+
+export type PopularTrip = {
+  id: string;
+  title: string;
+  travelers: number;
+  totalCost: number | null;
+  startDate: string | null;
+  cloneCount: number;
+  clonesThisWeek: number;
+  createdAt: string;
+  cities: Array<{ name: string; country: string | null }>;
+  tags: string[];
+  ownerName: string | null;
+  isMine: boolean;
+};
+
+export type PopularQuery = {
+  vibe?: string;
+  maxBudget?: number;
+  cities?: string[];
+  sort?: 'popular' | 'trending';
+  limit?: number;
+};
+
+/** Trips their owners shared to Explore, ranked by clones. */
+export async function getPopularTrips(q: PopularQuery = {}): Promise<{ trips: PopularTrip[] }> {
+  const params = new URLSearchParams();
+  if (q.vibe) params.set('vibe', q.vibe);
+  if (q.maxBudget) params.set('maxBudget', String(q.maxBudget));
+  if (q.cities?.length) params.set('cities', q.cities.join(','));
+  if (q.sort) params.set('sort', q.sort);
+  if (q.limit) params.set('limit', String(q.limit));
+  const qs = params.toString();
+  return apiFetch<{ trips: PopularTrip[] }>(`/api/trips/popular${qs ? `?${qs}` : ''}`);
+}
+
+/** Owner-only sharing toggles. isPublic = "Share to Explore". */
+export async function updateTripPermissions(
+  tripId: string,
+  patch: { isPublic?: boolean; allowClones?: boolean; allowRecommendations?: boolean },
+): Promise<{ permissions: any }> {
+  return apiFetch<{ permissions: any }>(`/api/trips/${tripId}/permissions`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}

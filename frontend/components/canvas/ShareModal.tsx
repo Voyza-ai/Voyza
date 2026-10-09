@@ -59,6 +59,13 @@ const MODES: { key: ShareMode; icon: typeof Eye; title: string; blurb: string; j
   },
 ];
 
+/** Sentence form of a link mode: "Anyone with the link can ___." */
+const LINK_ACCESS_PHRASE: Record<ShareMode, string> = {
+  view: 'view the trip',
+  suggest: 'suggest edits for the owner to approve',
+  edit: 'edit the trip',
+};
+
 const ROLE_LABELS: Record<string, string> = {
   owner: 'Owner',
   editor: 'Editor',
@@ -84,6 +91,7 @@ export default function ShareModal({ tripId, role: myRole = 'owner', isOpen, onC
   const [email, setEmail] = useState('');
   const [inviteError, setInviteError] = useState<string | null>(null);
   const myEmail = useAuthStore((s) => s.user?.email ?? null);
+  const myUserId = useAuthStore((s) => s.user?.id ?? null);
   const [inviteRole, setInviteRole] = useState<'editor' | 'suggester' | 'viewer'>('editor');
   const [sending, setSending] = useState(false);
 
@@ -267,12 +275,20 @@ export default function ShareModal({ tripId, role: myRole = 'owner', isOpen, onC
             <div className="px-5 py-4 flex flex-col gap-5">
               {/* ── Link access mode (owner sets it; editors just see it) ── */}
               {!isOwner ? (
-                <div className="text-[12px] text-gray-500">
-                  Anyone with the link can{' '}
-                  <span className="font-medium text-gray-800">
-                    {(MODES.find((m) => m.key === mode)?.title ?? 'view').toLowerCase()}
-                  </span>
-                  . Only the owner can change this.
+                <div className="flex flex-col gap-2">
+                  <div
+                    className="rounded-lg px-3 py-2 text-[12px] leading-snug"
+                    style={{ background: '#eff6ff', color: '#1e40af' }}
+                  >
+                    You&apos;re {myRole === 'editor' ? 'an' : 'a'}{' '}
+                    <span className="font-semibold">{ROLE_LABELS[myRole]?.toLowerCase() ?? myRole}</span>{' '}
+                    on this trip — you can copy the link and invite friends. Only the owner can
+                    change link access or manage people.
+                  </div>
+                  <div className="text-[12px] text-gray-500">
+                    Anyone with the link can{' '}
+                    <span className="font-medium text-gray-800">{LINK_ACCESS_PHRASE[mode]}</span>.
+                  </div>
                 </div>
               ) : (
               <div>
@@ -402,6 +418,9 @@ export default function ShareModal({ tripId, role: myRole = 'owner', isOpen, onC
                                 redaction; the rest of the chain covers a backend
                                 deployed before the field existed. */}
                             {m.displayName || m.fullName || m.email || 'Member'}
+                            {myUserId && m.userId === myUserId && (
+                              <span className="text-gray-400"> (you)</span>
+                            )}
                           </div>
                           {m.fullName && m.email && (
                             <div className="text-[10px] text-gray-400 truncate">{m.email}</div>

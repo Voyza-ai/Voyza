@@ -145,6 +145,59 @@ describe('optimize — home legs and savings', () => {
     expect(result.dateShiftSuggestion).toBeUndefined();
   }, 30000);
 
+  it('prices HOME flights at shifted dates and suggests a real saving', async () => {
+    // The outbound home flight is $600 on the requested date (June 10) but
+    // $300 if the trip starts 2 days earlier (June 8). Everything else is
+    // date-independent at $100/$50. A legs-only probe can't see this at
+    // all; the whole-trip probe must report the $300 the user actually saves.
+    mockedSearchFlights.mockImplementation(async ({ origin, destination, date }: any) => {
+      if (origin === 'HOM' && destination === 'ALP') {
+        return [offer(date === '2030-06-08' ? 300 : 600)];
+      }
+      return [offer(100)];
+    });
+
+    const result = await optimize({
+      cities: [{ name: 'Alpha' }],
+      startDate: '2030-06-10',
+      travelers: 1,
+      origin: 'Home',
+      originAirports: ['HOM'],
+      returnToHome: true,
+      totalNights: 3,
+    });
+
+    const s = result.dateShiftSuggestion;
+    expect(s).toBeDefined();
+    expect(s!.dayOffset).toBe(-2);
+    expect(s!.newStartDate).toBe('2030-06-08');
+    // Whole trip: (600 out + 100 back) → (300 out + 100 back) = $300 saved.
+    expect(s!.savings).toBe(300);
+    expect(s!.newTotalCost).toBe(400);
+  }, 30000);
+
+  it('never offers a date whose home flight cannot be priced', async () => {
+    // Cheaper on June 8 for the outbound… but no return flight exists for
+    // that shifted trip. An unpriced flight must not read as a saving.
+    mockedSearchFlights.mockImplementation(async ({ origin, destination, date }: any) => {
+      if (origin === 'HOM' && destination === 'ALP') return [offer(date === '2030-06-08' ? 50 : 600)];
+      if (origin === 'ALP' && destination === 'HOM' && date === '2030-06-11') return [];
+      return [offer(100)];
+    });
+
+    const result = await optimize({
+      cities: [{ name: 'Alpha' }],
+      startDate: '2030-06-10',
+      travelers: 1,
+      origin: 'Home',
+      originAirports: ['HOM'],
+      returnToHome: true,
+      totalNights: 3,
+    });
+
+    expect(result.dateShiftSuggestion?.newStartDate).not.toBe('2030-06-08');
+  }, 30000);
+
   it('keeps same-country cities contiguous for trips too large to permute', async () => {
     priceRoutes({});
 
