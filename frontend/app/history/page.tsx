@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, MapPin, Users, Calendar, Plane, Plus } from 'lucide-react';
+import { Trash2, MapPin, Users, Calendar, Plane, Plus, Globe } from 'lucide-react';
+import { updateTripPermissions } from '@/lib/api';
 import Navbar from '@/components/shared/Navbar';
 import ProtectedRoute from '@/components/shared/ProtectedRoute';
 import { getAuthHeader } from '@/lib/supabase';
@@ -20,6 +21,8 @@ type TripSummary = {
   city_count: number;
   cities: string[];
   date_range?: { start: string; end: string };
+  // Owned trips only: shared to Explore (opt-in).
+  is_public?: boolean;
   // Present only on trips shared with me:
   role?: string;
   owner_name?: string | null;
@@ -60,12 +63,14 @@ function TripCard({
   variant,
   onDelete,
   onOpen,
+  onTogglePublic,
 }: {
   trip: TripSummary;
   idx: number;
   variant: 'owned' | 'shared';
   onDelete?: (id: string) => void;
   onOpen: (trip: TripSummary) => void;
+  onTogglePublic?: (trip: TripSummary) => void;
 }) {
   const status = STATUS_STYLES[trip.status] ?? STATUS_STYLES.active;
   // Name only — the API deliberately doesn't send the owner's email
@@ -118,6 +123,40 @@ function TripCard({
             </span>
           )}
         </div>
+
+        {variant === 'owned' && (
+          <button
+            role="switch"
+            aria-checked={!!trip.is_public}
+            aria-label={`Share ${trip.title || 'trip'} to Explore`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePublic?.(trip);
+            }}
+            title={
+              trip.is_public
+                ? 'Visible on Explore — others can find and clone it. Click to make private.'
+                : 'Private. Click to share on Explore so other travelers can find and clone it.'
+            }
+            className="w-full mb-3 flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11.5px] transition-colors"
+            style={{ background: '#f0f4f8' }}
+          >
+            <span className="flex items-center gap-1.5 text-gray-600">
+              <Globe size={12} style={{ color: trip.is_public ? '#2563eb' : '#9ca3af' }} />
+              Share to Explore
+            </span>
+            <span
+              aria-hidden
+              className="relative inline-flex w-7 h-4 rounded-full transition-colors"
+              style={{ background: trip.is_public ? '#2563eb' : '#d1d5db' }}
+            >
+              <span
+                className="absolute top-[2px] w-3 h-3 rounded-full bg-white shadow-sm transition-all"
+                style={{ left: trip.is_public ? '14px' : '2px' }}
+              />
+            </span>
+          </button>
+        )}
 
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold" style={{ color: '#2563eb' }}>
@@ -176,6 +215,19 @@ function HistoryPageInner() {
     }
     fetchTrips();
   }, []);
+
+  // Optimistic toggle; rolls back if the server refuses.
+  const handleTogglePublic = async (trip: TripSummary) => {
+    const next = !trip.is_public;
+    const flip = (v: boolean) =>
+      setTrips((prev) => prev.map((t) => (t.id === trip.id ? { ...t, is_public: v } : t)));
+    flip(next);
+    try {
+      await updateTripPermissions(trip.id, { isPublic: next });
+    } catch {
+      flip(!next);
+    }
+  };
 
   const handleDelete = async (tripId: string) => {
     const headers = await getAuthHeader();
@@ -249,7 +301,7 @@ function HistoryPageInner() {
         {!loading && trips.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {trips.map((trip, idx) => (
-              <TripCard key={trip.id} trip={trip} idx={idx} variant="owned" onDelete={handleDelete} onOpen={openOwned} />
+              <TripCard key={trip.id} trip={trip} idx={idx} variant="owned" onDelete={handleDelete} onOpen={openOwned} onTogglePublic={handleTogglePublic} />
             ))}
           </div>
         )}

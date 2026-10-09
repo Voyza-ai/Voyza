@@ -1365,41 +1365,58 @@ router.post(
       throw new AppError(400, 'That person has not accepted their invite yet');
     }
 
-    // 1. Trip changes hands.
+    // ORDER MATTERS: the old owner must never be without access, not even
+    // for a split second. Their editor row is written BEFORE the trip
+    // changes hands; otherwise a role check landing mid-transfer saw "no
+    // role" and showed the old owner the "you've been removed" screen.
+
+    // 1. Old owner's editor row first (while trips.user_id still makes
+    //    them owner, so their access never lapses). Insert the new row,
+    //    THEN drop any older rows of theirs — never delete-then-insert.
+    const { data: editorRow } = await supabase
+      .from('group_members')
+      .insert({
+        trip_id: tripId,
+        user_id: user.id,
+        invited_email: user.email ?? null,
+        role: 'editor',
+        accepted_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+    if (editorRow?.id) {
+      await supabase
+        .from('group_members')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('user_id', user.id)
+        .neq('id', editorRow.id);
+    }
+
+    // 2. Trip changes hands.
     const { error: tripErr } = await supabase
       .from('trips')
       .update({ user_id: member.user_id })
       .eq('id', tripId);
     if (tripErr) throw new AppError(500, 'Could not transfer the trip');
 
-    // 2. New owner's membership rows go away (ownership is via the trip) —
+    // 3. New owner's membership rows go away (ownership is via the trip) —
     //    by user_id, not just the clicked row, so duplicates from older
-    //    flows are swept too.
+    //    flows are swept too. Safe now: trips.user_id already makes them
+    //    owner, so they never lose access either.
     await supabase
       .from('group_members')
       .delete()
       .eq('trip_id', tripId)
       .eq('user_id', member.user_id);
 
-    // 3. Nobody else may hold a role='owner' member row — trips.user_id is
-    //    the only ownership record. Demote any stale ones (legacy transfer
-    //    implementations wrote these and they granted phantom owner powers).
+    // 4. Nobody may hold a role='owner' member row — trips.user_id is the
+    //    only ownership record. Demote any stale ones.
     await supabase
       .from('group_members')
       .update({ role: 'editor' })
       .eq('trip_id', tripId)
       .eq('role', 'owner');
-
-    // 4. Old owner stays on the trip as an editor (replace any existing
-    //    rows of theirs so this can't create duplicates).
-    await supabase.from('group_members').delete().eq('trip_id', tripId).eq('user_id', user.id);
-    await supabase.from('group_members').insert({
-      trip_id: tripId,
-      user_id: user.id,
-      invited_email: user.email ?? null,
-      role: 'editor',
-      accepted_at: new Date().toISOString(),
-    });
 
     // Tell the new owner.
     const { data: tripRow } = await supabase

@@ -302,9 +302,38 @@ describe('CanvasPage', () => {
       mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
 
       render(<CanvasPage />);
-      expect(await screen.findByText("You've been removed from this trip")).toBeInTheDocument();
+      // A removal is confirmed by a second role check ~1.5s later.
+      expect(
+        await screen.findByText("You've been removed from this trip", {}, { timeout: 4000 }),
+      ).toBeInTheDocument();
       fireEvent.click(screen.getByText('Take me back to My Trips'));
       expect(mockPush).toHaveBeenCalledWith('/history');
+      getCanvasRole.mockResolvedValue({ role: 'editor' });
+    });
+
+    it('a mid-transfer role blip shows "now an editor", never the removed screen', async () => {
+      // Regression: ownership transfer rewrites membership in steps; a role
+      // check landing between them briefly returned null and the old owner
+      // was shown "You've been removed". The confirm re-check must see the
+      // settled role (editor) and show the access-changed message instead.
+      const { getCanvasRole } = jest.requireMock('@/lib/api');
+      const roleEvent = { actor: 'someone', targetUserId: 'u1', role: 'editor', ts: 1 };
+      rt.useCanvasRealtime = () => makeRt({ roleEvent, broadcastRoleChange: jest.fn() });
+      getCanvasRole
+        .mockResolvedValueOnce({ role: null }) // mid-transfer blip
+        .mockResolvedValue({ role: 'editor' }); // settled
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'owner',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+      render(<CanvasPage />);
+      expect(
+        await screen.findByText(/you're now an editor/i, {}, { timeout: 4000 }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("You've been removed from this trip")).not.toBeInTheDocument();
+      getCanvasRole.mockReset();
       getCanvasRole.mockResolvedValue({ role: 'editor' });
     });
 

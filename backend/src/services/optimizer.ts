@@ -403,19 +403,58 @@ async function scoreRoute(
   return { ordering, totalCost, rankCost, legs: resolvedLegs };
 }
 
+type DateShiftHome = {
+  originAirports: string[];
+  returnToHome: boolean;
+  totalNights: number;
+};
+
 /**
- * Probe a handful of ±1 / ±2 day offsets from the user's requested start
- * date and return the biggest-savings offset (if any saves > threshold).
- * Runs in parallel so the wait is ~the time of one extra scoreRoute call.
+ * Price the home flights for a trip starting on `start`, the same way the
+ * scoring pass does (estimateHomeLegCost, cache-warm). Returns null when
+ * any needed home flight can't be priced — an unpriced flight would read
+ * as its whole fare "saved".
+ */
+async function homeFlightsCost(
+  home: DateShiftHome,
+  bestOrdering: string[],
+  start: string,
+  travelers: number,
+): Promise<number | null> {
+  const costs = [
+    await estimateHomeLegCost({
+      originAirports: home.originAirports,
+      destinationCity: bestOrdering[0],
+      date: clampToFuture(start),
+      travelers,
+    }),
+  ];
+  if (home.returnToHome) {
+    costs.push(
+      await estimateHomeLegCost({
+        originAirports: home.originAirports,
+        destinationCity: bestOrdering[bestOrdering.length - 1],
+        date: clampToFuture(addDays(start, home.totalNights)),
+        travelers,
+        reverse: true,
+      }),
+    );
+  }
+  if (costs.some((c) => c === Infinity)) return null;
+  return costs.reduce((sum, c) => sum + c, 0);
+}
+
+/**
+ * Re-price the WHOLE trip at -2/-1/+1/+2 day start offsets and compare
+ * like with like: inter-city legs + home flights at the requested dates vs
+ * the same at each shifted date. Home flights are the biggest and most
+ * date-sensitive cost (a Tuesday departure vs a Friday one), so leaving
+ * them out made the feature honest but almost never useful.
  *
- * `baselineLegsCost` must be the winning route's inter-city leg total at
- * the requested start date, priced on the same `nightsArray` we probe with
- * (the caller guarantees it is > 0 and that every leg priced). It used to
- * be the route's full totalCost — home flights included — while the probe
- * re-scored the inter-city legs only, on a 2-nights-per-city schedule the
- * user was never going to travel. The gap between those two numbers is
- * mostly a transatlantic airfare, so the tip promised several hundred (or
- * thousand) dollars for moving the trip one day.
+ * When the home flights can't be priced at the REQUESTED dates, the
+ * comparison falls back to inter-city legs only (still like with like).
+ * A shifted date whose legs or home flights can't all be priced is never
+ * offered — a missing fare must not read as a saving.
  */
 async function findDateShiftSuggestion(
   bestOrdering: string[],
@@ -424,12 +463,21 @@ async function findDateShiftSuggestion(
   travelers: number,
   cityMap: Map<string, CityInput>,
   nightsArray: number[],
+  home: DateShiftHome | null,
 ): Promise<DateShiftSuggestion | undefined> {
   const offsets = [-2, -1, 1, 2];
 
   // Skip offsets that would land in the past (users can't book for yesterday)
   const today = todayIso();
   const candidateOffsets = offsets.filter((o) => addDays(requestedStartDate, o) >= today);
+
+  // Baseline home flights at the requested dates. Unpriceable → compare
+  // inter-city legs only for every offset.
+  const baselineHome = home
+    ? await homeFlightsCost(home, bestOrdering, requestedStartDate, travelers)
+    : null;
+  const includeHome = home !== null && baselineHome !== null;
+  const baselineCost = baselineLegsCost + (includeHome ? (baselineHome as number) : 0);
 
   const shifted = await Promise.all(
     candidateOffsets.map(async (offset) => {
@@ -438,31 +486,31 @@ async function findDateShiftSuggestion(
         // Same nights array as the real trip → the same leg dates, just
         // shifted, so these searches reuse the caches the scoring pass
         // warmed instead of pricing dates nobody will travel.
-        const route = await scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsArray);
-        return { offset, startDate, route };
+        const hasLegs = bestOrdering.length > 1;
+        const route = hasLegs
+          ? await scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsArray)
+          : null;
+        if (route && !route.legs.every((leg) => leg.cost !== Infinity)) return null;
+        const legsCost = route ? route.totalCost : 0;
+
+        let homeCost = 0;
+        if (includeHome) {
+          const priced = await homeFlightsCost(home as DateShiftHome, bestOrdering, startDate, travelers);
+          if (priced === null) return null;
+          homeCost = priced;
+        }
+        const cost = legsCost + homeCost;
+        return cost > 0 ? { offset, startDate, cost } : null;
       } catch {
         return null;
       }
     }),
   );
 
-  // Only an offset where EVERY leg priced can be compared with the baseline —
-  // an unavailable leg contributes $0 to totalCost, which would otherwise read
-  // as that leg's whole fare "saved". Mapped to { cost } for the selector
-  // below, which is the multi-option picker.
-  const valid = shifted
-    .filter(
-      (s): s is { offset: number; startDate: string; route: OptimizedRoute } =>
-        s !== null &&
-        s.route.totalCost > 0 &&
-        s.route.legs.every((leg) => leg.cost !== Infinity),
-    )
-    .map((s) => ({ offset: s.offset, startDate: s.startDate, cost: s.route.totalCost }));
-
-  // `baselineLegsCost`, not the route's full totalCost: the probe re-scores the
-  // inter-city legs only, so comparing against a home-flight-inclusive number
-  // reported the airfare as a date-shift saving.
-  return pickDateShiftOptions(valid, baselineLegsCost);
+  const valid = shifted.filter(
+    (s): s is { offset: number; startDate: string; cost: number } => s !== null,
+  );
+  return pickDateShiftOptions(valid, baselineCost);
 }
 
 /**
@@ -920,15 +968,23 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // Runs in parallel; any failures silently skip this feature.
   let dateShiftSuggestion: DateShiftSuggestion | undefined;
   try {
-    // Baseline = the winning route's inter-city legs at the requested
-    // dates, which is exactly what the probe re-prices. Skipped when any
-    // leg is unpriced (its $0 would read as a saving) or when there are no
-    // legs at all (single-city trips — only the home flights move there,
-    // and we don't re-price those).
+    // Baseline = the winning route's inter-city legs (plus, inside the
+    // probe, the home flights) at the requested dates — exactly what each
+    // shifted date re-prices. Skipped when any inter-city leg is unpriced:
+    // its $0 would read as a saving.
     const winningLegs = topRoutes[0].legs;
     const allLegsPriced = winningLegs.every((leg) => leg.cost !== Infinity);
-    const baselineLegsCost = winningLegs.reduce((sum, leg) => sum + leg.cost, 0);
-    if (winningLegs.length > 0 && allLegsPriced && baselineLegsCost > 0) {
+    const baselineLegsCost = allLegsPriced
+      ? winningLegs.reduce((sum, leg) => sum + leg.cost, 0)
+      : 0;
+    const home: DateShiftHome | null =
+      hasOrigin && resolvedOriginAirports.length > 0
+        ? { originAirports: resolvedOriginAirports, returnToHome, totalNights: totalNightsResolved }
+        : null;
+    // Probe when there's something real to compare: fully priced inter-
+    // city legs and/or home flights (single-city trips now qualify too —
+    // their home flights are exactly what moves with the date).
+    if (allLegsPriced && (baselineLegsCost > 0 || home)) {
       dateShiftSuggestion = await findDateShiftSuggestion(
         bestOrdering,
         startDate,
@@ -936,6 +992,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         travelers,
         cityMap,
         nightsArray,
+        home,
       );
     }
   } catch (err: any) {

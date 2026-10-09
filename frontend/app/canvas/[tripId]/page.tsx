@@ -673,9 +673,16 @@ function CanvasPageInner() {
 
   const refreshRole = useCallback(async () => {
     try {
-      const { role: fresh } = await getCanvasRole(tripId);
-      // No role at all = the owner removed us from this trip. Lock the
-      // canvas behind the "you've been removed" screen.
+      let { role: fresh } = await getCanvasRole(tripId);
+      // No role at all = the owner removed us from this trip. Confirm with
+      // a second check before locking the canvas: an ownership transfer
+      // rewrites membership in several steps, and a check landing between
+      // them must never be mistaken for a removal (the old owner used to
+      // see "you've been removed" instead of "you're now an editor").
+      if (!fresh) {
+        await new Promise((r) => setTimeout(r, 1500));
+        ({ role: fresh } = await getCanvasRole(tripId));
+      }
       if (!fresh) {
         setRemoved(true);
         return;

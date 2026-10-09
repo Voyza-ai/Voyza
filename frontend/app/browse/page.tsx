@@ -21,6 +21,7 @@ import {
   Plus,
 } from 'lucide-react';
 import Navbar from '@/components/shared/Navbar';
+import PopularTravelerTrips from '@/components/browse/PopularTravelerTrips';
 import LoginModal from '@/components/shared/LoginModal';
 import { useAuthStore } from '@/store/authStore';
 import { getCityColor } from '@/lib/cityColors';
@@ -232,6 +233,9 @@ export default function BrowsePage() {
             Hand-crafted trips you can make your own — open one in the canvas and start editing.
           </p>
         </div>
+
+        {/* Real traveler trips (opt-in Explore) — renders nothing when empty */}
+        <PopularTravelerTrips />
 
         {/* Search — centered on the page, above the sidebar/grid row */}
         <div className="max-w-xl mx-auto mb-6">
@@ -452,9 +456,12 @@ export default function BrowsePage() {
                   whileHover={{ y: -3 }}
                   className="text-left bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col min-h-[420px]"
                 >
-                  {/* Gradient banner */}
+                  {/* Gradient banner. w-full is load-bearing: the card is a
+                      <button>, and Safari doesn't stretch a flex button's
+                      children — without it the banner shrank to the title's
+                      width and the photo covered only part of the card. */}
                   <div
-                    className="h-44 flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
+                    className="w-full h-44 flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
                     style={{ background: bannerBackground(preset) }}
                   >
                     <span
@@ -469,8 +476,8 @@ export default function BrowsePage() {
                     <div className="text-white/85 text-[10px] mt-0.5">{preset.flags}</div>
                   </div>
 
-                  {/* Body */}
-                  <div className="p-4 flex-1 flex flex-col min-h-0">
+                  {/* Body (w-full: same Safari <button> stretch fix as the banner) */}
+                  <div className="w-full p-4 flex-1 flex flex-col min-h-0">
                     <p className="text-[12px] text-gray-600 leading-snug mb-2">
                       {preset.tagline}
                     </p>
