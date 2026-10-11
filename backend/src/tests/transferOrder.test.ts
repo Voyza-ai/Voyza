@@ -54,6 +54,7 @@ jest.mock('../services/supabase', () => ({
   }),
 }));
 
+import { createNotification } from '../services/notifications';
 import express from 'express';
 import request from 'supertest';
 import canvasRouter from '../routes/canvas';
@@ -74,6 +75,7 @@ const firstIndex = (prefix: string) => ops.findIndex((o) => o.startsWith(prefix)
 
 beforeEach(() => {
   ops.length = 0;
+  (createNotification as jest.Mock).mockClear();
 });
 
 describe.each([
@@ -96,5 +98,14 @@ describe.each([
     // And never a delete of membership rows before that editor row exists.
     const firstMemberDelete = firstIndex('delete:group_members');
     expect(firstMemberDelete).toBeGreaterThan(editorInsert);
+  });
+
+  it('notifies the NEW owner (and only them)', async () => {
+    await request(app).post(url).set('Authorization', 'Bearer t').send(body);
+    const calls = (createNotification as jest.Mock).mock.calls.map((c) => c[0]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ type: 'ownership_transferred' });
+    expect(calls[0].userId).not.toBe(OLD_OWNER);
+    expect(calls[0].data).toMatchObject({ tripId: 'trip-1', previousOwnerId: OLD_OWNER });
   });
 });
