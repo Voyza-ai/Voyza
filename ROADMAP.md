@@ -224,28 +224,28 @@ Home anchor / origin model (984a553 + d4007d9)
 ## 📋 Backlog
 
 ### Feature: Notifications system (separate task — complex)
-- [ ] `notifications` table with RLS
-- [ ] GET/PATCH/DELETE endpoints
-- [ ] Notification bell icon in navbar (frontend)
-- [ ] Dropdown with unread count + list
-- [ ] Mark-all-read action
-- [ ] Notification triggers wired into:
-  - [ ] Account deletion requested (self-notification with grace period info)
-  - [ ] Trip owner anonymized → notify collaborators with clone action
-  - [ ] Ownership transferred
-  - [ ] Canvas suggestion approved/rejected
-  - [ ] Canvas invite received
-- [ ] Notification preferences in `user_profiles.preferences`
+- [x] `notifications` table with RLS
+- [x] GET/PATCH/DELETE endpoints
+- [x] Notification bell icon in navbar (frontend)
+- [x] Dropdown with unread count + list
+- [x] Mark-all-read action
+- [x] Notification triggers wired into:
+  - [x] Account deletion requested (self-notification with grace period info)
+  - [x] Trip owner anonymized → notify collaborators with clone action
+  - [x] Ownership transferred
+  - [x] Canvas suggestion approved/rejected
+  - [x] Canvas invite received
+- [x] Notification preferences in `user_profiles.preferences`
 
 ### Feature: Email transport (separate task)
-- [ ] Integrate Resend or SendGrid
-- [ ] Transactional email templates:
-  - [ ] Account deletion requested confirmation ("your account will be deleted on X")
-  - [ ] Grace period reminder (day 23 of 30)
-  - [ ] Canvas invite (currently links are copy-paste)
-  - [ ] Notification digest (weekly optional)
-- [ ] Email preferences in `user_profiles.preferences`
-- [ ] Unsubscribe link handling
+- [x] Integrate Resend or SendGrid
+- [x] Transactional email templates:
+  - [x] Account deletion requested confirmation ("your account will be deleted on X")
+  - [x] Grace period reminder (day 23 of 30)
+  - [x] Canvas invite (currently links are copy-paste)
+  - [x] Notification digest (weekly optional)
+- [x] Email preferences in `user_profiles.preferences`
+- [x] Unsubscribe link handling
 
 ### Feature: Popular trips / trip discovery
 Note: this is the older "discover real user trips that opted into
@@ -254,12 +254,15 @@ preset trips" feature below, which uses *pre-generated* preset trips
 as the primary discovery surface (with the old "clone this real
 trip" flow as a bonus row).
 
-- [ ] New page: `/explore` or `/popular`
-- [ ] Backend: `GET /api/trips/popular` with filters (vibe, budget, cities)
+- [x] New page: `/explore` or `/popular`
+- [x] Backend: `GET /api/trips/popular` with filters (vibe, budget, cities)
   - Query: `trips WHERE allow_recommendations = TRUE ORDER BY clone_count DESC`
-- [ ] Clone count stored per trip (incremented on clone)
-- [ ] Tagging / vibe browsing
-- [ ] "Trending this week" ranking
+  - Shipped gated on `is_public` instead (owner opts in via "Share to Explore"):
+    `allow_recommendations` defaults TRUE on every trip, so gating on it would
+    publish all users' trips without consent.
+- [x] Clone count stored per trip (incremented on clone)
+- [x] Tagging / vibe browsing
+- [x] "Trending this week" ranking
 
 ### Feature: Map on mobile (needs design)
 
@@ -416,13 +419,13 @@ Tasks deferred from the current chat work:
 - [ ] Frontend flow: owner picks a collaborator (or invites one) to transfer to
 - [ ] "Are you sure?" confirm
 - [ ] After transfer, former owner becomes editor (or leaves)
-- [ ] Notification to new owner
+- [x] Notification to new owner
 
 ### Feature: Clone UX
 - [ ] "Clone this trip" button visible on all results pages (respecting `allow_clones`)
 - [ ] Clone dialog with checkboxes: cities, hotels, activities, restaurants, schedule
 - [ ] Shareable trip links (read-only) for any `is_public = TRUE` trip
-- [ ] Clone count shown as a social signal ("100 travelers cloned this")
+- [x] Clone count shown as a social signal ("100 travelers cloned this")
 
 ### Feature: Admin UI
 - [ ] `/admin` route (auth-gated to specific user_ids)
