@@ -42,10 +42,10 @@ frontend change → commit to dev → push → auto-deploys to voyza-dev.vercel.
 ## Railway configuration
 - `CORS_ORIGIN` must list every frontend origin that calls the backend:
   ```
-  https://voyza-nine.vercel.app,https://voyza-dev.vercel.app,http://localhost:3000,https://bluemurr.com
+  https://bluemurr.com,https://voyza-dev.vercel.app,http://localhost:3000
   ```
-  (`voyza-nine` is dead and can be dropped; add `https://www.bluemurr.com` only if
-  www ever serves the app instead of redirecting to the apex.)
+  (Add `https://www.bluemurr.com` only if www ever serves the app instead of
+  redirecting to the apex.)
 - `FRONTEND_URL` = `https://bluemurr.com` — base for canvas invite links and email
   CTAs. Defaults to `http://localhost:3000` if unset, which silently breaks both.
 - `RESEND_API_KEY` — optional. Unset = transactional email disables itself (in-app
