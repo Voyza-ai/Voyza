@@ -78,9 +78,16 @@ function AuthCallbackInner() {
         // wrong for the pages you sign in *from*. The landing page and the
         // auth screens aren't destinations — returning there just looks like
         // the sign-in did nothing. Send those to the hub instead.
+        //
+        // "starts with /" alone is NOT enough to prove a path is local:
+        // "//evil.com" is a protocol-relative URL and would navigate straight
+        // off-site, and some browsers normalise a backslash to a slash, so
+        // "/\evil.com" is the same trick. Require a single leading slash
+        // followed by something that isn't another separator.
         const path = (saved ?? '').split('?')[0];
+        const isSameOriginPath = /^\/(?![/\\])/.test(saved ?? '') || saved === '/';
         const isDestination =
-          !!saved && saved.startsWith('/') && path !== '/' && !path.startsWith('/auth/');
+          !!saved && isSameOriginPath && path !== '/' && !path.startsWith('/auth/');
         if (isDestination) returnTo = saved;
       } catch {
         // sessionStorage unavailable (SSR, privacy mode) — use default.
