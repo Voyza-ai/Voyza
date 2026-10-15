@@ -331,9 +331,13 @@ export default function CityDetailPanel({
             ))}
           </div>
 
-          {/* Custom hotel form */}
+          {/* Custom hotel form — `key` is load-bearing. The form seeds its five
+              fields from `current` in useState initialisers, which only run on
+              mount; without a remount per city it keeps the previous city's
+              name/amount while Cancel and "Use this stay" write to the city on
+              screen. */}
           <CustomHotelForm
-            cityIndex={cityIndex}
+            key={cityIndex}
             nights={nights}
             color={color}
             current={city.customHotel}
@@ -531,10 +535,10 @@ function HotelRow({
                     borderColor: `${accent}50`,
                     color: accent,
                   }}
-                  title="Bookable directly through Voyza"
+                  title="Bookable directly through BlueMurr"
                 >
                   <Zap size={9} fill="currentColor" />
-                  Voyza book
+                  BlueMurr book
                 </span>
               )}
             </div>
@@ -584,7 +588,6 @@ function CustomHotelForm({
   onSave,
   onClear,
 }: {
-  cityIndex: number;
   nights: number;
   color: { bg: string; text: string; border: string; name: string };
   current?: import('@/lib/types').CustomHotel;
@@ -821,7 +824,7 @@ function HotelDetail({
                 className="inline-flex items-center gap-0.5 text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border font-medium"
                 style={{ background: `${accent}18`, borderColor: `${accent}50`, color: accent }}
               >
-                <Zap size={8} fill="currentColor" /> Voyza book
+                <Zap size={8} fill="currentColor" /> BlueMurr book
               </span>
             )}
             {hotel.score != null && hotel.score >= 60 && (

@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
 import LoginModal from '@/components/shared/LoginModal';
+import NotificationBell from '@/components/shared/NotificationBell';
+import DeleteAccountModal from '@/components/shared/DeleteAccountModal';
 
 type NavbarProps = {
   minimal?: boolean;
@@ -21,6 +23,7 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
   const signOut = useAuthStore((s) => s.signOut);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -57,7 +60,7 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
       {/* Logo */}
       {!minimal ? (
         <Link href="/main" className="text-lg font-bold tracking-tight text-white">
-          VOYZA
+          BlueMurr
         </Link>
       ) : (
         <div />
@@ -71,6 +74,7 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
 
       {/* Right side — the auth corner */}
       <div className="flex items-center gap-4">
+      {user && <NotificationBell />}
       {user ? (
         <div className="relative" ref={dropdownRef}>
           <button
@@ -93,6 +97,13 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
               >
                 My Trips
               </Link>
+              <Link
+                href="/explore"
+                onClick={() => setDropdownOpen(false)}
+                className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Explore trips
+              </Link>
               <div className="border-t border-gray-100" />
               <button
                 onClick={() => {
@@ -102,6 +113,16 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
                 className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Sign out
+              </button>
+              <div className="border-t border-gray-100" />
+              <button
+                onClick={() => {
+                  setDropdownOpen(false);
+                  setDeleteOpen(true);
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+              >
+                Delete account
               </button>
             </div>
           )}
@@ -120,6 +141,7 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
       </div>
 
       <LoginModal isOpen={loginOpen} onClose={() => setLoginOpen(false)} />
+      <DeleteAccountModal isOpen={deleteOpen} onClose={() => setDeleteOpen(false)} />
     </nav>
   );
 }

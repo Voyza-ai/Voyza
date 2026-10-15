@@ -334,16 +334,28 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
       <AnimatePresence>
         {(() => {
           if (!selectedDay) return null;
-          let plannerCity = selectedDay.city;
+          // Resolve the city INDEX, never the City object. `selectedDay` is a
+          // DayCell snapshot frozen at click time, and every schedule write
+          // rebuilds the City (`cities[cityIndex] = { ...c, schedule }` in the
+          // store), so the cell's embedded `city` goes stale the moment the
+          // planner writes anything. The index survives those writes, so
+          // re-read the city from `trip` on every render — the same address
+          // the planner's own writes go to.
           let plannerCityIndex = selectedDay.cityIndex;
-          if ((!plannerCity || plannerCityIndex == null) && selectedDay.isDeparture) {
-            const dep = trip.cities.find((c) => c.dates.departure === selectedDay.iso);
-            if (dep) {
-              plannerCity = dep;
-              plannerCityIndex = trip.cities.indexOf(dep);
-            }
+          if (plannerCityIndex == null && selectedDay.isDeparture) {
+            // Departure dates are unique in a well-formed itinerary. If bad
+            // data gives two cities the same one, take the later of them —
+            // that matches the last-write-wins of `dateToCity` above, and
+            // ScheduleView's fly-home attribution.
+            let depIndex = -1;
+            trip.cities.forEach((c, i) => {
+              if (c.dates.departure === selectedDay.iso) depIndex = i;
+            });
+            if (depIndex !== -1) plannerCityIndex = depIndex;
           }
-          if (!plannerCity || plannerCityIndex == null) return null;
+          if (plannerCityIndex == null) return null;
+          const plannerCity = trip.cities[plannerCityIndex];
+          if (!plannerCity) return null;
           return (
             <DayPlanner
               trip={trip}

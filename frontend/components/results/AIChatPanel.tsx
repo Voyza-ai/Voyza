@@ -351,7 +351,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
           <Sparkles size={14} className="text-white" />
         </div>
         <div>
-          <div className="text-white text-sm font-medium leading-tight">Voyza AI</div>
+          <div className="text-white text-sm font-medium leading-tight">BlueMurr AI</div>
           <div className="text-white/60 text-[11px]">Tweak your trip in plain English</div>
         </div>
       </div>
@@ -438,8 +438,10 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
         </AnimatePresence>
       </div>
 
-      {/* Suggested prompts */}
-      {messages.length <= 1 && (
+      {/* Suggested prompts — visible until the user sends their first
+          message. Counting messages breaks when the date-shift savings tip
+          adds a second assistant bubble on load. */}
+      {!messages.some((m) => m.role === 'user') && (
         <div className="px-5 pb-3 flex flex-wrap gap-1.5">
           {suggestions.map((prompt) => (
             <button

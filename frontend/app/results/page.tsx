@@ -14,6 +14,7 @@ import dynamic from 'next/dynamic';
 // Leaflet touches `window` at import time — load the map client-side only.
 const MapView = dynamic(() => import('@/components/results/MapView'), { ssr: false });
 import AIChatPanel from '@/components/results/AIChatPanel';
+import { countryForCity } from '@/data/worldCities';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
@@ -90,6 +91,12 @@ function ResultsPageInner() {
           // if the backend is an older deploy without buildTripFromDb.
           const fullTrip = data.trip;
           if (fullTrip && Array.isArray(fullTrip.cities) && fullTrip.cities[0]?.transportIn) {
+            // AI-planned trips saved before the country fix have none — fill
+            // from the world-cities dataset so their cards match presets.
+            fullTrip.cities = fullTrip.cities.map((c: any) => ({
+              ...c,
+              country: c.country || countryForCity(c.name),
+            }));
             setTrip(fullTrip);
             setLoading(false);
             return;
@@ -129,7 +136,9 @@ function ResultsPageInner() {
                 ];
             return {
               name: c.name,
-              country: c.country ?? '',
+              // Older AI-planned trips were saved without a country — fill
+              // it from the world-cities dataset so their cards match presets.
+              country: c.country || countryForCity(c.name),
               dates: { arrival: c.arrival_date ?? '', departure: c.departure_date ?? '' },
               hotel,
               hotels: hotelsArr,
@@ -199,9 +208,16 @@ function ResultsPageInner() {
     if (!currentTrip || hotelsFetchedRef.current) return;
     hotelsFetchedRef.current = true;
 
-    currentTrip.cities.forEach((city, idx) => {
+    currentTrip.cities.forEach((city) => {
       // Skip if city already has hotels populated (e.g. from backend optimizer)
       if (city.hotels.length > 1) return;
+
+      // Identify the visit, not its position: the search resolves seconds
+      // later, and by then the optimizer or a drag-reorder may have moved
+      // this city. A repeat visit (Paris → Rome → Paris) shares a name but
+      // never an arrival date, so name + arrival is the stable key.
+      const visitName = city.name;
+      const visitArrival = city.dates.arrival;
 
       searchHotels({
         city: city.name,
@@ -218,6 +234,12 @@ function ResultsPageInner() {
             area: '',
             bookingUrl: r.bookingUrl,
           }));
+          const idx = useTripStore
+            .getState()
+            .currentTrip?.cities.findIndex(
+              (c) => c.name === visitName && c.dates.arrival === visitArrival,
+            ) ?? -1;
+          if (idx < 0) return; // visit removed while the search was in flight
           updateCity(idx, {
             hotels,
             hotel: hotels[0],
@@ -371,14 +393,14 @@ function ResultsPageInner() {
     <main className="h-screen overflow-hidden dot-grid-bg text-gray-900 flex flex-col">
       {/* View tabs live in the navbar (next to the auth corner) so the cards
           below get the full viewport height. The date-shift savings tip now
-          arrives as a Voyza AI chat message instead of a page banner. */}
+          arrives as a BlueMurr AI chat message instead of a page banner. */}
       <Navbar tabs={<ViewTabs value={view} onChange={setView} />} />
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
           except the cards area (left↔right) and the AI chat panel. */}
       {/* Near-zero side gutters: no max-width cap, minimal padding — the
           cards start at the left edge and the chat ends at the right edge. */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 px-2 pb-2 pt-[3rem] w-full">
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 px-2 pb-2 pt-[3rem] w-full">
         {/* Main column — header pinned, cards fill the rest */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
           <ResultsHeader trip={currentTrip} />
@@ -440,8 +462,17 @@ function ResultsPageInner() {
           </div>
         </div>
 
-        {/* AI chat sidebar */}
-        <aside className="lg:w-[380px] lg:flex-shrink-0 min-h-0 flex lg:mt-3">
+        {/* AI chat sidebar. Docks to the right from `md` up (not `lg`) so it
+            matches the canvas on ordinary laptop windows — at the old
+            breakpoint anything under 1024px dropped the chat below the
+            content, which read as a different layout from the rest of the app. */}
+        {/* Stacked on mobile, the chat has no width to be bounded by, so it
+            grew to its natural height and left the content above it a sliver —
+            the Map tab came out 77px tall, most of that covered by the tile
+            attribution. Cap it below `md` so the content above always keeps
+            the larger share; from `md` up it docks to the right and the cap
+            is irrelevant. */}
+        <aside className="max-h-[45vh] md:max-h-none md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 flex md:mt-3">
           <AIChatPanel trip={currentTrip} />
         </aside>
       </div>

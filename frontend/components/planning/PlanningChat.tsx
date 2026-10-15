@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin } from 'lucide-react';
+import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin, LocateFixed, Loader2 } from 'lucide-react';
 import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -12,6 +12,8 @@ import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput } from '@/lib/parseDate';
 import { parseLocal, toIso } from '@/lib/dateHelpers';
 import { buildDayTransportContext } from '@/lib/dayScheduleDefaults';
+import { countryForCity } from '@/data/worldCities';
+import { vibesFromAnswer } from '@/lib/vibeMap';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
@@ -171,6 +173,9 @@ export default function PlanningChat() {
       ]);
       window.setTimeout(() => {
         if (!mountedRef.current) return;
+        // An armed autorun (one-click date-shift replan) owns the screen —
+        // its searching state replaces the picker; don't summon it back.
+        if (autorunArmedRef.current) return;
         setShowIntent(true);
       }, 500);
     }
@@ -413,6 +418,45 @@ export default function PlanningChat() {
   };
 
   // Guided text submit (destination, notes)
+  // "Use my location" on the origin step: browser geolocation → nearest
+  // major airport city (offline coordinate lookup, no API) → submitted
+  // through the exact same path as a typed origin answer.
+  const [locating, setLocating] = useState(false);
+  const handleUseMyLocation = async () => {
+    if (locating) return;
+    setLocating(true);
+    try {
+      const { detectNearestAirportCity } = await import('@/lib/nearestAirport');
+      const result = await detectNearestAirportCity();
+
+      if (!result.ok) {
+        const content =
+          result.reason === 'unsupported'
+            ? "Your browser doesn't support location sharing — just type the city you're starting from."
+            : "No worries — I couldn't get your location. Just type the city you're starting from.";
+        setMessages((prev) => [...prev, { id: nextId(), role: 'assistant', content }]);
+        return;
+      }
+
+      const { city } = result;
+      setMessages((prev) => [
+        ...prev,
+        { id: nextId(), role: 'user', content: `📍 ${city.city}` },
+        {
+          id: nextId(),
+          role: 'assistant',
+          content: `Looks like your closest major airport is in ${city.city} — I'll use that as your starting point.`,
+        },
+      ]);
+      const { getOriginAirports } = await import('@/lib/originAirports');
+      setAnswer('origin', city.city);
+      setAnswer('originAirports', getOriginAirports(city.city));
+      advanceToNextStep(currentStepIndex);
+    } finally {
+      setLocating(false);
+    }
+  };
+
   const handleTextSubmit = async () => {
     if (!textInput.trim() || !steps.length) return;
     const step = steps[currentStepIndex];
@@ -979,7 +1023,9 @@ export default function PlanningChat() {
 
       return {
         name,
-        country: '',
+        // Fill from the world-cities dataset / the user's vibe answer so
+        // AI-planned cards match the preset cards (country line + chips).
+        country: countryForCity(name),
         dates: cityDates,
         transportIn,
         transportOut: emptyTransport,
@@ -988,7 +1034,7 @@ export default function PlanningChat() {
         selectedHotelIndex: 0,
         activities: [],
         restaurants: [],
-        vibes: [],
+        vibes: vibesFromAnswer(answers.vibe),
       };
     });
 
@@ -2071,6 +2117,82 @@ export default function PlanningChat() {
     }
   };
 
+  // One-click date-shift replans (the "Cheaper start dates" menu on the
+  // results header) land here as /plan?resume=1&autorun=1 with the shifted
+  // answers already staged in the store. Skip every picker, drop a status
+  // bubble, and kick the exact same search the "Find my trip" button runs.
+  // If the staged answers are somehow incomplete, do nothing — the page
+  // behaves like a normal resume and the user finishes in the chat.
+  const autorunRef = useRef(false);
+  const autorunArmedRef = useRef(false);
+  const [autorunPending, setAutorunPending] = useState(false);
+
+  // Detect + restore on mount. The sessionStorage snapshot is the primary
+  // signal — client-side navigations can present a stale window.location
+  // during the first render, which both hides the ?autorun=1 flag AND lets
+  // the plan page's reset wipe the staged store answers. The snapshot
+  // survives either failure mode; firing is deferred to the next render so
+  // handleFindTrip closes over the restored answers, not the wiped ones.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let snapshot: Record<string, unknown> | null = null;
+    try {
+      const raw = sessionStorage.getItem('bluemurr-autorun');
+      if (raw) {
+        snapshot = JSON.parse(raw);
+        sessionStorage.removeItem('bluemurr-autorun'); // one shot
+      }
+    } catch {
+      // storage blocked — fall through to the URL flag
+    }
+    const urlFlag =
+      new URLSearchParams(window.location.search).get('autorun') === '1';
+    if (!snapshot && !urlFlag) return;
+    autorunArmedRef.current = true; // suppress the delayed intent picker
+
+    if (snapshot) {
+      const set = useTripStore.getState().setAnswer;
+      for (const [key, value] of Object.entries(snapshot)) {
+        if (value !== undefined && value !== null) set(key as any, value as any);
+      }
+    }
+    setAutorunPending(true);
+  }, []);
+
+  // Fire once the restored answers are in this render's closure.
+  useEffect(() => {
+    if (!autorunPending || autorunRef.current) return;
+    if (validateTripInputs(answers).length > 0) {
+      // Staged answers incomplete — disarm and hand back the normal flow.
+      autorunArmedRef.current = false;
+      setAutorunPending(false);
+      setShowIntent(true);
+      return;
+    }
+    autorunRef.current = true;
+    setAutorunPending(false);
+    setShowIntent(false);
+    setMessages([
+      {
+        id: nextId(),
+        role: 'assistant',
+        content: `Recalculating your trip starting ${answers.dateRange?.start ?? 'on the new date'} — searching flights, trains, and hotels with the shifted dates...`,
+      },
+    ]);
+    handleFindTrip();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autorunPending, answers]);
+
+  // If the auto-run search fails, hand the screen back to the normal flow
+  // so the error bubble isn't a dead end (the picker returns below it).
+  useEffect(() => {
+    if (autorunRef.current && !findTripLoading && findTripError && !intent) {
+      autorunArmedRef.current = false;
+      setShowIntent(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findTripLoading, findTripError, intent]);
+
   return (
     <div className="relative flex flex-col h-screen" style={{ background: '#0f0f1a' }}>
       {/* Subtle vibe background shift */}
@@ -2084,7 +2206,7 @@ export default function PlanningChat() {
       {/* Header */}
       <div className="relative z-10 flex items-center justify-center pt-10 pb-5">
         <Link href="/main" className="text-4xl font-bold tracking-tight hover:opacity-80 transition-opacity" style={{ color: '#4f8ef7' }}>
-          VOYZA
+          BlueMurr
         </Link>
       </div>
 
@@ -2215,8 +2337,8 @@ export default function PlanningChat() {
             ))}
           </AnimatePresence>
 
-          {/* Intent picker */}
-          {showIntent && !intent && (
+          {/* Intent picker — hidden while an auto-run search owns the page */}
+          {showIntent && !intent && !findTripLoading && (
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
@@ -2225,6 +2347,19 @@ export default function PlanningChat() {
               className="mt-2"
             >
               <IntentPicker onSelect={handleIntentSelect} />
+            </motion.div>
+          )}
+
+          {/* Auto-run searching state — the date-shift replan has no chat
+              mode mounted, so its progress renders here instead. */}
+          {findTripLoading && !intent && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-3 flex items-center gap-2.5 text-sm text-gray-400"
+            >
+              <Loader2 size={16} className="animate-spin" style={{ color: '#4f8ef7' }} />
+              <span>{findTripStatus || 'Searching flights, trains, and hotels...'}</span>
             </motion.div>
           )}
 
@@ -2274,6 +2409,25 @@ export default function PlanningChat() {
                     <span className="text-white/40 text-[12px]">Combined for everyone</span>
                   </button>
                 </div>
+              )}
+
+              {/* Origin step — offer to detect the nearest airport from the
+                  user's location instead of typing. Typing stays available
+                  in the main input bar either way. */}
+              {currentStep.type === 'origin' && (
+                <button
+                  onClick={handleUseMyLocation}
+                  disabled={locating}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 text-[13px]"
+                  style={{ background: 'rgba(255,255,255,0.04)' }}
+                >
+                  {locating ? (
+                    <Loader2 size={14} className="animate-spin" style={{ color: '#4f8ef7' }} />
+                  ) : (
+                    <LocateFixed size={14} style={{ color: '#4f8ef7' }} />
+                  )}
+                  {locating ? 'Finding your nearest airport…' : 'Use my location'}
+                </button>
               )}
 
               {/* Round-trip / one-way picker — binary toggle, same style

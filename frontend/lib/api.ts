@@ -1,4 +1,4 @@
-import { getAuthHeader } from './supabase';
+import { getAuthHeader, refreshAuthHeader } from './supabase';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -18,21 +18,29 @@ export class ApiError extends Error {
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const authHeaders = await getAuthHeader();
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders,
-      ...options.headers,
-    },
-  });
+  const send = (authHeaders: Record<string, string>) =>
+    fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+        ...options.headers,
+      },
+    });
 
+  let res = await send(await getAuthHeader());
+
+  // A 401 usually means the access token went stale (long session, a tab
+  // that slept past expiry). Force-refresh the session and retry once.
+  // Never hard-redirect: background calls (e.g. the notification bell)
+  // used to send the whole page to /login — a route that doesn't exist —
+  // so a stale token showed up as a 404 on whatever page you were on.
   if (res.status === 401) {
-    if (typeof window !== 'undefined') {
-      window.location.href = '/login';
-    }
-    throw new Error('Unauthorized');
+    const refreshed = await refreshAuthHeader();
+    if (refreshed) res = await send(refreshed);
+  }
+  if (res.status === 401) {
+    throw new ApiError(401, 'Unauthorized');
   }
 
   if (!res.ok) {
@@ -369,7 +377,7 @@ export async function editPlan(params: {
   });
 }
 
-// ─── Voyza AI chat ───────────────────────────────────────────
+// ─── BlueMurr AI chat ───────────────────────────────────────────
 // Send a message to the trip's AI assistant. Response is either a
 // plain-text answer or a proposal the user can Accept/Reject.
 export type ChatTurn = { role: 'user' | 'assistant'; content: string };
@@ -693,6 +701,9 @@ export type UserProfile = {
     defaultTravelers?: number;
     emailNotifications?: boolean;
   };
+  /** 'pending_deletion' during the 30-day grace window. */
+  accountStatus?: 'active' | 'pending_deletion' | 'anonymized';
+  scheduledDeletionAt?: string | null;
 };
 
 export async function getCurrentUser(): Promise<UserProfile> {
@@ -708,10 +719,21 @@ export async function updateCurrentUser(
   });
 }
 
-export async function deleteCurrentUser(): Promise<{ success: boolean; deletedUserId: string }> {
-  return apiFetch<{ success: boolean; deletedUserId: string }>('/api/users/me', {
+export async function deleteCurrentUser(reason?: string): Promise<{
+  success: boolean;
+  accountStatus: string;
+  deletedAt: string;
+  scheduledDeletionAt: string;
+  alreadyScheduled: boolean;
+}> {
+  return apiFetch('/api/users/me', {
     method: 'DELETE',
+    body: JSON.stringify(reason ? { reason } : {}),
   });
+}
+
+export async function cancelAccountDeletion(): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>('/api/users/me/cancel-deletion', { method: 'POST' });
 }
 
 // ─── Trip collaboration members ─────────────────────────────
@@ -721,7 +743,14 @@ export type TripMember = {
   role: 'owner' | 'editor' | 'suggester' | 'viewer';
   acceptedAt: string | null;
   createdAt: string;
-  /** Real email for accepted members; invited_email for pending invites. */
+  /** Always-present label to render for this member: their profile name,
+   *  else their email when we're allowed to see it, else a neutral
+   *  "Member" / "Pending invite". */
+  displayName: string;
+  /** Real email for accepted members, invited_email for pending invites —
+   *  for the trip OWNER. Everyone else gets null here on every row but
+   *  their own, so a share-link viewer can't harvest the other
+   *  collaborators' addresses. */
   email: string | null;
   fullName: string | null;
   avatarUrl: string | null;
@@ -800,5 +829,114 @@ export async function applyRoleToMembers(
   return apiFetch<{ updated: number; role: string }>(`/api/canvas/${tripId}/members/apply-role`, {
     method: 'PATCH',
     body: JSON.stringify({ role }),
+  });
+}
+
+// ─── Notifications ───────────────────────────────────────────
+
+/** "App" prefix avoids clashing with the DOM's built-in Notification. */
+export type AppNotification = {
+  id: string;
+  type:
+    | 'account_deletion_scheduled'
+    | 'trip_owner_anonymized'
+    | 'ownership_transferred'
+    | 'suggestion_decided'
+    | 'canvas_invite';
+  title: string;
+  body: string | null;
+  data: Record<string, any>;
+  read_at: string | null;
+  created_at: string;
+};
+
+export async function getNotifications(
+  limit = 30,
+): Promise<{ notifications: AppNotification[]; unreadCount: number }> {
+  return apiFetch<{ notifications: AppNotification[]; unreadCount: number }>(
+    `/api/notifications?limit=${limit}`,
+  );
+}
+
+export async function markNotificationRead(
+  id: string,
+): Promise<{ notification: AppNotification }> {
+  return apiFetch<{ notification: AppNotification }>(`/api/notifications/${id}`, {
+    method: 'PATCH',
+  });
+}
+
+export async function markAllNotificationsRead(): Promise<{ success: boolean; updated: number }> {
+  return apiFetch<{ success: boolean; updated: number }>(`/api/notifications/read-all`, {
+    method: 'PATCH',
+  });
+}
+
+export async function deleteNotification(id: string): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(`/api/notifications/${id}`, { method: 'DELETE' });
+}
+
+export async function clearAllNotifications(): Promise<{ success: boolean; deleted: number }> {
+  return apiFetch<{ success: boolean; deleted: number }>(`/api/notifications`, {
+    method: 'DELETE',
+  });
+}
+
+/** Clone a shared trip into the caller's own account (used by the
+ *  trip-owner-anonymized notification's "Clone trip" action). */
+export async function cloneTrip(
+  tripId: string,
+): Promise<{ tripId: string; trip: any; clonedFrom: string }> {
+  return apiFetch<{ tripId: string; trip: any; clonedFrom: string }>(
+    `/api/trips/${tripId}/clone`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+}
+
+// ─── Trip discovery (Explore) ────────────────────────────────
+
+export type PopularTrip = {
+  id: string;
+  title: string;
+  travelers: number;
+  totalCost: number | null;
+  startDate: string | null;
+  cloneCount: number;
+  clonesThisWeek: number;
+  createdAt: string;
+  cities: Array<{ name: string; country: string | null }>;
+  tags: string[];
+  ownerName: string | null;
+  isMine: boolean;
+};
+
+export type PopularQuery = {
+  vibe?: string;
+  maxBudget?: number;
+  cities?: string[];
+  sort?: 'popular' | 'trending';
+  limit?: number;
+};
+
+/** Trips their owners shared to Explore, ranked by clones. */
+export async function getPopularTrips(q: PopularQuery = {}): Promise<{ trips: PopularTrip[] }> {
+  const params = new URLSearchParams();
+  if (q.vibe) params.set('vibe', q.vibe);
+  if (q.maxBudget) params.set('maxBudget', String(q.maxBudget));
+  if (q.cities?.length) params.set('cities', q.cities.join(','));
+  if (q.sort) params.set('sort', q.sort);
+  if (q.limit) params.set('limit', String(q.limit));
+  const qs = params.toString();
+  return apiFetch<{ trips: PopularTrip[] }>(`/api/trips/popular${qs ? `?${qs}` : ''}`);
+}
+
+/** Owner-only sharing toggles. isPublic = "Share to Explore". */
+export async function updateTripPermissions(
+  tripId: string,
+  patch: { isPublic?: boolean; allowClones?: boolean; allowRecommendations?: boolean },
+): Promise<{ permissions: any }> {
+  return apiFetch<{ permissions: any }>(`/api/trips/${tripId}/permissions`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
   });
 }

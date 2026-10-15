@@ -11,7 +11,7 @@ export default function LogoReveal({ show }: LogoRevealProps) {
 
   return (
     <div className="flex flex-col items-center gap-3">
-      {/* VOYZA logo */}
+      {/* BlueMurr logo */}
       <motion.h1
         className="text-[60px] font-bold tracking-tight"
         style={{
@@ -22,7 +22,7 @@ export default function LogoReveal({ show }: LogoRevealProps) {
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.6, ease: 'easeOut' }}
       >
-        VOYZA
+        BlueMurr
       </motion.h1>
 
       {/* Tagline */}

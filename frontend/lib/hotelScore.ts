@@ -1,7 +1,7 @@
 import { Hotel } from './types';
 
 /**
- * Voyza hotel ranking formula.
+ * BlueMurr hotel ranking formula.
  *
  *   score = rating^2.8 × (0.8 + 0.2 × locationScore) × (100 / pricePerNight)
  *

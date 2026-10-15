@@ -136,7 +136,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
 
               <div className="text-center mb-6">
                 <h2 className="text-xl font-bold" style={{ color: '#2563eb' }}>
-                  VOYZA
+                  BlueMurr
                 </h2>
                 <p className="text-gray-500 text-sm mt-1">Sign in to save your trip</p>
               </div>

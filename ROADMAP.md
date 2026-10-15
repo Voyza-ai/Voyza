@@ -70,6 +70,91 @@ Remaining on the branch:
 
 ## 📦 Previously shipped (ordered recent → older)
 
+### Map tab rebuild (on `feat/map-redesign`, not yet merged)
+
+Five phases, all landed. The organising idea is a **drill-down**: the map
+shows the level of detail the camera is at, and the panel always agrees with
+the map.
+
+- [x] **1. MapLibre + vector tiles** (OpenFreeMap, free, no key). Raster tiles
+      bake roads and labels into the image, which makes per-zoom control
+      impossible — this swap is what the rest depends on.
+- [x] **2. Zoom level-of-detail** on the basemap — country lines → city
+      boundaries → roads → labels, tuned per `source-layer`. Brand-blue
+      recolour so the map reads as BlueMurr, not generic OSM.
+- [x] **3. Typed itinerary pins** inside a city — airport / hotel / restaurant
+      / sight / activity, each with its own colour and glyph, names always
+      visible, collision-nudged so they don't stack.
+- [x] **4. Recommended pins** — "Also worth seeing": places in the city that
+      are NOT in the itinerary, drawn hollow + dashed + starred so a
+      suggestion never reads as a plan. Opt-in per city, cached.
+- [x] **5. Country tier** — zoomed out past z5, cities collapse into one pill
+      per country, numbered 1..n in visit order. Click drills down to that
+      country's cities.
+
+**Zoom thresholds** (`CITY_ENTER_ZOOM` 10 / `CITY_EXIT_ZOOM` 9 / `COUNTRY_ZOOM`
+5): the enter/exit pair differ on purpose — one shared threshold makes the view
+flap between tiers while the camera sits on the boundary.
+
+Bugs found and fixed while building, worth not regressing:
+- City geocoding was unqualified, so "Nara" resolved to the **US National
+  Archives** in Washington DC and dragged the map across the Atlantic. Now
+  country-scoped.
+- Spot cache was keyed by array **index**, so reordering the trip served one
+  city another's places (Osaka showing Kyoto's temples). Now keyed by identity.
+- Map bounds took the long way round the globe on intercontinental trips —
+  Philadelphia → Japan framed the Atlantic (215°) instead of the Pacific
+  (149°). Fixed in `lib/mapBounds.ts`, unit-tested.
+- All-capitalised place names never resolved ("Todai-ji Great Buddha Hall"),
+  because the proper-noun trim had no descriptive tail to cut. Two-word head
+  fallback added — deliberately never one word, since "Tokyo" resolves to
+  Tokyo Station and would pin the wrong place convincingly.
+
+Known remaining:
+- [ ] Recommendations currently source candidates from Claude, which is the
+      wrong tool for recall. Measured **~85s** for one city (Milan) from click
+      to pins — a Claude call plus one rate-limited geocode per returned name.
+      Cached per city, so only the first open pays it, but that first open is
+      long enough that the feature reads as broken. See "Taste-based
+      recommendations" in the backlog for the intended architecture.
+- [ ] Some places genuinely aren't in OpenStreetMap. Root cause is the data,
+      not the query: "Kamameshi Shizuka" (a real Nara restaurant) was probed
+      live against Nominatim in four forms — `", Nara, Japan"`, `", Japan"`,
+      `"Shizuka, Nara, Japan"`, and the full name — and every one missed. No
+      query engineering reaches data that isn't there. The map reports these
+      honestly as "couldn't place", which is the right behaviour; the
+      alternative is pinning a guess. Fixing it properly needs a second
+      geocoding source with commercial POI coverage (Google Places /
+      Foursquare) — an API key and a per-call cost, so a real decision rather
+      than a tweak. Restaurants are the weakest category; landmarks are
+      generally fine in OSM.
+- [?] Saw the camera fail to re-frame once: the panel listed Paris / Amsterdam
+      / Lyon while the map still showed Iceland from a previous trip. Pins had
+      updated, the camera had not. Happened during rapid successive trip swaps
+      (three `setTrip` calls, ~20s apart, while the Map tab was open). Tried to
+      reproduce with a deliberate swap and the map re-framed correctly, so the
+      trigger is unknown — possibly a geocode still in flight when the next
+      trip landed. Worth re-checking whenever the AI chat gains the ability to
+      rewrite a whole itinerary, since that is the real path that would hit it.
+- [~] Map rendered blank once. **Size mechanism root-caused**, the rest not.
+      MapLibre measures its container ONCE at construction; mount it with no
+      layout box and it falls back to a built-in 400x300 canvas and stays
+      there. Reproduced deliberately by forcing the cards area to 0x0 before
+      switching to the Map tab — canvas came back 800x600 (400x300 CSS at DPR
+      2), exactly the size seen in the original failure.
+      Now recovers: with `ready` also listening to `idle` (not just `load`) and
+      the ResizeObserver always calling `map.resize()` — including on its first
+      observation, which used to be skipped and was precisely the event that
+      would have fixed it — a 0x0 mount resizes correctly once the container
+      gains a box (verified: canvas 1236x1280, markers render).
+      STILL UNEXPLAINED: the original also had `ready` false, zero markers and
+      **no tile requests at all**. In the reproduction `load` fires and markers
+      render even at 0x0, so something additionally prevented the style from
+      loading that day — possibly the style fetch to OpenFreeMap failing right
+      after a dev-server restart. If it recurs, check the network panel for the
+      style request before anything else.
+
+
 ### Voyza AI chat + home anchor (on `feat/voyza-ai-chat`, not yet merged)
 
 Voyza AI chat v1 — constraint proposals (0fbbd20)
@@ -139,28 +224,28 @@ Home anchor / origin model (984a553 + d4007d9)
 ## 📋 Backlog
 
 ### Feature: Notifications system (separate task — complex)
-- [ ] `notifications` table with RLS
-- [ ] GET/PATCH/DELETE endpoints
-- [ ] Notification bell icon in navbar (frontend)
-- [ ] Dropdown with unread count + list
-- [ ] Mark-all-read action
-- [ ] Notification triggers wired into:
-  - [ ] Account deletion requested (self-notification with grace period info)
-  - [ ] Trip owner anonymized → notify collaborators with clone action
-  - [ ] Ownership transferred
-  - [ ] Canvas suggestion approved/rejected
-  - [ ] Canvas invite received
-- [ ] Notification preferences in `user_profiles.preferences`
+- [x] `notifications` table with RLS
+- [x] GET/PATCH/DELETE endpoints
+- [x] Notification bell icon in navbar (frontend)
+- [x] Dropdown with unread count + list
+- [x] Mark-all-read action
+- [x] Notification triggers wired into:
+  - [x] Account deletion requested (self-notification with grace period info)
+  - [x] Trip owner anonymized → notify collaborators with clone action
+  - [x] Ownership transferred
+  - [x] Canvas suggestion approved/rejected
+  - [x] Canvas invite received
+- [x] Notification preferences in `user_profiles.preferences`
 
 ### Feature: Email transport (separate task)
-- [ ] Integrate Resend or SendGrid
-- [ ] Transactional email templates:
-  - [ ] Account deletion requested confirmation ("your account will be deleted on X")
-  - [ ] Grace period reminder (day 23 of 30)
-  - [ ] Canvas invite (currently links are copy-paste)
-  - [ ] Notification digest (weekly optional)
-- [ ] Email preferences in `user_profiles.preferences`
-- [ ] Unsubscribe link handling
+- [x] Integrate Resend or SendGrid
+- [x] Transactional email templates:
+  - [x] Account deletion requested confirmation ("your account will be deleted on X")
+  - [x] Grace period reminder (day 23 of 30)
+  - [x] Canvas invite (currently links are copy-paste)
+  - [x] Notification digest (weekly optional)
+- [x] Email preferences in `user_profiles.preferences`
+- [x] Unsubscribe link handling
 
 ### Feature: Popular trips / trip discovery
 Note: this is the older "discover real user trips that opted into
@@ -169,12 +254,91 @@ preset trips" feature below, which uses *pre-generated* preset trips
 as the primary discovery surface (with the old "clone this real
 trip" flow as a bonus row).
 
-- [ ] New page: `/explore` or `/popular`
-- [ ] Backend: `GET /api/trips/popular` with filters (vibe, budget, cities)
+- [x] New page: `/explore` or `/popular`
+- [x] Backend: `GET /api/trips/popular` with filters (vibe, budget, cities)
   - Query: `trips WHERE allow_recommendations = TRUE ORDER BY clone_count DESC`
-- [ ] Clone count stored per trip (incremented on clone)
-- [ ] Tagging / vibe browsing
-- [ ] "Trending this week" ranking
+  - Shipped gated on `is_public` instead (owner opts in via "Share to Explore"):
+    `allow_recommendations` defaults TRUE on every trip, so gating on it would
+    publish all users' trips without consent.
+- [x] Clone count stored per trip (incremented on clone)
+- [x] Tagging / vibe browsing
+- [x] "Trending this week" ranking
+
+### Feature: Map on mobile (needs design)
+
+The Map tab is effectively unusable below `md`. Not a bug with a fix — a
+layout that was designed for desktop and never given a mobile treatment.
+
+Measured on a 375×812 viewport:
+- Map canvas came out **77px tall** (now 156px after capping the stacked chat
+  at 45vh, still unusable). The header, title and cost cards take ~530px of
+  the 812px screen before the map gets any.
+- The tile attribution wraps to two lines and covers most of what's left.
+- The itinerary panel is `hidden md:flex`, so there is no way to see the stop
+  list or open a city at all — the entire drill-down is desktop-only.
+- Map controls (zoom, Show home, theme) overlap the country pills.
+
+Decisions needed before building:
+- [?] Should the Map tab go full-bleed on mobile — collapse the header and
+      cost cards while it is active?
+- [?] What replaces the floating itinerary panel — a bottom sheet?
+- [?] Does the AI chat belong on the Map tab on mobile at all, or should it be
+      a tab of its own?
+
+Separately, and not map-specific: the navbar overlaps itself at 375px —
+"BlueMurr" collides with "Flowchart", and "Schedule" collides with "Log in".
+
+### Feature: Taste-based recommendations (map suggestions → personalized)
+
+The map's "Also worth seeing" layer today shows *general* picks for a city.
+The intent is that it becomes personal: Claude reads a user's past trips and
+infers what they actually like, so the same city suggests different places to
+different people. General picks are the cold start, not the destination.
+
+**Architecture (decided — see the note below on why):**
+- [ ] Candidates from a places API (Overpass/OSM, or Google Places), NOT from
+      Claude's recall. Returns names *and* coordinates in one call.
+- [ ] Claude ranks the candidate list against the user's taste and writes the
+      one-line reason. Small, cheap, grounded call over a known list.
+- [ ] Cold start (no history) = same pipeline with an empty taste input.
+
+**Capture the training signal — do this EARLY, it cannot be backfilled:**
+- [ ] "Add to trip" action on suggested map pins
+- [ ] Log every suggestion *shown* alongside whether it was added or ignored,
+      with city + vibe context. Six suggestions shown = six labelled examples.
+- [ ] Without this the DB only stores outcomes (what ended up in the trip),
+      never choices (what was offered and passed over). Taste lives mostly in
+      the rejections.
+
+**Taste signals already in the schema (usable on day one):**
+- `trips.vibe`, `cities.vibes` — stated preference
+- `trips.budget` + `budget_per_person`, `restaurants[].priceRange` — price tier
+- `cities.restaurants[].cuisine` — food preference
+- `cities.activities` — what they actually planned
+- nights per city — pace (fast-moving vs. slow traveller)
+- `cities.selected_hotel_index` — REVEALED preference: shown five ranked
+  hotels, picked one. Worth more than anything self-reported.
+- `cities.custom_hotel` — louder still: rejected all five and typed their own.
+
+**Open questions:**
+- [?] Cross-user ("people like you also liked…") is a much bigger step than
+      per-user history, and raises privacy questions the current model avoids.
+      Gated on `allow_recommendations` (already in the schema) if pursued.
+- [?] Needs real usage before it means anything — the DB currently holds a
+      handful of users and mostly duplicate test trips. No corpus yet.
+
+**Why candidates come from a places API rather than Claude:**
+Asking an LLM to list a city's landmarks is asking it to *recall*, which is
+what it is weakest at — it occasionally returns places that are renamed,
+closed, or absent from OSM, which then silently fail to geocode and get
+dropped. It also returns names only, so each one costs a separate rate-limited
+geocode (~1/sec). Measured end-to-end on Milan: **~85 seconds** from clicking
+"Also worth seeing" to pins on the map. (An earlier note in this file said
+~40s; that was an under-estimate from a city whose places were already in the
+geocode cache.)
+A places API answers the question actually being asked ("what is near these
+coordinates") and hands back coordinates for free. Claude's real value here is
+taste and explanation, not recall.
 
 ### Feature: Browse / preset trips (3 phases)
 
@@ -255,13 +419,13 @@ Tasks deferred from the current chat work:
 - [ ] Frontend flow: owner picks a collaborator (or invites one) to transfer to
 - [ ] "Are you sure?" confirm
 - [ ] After transfer, former owner becomes editor (or leaves)
-- [ ] Notification to new owner
+- [x] Notification to new owner
 
 ### Feature: Clone UX
 - [ ] "Clone this trip" button visible on all results pages (respecting `allow_clones`)
 - [ ] Clone dialog with checkboxes: cities, hotels, activities, restaurants, schedule
 - [ ] Shareable trip links (read-only) for any `is_public = TRUE` trip
-- [ ] Clone count shown as a social signal ("100 travelers cloned this")
+- [x] Clone count shown as a social signal ("100 travelers cloned this")
 
 ### Feature: Admin UI
 - [ ] `/admin` route (auth-gated to specific user_ids)
@@ -276,6 +440,63 @@ Tasks deferred from the current chat work:
 - [ ] Subscription webhook handler
 - [ ] Gate premium features (higher activity counts? offline export?)
 - [ ] Cancel subscription on account deletion
+
+### Feature: Real rail booking (All Aboard)
+Context: rail legs ship with **no** booking link. Neither provider returns one
+at the search/offer stage — All Aboard confirmed it in writing (2026-09) and
+their docs agree: booking is an API flow, and the only URL in it is the hosted
+payment page. Until 2026-09 we filled the field with their marketing homepage;
+persisted trips are scrubbed at read time (`tripShape.ts`).
+Sources: docs.allaboard.eu/tickets/book-tickets · /payments/ · /payments/fees ·
+/refunds/ (not yet read).
+
+**The flow (docs, verbatim operation names):**
+1. `createBooking(offerIds, passengers)` — from the `getJourneyOffer` offer we
+   already fetch. Returns booking id + a `requirements` field saying what this
+   operator needs per passenger. **Bookings expire** — honour `expiresAt`.
+2. `updateBooking(id, passengers)` — firstName, lastName, birthDate,
+   nationality, email/phone; exactly one `isContactPerson`. YOUTH/SENIOR need
+   `birthDate`/`age`. Some operators want passport.
+3. `updateBooking(id, selections)` — only when the offer is part of an offer
+   set (must select from every collection in one call, or none).
+4. `updatePart(id, booking, placeProperties)` — seat preferences, when offered.
+5. `setTicketDelivery(offerId, method)` — `E_TICKET` | `TICKET_ON_DEPARTURE`.
+6. `createOrder(booking)` — **up to 30s**; docs recommend their WebSocket.
+7. `createPayment(orderId, successUrl, cancelUrl)` → `url` — All Aboard's
+   hosted page (cards, Apple Pay, Google Pay). Customer pays there; order
+   finalises automatically; they land on our `successUrl`.
+8. `node(id: order)` — tickets arrive **15+ minutes later** as `PdfTicket.url`,
+   `CheckInResource.url`, or a `TicketOnDeparture` reference. Needs a
+   "tickets pending" state and a poll/notification, not a synchronous result.
+
+**Money (decided by the docs, not open any more):**
+- Use the **payment gateway**, not wallet/invoice. The customer pays the
+  operator fare on All Aboard's page → BlueMurr never touches card data, never
+  fronts a fare, and gets no PCI scope. Wallet/invoice mean *we* pay and
+  collect separately, i.e. our own payment stack and seller-of-travel exposure.
+- **Revenue = a service fee we configure** (fixed, %, per ticket, or mix),
+  added to the customer's total at checkout and remitted to us monthly. There
+  is no fare markup mechanism. All Aboard's own commission is per contract, not
+  in the API. Monthly reconciliation nets our commission, their fees, service
+  fees collected, and refunds.
+
+- [ ] Passenger details form driven by `requirements` (varies per operator)
+- [ ] Booking → order → payment redirect, with `expiresAt` countdown and the
+      30s order wait handled (WebSocket or patient polling)
+- [ ] Post-payment: order status page, ticket retrieval via `node`, store the
+      ticket URLs on the trip, notify when they land (15+ min)
+- [ ] Refunds/cancellation — read /refunds/ first; design with the payment flow
+- [ ] Decide the service fee and sign commercial terms (commission is per contract)
+- [ ] Party fares — **answered empirically 2026-09-21** on the test gateway:
+      `getJourneyOffer` with N `ADULT`s returns the party total (Paris→Lyon,
+      same journey: 1 adult $53.88, 2 adults $107.77, ratio 2.0002). So pass
+      `travelers` adults in `allaboard.ts` and let their total be the total;
+      keep ×N only for Deutsche Bahn, whose API takes no passenger count.
+- [~] API key: **test gateway** (confirmed 2026-09-21) — fares seen in dev are
+      test-gateway numbers. Need a production key before launch; validity was
+      described as mid-November to year end, confirm renewal.
+- [~] Seller-of-travel compliance: same questions as in-app flight booking —
+      do them together.
 
 ### Feature: Real regional train APIs
 - [ ] Replace static Japan table with real-time JR data (Navitime partner API)

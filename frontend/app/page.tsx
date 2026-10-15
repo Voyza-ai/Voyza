@@ -49,7 +49,7 @@ export default function WelcomePage() {
       {/* Plane animation */}
       {(phase === 'waiting' || phase === 'plane') && <PlaneAnimation />}
 
-      {/* Content — VOYZA at top, content flows down */}
+      {/* Content — BlueMurr at top, content flows down */}
       <div className="relative flex flex-col items-center gap-3 px-4 z-10 pt-[18vh]">
         <LogoReveal show={phase === 'logo' || phase === 'input'} />
         <HeroInput show={phase === 'input'} />

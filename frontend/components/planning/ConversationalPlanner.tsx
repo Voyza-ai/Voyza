@@ -15,6 +15,8 @@ import {
   Plus,
   Check,
   ListChecks,
+  LocateFixed,
+  Loader2,
 } from 'lucide-react';
 import { converse, ConverseResponse } from '@/lib/api';
 import { useTripStore } from '@/store/tripStore';
@@ -124,19 +126,26 @@ export default function ConversationalPlanner({
     };
   }, []);
 
+  // A "set" string must be non-empty — the model occasionally returns ""
+  // instead of null for fields the user didn't mention this turn, and an
+  // empty string must never overwrite a fact we already collected (this
+  // erased a location-detected origin and got the user re-asked for it).
+  const isSet = (v: string | null | undefined): v is string =>
+    typeof v === 'string' && v.trim().length > 0;
+
   const applyUpdates = useCallback(
     (u: ConverseResponse['updates']) => {
       if (u.destinations) setAnswer('destinations', u.destinations);
-      if (u.origin !== undefined && u.origin !== null) setAnswer('origin', u.origin);
+      if (isSet(u.origin)) setAnswer('origin', u.origin);
       if (u.dates) setAnswer('dateRange', u.dates);
       if (u.travelers !== undefined && u.travelers !== null) setAnswer('travelers', u.travelers);
       if (u.budget !== undefined && u.budget !== null) setAnswer('budget', u.budget);
       if (u.budgetPerPerson !== undefined && u.budgetPerPerson !== null)
         setAnswer('budgetPerPerson', u.budgetPerPerson);
-      if (u.vibe !== undefined && u.vibe !== null) setAnswer('vibe', u.vibe);
+      if (isSet(u.vibe)) setAnswer('vibe', u.vibe);
       if (u.returnToHome !== undefined && u.returnToHome !== null)
         setAnswer('returnToHome', u.returnToHome);
-      if (u.notes !== undefined && u.notes !== null) setAnswer('extraNotes', u.notes);
+      if (isSet(u.notes)) setAnswer('extraNotes', u.notes);
       setAnswer('planningMode', 'destination');
     },
     [setAnswer],
@@ -233,6 +242,42 @@ export default function ConversationalPlanner({
     },
     [isTyping, knownState, applyUpdates, meetsMinimums, syncStore],
   );
+
+  // "Use my location": geolocation → nearest airport city (offline lookup)
+  // → origin set directly + announced through the conversation so the AI
+  // acknowledges it and never re-asks. All failures fall back to typing.
+  const [locating, setLocating] = useState(false);
+  const handleUseMyLocation = async () => {
+    if (locating || isTyping) return;
+    setLocating(true);
+    try {
+      const { detectNearestAirportCity } = await import('@/lib/nearestAirport');
+      const result = await detectNearestAirportCity();
+
+      if (!result.ok) {
+        const content =
+          result.reason === 'unsupported'
+            ? "Your browser doesn't support location sharing — just tell me the city you're starting from."
+            : "No worries — I couldn't get your location. Just tell me the city you're starting from.";
+        const withMsg = [
+          ...messagesRef.current,
+          { id: nextId(), role: 'assistant' as const, content },
+        ];
+        messagesRef.current = withMsg;
+        setMessages(withMsg);
+        syncStore(withMsg);
+        return;
+      }
+
+      const cityName = result.city.city;
+      const { getOriginAirports } = await import('@/lib/originAirports');
+      setAnswer('origin', cityName);
+      setAnswer('originAirports', getOriginAirports(cityName));
+      await send(`I'm starting from ${cityName} (detected from my location)`);
+    } finally {
+      setLocating(false);
+    }
+  };
 
   // Seed from the landing hero (or greet) — once.
   useEffect(() => {
@@ -532,6 +577,24 @@ export default function ConversationalPlanner({
       {/* ── Quick replies + input bar ── */}
       <div className="relative z-10 flex-shrink-0 px-6 pb-6">
         <div className="max-w-3xl mx-auto flex flex-col gap-3">
+          {/* Location offer — visible until an origin is known */}
+          {!answers.origin && !isTyping && (
+            <div className="flex">
+              <button
+                onClick={handleUseMyLocation}
+                disabled={locating}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#4f8ef7]/30 text-[#9db9f0] hover:text-white hover:border-[#4f8ef7]/60 transition-all disabled:opacity-60"
+                style={{ background: 'rgba(79,142,247,0.08)' }}
+              >
+                {locating ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <LocateFixed size={13} />
+                )}
+                {locating ? 'Finding your nearest airport…' : 'Use my location'}
+              </button>
+            </div>
+          )}
           {quickReplies.length > 0 && !isTyping && (
             <div className="flex flex-wrap gap-2">
               {quickReplies.map((q) => (

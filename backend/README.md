@@ -26,8 +26,7 @@ backend/
 │   ├── routes/
 │   │   ├── index.ts             # Mounts all routers under /api
 │   │   ├── health.ts            # GET /api/health
-│   │   ├── flights.ts           # POST /api/flights/search (stub)
-│   │   └── ai.ts                # POST /api/ai/chat (Claude passthrough)
+│   │   └── flights.ts           # POST /api/flights/search (stub)
 │   ├── services/
 │   │   ├── supabase.ts          # Lazy service-role client
 │   │   ├── anthropic.ts         # Lazy Anthropic client + DEFAULT_MODEL

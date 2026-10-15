@@ -39,7 +39,7 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-md bg-white rounded-xl shadow-sm border border-gray-100 p-8">
         <div className="text-center mb-6">
           <Link href="/" className="text-2xl font-bold" style={{ color: '#2563eb' }}>
-            VOYZA
+            BlueMurr
           </Link>
         </div>
 

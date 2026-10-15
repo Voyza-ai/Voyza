@@ -22,4 +22,10 @@ yarn-error.log*
 .claude/launch.json
 .mcp.json
 
+# graphify — generated knowledge graph. Regenerate with `graphify update .`
+# (AST-only, ~1 min, no API cost). Not committed: graph.json + graph.html are
+# ~3MB and change on every code edit, so they'd bloat history fast. The config
+# that matters (.claude/settings.json, CLAUDE.md) IS committed.
+graphify-out/
+
 .claude/settings.local.json

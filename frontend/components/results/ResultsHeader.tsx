@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Users, TrendingDown, Sparkles, PenSquare, MessageSquare } from 'lucide-react';
+import { Calendar, Users, TrendingDown, Sparkles, PenSquare, MessageSquare, ChevronDown, CheckCircle2 } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { useCountUp } from '@/lib/useCountUp';
@@ -153,12 +153,15 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
 
   // "You can save" surfaces the single MOST valuable savings opportunity:
   // either the routing optimization we already applied, or the date-shift
-  // suggestion (also delivered as a Voyza AI chat tip) — whichever is bigger.
+  // suggestion (also delivered as a BlueMurr AI chat tip) — whichever is bigger.
   // Fixes the deflating "You save $0" box when routing saved nothing but
   // shifting the start date would save real money.
   const shiftSavings = trip.dateShiftSuggestion?.savings ?? 0;
   const shiftIsBest = shiftSavings > liveSavings;
   const bestSavings = shiftIsBest ? shiftSavings : liveSavings;
+  // Nothing cheaper exists: neither the routing nor any nearby start date
+  // beats these prices. Say so positively instead of "You can save $0".
+  const nothingToSave = Math.round(bestSavings) <= 0;
   const shiftDateNice = (() => {
     const iso = trip.dateShiftSuggestion?.newStartDate;
     if (!iso) return '';
@@ -168,6 +171,117 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
       day: 'numeric',
     });
   })();
+
+  // Date-shift options menu on the savings pill. Newer trips carry an
+  // options[] array (every shift that clears the savings thresholds);
+  // older saved trips only have the flat headline suggestion, which we
+  // treat as a one-entry menu so the pill stays clickable for them too.
+  const shiftOptions = (() => {
+    const s = trip.dateShiftSuggestion;
+    if (!s) return [];
+    return s.options && s.options.length > 0 ? s.options : [s];
+  })();
+  const [shiftMenuOpen, setShiftMenuOpen] = useState(false);
+  const shiftMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!shiftMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!shiftMenuRef.current?.contains(e.target as Node)) setShiftMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [shiftMenuOpen]);
+
+  const offsetLabel = (dayOffset: number) => {
+    const n = Math.abs(dayOffset);
+    return `${n} day${n === 1 ? '' : 's'} ${dayOffset < 0 ? 'earlier' : 'later'}`;
+  };
+
+  const addDaysIso = (iso: string, days: number) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    const date = new Date(y, (m || 1) - 1, (d || 1) + days);
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${date.getFullYear()}-${mm}-${dd}`;
+  };
+
+  // Clicking an option replans the SAME trip at the shifted dates: stage
+  // the planner answers (from live answers when resuming, else rebuilt
+  // from the trip itself so saved trips work in a fresh session), then
+  // let /plan?resume=1&autorun=1 run the real search and land back on
+  // results. Savings shown are from the optimizer's earlier re-pricing;
+  // the replan fetches live prices, which is why we re-search rather
+  // than just relabeling the dates on the current itinerary.
+  const applyDateShift = (opt: { dayOffset: number; newStartDate: string }) => {
+    const store = useTripStore.getState();
+    const a = store.answers;
+
+    let endISO: string | undefined;
+    if (a.dateRange?.start && a.dateRange?.end) {
+      endISO = addDaysIso(a.dateRange.end, opt.dayOffset);
+    } else {
+      const lastCity = trip.cities[trip.cities.length - 1];
+      if (lastCity?.dates?.departure) {
+        endISO = addDaysIso(lastCity.dates.departure, opt.dayOffset);
+      }
+    }
+    if (!endISO) return;
+
+    // The canvas origin handoff is a third source for the home city when
+    // neither the planner answers nor the trip payload carry one.
+    const storedOrigin = (() => {
+      try {
+        const id = (trip as any).id;
+        if (!id) return null;
+        const raw = localStorage.getItem(`voyza-origin-${id}`);
+        return raw ? (JSON.parse(raw)?.origin ?? null) : null;
+      } catch {
+        return null;
+      }
+    })();
+
+    const staged = {
+      destinations: a.destinations?.length
+        ? a.destinations
+        : trip.cities.map((c) => c.name),
+      travelers: a.travelers || trip.travelers,
+      origin: a.origin ?? trip.origin?.city ?? storedOrigin?.city ?? undefined,
+      originAirports:
+        (a.originAirports?.length ? a.originAirports : undefined) ??
+        trip.origin?.airports ??
+        storedOrigin?.airports ??
+        [],
+      returnToHome: a.returnToHome ?? trip.returnToHome ?? true,
+      dateRange: { start: opt.newStartDate, end: endISO },
+      planningMode: 'destination' as const,
+      budget: a.budget,
+      budgetPerPerson: a.budgetPerPerson,
+      vibe: a.vibe,
+    };
+
+    // Stage in the store AND snapshot to sessionStorage: the /plan page
+    // wipes the store on entry whenever its reset check reads a stale
+    // URL mid-navigation (client transitions can lag), so the planner's
+    // autorun restores from this snapshot after any such wipe.
+    for (const [key, value] of Object.entries(staged)) {
+      if (value !== undefined) store.setAnswer(key as any, value as any);
+    }
+    try {
+      sessionStorage.setItem('bluemurr-autorun', JSON.stringify(staged));
+    } catch {
+      // Storage blocked — the store staging still covers the normal case.
+    }
+    setShiftMenuOpen(false);
+    router.push('/plan?resume=1&autorun=1');
+  };
+  const niceFullDate = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
 
   // Per-person vs total display toggle is global (read from tripStore) so
   // every price across the results page — flights, hotels, transit, savings —
@@ -187,9 +301,15 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
 
   return (
     <div className="px-4 pt-3 pb-0">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      {/* No flex-wrap here: long AI-built route titles ("Berlin → Florence →
+          Barcelona → Madrid") used to widen the left block until the price
+          pills + buttons wrapped onto a second row, breaking the header
+          alignment. Instead the left column shrinks (flex-1 + min-w-0) and
+          the title truncates within it, so the right cluster stays pinned
+          top-right, aligned with the meta row. */}
+      <div className="flex items-start justify-between gap-4">
         {/* Left: meta + title stacked tight */}
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3 flex-wrap text-xs mb-0.5">
             <div className="flex items-center gap-2 text-[#2e6bc4] uppercase tracking-[0.18em] font-medium">
               <Sparkles size={12} />
@@ -228,11 +348,9 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
           )}
         </div>
 
-        {/* Right: toggle stacked above cost cards + save button. ml-auto
-            keeps this block pinned to the right even when flex-wrap drops
-            it onto its own row — without it, a wrapped stats row jumped to
-            the left edge and read as broken. */}
-        <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-auto">
+        {/* Right: toggle stacked above cost cards + save button. Never
+            wraps below the title — the row above is no-wrap by design. */}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
           {/* Total / Per-person pill toggle — sits above the cards so it doesn't widen the row */}
           {showToggle && (
             <div
@@ -290,24 +408,90 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
             )}
           </div>
 
-          {/* Savings */}
-          <div
-            className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
-            style={{
-              background: 'linear-gradient(180deg, rgba(52,211,153,0.08) 0%, rgba(52,211,153,0.02) 100%)',
-              borderColor: 'rgba(52,211,153,0.25)',
-            }}
-          >
-            <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
-              <TrendingDown size={9} />
-              <span>You can save</span>
-            </div>
-            <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
-              ${animatedSavings.toLocaleString()}
-            </div>
-            <div className="text-[#22c088]/50 text-[9px]">
-              {shiftIsBest ? `by starting ${shiftDateNice}` : 'vs default routing'}
-            </div>
+          {/* Savings — clickable when date-shift options exist: opens a
+              menu of alternative start dates with their real, re-priced
+              savings (the optimizer scored each shifted date already). */}
+          <div className="relative" ref={shiftMenuRef}>
+            <button
+              type="button"
+              onClick={() => shiftOptions.length > 0 && setShiftMenuOpen((v) => !v)}
+              disabled={shiftOptions.length === 0}
+              title={
+                shiftOptions.length > 0
+                  ? 'See which start dates would save you money'
+                  : undefined
+              }
+              className={`flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px] text-left transition-all ${
+                shiftOptions.length > 0 ? 'cursor-pointer hover:brightness-95' : 'cursor-default'
+              }`}
+              style={{
+                background: 'linear-gradient(180deg, rgba(52,211,153,0.08) 0%, rgba(52,211,153,0.02) 100%)',
+                borderColor: 'rgba(52,211,153,0.25)',
+              }}
+            >
+              <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
+                {nothingToSave ? <CheckCircle2 size={9} /> : <TrendingDown size={9} />}
+                <span>{nothingToSave ? 'Price check' : 'You can save'}</span>
+                {shiftOptions.length > 0 && (
+                  <ChevronDown
+                    size={9}
+                    className={`transition-transform ${shiftMenuOpen ? 'rotate-180' : ''}`}
+                  />
+                )}
+              </div>
+              <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
+                {nothingToSave ? 'Best price' : `$${animatedSavings.toLocaleString()}`}
+              </div>
+              <div className="text-[#22c088]/50 text-[9px]">
+                {nothingToSave
+                  ? 'for these dates'
+                  : shiftIsBest
+                    ? `by starting ${shiftDateNice}`
+                    : 'vs default routing'}
+              </div>
+            </button>
+
+            {shiftMenuOpen && shiftOptions.length > 0 && (
+              <div
+                className="absolute right-0 top-full mt-2 w-[264px] bg-white border rounded-xl shadow-lg z-50 overflow-hidden"
+                style={{ borderColor: 'rgba(52,211,153,0.35)' }}
+              >
+                <div className="px-3 pt-2.5 pb-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
+                  Cheaper start dates
+                </div>
+                {shiftOptions.map((opt) => {
+                  const optSavings =
+                    priceMode === 'total'
+                      ? Math.round(opt.savings)
+                      : Math.round(opt.savings / travelers);
+                  return (
+                    <button
+                      type="button"
+                      key={opt.dayOffset}
+                      onClick={() => applyDateShift(opt)}
+                      title="Replan this trip starting on this date"
+                      className="w-full px-3 py-2 border-t border-gray-100 flex items-center justify-between gap-2 text-left transition-colors hover:bg-emerald-50/60 cursor-pointer"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-medium text-gray-800">
+                          {offsetLabel(opt.dayOffset)}
+                        </div>
+                        <div className="text-[10px] text-gray-500">
+                          starts {niceFullDate(opt.newStartDate)}
+                        </div>
+                      </div>
+                      <div className="text-[#22c088] text-[13px] font-semibold tabular-nums flex-shrink-0">
+                        save ${optSavings.toLocaleString()}
+                      </div>
+                    </button>
+                  );
+                })}
+                <div className="px-3 py-2 border-t border-gray-100 text-[10px] text-gray-400">
+                  Picking a date replans your trip with live prices — the
+                  final savings can differ slightly.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Edit in Canvas — saves the trip first if needed and then

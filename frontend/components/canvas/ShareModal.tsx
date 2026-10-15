@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Copy, Check, Eye, MessageSquare, Pencil, RefreshCw, Trash2, Send, Crown } from 'lucide-react';
+import { useAuthStore } from '@/store/authStore';
 import {
   getShareLink,
   updateShareLink,
@@ -18,6 +19,10 @@ import {
 
 type ShareModalProps = {
   tripId: string;
+  /** Viewer's role. Owners manage everything; editors can copy the link
+   *  and invite friends (Google Docs-style), but link-mode changes,
+   *  role changes, removals, and transfers stay owner-only. */
+  role?: string;
   isOpen: boolean;
   onClose: () => void;
   /** Toast passthrough so feedback matches the canvas. */
@@ -54,6 +59,13 @@ const MODES: { key: ShareMode; icon: typeof Eye; title: string; blurb: string; j
   },
 ];
 
+/** Sentence form of a link mode: "Anyone with the link can ___." */
+const LINK_ACCESS_PHRASE: Record<ShareMode, string> = {
+  view: 'view the trip',
+  suggest: 'suggest edits for the owner to approve',
+  edit: 'edit the trip',
+};
+
 const ROLE_LABELS: Record<string, string> = {
   owner: 'Owner',
   editor: 'Editor',
@@ -61,7 +73,8 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: 'Viewer',
 };
 
-export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleChanged, onTransferred }: ShareModalProps) {
+export default function ShareModal({ tripId, role: myRole = 'owner', isOpen, onClose, onToast, onRoleChanged, onTransferred }: ShareModalProps) {
+  const isOwner = myRole === 'owner';
   // Compose the link from OUR origin — the backend's FRONTEND_URL points at
   // prod, which would hand dev/localhost users a wrong-environment link.
   const composeUrl = (token?: string, fallback?: string) =>
@@ -76,6 +89,9 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [members, setMembers] = useState<TripMember[]>([]);
   const [email, setEmail] = useState('');
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const myEmail = useAuthStore((s) => s.user?.email ?? null);
+  const myUserId = useAuthStore((s) => s.user?.id ?? null);
   const [inviteRole, setInviteRole] = useState<'editor' | 'suggester' | 'viewer'>('editor');
   const [sending, setSending] = useState(false);
 
@@ -153,6 +169,11 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
 
   const handleInvite = async () => {
     if (!email.trim()) return;
+    if (myEmail && email.trim().toLowerCase() === myEmail.toLowerCase()) {
+      setInviteError("You can't invite yourself");
+      return;
+    }
+    setInviteError(null);
     setSending(true);
     try {
       await inviteToCanvas(tripId, email.trim(), inviteRole);
@@ -160,8 +181,12 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
       const r = await listTripMembers(tripId);
       setMembers(r.members);
       toast(`Invite created — use its Copy link button to send it`);
-    } catch {
-      toast('Invite failed', 'error');
+    } catch (err: any) {
+      if (err?.status === 400 && /yourself/i.test(err?.message ?? '')) {
+        setInviteError("You can't invite yourself");
+      } else {
+        toast('Invite failed', 'error');
+      }
     } finally {
       setSending(false);
     }
@@ -203,9 +228,13 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
 
   const handleRemove = async (memberId: string) => {
     const prev = members;
+    const target = members.find((m) => m.id === memberId);
     setMembers((ms) => ms.filter((m) => m.id !== memberId));
     try {
       await removeMember(tripId, memberId);
+      // Tell the removed person's open canvas right away — their page
+      // re-checks its role, finds none, and shows the removed screen.
+      if (target?.userId) onRoleChanged?.(target.userId, 'removed');
     } catch {
       setMembers(prev);
       toast('Could not remove member', 'error');
@@ -244,7 +273,24 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
             </div>
 
             <div className="px-5 py-4 flex flex-col gap-5">
-              {/* ── Link access mode ── */}
+              {/* ── Link access mode (owner sets it; editors just see it) ── */}
+              {!isOwner ? (
+                <div className="flex flex-col gap-2">
+                  <div
+                    className="rounded-lg px-3 py-2 text-[12px] leading-snug"
+                    style={{ background: '#eff6ff', color: '#1e40af' }}
+                  >
+                    You&apos;re {myRole === 'editor' ? 'an' : 'a'}{' '}
+                    <span className="font-semibold">{ROLE_LABELS[myRole]?.toLowerCase() ?? myRole}</span>{' '}
+                    on this trip — you can copy the link and invite friends. Only the owner can
+                    change link access or manage people.
+                  </div>
+                  <div className="text-[12px] text-gray-500">
+                    Anyone with the link can{' '}
+                    <span className="font-medium text-gray-800">{LINK_ACCESS_PHRASE[mode]}</span>.
+                  </div>
+                </div>
+              ) : (
               <div>
                 <div className="text-[12px] font-medium text-gray-500 mb-2">
                   Anyone with the link
@@ -280,25 +326,20 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
                   Apply this access to all current members
                 </button>
               </div>
+              )}
 
               {/* ── The link ── */}
               <div>
-                <div className="flex items-center gap-2">
-                  <input
-                    readOnly
-                    value={linkLoading ? 'Loading…' : url}
-                    className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-[12px] text-gray-600 outline-none"
-                  />
-                  <button
-                    onClick={copyLink}
-                    disabled={!url}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40 flex-shrink-0"
-                    style={{ background: '#2563eb' }}
-                  >
-                    {copied ? <Check size={13} /> : <Copy size={13} />}
-                    {copied ? 'Copied' : 'Copy link'}
-                  </button>
-                </div>
+                <button
+                  onClick={copyLink}
+                  disabled={!url || linkLoading}
+                  className="w-full flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-[12.5px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
+                  style={{ background: '#2563eb' }}
+                >
+                  {copied ? <Check size={13} /> : <Copy size={13} />}
+                  {linkLoading ? 'Loading…' : copied ? 'Copied' : 'Copy link'}
+                </button>
+                {isOwner && (
                 <button
                   onClick={rotateLink}
                   className="mt-1.5 flex items-center gap-1 text-[11.5px] text-gray-400 hover:text-gray-600 transition-colors"
@@ -306,18 +347,19 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
                   <RefreshCw size={11} />
                   Reset link (old copies stop working)
                 </button>
+                )}
               </div>
 
-              {/* ── Personal invites (link-based — email sending comes later) ── */}
+              {/* ── Friend invites (per-person link + email + bell notification) ── */}
               <div>
-                <div className="text-[12px] font-medium text-gray-500 mb-0.5">Personal invites</div>
-                <div className="text-[11px] text-gray-400 mb-2">
-                  Creates a personal link at the role you pick — copy it and send it yourself.
-                </div>
+                <div className="text-[12px] font-medium text-gray-500 mb-2">Friend invites</div>
                 <div className="flex items-center gap-2">
                   <input
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (inviteError) setInviteError(null);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleInvite();
                     }}
@@ -344,6 +386,11 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
                     <Send size={14} />
                   </button>
                 </div>
+                {inviteError && (
+                  <p role="alert" className="mt-1.5 text-[11px] text-red-500">
+                    {inviteError}
+                  </p>
+                )}
               </div>
 
               {/* ── Members ── */}
@@ -363,11 +410,17 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
                           className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-medium text-white flex-shrink-0"
                           style={{ background: '#64748b' }}
                         >
-                          {((m.fullName ?? m.email)?.[0] ?? '?').toUpperCase()}
+                          {((m.displayName || m.fullName || m.email)?.[0] ?? '?').toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-[12px] text-gray-800 truncate">
-                            {m.fullName ?? m.email ?? 'Member'}
+                            {/* displayName is the server's label and survives email
+                                redaction; the rest of the chain covers a backend
+                                deployed before the field existed. */}
+                            {m.displayName || m.fullName || m.email || 'Member'}
+                            {myUserId && m.userId === myUserId && (
+                              <span className="text-gray-400"> (you)</span>
+                            )}
                           </div>
                           {m.fullName && m.email && (
                             <div className="text-[10px] text-gray-400 truncate">{m.email}</div>
@@ -388,8 +441,10 @@ export default function ShareModal({ tripId, isOpen, onClose, onToast, onRoleCha
                             {copiedId === m.id ? 'Copied' : 'Copy link'}
                           </button>
                         )}
-                        {m.role === 'owner' ? (
-                          <span className="text-[11px] text-gray-400 px-1.5">Owner</span>
+                        {m.role === 'owner' || !isOwner ? (
+                          <span className="text-[11px] text-gray-400 px-1.5">
+                            {ROLE_LABELS[m.role] ?? m.role}
+                          </span>
                         ) : (
                           <>
                             <select

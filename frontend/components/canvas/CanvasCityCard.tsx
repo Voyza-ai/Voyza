@@ -180,8 +180,10 @@ export default function CanvasCityCard({
           </div>
         )}
 
-        {/* Hotel info */}
-        {hotel && hotel.name !== 'Select hotel' && (
+        {/* Hotel info — a city with no hotel arrives from the DB read with an
+            empty name (buildTripFromDb), from the canvas with "Select hotel";
+            both are placeholders, neither is a stay to show. */}
+        {hotel && hotel.name && hotel.name !== 'Select hotel' && (
           <div
             className="mx-4 mb-2 px-3 py-2.5 rounded-xl"
             style={{ background: `${color.text}10` }}
@@ -221,7 +223,7 @@ export default function CanvasCityCard({
         )}
 
         {/* Hotel loading state — shown while a freshly added city fetches its hotel */}
-        {(!hotel || hotel.name === 'Select hotel') && hotelLoading && (
+        {(!hotel?.name || hotel.name === 'Select hotel') && hotelLoading && (
           <div
             className="mx-4 mb-2 px-3 py-2.5 rounded-xl flex items-center gap-2"
             style={{ background: `${color.text}10` }}

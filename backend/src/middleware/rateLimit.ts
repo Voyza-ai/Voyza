@@ -2,10 +2,15 @@ import rateLimit from 'express-rate-limit';
 import type { Request } from 'express';
 import { env } from '../config/env';
 
-// Skip rate limiting during tests, and never throttle the health check
-// (Railway's healthcheck + any monitors hit /api/health constantly).
+// Skip rate limiting during tests AND local development — one plan run
+// fires ~10 expensive-route calls, so a dev testing the planner a few
+// times in a row trips the 30/15min guard that exists for production
+// abuse. Never throttle the health check either (Railway's healthcheck +
+// any monitors hit /api/health constantly).
 const skip = (req: Request): boolean =>
-  env.NODE_ENV === 'test' || (req.originalUrl || '').startsWith('/api/health');
+  env.NODE_ENV === 'test' ||
+  env.NODE_ENV === 'development' ||
+  (req.originalUrl || '').startsWith('/api/health');
 
 /**
  * General limiter for ALL /api routes — generous for normal use, but stops

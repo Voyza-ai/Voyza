@@ -116,6 +116,9 @@ describe('searchTrains', () => {
     expect(offers[0].operator).toBe('Deutsche Bahn');
     expect(offers[0].trainType).toBe('ICE');
     expect(offers[0].durationMinutes).toBe(240);
+    // No provider gives us a booking link. We used to fill this with bahn.de's
+    // generic start page, which sent people to a search they had to redo.
+    expect(offers[0].bookingUrl).toBeNull();
     expect(offers[0].limitedCoverage).toBe(false);
   });
 
@@ -216,5 +219,86 @@ describe('searchTrains', () => {
     });
 
     expect(offers).toEqual([]);
+  });
+
+  // ── Fare unit ──────────────────────────────────────────────────
+  // Deutsche Bahn's /journeys endpoint takes no passenger count, so its
+  // fares are always ONE adult. Every price crossing the API boundary is a
+  // party total (Duffel quotes the whole passenger set, and the frontend's
+  // per-person toggle divides by travelers), so searchTrains has to scale.
+  // Before it did, a rail leg rendered at 1/N of its real cost in 'total'
+  // mode and 1/N² in 'perPerson' mode, and the optimizer preferred trains
+  // that weren't actually cheaper.
+
+  /** One €49.90 ICE; station names chosen so the station-vs-city filter passes. */
+  const frankfurtToMunich = (amount?: string) => ({
+    journeys: [
+      {
+        legs: [
+          {
+            departure: '2026-06-01T08:00:00+02:00',
+            arrival: '2026-06-01T12:00:00+02:00',
+            origin: { name: 'Frankfurt(Main)Hbf' },
+            destination: { name: 'Munich Hbf' },
+            line: { operator: { name: 'Deutsche Bahn' }, productName: 'ICE' },
+          },
+        ],
+        ...(amount ? { price: { amount, currency: 'EUR' } } : {}),
+      },
+    ],
+  });
+
+  /** The three fetches one DB search makes: origin stop, dest stop, journeys. */
+  const mockDbLeg = (journeys: any) => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([{ id: '8000105' }]) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([{ id: '8000261' }]) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(journeys) });
+  };
+
+  const frankfurtMunich = (travelers: number) => ({
+    origin: 'Frankfurt',
+    destination: 'Munich',
+    date: '2026-06-01',
+    travelers,
+    originCountry: 'DE',
+    destinationCountry: 'DE',
+  });
+
+  it('scales the provider per-person fare to a party total', async () => {
+    mockDbLeg(frankfurtToMunich('49.90'));
+
+    const offers = await searchTrains(frankfurtMunich(3));
+
+    expect(offers).toHaveLength(1);
+    expect(offers[0].price).toBe(149.7); // 49.90 per adult × 3
+  });
+
+  it('does not expose the provider per-person field to callers', async () => {
+    mockDbLeg(frankfurtToMunich('49.90'));
+
+    const offers = await searchTrains(frankfurtMunich(2));
+
+    expect(offers[0].price).toBe(99.8);
+    expect(offers[0]).not.toHaveProperty('pricePerPerson');
+  });
+
+  it('leaves an unpriced journey null instead of multiplying it to $0', async () => {
+    mockDbLeg(frankfurtToMunich());
+
+    const offers = await searchTrains(frankfurtMunich(4));
+
+    expect(offers[0].price).toBeNull();
+    expect(offers[0].limitedCoverage).toBe(true);
+  });
+
+  it('falls back to a party of one when travelers is zero', async () => {
+    // A zero/NaN count would otherwise zero out every fare, and a $0 leg
+    // reads as a free train rather than a data gap.
+    mockDbLeg(frankfurtToMunich('49.90'));
+
+    const offers = await searchTrains(frankfurtMunich(0));
+
+    expect(offers[0].price).toBe(49.9);
   });
 });

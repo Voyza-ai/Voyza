@@ -1,5 +1,5 @@
 {
-  "name": "voyza-backend",
+  "name": "bluemurr-backend",
   "version": "0.1.0",
   "private": true,
   "description": "Voyza Express backend — flight/hotel aggregation, payments, and AI planning.",

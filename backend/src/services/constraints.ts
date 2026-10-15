@@ -13,6 +13,8 @@
  * constraint and honors it on next explicit re-optimize).
  */
 
+import { addDays } from '../utils/dates';
+
 export type PinnedCity = {
   city: string;
   arrival: string; // YYYY-MM-DD
@@ -38,13 +40,6 @@ export type TripConstraints = {
   min_days?: MinDaysRule[];
   transport_windows?: TransportWindow[];
 };
-
-/** Advance an ISO date by N days, returning YYYY-MM-DD. */
-function addDays(iso: string, days: number): string {
-  const d = new Date(iso);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
-}
 
 /** Nights between two YYYY-MM-DD dates (min 1 so even same-day shows as a 1-night stay). */
 function nightsBetween(arrival: string, departure: string): number {

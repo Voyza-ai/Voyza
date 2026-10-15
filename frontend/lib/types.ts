@@ -49,7 +49,7 @@ export type Hotel = {
   bookingUrl?: string;
   /** Taxes & fees per night (city tax, service, resort fee, etc.) */
   taxesPerNight?: number;
-  /** True if Voyza can book this hotel directly as part of the upfront payment */
+  /** True if BlueMurr can book this hotel directly as part of the upfront payment */
   bookable?: boolean;
   /** Maximum guests per room — defaults to 2 when unset */
   maxGuests?: number;
@@ -147,6 +147,14 @@ export type Trip = {
     newStartDate: string;
     newTotalCost: number;
     savings: number;
+    /** Every shift that saves real money, best first (max 3). Older saved
+     *  trips only carry the flat headline fields above. */
+    options?: Array<{
+      dayOffset: number;
+      newStartDate: string;
+      newTotalCost: number;
+      savings: number;
+    }>;
   };
   createdAt?: string;
   ownerId?: string;
@@ -158,7 +166,7 @@ export type Trip = {
    */
   vibeTierUp?: VibeTierUpSuggestion | null;
   /** User-set constraints (pinned dates, transport windows, min stays)
-   *  collected via the Voyza AI chat. Persisted to the trip so future
+   *  collected via the BlueMurr AI chat. Persisted to the trip so future
    *  re-optimizations honor them. Shape matches backend TripConstraints. */
   constraints?: {
     pinned_cities?: Array<{ city: string; arrival: string; departure: string }>;

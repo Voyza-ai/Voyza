@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { getSupabase } from '../services/supabase';
+import { createNotification } from '../services/notifications';
+import { fetchPopularTrips } from '../services/popularTrips';
 import { AppError } from '../middleware/error';
 import { parseDurationMinutes } from '../utils/duration';
 import { buildTripFromDb } from '../utils/tripShape';
@@ -35,6 +37,18 @@ const createTripSchema = z.object({
       newStartDate: z.string(),
       newTotalCost: z.number(),
       savings: z.number(),
+      // Alternative shifts (best first) — without this the save schema
+      // would silently strip the options menu off every saved trip.
+      options: z
+        .array(
+          z.object({
+            dayOffset: z.number(),
+            newStartDate: z.string(),
+            newTotalCost: z.number(),
+            savings: z.number(),
+          }),
+        )
+        .optional(),
     })
     .nullable()
     .optional(),
@@ -221,7 +235,7 @@ router.get(
     // 1. Trips I own.
     const { data: owned, error } = await supabase
       .from('trips')
-      .select('id, title, status, travelers, total_cost, savings_vs_alternative, created_at')
+      .select('id, title, status, travelers, total_cost, savings_vs_alternative, created_at, is_public')
       .eq('user_id', user.id)
       .neq('status', 'archived')
       .order('created_at', { ascending: false });
@@ -266,22 +280,19 @@ router.get(
       (citiesByTrip[c.trip_id] ??= []).push(c);
     }
 
-    // 4. Owner display info for shared trips ("Shared by …").
+    // 4. Owner display info for shared trips ("Shared by …"). Name only —
+    // everyone with an accepted membership reads this list, share-link
+    // viewers included, and the owner's email address is not theirs to
+    // have (same rule as GET /api/canvas/:tripId/members and the GDPR
+    // export in users.ts). The card falls back to "someone" without a name.
     const ownerIds = Array.from(new Set((sharedTrips ?? []).map((t: any) => t.user_id)));
-    const ownersById: Record<string, { name: string | null; email: string | null }> = {};
+    const ownersById: Record<string, { name: string | null }> = {};
     if (ownerIds.length > 0) {
       const { data: profiles } = await supabase
         .from('user_profiles')
         .select('id, full_name')
         .in('id', ownerIds);
-      const nameById: Record<string, string | null> = {};
-      for (const p of profiles ?? []) nameById[p.id] = p.full_name ?? null;
-      // Emails live in auth, not user_profiles — fetch per distinct owner
-      // (usually just one or two) so the card can attribute the trip.
-      for (const oid of ownerIds) {
-        const { data: auth } = await supabase.auth.admin.getUserById(oid);
-        ownersById[oid] = { name: nameById[oid] ?? null, email: auth?.user?.email ?? null };
-      }
+      for (const p of profiles ?? []) ownersById[p.id] = { name: p.full_name ?? null };
     }
 
     const enrich = (t: any, extra: Record<string, unknown> = {}) => {
@@ -301,15 +312,45 @@ router.get(
     res.json({
       trips: (owned ?? []).map((t: any) => enrich(t)),
       shared: (sharedTrips ?? []).map((t: any) => {
-        const owner = ownersById[t.user_id] ?? { name: null, email: null };
+        const owner = ownersById[t.user_id] ?? { name: null };
         const { user_id, ...rest } = t;
         return enrich(rest, {
           role: roleByTrip[t.id] ?? 'viewer',
           owner_name: owner.name,
-          owner_email: owner.email,
         });
       }),
     });
+  }),
+);
+
+// ─── GET /api/trips/popular — trip discovery (Explore) ──────
+// Opt-in only: trips whose owner shared them to Explore (is_public).
+// MUST be declared before GET /:id or "popular" is matched as an id.
+const popularSchema = z.object({
+  vibe: z.string().max(40).optional(),
+  maxBudget: z.coerce.number().positive().optional(),
+  // Comma-separated city names.
+  cities: z.string().max(400).optional(),
+  sort: z.enum(['popular', 'trending']).default('popular'),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+
+router.get(
+  '/popular',
+  asyncHandler(async (req, res) => {
+    const user = (req as any).user;
+    const q = popularSchema.parse(req.query);
+    const trips = await fetchPopularTrips(
+      {
+        vibe: q.vibe,
+        maxBudget: q.maxBudget,
+        cities: q.cities ? q.cities.split(',') : undefined,
+        sort: q.sort,
+        limit: q.limit,
+      },
+      user.id,
+    );
+    res.json({ trips });
   }),
 );
 
@@ -449,7 +490,7 @@ router.patch(
 // Owner-only toggles that control how the trip shows up elsewhere in
 // the product:
 //   - allow_clones: can other users make a personal copy?
-//   - allow_recommendations: can Voyza use this trip's patterns as
+//   - allow_recommendations: can BlueMurr use this trip's patterns as
 //     training data for the recommender? (No PII used — just cities,
 //     dates, budget, vibe.)
 //   - is_public: does this trip appear in /explore? Public trips are
@@ -522,7 +563,7 @@ const cloneSchema = z.object({
       activities: z.boolean().default(true),
       restaurants: z.boolean().default(true),
       schedule: z.boolean().default(true),
-      transports: z.boolean().default(false),
+      transports: z.boolean().default(true),
     })
     .partial()
     .optional(),
@@ -538,7 +579,10 @@ router.post(
       activities: true,
       restaurants: true,
       schedule: true,
-      transports: false,
+      // A clone is a faithful copy: the original's flights and trains come
+      // along (the results page lets the new owner re-search any leg).
+      // Skipping them left every connector as an empty $0 card.
+      transports: true,
       ...(body.include ?? {}),
     };
     const supabase = getSupabase();
@@ -580,6 +624,26 @@ router.post(
         travelers: source.travelers,
         total_cost: include.transports ? source.total_cost : 0,
         savings_vs_alternative: 0,
+        // Home anchor — the original traveler's departure airport and
+        // home flights, so the copy renders the full Home → … → Back Home
+        // itinerary. The new owner changes the airport from the home card.
+        // A source with no origin gets the New York (JFK) default (same as
+        // Browse presets); the results page then auto-searches its home
+        // flights, since the legs are left empty for that case.
+        origin_city: source.origin_city ?? 'New York',
+        origin_airports:
+          source.origin_city && Array.isArray(source.origin_airports)
+            ? source.origin_airports
+            : ['JFK'],
+        // Copies are ALWAYS round trips (Home + Back Home cards). The
+        // original traveler may have planned one-way; the new owner gets
+        // the complete itinerary and the results page searches the return
+        // flight if the source never had one.
+        return_to_home: true,
+        outbound_leg: source.origin_city ? (source.outbound_leg ?? null) : null,
+        return_leg: source.origin_city ? (source.return_leg ?? null) : null,
+        return_city: source.origin_city ? (source.return_city ?? null) : null,
+        return_airports: source.origin_city ? (source.return_airports ?? null) : null,
         status: 'active',
         budget: source.budget,
         budget_per_person: source.budget_per_person,
@@ -588,8 +652,11 @@ router.post(
         date_shift_suggestion: null,
         cloned_from_trip_id: source.id,
         // Cloned trips default to private — the new owner decides if
-        // THEY want their copy discoverable.
-        allow_clones: true,
+        // THEY want their copy discoverable. Cloning is opt-in too: this
+        // used to hard-code `true`, which handed every copy a permission
+        // its new owner never granted (and would have made the new
+        // `allow_clones` default in migration 009 a no-op for clones).
+        allow_clones: false,
         allow_recommendations: true,
         is_public: false,
       })
@@ -641,9 +708,9 @@ router.post(
       }
     }
 
-    // 3. Clone transports only if the caller asked for them. Stale by
-    //    default — flight prices move fast — but useful for trip
-    //    templates where the exact flights matter.
+    // 3. Clone transports (default ON — the copy should show the same
+    //    flights and trains the original traveler had; prices are as of
+    //    their search and the new owner can re-search any leg).
     if (include.transports) {
       const { data: sourceTransports } = await supabase
         .from('transports')
@@ -659,6 +726,8 @@ router.post(
             operator: t.operator,
             price: t.price,
             duration_minutes: t.duration_minutes,
+            journey_time_minutes: t.journey_time_minutes,
+            door_to_door_minutes: t.door_to_door_minutes,
             depart_time: t.depart_time,
             arrive_time: t.arrive_time,
             depart_date: t.depart_date,
@@ -672,25 +741,42 @@ router.post(
           }))
           .filter((t: any) => t.from_city_id && t.to_city_id);
         if (transportRows.length > 0) {
-          await supabase.from('transports').insert(transportRows);
+          const { error: transportsErr } = await supabase
+            .from('transports')
+            .insert(transportRows);
+          if (transportsErr) {
+            throw new AppError(500, `Failed to clone transports: ${transportsErr.message}`);
+          }
         }
       }
     }
 
-    // 4. Owner membership row for the NEW trip.
-    await supabase.from('group_members').insert({
-      trip_id: newTrip.id,
-      user_id: user.id,
-      role: 'owner',
-      accepted_at: new Date().toISOString(),
-    });
+    // 4. No group_members row for the new owner: ownership lives on
+    //    trips.user_id ONLY. (This used to insert role='owner' rows — the
+    //    stale-owner debris behind the wrong-owner bug in the share list.)
 
     // 5. Bump the source's clone_count for social-proof signals
-    //    ("100 travelers cloned this"). Non-fatal if it fails.
-    await supabase
-      .from('trips')
-      .update({ clone_count: (source.clone_count ?? 0) + 1 })
-      .eq('id', source.id);
+    //    ("100 travelers cloned this"). It counts PEOPLE, not clones:
+    //    the owner copying their own trip never counts, and a user who
+    //    already has a copy doesn't count again — otherwise anyone could
+    //    inflate a trip's Explore ranking by cloning it repeatedly.
+    let countsAsNewCloner = !isOwner;
+    if (countsAsNewCloner) {
+      const { data: priorCopies } = await supabase
+        .from('trips')
+        .select('id')
+        .eq('cloned_from_trip_id', source.id)
+        .eq('user_id', user.id)
+        .neq('id', newTrip.id)
+        .limit(1);
+      countsAsNewCloner = !(Array.isArray(priorCopies) && priorCopies.length > 0);
+    }
+    if (countsAsNewCloner) {
+      await supabase
+        .from('trips')
+        .update({ clone_count: (source.clone_count ?? 0) + 1 })
+        .eq('id', source.id);
+    }
 
     res.status(201).json({ tripId: newTrip.id, trip: newTrip, clonedFrom: source.id });
   }),
@@ -723,7 +809,7 @@ router.post(
 
     const { data: trip } = await supabase
       .from('trips')
-      .select('user_id')
+      .select('user_id, title')
       .eq('id', req.params.id)
       .single();
     if (!trip) throw new AppError(404, 'Trip not found');
@@ -746,26 +832,62 @@ router.post(
       );
     }
 
-    // 1. Update trips.user_id to the new owner.
+    // ORDER MATTERS (same as the canvas transfer route): write the old
+    // owner's editor row BEFORE the trip changes hands, so their access
+    // never lapses mid-transfer.
+
+    // 1. Previous owner stays on as an editor — insert first, then drop
+    //    older rows of theirs (never delete-then-insert).
+    const { data: editorRow } = await supabase
+      .from('group_members')
+      .insert({
+        trip_id: req.params.id,
+        user_id: user.id,
+        invited_email: user.email ?? null,
+        role: 'editor',
+        accepted_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+    if (editorRow?.id) {
+      await supabase
+        .from('group_members')
+        .delete()
+        .eq('trip_id', req.params.id)
+        .eq('user_id', user.id)
+        .neq('id', editorRow.id);
+    }
+
+    // 2. Update trips.user_id to the new owner.
     const { error: tripErr } = await supabase
       .from('trips')
       .update({ user_id: newOwnerId, updated_at: new Date().toISOString() })
       .eq('id', req.params.id);
     if (tripErr) throw new AppError(500, tripErr.message);
 
-    // 2. Demote the previous owner's membership row to 'editor' so they
-    //    still have edit access but no ownership powers.
+    // 3. The new owner's membership rows go away — ownership lives on
+    //    trips.user_id ONLY (they're owner via the trip from step 2).
+    await supabase
+      .from('group_members')
+      .delete()
+      .eq('trip_id', req.params.id)
+      .eq('user_id', newOwnerId);
+
+    // 4. Sweep any other stale role='owner' rows on this trip.
     await supabase
       .from('group_members')
       .update({ role: 'editor' })
       .eq('trip_id', req.params.id)
-      .eq('user_id', user.id);
+      .eq('role', 'owner');
 
-    // 3. Promote the new owner's membership row.
-    await supabase
-      .from('group_members')
-      .update({ role: 'owner' })
-      .eq('id', targetMember.id);
+    // Tell the new owner.
+    await createNotification({
+      userId: newOwnerId,
+      type: 'ownership_transferred',
+      title: 'You are now the owner of a trip',
+      body: `Ownership of "${trip.title ?? 'a trip'}" was transferred to you.`,
+      data: { tripId: req.params.id, tripTitle: trip.title ?? null, previousOwnerId: user.id },
+    });
 
     res.json({
       success: true,

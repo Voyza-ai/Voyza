@@ -230,6 +230,20 @@ function normalize(s: string): string {
  * substring matches; also matches on country so e.g. "japan" surfaces
  * Japanese cities. `exclude` drops cities already on the canvas.
  */
+/**
+ * Country for a known city name, or '' when we don't know it. Used to fill
+ * the country line on city cards for AI-planned trips, which (unlike the
+ * hand-curated Browse presets) arrive with no country data.
+ */
+export function countryForCity(cityName: string): string {
+  const q = normalize(cityName);
+  if (!q) return '';
+  for (const c of WORLD_CITIES) {
+    if (normalize(c.city) === q) return c.country;
+  }
+  return '';
+}
+
 export function searchWorldCities(
   query: string,
   exclude: string[] = [],

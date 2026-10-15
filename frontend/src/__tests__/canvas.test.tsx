@@ -98,6 +98,8 @@ describe('CanvasPage', () => {
       expect(screen.getByText('Rome')).toBeInTheDocument();
     });
     expect(screen.queryByText('Save')).not.toBeInTheDocument();
+    // Viewers can't share onward (only owners and editors can).
+    expect(screen.queryByText('Share')).not.toBeInTheDocument();
   });
 
   it('Share button only visible to owner role', async () => {
@@ -148,8 +150,8 @@ describe('CanvasPage', () => {
 
     expect(screen.getByText('Save a copy')).toBeInTheDocument();
     expect(screen.queryByText('Saved ✓')).not.toBeInTheDocument();
-    // ...and Share stays owner-only
-    expect(screen.queryByText('Share')).not.toBeInTheDocument();
+    // ...and editors CAN share (Google Docs-style) — Share is visible
+    expect(screen.getByText('Share')).toBeInTheDocument();
   });
 
   it('handles canvas session fetch failure gracefully', async () => {
@@ -192,7 +194,7 @@ describe('CanvasPage', () => {
     expect(screen.getByText('No cities yet')).toBeInTheDocument();
   });
 
-  it('shows VOYZA logo in top bar', async () => {
+  it('shows BlueMurr logo in top bar', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -202,11 +204,11 @@ describe('CanvasPage', () => {
     render(<CanvasPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('VOYZA')).toBeInTheDocument();
+      expect(screen.getByText('BlueMurr')).toBeInTheDocument();
     });
   });
 
-  it('shows the live total pill and the Voyza AI chat dock for owners', async () => {
+  it('shows the live total pill and the BlueMurr AI chat dock for owners', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'owner',
@@ -220,10 +222,10 @@ describe('CanvasPage', () => {
     expect(screen.getByText('Total')).toBeInTheDocument();
     // Docked chat (same panel as results)
     expect(screen.getByPlaceholderText('Ask about your trip...')).toBeInTheDocument();
-    expect(screen.getByLabelText('Close Voyza AI chat')).toBeInTheDocument();
+    expect(screen.getByLabelText('Close BlueMurr AI chat')).toBeInTheDocument();
   });
 
-  it('hides the Voyza AI chat for viewers', async () => {
+  it('hides the BlueMurr AI chat for viewers', async () => {
     mockedGetSession.mockResolvedValue({
       session: { state: mockCanvasState },
       role: 'viewer',
@@ -234,11 +236,16 @@ describe('CanvasPage', () => {
     await waitFor(() => expect(screen.getByText('Rome')).toBeInTheDocument());
 
     expect(screen.queryByPlaceholderText('Ask about your trip...')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Open Voyza AI chat')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Open BlueMurr AI chat')).not.toBeInTheDocument();
   });
 
   it('joins via ?share= link token, then strips the param', async () => {
     const token = '123e4567-e89b-42d3-a456-426614174000';
+    // The page reads the token from the ROUTER's search params (never
+    // window.location — stale during client navigations); set both so the
+    // strip-the-param assertion below still exercises the URL cleanup.
+    const { mockSearchParams } = require('./mocks');
+    mockSearchParams.set('share', token);
     window.history.replaceState({}, '', `/canvas/trip-test-123?share=${token}`);
     mockedJoinLink.mockResolvedValue({ role: 'editor', joined: true });
     mockedGetSession.mockResolvedValue({
@@ -260,6 +267,7 @@ describe('CanvasPage', () => {
     expect(await screen.findByText('Rome')).toBeInTheDocument();
 
     window.history.replaceState({}, '', '/');
+    mockSearchParams.delete('share'); // shared instance — clean up for other suites
   });
 
   describe('live sync (Phase B)', () => {
@@ -278,6 +286,88 @@ describe('CanvasPage', () => {
     afterEach(() => {
       rt.useCanvasRealtime = originalHook;
       jest.useRealTimers();
+    });
+
+    it('a removed member sees the removed screen and can go back to My Trips', async () => {
+      const { getCanvasRole } = jest.requireMock('@/lib/api');
+      const { mockPush } = require('./mocks');
+      // Owner's removal broadcast targeting this user (u1 in the auth mock).
+      const roleEvent = { actor: 'owner-id', targetUserId: 'u1', role: 'removed', ts: 1 };
+      rt.useCanvasRealtime = () => makeRt({ roleEvent, broadcastRoleChange: jest.fn() });
+      getCanvasRole.mockResolvedValue({ role: null });
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'editor',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+      render(<CanvasPage />);
+      // A removal is confirmed by a second role check ~1.5s later.
+      expect(
+        await screen.findByText("You've been removed from this trip", {}, { timeout: 4000 }),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Take me back to My Trips'));
+      expect(mockPush).toHaveBeenCalledWith('/history');
+      getCanvasRole.mockResolvedValue({ role: 'editor' });
+    });
+
+    it('a mid-transfer role blip shows "now an editor", never the removed screen', async () => {
+      // Regression: ownership transfer rewrites membership in steps; a role
+      // check landing between them briefly returned null and the old owner
+      // was shown "You've been removed". The confirm re-check must see the
+      // settled role (editor) and show the access-changed message instead.
+      const { getCanvasRole } = jest.requireMock('@/lib/api');
+      const roleEvent = { actor: 'someone', targetUserId: 'u1', role: 'editor', ts: 1 };
+      rt.useCanvasRealtime = () => makeRt({ roleEvent, broadcastRoleChange: jest.fn() });
+      getCanvasRole
+        .mockResolvedValueOnce({ role: null }) // mid-transfer blip
+        .mockResolvedValue({ role: 'editor' }); // settled
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'owner',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+      render(<CanvasPage />);
+      expect(
+        await screen.findByText(/you're now an editor/i, {}, { timeout: 4000 }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("You've been removed from this trip")).not.toBeInTheDocument();
+      getCanvasRole.mockReset();
+      getCanvasRole.mockResolvedValue({ role: 'editor' });
+    });
+
+    it('reopening a trip you have no access to shows the no-access screen, not an error', async () => {
+      const { getCanvasRole } = jest.requireMock('@/lib/api');
+      const { mockPush } = require('./mocks');
+      getCanvasRole.mockResolvedValue({ role: null });
+      mockedGetSession.mockRejectedValue(new Error('Not a member of this trip'));
+
+      render(<CanvasPage />);
+      // One silent retry (~700ms) happens before the gate decision.
+      expect(
+        await screen.findByText("You don't have access to this trip", {}, { timeout: 3000 }),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Take me back to My Trips'));
+      expect(mockPush).toHaveBeenCalledWith('/history');
+      getCanvasRole.mockResolvedValue({ role: 'editor' });
+    });
+
+    it('a role change that keeps access does not show the removed screen', async () => {
+      const { getCanvasRole } = jest.requireMock('@/lib/api');
+      const roleEvent = { actor: 'owner-id', targetUserId: 'u1', role: 'viewer', ts: 1 };
+      rt.useCanvasRealtime = () => makeRt({ roleEvent, broadcastRoleChange: jest.fn() });
+      getCanvasRole.mockResolvedValue({ role: 'viewer' });
+      mockedGetSession.mockResolvedValue({
+        session: { state: mockCanvasState },
+        role: 'editor',
+      });
+      mockedGetSuggestions.mockResolvedValue({ suggestions: [] });
+
+      render(<CanvasPage />);
+      await waitFor(() => expect(getCanvasRole).toHaveBeenCalled());
+      expect(screen.queryByText("You've been removed from this trip")).not.toBeInTheDocument();
+      getCanvasRole.mockResolvedValue({ role: 'editor' });
     });
 
     it('applies a live op broadcast by another user', async () => {

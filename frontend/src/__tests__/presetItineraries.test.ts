@@ -4,6 +4,7 @@ import {
   presetDurationBucket,
   presetBudgetBucket,
   presetVibes,
+  presetCostFor,
   buildPresetTrip,
 } from '@/data/presetItineraries';
 
@@ -51,6 +52,21 @@ describe('preset itineraries catalog', () => {
     }
   });
 
+
+  test('buildPresetTrip honors a chosen party size', () => {
+    const preset = PRESET_ITINERARIES[0];
+    const trip = buildPresetTrip(preset, 4);
+    expect(trip.travelers).toBe(4);
+    expect(trip.totalCost).toBe(presetCostFor(preset, 4));
+    // 4 people = 2 rooms + 2x transport — must cost more than the default 2.
+    expect(trip.totalCost).toBeGreaterThan(presetCostFor(preset, 2));
+  });
+
+  test('solo traveler costs less than a pair (per-person transport)', () => {
+    const preset = PRESET_ITINERARIES[0];
+    expect(presetCostFor(preset, 1)).toBeLessThan(presetCostFor(preset, 2));
+  });
+
   test('built trips chain dates city-to-city with no gaps', () => {
     for (const p of PRESET_ITINERARIES) {
       const trip = buildPresetTrip(p);
@@ -58,6 +74,20 @@ describe('preset itineraries catalog', () => {
         expect(trip.cities[i].dates.arrival).toBe(trip.cities[i - 1].dates.departure);
       }
       expect(presetNights(p)).toBeGreaterThan(0);
+    }
+  });
+
+  test('every preset city ships complete card data (country, vibes, hotel)', () => {
+    // The results/browse cards render country lines, vibe chips, and hotel
+    // rows straight from this data — a preset added without them would
+    // silently render bare cards, the same bug AI-planned trips had.
+    for (const p of PRESET_ITINERARIES) {
+      for (const c of p.cities) {
+        expect(c.country).toBeTruthy();
+        expect(c.vibes.length).toBeGreaterThan(0);
+        expect(c.hotel.name).toBeTruthy();
+        expect(c.activities.length).toBeGreaterThan(0);
+      }
     }
   });
 });

@@ -71,6 +71,44 @@ describe('POST /api/plan/converse', () => {
     expect(call.system).toContain('WHAT YOU KNOW SO FAR');
   });
 
+  it('sanitizes empty-string updates to null so they cannot erase known facts', async () => {
+    // The model sometimes emits "" instead of null for string fields the
+    // user didn't mention this turn. Passed through raw, that empty string
+    // overwrote a location-detected origin and got the user re-asked.
+    mockCreate.mockResolvedValue(
+      toolResponse({
+        reply: 'Europe by train — perfect. Any cities calling to you?',
+        updates: { origin: '', vibe: '   ', notes: '' },
+        action: 'ask',
+      }),
+    );
+
+    const res = await request(app)
+      .post('/api/plan/converse')
+      .send({
+        message: 'train friendly trip in Europe',
+        history: [],
+        known: { origin: 'Philadelphia' },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.updates.origin).toBeNull();
+    expect(res.body.updates.vibe).toBeNull();
+    expect(res.body.updates.notes).toBeNull();
+  });
+
+  it('tells the model that known fields are settled facts', async () => {
+    mockCreate.mockResolvedValue(
+      toolResponse({ reply: 'Got it!', updates: {}, action: 'ask' }),
+    );
+    await request(app)
+      .post('/api/plan/converse')
+      .send({ message: 'hi', history: [], known: { origin: 'Philadelphia' } });
+    const call = mockCreate.mock.calls[0][0];
+    expect(call.system).toContain('settled facts');
+    expect(call.system).toContain('Philadelphia');
+  });
+
   it('passes known state so the model never re-asks', async () => {
     mockCreate.mockResolvedValue(
       toolResponse({ reply: 'And how many of you are going?', updates: {}, action: 'ask' }),

@@ -227,10 +227,10 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
                 border: '1px solid rgba(46,107,196,0.35)',
                 color: '#2e6bc4',
               }}
-              title="Bookable directly through Voyza in your one upfront payment"
+              title="Bookable directly through BlueMurr in your one upfront payment"
             >
               <Zap size={9} fill="currentColor" />
-              <span>VOYZA BOOK</span>
+              <span>BLUEMURR BOOK</span>
             </span>
           )}
         </div>

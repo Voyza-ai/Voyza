@@ -277,7 +277,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
             const isDimmed = hoveredCity !== null && hoveredCity !== idx;
             return (
               <motion.div
-                key={city.name}
+                key={`${city.name}|${city.dates.arrival}`}
                 className="flex items-stretch"
                 variants={{
                   hidden: { opacity: 0, y: 24 },
