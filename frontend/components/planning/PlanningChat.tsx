@@ -154,7 +154,39 @@ export default function PlanningChat() {
     if (initialized.current) return () => { mountedRef.current = false; };
     initialized.current = true;
 
-    const snapshotRawInput = answers.rawInput;
+    // Fresh visit → clean slate, before anything below reads planning state.
+    //
+    // This reset used to live in app/plan/page.tsx, where it ran during
+    // PlanPage's *render* so it would land before this component mounted.
+    // That wrote to the store from a render pass: an App Router navigation
+    // renders the incoming page while the outgoing one is still mounted, so
+    // the store notification re-rendered /results mid-render and React warned
+    // "Cannot update a component (`ResultsPageInner`) while rendering a
+    // different component (`PlanPage`)".
+    //
+    // Here it is an ordinary committed update, and the ordering guarantee the
+    // render-phase version was buying still holds: this is the planner's
+    // first effect, so the reset precedes every read below (and the autorun
+    // restore further down, which must still see a wiped store), while this
+    // component's first render reads no planning state at all.
+    //
+    // ?resume=1 (the "Adjust trip" path from results) keeps the whole
+    // planning session — answers AND the AI conversation — so the user can
+    // change anything without starting over. Every other entry gets the
+    // usual clean slate.
+    const resume =
+      new URLSearchParams(window.location.search).get('resume') === '1';
+    if (!resume) {
+      // A landing-page rawInput seed (if present) survives the reset so the
+      // conversation opens with the user's sentence.
+      const heroSeed = useTripStore.getState().answers.rawInput;
+      useTripStore.getState().resetPlanning();
+      if (heroSeed) useTripStore.getState().setAnswer('rawInput', heroSeed);
+    }
+
+    // Read through the store rather than the render closure: `answers` was
+    // captured before the reset above, so it can be a trip behind.
+    const snapshotRawInput = useTripStore.getState().answers.rawInput;
 
     if (snapshotRawInput) {
       // Hero-input seed → straight into the AI conversation; it parses the
