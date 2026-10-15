@@ -66,11 +66,22 @@ function AuthCallbackInner() {
         return;
       }
 
-      let returnTo = '/history';
+      // Default to the hub, not My Trips: someone who just signed in wants the
+      // three front doors (Browse / Describe / View or edit trips), not one of
+      // them picked for them.
+      let returnTo = '/main';
       try {
         const saved = sessionStorage.getItem('voyza.oauth_return_to');
-        if (saved && saved.startsWith('/')) returnTo = saved;
         sessionStorage.removeItem('voyza.oauth_return_to');
+        // LoginModal stores whatever page the modal was opened from, which is
+        // right for a deep link ("/results?tripId=…" → back to that trip) but
+        // wrong for the pages you sign in *from*. The landing page and the
+        // auth screens aren't destinations — returning there just looks like
+        // the sign-in did nothing. Send those to the hub instead.
+        const path = (saved ?? '').split('?')[0];
+        const isDestination =
+          !!saved && saved.startsWith('/') && path !== '/' && !path.startsWith('/auth/');
+        if (isDestination) returnTo = saved;
       } catch {
         // sessionStorage unavailable (SSR, privacy mode) — use default.
       }
