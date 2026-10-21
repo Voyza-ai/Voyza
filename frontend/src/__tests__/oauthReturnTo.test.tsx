@@ -92,4 +92,21 @@ describe('OAuth callback redirect', () => {
     await landsOn('/history');
     expect(sessionStorage.getItem('voyza.oauth_return_to')).toBeNull();
   });
+
+  // A stored value only has to start with "/" to look local, which is not the
+  // same as being local. These are the shapes that escape the origin.
+  it.each([
+    ['//evil.com', 'protocol-relative URL'],
+    ['//evil.com/phish', 'protocol-relative with a path'],
+    ['/\\evil.com', 'backslash some browsers normalise to a slash'],
+    ['///evil.com', 'triple slash'],
+    ['https://evil.com', 'absolute URL'],
+    ['javascript:alert(1)', 'script scheme'],
+    ['/\t/evil.com', 'tab the URL parser strips'],
+    ['/\n/evil.com', 'newline the URL parser strips'],
+    ['/\r/evil.com', 'carriage return the URL parser strips'],
+    ['/\r\\evil.com', 'carriage return before a backslash'],
+  ])('refuses to redirect to %s (%s)', async (hostile) => {
+    expect(await landsOn(hostile)).toBe('/main');
+  });
 });

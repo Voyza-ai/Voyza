@@ -72,16 +72,28 @@ function AuthCallbackInner() {
       let returnTo = '/main';
       try {
         const saved = sessionStorage.getItem('voyza.oauth_return_to');
+        // StrictMode double-invokes this effect in dev, so the second run finds this already removed and a deep-link sign-in lands on /main locally; a production build correctly returns to the trip.
         sessionStorage.removeItem('voyza.oauth_return_to');
         // LoginModal stores whatever page the modal was opened from, which is
         // right for a deep link ("/results?tripId=…" → back to that trip) but
         // wrong for the pages you sign in *from*. The landing page and the
         // auth screens aren't destinations — returning there just looks like
         // the sign-in did nothing. Send those to the hub instead.
-        const path = (saved ?? '').split('?')[0];
-        const isDestination =
-          !!saved && saved.startsWith('/') && path !== '/' && !path.startsWith('/auth/');
-        if (isDestination) returnTo = saved;
+        //
+        // "starts with /" alone is NOT enough to prove a path is local:
+        // "//evil.com" is protocol-relative, browsers normalise "/\evil.com"
+        // the same way, and the URL parser strips tabs and newlines, so
+        // "/\t/evil.com" becomes "//evil.com". Rather than pattern-match every
+        // shape, resolve it exactly as the browser will and require the
+        // result to stay on this origin.
+        if (saved) {
+          const url = new URL(saved, window.location.origin);
+          const isDestination =
+            url.origin === window.location.origin &&
+            url.pathname !== '/' &&
+            !url.pathname.startsWith('/auth/');
+          if (isDestination) returnTo = url.pathname + url.search + url.hash;
+        }
       } catch {
         // sessionStorage unavailable (SSR, privacy mode) — use default.
       }
