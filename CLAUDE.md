@@ -51,13 +51,15 @@ Supabase service-role client.
   still open — don't mix fixed things in where they read as outstanding.
 - Lead with the direct answer when asked a direct question.
 
-## graphify
+## graphify (optional)
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+graphify can build a knowledge graph of the repo into `graphify-out/`
+(gitignored). It is **optional** — use grep/ripgrep for finding code. Measured
+here, `graphify query` missed `countryGroupedOrderings` in
+`backend/src/services/optimizer.ts` that a one-line grep found, and it
+truncates results at a token budget.
 
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
-- Rebuild from scratch with: `brew install uv && uv tool install "graphifyy[sql]" && graphify update .`
+- If you do use it: `graphify query "<question>"`, `graphify path "<A>" "<B>"`,
+  `graphify explain "<concept>"`; `graphify-out/GRAPH_REPORT.md` for a broad
+  architecture overview.
+- Build or refresh with: `brew install uv && uv tool install "graphifyy[sql]" && graphify update .`
