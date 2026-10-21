@@ -1,4 +1,5 @@
 import { getAuthHeader, refreshAuthHeader } from './supabase';
+import { rankHotels } from './hotelScore';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -106,7 +107,15 @@ export async function searchHotels(params: {
     method: 'POST',
     body: JSON.stringify(params),
   });
-  return data.hotels;
+  // Rank here, at the single boundary every caller goes through.
+  //
+  // The provider's order is arbitrary, and every consumer — the results page,
+  // PlanningChat's trip build, the canvas — takes `hotels[0]` as "the hotel".
+  // Measured against production: a Florence search returned a $5383.47/night
+  // room rated 8.1 FIRST, ahead of a $114.51 room rated 9.3, and that became
+  // the trip's hotel. Ranking at the source makes `hotels[0]` mean "best"
+  // everywhere instead of asking three call sites to remember.
+  return rankHotels(data.hotels);
 }
 
 // ─── Train Search ────────────────────────────────────────────

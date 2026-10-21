@@ -31,11 +31,19 @@ export function hotelScore(h: {
   return ratingTerm * locTerm * priceTerm;
 }
 
-/** Sorts hotels by score descending and stamps each one with its computed score. */
-export function rankHotels(hotels: Hotel[]): Hotel[] {
+/**
+ * Sorts hotels by score descending and stamps each one with its computed score.
+ *
+ * Generic over the input shape so the API layer can rank a `HotelResult`
+ * straight off the wire without first narrowing it to `Hotel` — ranking at that
+ * boundary is what makes `hotels[0]` mean "best" for every caller.
+ */
+export function rankHotels<
+  T extends { rating: number; locationScore?: number; pricePerNight: number },
+>(hotels: T[]): (T & { score: number })[] {
   return hotels
     .map((h) => ({ ...h, score: hotelScore(h) }))
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    .sort((a, b) => b.score - a.score);
 }
 
 /** Number of nights between two ISO yyyy-mm-dd dates (local). */
