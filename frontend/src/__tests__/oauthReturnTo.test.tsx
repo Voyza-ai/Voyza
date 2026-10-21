@@ -102,6 +102,10 @@ describe('OAuth callback redirect', () => {
     ['///evil.com', 'triple slash'],
     ['https://evil.com', 'absolute URL'],
     ['javascript:alert(1)', 'script scheme'],
+    ['/\t/evil.com', 'tab the URL parser strips'],
+    ['/\n/evil.com', 'newline the URL parser strips'],
+    ['/\r/evil.com', 'carriage return the URL parser strips'],
+    ['/\r\\evil.com', 'carriage return before a backslash'],
   ])('refuses to redirect to %s (%s)', async (hostile) => {
     expect(await landsOn(hostile)).toBe('/main');
   });
