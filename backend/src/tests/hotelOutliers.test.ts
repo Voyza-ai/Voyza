@@ -6,7 +6,7 @@ jest.mock('../config/env', () => ({
   },
 }));
 
-import { dropPriceOutliers } from '../services/hotels';
+import { dropPriceOutliers, dropImplausiblePrices } from '../services/hotels';
 
 /**
  * Guard against a provider row that is wildly out of line with the rest of its
@@ -15,10 +15,11 @@ import { dropPriceOutliers } from '../services/hotels';
  * $5383.47/night against a $267 median, and the provider returned it first —
  * so it became the trip's hotel and 95% of a $17,039 total.
  */
-const hotel = (name: string, pricePerNight: number) =>
+const hotel = (name: string, pricePerNight: number, stars = 0) =>
   ({
     name,
     rating: 8,
+    stars,
     pricePerNight,
     price: pricePerNight * 3,
     currency: 'USD',
@@ -101,5 +102,65 @@ describe('dropPriceOutliers', () => {
 
   it('is a no-op on an empty list', () => {
     expect(dropPriceOutliers([], 'Empty')).toEqual([]);
+  });
+});
+
+/**
+ * The absolute check. Its whole value is working where the median check can't:
+ * tiny result sets, and a feed that is uniformly wrong so every row looks
+ * sane beside its neighbours.
+ */
+describe('dropImplausiblePrices', () => {
+  it('drops the real 3-star hotel priced at $5383/night', () => {
+    const hotels = [hotel('Hotel Aldobrandini', 5383.47, 3), hotel('Normal', 180, 3)];
+
+    const kept = dropImplausiblePrices(hotels, 'Florence');
+    expect(kept.map((h) => h.name)).toEqual(['Normal']);
+  });
+
+  it('catches it in a 2-hotel set, where the median guard is powerless', () => {
+    const hotels = [hotel('Junk', 5383.47, 3), hotel('Fine', 180, 3)];
+
+    // The median guard bails below 4 results and lets this straight through.
+    expect(dropPriceOutliers(hotels, 'Florence')).toHaveLength(2);
+    expect(dropImplausiblePrices(hotels, 'Florence')).toHaveLength(1);
+  });
+
+  it('catches it when the whole feed is wrong and nothing looks like an outlier', () => {
+    // Every row 20x too high: the median moves with the error, so relative
+    // comparison sees a perfectly consistent set.
+    const hotels = [
+      hotel('A', 3600, 2),
+      hotel('B', 3800, 2),
+      hotel('C', 4000, 3),
+      hotel('D', 4200, 3),
+    ];
+
+    expect(dropPriceOutliers(hotels, 'Broken')).toHaveLength(4);
+    // All four are implausible, so this returns them rather than emptying the
+    // city — but it logs every one, which is how we'd find out.
+    expect(dropImplausiblePrices(hotels, 'Broken')).toHaveLength(4);
+  });
+
+  it('leaves 4 and 5 star hotels alone — they really do cost that', () => {
+    const hotels = [hotel('Aman', 2400, 5), hotel('Four Seasons', 1800, 4), hotel('Inn', 200, 3)];
+
+    expect(dropImplausiblePrices(hotels, 'Tokyo')).toHaveLength(3);
+  });
+
+  it('leaves unrated (0-star) properties alone — a whole villa has no ceiling', () => {
+    const hotels = [hotel('Villa', 3000, 0), hotel('B&B', 120, 0)];
+
+    expect(dropImplausiblePrices(hotels, 'Tuscany')).toHaveLength(2);
+  });
+
+  it('keeps a budget hotel sitting exactly on the ceiling', () => {
+    const hotels = [hotel('Edge', 1000, 3), hotel('Over', 1000.01, 3)];
+
+    expect(dropImplausiblePrices(hotels, 'Edge').map((h) => h.name)).toEqual(['Edge']);
+  });
+
+  it('is a no-op on an empty list', () => {
+    expect(dropImplausiblePrices([], 'Empty')).toEqual([]);
   });
 });
