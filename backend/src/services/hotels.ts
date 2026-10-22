@@ -93,22 +93,6 @@ const BUDGET_STARS_PRICE_CEILING = 1000;
 const MIN_RESULTS_TO_FILTER = 4;
 
 /**
- * Drop provider rows whose per-night price is wildly out of line with the rest
- * of the same search.
- *
- * Measured in production: a Florence search (2027-04-10 → 04-13, 2 adults)
- * returned "Hotel Aldobrandini" at $5383.47/night against a $267 median — and
- * the provider returned it FIRST, so it became the trip's hotel and 95% of a
- * $17,039 total displayed as "Best price for these dates".
- *
- * `pricePerNight` is already `totalPrice / nights` by this point, so this is
- * not our arithmetic: the provider is quoting for a different occupancy or
- * room count than we asked for. We can't fix their data, only refuse it.
- *
- * Deliberately a median rather than a mean — a mean is dragged upward by the
- * very outlier we're trying to catch. An expensive city just has an expensive
- * median, so the multiple travels without needing per-city thresholds.
- */
 /**
  * Reject prices that are implausible on their own terms, without comparing
  * them to anything.
@@ -150,6 +134,23 @@ export function dropImplausiblePrices(hotels: HotelResult[], city: string): Hote
   return kept.length > 0 ? kept : hotels;
 }
 
+/**
+ * Drop provider rows whose per-night price is wildly out of line with the rest
+ * of the same search.
+ *
+ * Measured in production: a Florence search (2027-04-10 → 04-13, 2 adults)
+ * returned "Hotel Aldobrandini" at $5383.47/night against a $267 median — and
+ * the provider returned it FIRST, so it became the trip's hotel and 95% of a
+ * $17,039 total displayed as "Best price for these dates".
+ *
+ * `pricePerNight` is already `totalPrice / nights` by this point, so this is
+ * not our arithmetic: the provider is quoting for a different occupancy or
+ * room count than we asked for. We can't fix their data, only refuse it.
+ *
+ * Deliberately a median rather than a mean — a mean is dragged upward by the
+ * very outlier we're trying to catch. An expensive city just has an expensive
+ * median, so the multiple travels without needing per-city thresholds.
+ */
 export function dropPriceOutliers(hotels: HotelResult[], city: string): HotelResult[] {
   if (hotels.length < MIN_RESULTS_TO_FILTER) return hotels;
 

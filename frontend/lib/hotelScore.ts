@@ -3,46 +3,50 @@ import { Hotel } from './types';
 /**
  * BlueMurr hotel ranking formula.
  *
- *   score = rating^2.8 × (0.8 + 0.2 × locationScore) × (100 / pricePerNight)
+ *   score = effectiveRating^2.8 × (100 / pricePerNight)
  *
  * Design intent:
  *  - Rating dominates (exponent 2.8): a 4.5★ hotel beats a 4.2★ even at $15 more.
- *  - Location nudges, doesn't dominate: a perfectly central hotel gets a +25%
- *    multiplier vs a poorly located one (1.0 vs 0.8).
  *  - Price stays linear and meaningful: half the nightly rate ≈ 2× the price term.
+ *  - A rating is only worth its evidence — see `effectiveRating` below.
  *
- * ⚠ `locationScore` is INERT on real data. Nothing populates it: the Booking.com
- * response we map in backend/src/services/hotels.ts carries no location field,
- * so every live hotel falls to the 0.7 default and `locTerm` is 0.94 across the
- * board. A constant multiplier can't change a sort order, so on real searches
- * this reduces to `rating^2.8 / pricePerNight` with the review-confidence
- * discount below. The term is kept rather than deleted because it works the
- * moment something feeds it — the gap is the caller, not the formula. Sourcing
- * it (Booking exposes a distance-to-centre figure on some plans) needs someone
- * with the RapidAPI key to inspect a raw response first.
+ * A location term used to sit in the middle: `(0.8 + 0.2 × locationScore)`.
+ * It was removed because nothing ever fed it. The Booking.com response mapped
+ * in backend/src/services/hotels.ts carries no location field, so every live
+ * hotel fell to the 0.7 default and the term was a flat 0.94 — a constant
+ * multiplier, which cannot change a sort order. It was arithmetic that looked
+ * like a feature.
  *
- * Sanity check (Rome demo):
- *   Casa Trastevere    4.5 / loc 0.80 / $110  → ≈ 58.8  (winner)
- *   Hotel Pantheon     4.2 / loc 0.95 / $95   → ≈ 57.9
- *   Termini Plaza      3.9 / loc 0.55 / $72   → ≈ 57.1
- *   Roma Boutique      4.7 / loc 0.70 / $145  → ≈ 49.3
- *   Villa Borghese     4.4 / loc 0.85 / $130  → ≈ 47.2
+ * Reinstating it is a real option, not a closed door: Booking exposes a
+ * distance-to-centre figure on some plans. That needs someone with the
+ * RapidAPI key to confirm the field on a raw response, then mapping it through
+ * `HotelResult`. Until the data exists, the term is better absent than
+ * pretending.
+ *
+ * Sanity check (Rome demo, no review counts so no discount applies):
+ *   Termini Plaza      3.9 / $72   → ≈ 62.8  (winner)
+ *   Casa Trastevere    4.5 / $110  → ≈ 61.3
+ *   Hotel Pantheon     4.2 / $95   → ≈ 58.5
+ *   Roma Boutique      4.7 / $145  → ≈ 52.5
+ *   Villa Borghese     4.4 / $130  → ≈ 48.7
+ *
+ * Note the demo winner moved: Termini Plaza used to lose on its 0.55 location
+ * and now wins on price. That is the honest consequence of having no location
+ * data — and it only affects the demo set, since real searches never had a
+ * location signal to lose.
  */
 export function hotelScore(
   h: {
     rating: number;
-    locationScore?: number;
     pricePerNight: number;
     reviewCount?: number;
   },
   priorMeanRating?: number,
 ): number {
-  const loc = typeof h.locationScore === 'number' ? h.locationScore : 0.7;
   const safePrice = Math.max(1, h.pricePerNight);
   const ratingTerm = Math.pow(effectiveRating(h, priorMeanRating), 2.8);
-  const locTerm = 0.8 + 0.2 * loc;
   const priceTerm = 100 / safePrice;
-  return ratingTerm * locTerm * priceTerm;
+  return ratingTerm * priceTerm;
 }
 
 /**
@@ -93,7 +97,6 @@ function effectiveRating(
 export function rankHotels<
   T extends {
     rating: number;
-    locationScore?: number;
     pricePerNight: number;
     reviewCount?: number;
   },
