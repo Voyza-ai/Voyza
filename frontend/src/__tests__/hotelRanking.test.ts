@@ -135,3 +135,33 @@ describe('review-count confidence', () => {
     expect(score).toBeLessThan(hotelScore({ rating: 10, pricePerNight: 100 }));
   });
 });
+
+describe('locationScore', () => {
+  it('is inert on real data, where nothing populates it', () => {
+    // Every live hotel falls to the 0.7 default, so locTerm is 0.94 for all of
+    // them — a constant multiplier, which cannot change a sort order. This
+    // pins that so it is obvious if someone starts feeding the field: these
+    // orderings would then diverge, and that is the signal, not a failure.
+    const noLocation = FLORENCE_PRODUCTION.map(({ name, rating, reviewCount, pricePerNight }) => ({
+      name,
+      rating,
+      reviewCount,
+      pricePerNight,
+    }));
+    const allDefaulted = noLocation.map((h) => ({ ...h, locationScore: 0.7 }));
+
+    expect(rankHotels(noLocation).map((h) => h.name)).toEqual(
+      rankHotels(allDefaulted).map((h) => h.name),
+    );
+  });
+
+  it('still works when something does supply it', () => {
+    // Not dead code — the gap is the caller, not the formula. Demo data feeds
+    // it, and a future source would too.
+    const central = hotelScore({ rating: 9, pricePerNight: 200, locationScore: 1 });
+    const remote = hotelScore({ rating: 9, pricePerNight: 200, locationScore: 0 });
+
+    expect(central).toBeGreaterThan(remote);
+    expect(central / remote).toBeCloseTo(1.25, 2);
+  });
+});

@@ -11,6 +11,16 @@ import { Hotel } from './types';
  *    multiplier vs a poorly located one (1.0 vs 0.8).
  *  - Price stays linear and meaningful: half the nightly rate ≈ 2× the price term.
  *
+ * ⚠ `locationScore` is INERT on real data. Nothing populates it: the Booking.com
+ * response we map in backend/src/services/hotels.ts carries no location field,
+ * so every live hotel falls to the 0.7 default and `locTerm` is 0.94 across the
+ * board. A constant multiplier can't change a sort order, so on real searches
+ * this reduces to `rating^2.8 / pricePerNight` with the review-confidence
+ * discount below. The term is kept rather than deleted because it works the
+ * moment something feeds it — the gap is the caller, not the formula. Sourcing
+ * it (Booking exposes a distance-to-centre figure on some plans) needs someone
+ * with the RapidAPI key to inspect a raw response first.
+ *
  * Sanity check (Rome demo):
  *   Casa Trastevere    4.5 / loc 0.80 / $110  → ≈ 58.8  (winner)
  *   Hotel Pantheon     4.2 / loc 0.95 / $95   → ≈ 57.9
