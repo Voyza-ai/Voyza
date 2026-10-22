@@ -76,6 +76,117 @@ type SearchHotelsParams = {
   maxPrice?: number;
 };
 
+/** A hotel priced above this multiple of the set's median is treated as junk. */
+const OUTLIER_MEDIAN_MULTIPLE = 5;
+
+/**
+ * Absolute per-night ceiling for a hotel the provider itself calls 1-3 stars.
+ *
+ * Deliberately generous — roughly 4x the top end of a 3-star in an expensive
+ * city in peak season — because a false drop costs a real option, while the
+ * case this catches sits 5x above it. "Hotel Aldobrandini", stars: 3, came
+ * back at $5383.47/night.
+ */
+const BUDGET_STARS_PRICE_CEILING = 1000;
+
+/** Below this many results the median isn't meaningful, so don't filter on it. */
+const MIN_RESULTS_TO_FILTER = 4;
+
+/**
+ * Drop provider rows whose per-night price is wildly out of line with the rest
+ * of the same search.
+ *
+ * Measured in production: a Florence search (2027-04-10 → 04-13, 2 adults)
+ * returned "Hotel Aldobrandini" at $5383.47/night against a $267 median — and
+ * the provider returned it FIRST, so it became the trip's hotel and 95% of a
+ * $17,039 total displayed as "Best price for these dates".
+ *
+ * `pricePerNight` is already `totalPrice / nights` by this point, so this is
+ * not our arithmetic: the provider is quoting for a different occupancy or
+ * room count than we asked for. We can't fix their data, only refuse it.
+ *
+ * Deliberately a median rather than a mean — a mean is dragged upward by the
+ * very outlier we're trying to catch. An expensive city just has an expensive
+ * median, so the multiple travels without needing per-city thresholds.
+ */
+/**
+ * Reject prices that are implausible on their own terms, without comparing
+ * them to anything.
+ *
+ * `dropPriceOutliers` below is *relative* — it asks whether a hotel is out of
+ * line with its own search. That is blind to two cases: a small result set
+ * where the median means nothing, and a feed that is uniformly wrong, where
+ * the median moves with the error and every row looks reasonable next to its
+ * neighbours.
+ *
+ * The provider hands us a star rating it assigned itself, and a 1-3 star
+ * property cannot credibly cost four figures a night. That judgement needs no
+ * comparison set, so it still holds when the relative check cannot help.
+ *
+ * Only applied to 1-3 stars. 4-5 stars genuinely reach those prices, and 0
+ * means unrated — which covers B&Bs, apartments and whole villas, where there
+ * is no defensible ceiling.
+ */
+export function dropImplausiblePrices(hotels: HotelResult[], city: string): HotelResult[] {
+  const kept = hotels.filter((h) => {
+    const budgetTier = h.stars >= 1 && h.stars <= 3;
+    const absurd =
+      budgetTier && Number.isFinite(h.pricePerNight) && h.pricePerNight > BUDGET_STARS_PRICE_CEILING;
+    if (absurd) {
+      logger.warn('Hotel dropped — price implausible for its star rating', {
+        city,
+        hotel: h.name,
+        stars: h.stars,
+        pricePerNight: h.pricePerNight,
+        ceiling: BUDGET_STARS_PRICE_CEILING,
+      });
+    }
+    return !absurd;
+  });
+
+  // Same reasoning as the median guard: an empty city is worse than a
+  // suspicious one. If this would clear the board, the data is wrong in some
+  // way this rule doesn't model.
+  return kept.length > 0 ? kept : hotels;
+}
+
+export function dropPriceOutliers(hotels: HotelResult[], city: string): HotelResult[] {
+  if (hotels.length < MIN_RESULTS_TO_FILTER) return hotels;
+
+  const prices = hotels
+    .map((h) => h.pricePerNight)
+    .filter((p) => Number.isFinite(p) && p > 0)
+    .sort((a, b) => a - b);
+  if (prices.length < MIN_RESULTS_TO_FILTER) return hotels;
+
+  const mid = Math.floor(prices.length / 2);
+  const median =
+    prices.length % 2 === 1 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+  if (!Number.isFinite(median) || median <= 0) return hotels;
+
+  const ceiling = median * OUTLIER_MEDIAN_MULTIPLE;
+  const kept = hotels.filter((h) => !(Number.isFinite(h.pricePerNight) && h.pricePerNight > ceiling));
+
+  // If everything looks like an outlier, the median is the thing that's wrong.
+  // Returning nothing would silently empty the city, which is worse than
+  // showing suspicious prices.
+  if (kept.length === 0) return hotels;
+
+  for (const h of hotels) {
+    if (!kept.includes(h)) {
+      logger.warn('Hotel dropped — price far above the median for this search', {
+        city,
+        hotel: h.name,
+        pricePerNight: h.pricePerNight,
+        median,
+        ceiling,
+      });
+    }
+  }
+
+  return kept;
+}
+
 export async function searchHotels(params: SearchHotelsParams): Promise<HotelResult[]> {
   const { city, checkin, checkout, adults, rooms, maxPrice } = params;
 
@@ -192,6 +303,11 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
       }),
     );
     hotels = converted.filter((h): h is HotelResult => h !== null);
+
+    // Absolute check first: it works on any size of result set, so it can
+    // catch a row the median guard would be powerless against.
+    hotels = dropImplausiblePrices(hotels, city);
+    hotels = dropPriceOutliers(hotels, city);
 
     if (maxPrice !== undefined) {
       hotels = hotels.filter((h) => h.price <= maxPrice);
