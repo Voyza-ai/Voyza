@@ -214,10 +214,13 @@ describe('flagSuspectPrices — per star tier', () => {
   });
 
   it('keeps a hotel sitting exactly on the tier ceiling trusted', () => {
-    // Boundary: 5x the tier median is allowed, only strictly above it is flagged.
-    const hotels = [hotel('A', 100, 2), hotel('B', 100, 2), hotel('C', 100, 2), hotel('D', 500, 2)];
+    // Boundary: 8x the tier median is allowed, only strictly above it is
+    // flagged. Median of [100, 100, 100, 800] is 100, so the ceiling is 800.
+    const onCeiling = [hotel('A', 100, 2), hotel('B', 100, 2), hotel('C', 100, 2), hotel('D', 800, 2)];
+    expect(suspect(flagSuspectPrices(onCeiling, 'Edge'))).toEqual([]);
 
-    expect(suspect(flagSuspectPrices(hotels, 'Edge'))).toEqual([]);
+    const over = [hotel('A', 100, 2), hotel('B', 100, 2), hotel('C', 100, 2), hotel('D', 800.01, 2)];
+    expect(suspect(flagSuspectPrices(over, 'Edge'))).toEqual(['D']);
   });
 
   it('leaves a thin 5-star tier alone — stars are independent evidence of price class', () => {
@@ -229,7 +232,9 @@ describe('flagSuspectPrices — per star tier', () => {
 
   it('flags one tier while leaving another untouched in the same search', () => {
     const big = [100, 105, 110, 115].map((p, i) => hotel(`Big ${i}`, p, 2));
-    const bigOutlier = hotel('Big outlier', 900, 2);
+    // 1500 against a tier median of 107.5 is 14x — clear of the 8x ceiling
+    // rather than sitting just over it.
+    const bigOutlier = hotel('Big outlier', 1500, 2);
     const small = [hotel('Small A', 300, 4), hotel('Small B', 3000, 4)];
 
     const out = flagSuspectPrices([...big, bigOutlier, ...small], 'Split');
@@ -252,6 +257,31 @@ describe('flagSuspectPrices — per star tier', () => {
     const out = flagSuspectPrices(hotels, 'Mixed');
 
     expect(suspect(out)).toEqual(['Outlier']);
+  });
+
+  it('keeps a star-ceiling violator out of its own tier statistics', () => {
+    // A row the absolute rule has already condemned must not get a vote on
+    // where its tier's ceiling and floor sit. The guards this replaced got
+    // this for free by DELETING such rows in an earlier pass; flagging instead
+    // of deleting quietly lost it.
+    //
+    // The observable consequence is padding, not masking: without the
+    // exclusion the $5000 violator takes the 3-star tier from 2 real rows to 3
+    // — over MIN_RESULTS_TO_FILTER once the cheap row is counted — which
+    // manufactures a floor ($10.50) that then flags a legitimate $8 room. With
+    // it, the tier is correctly too thin to judge anything and the cheap row
+    // is left alone.
+    const hotels = [
+      hotel('Normal A', 100, 3),
+      hotel('Normal B', 110, 3),
+      hotel('Violator', 5000, 3),
+      hotel('Cheap but real', 8, 3),
+    ];
+
+    const out = flagSuspectPrices(hotels, 'Padding');
+
+    expect(suspect(out)).toEqual(['Violator']);
+    expect(reasonOf(out, 'Violator')).toBe('above-star-ceiling');
   });
 
   it('is a no-op on an empty list', () => {
@@ -359,8 +389,9 @@ describe('flagSuspectPrices — unrated row with no tier to judge it', () => {
     const unrated = [400, 450, 480, 500].map((p, i) => hotel(`Unrated ${i}`, p, 0));
     const cheapRest = [100, 110, 120, 130].map((p, i) => hotel(`Cheap ${i}`, p, 3));
 
-    // $1800 is 3.8x its own tier median ($465) so its tier trusts it, but it is
-    // 12x the whole search's median — the fallback would have flagged it.
+    // $1800 is 3.75x its own tier median ($480, which includes it) so its tier
+    // trusts it, but it is 12x the whole search's median — the fallback would
+    // have flagged it.
     const out = flagSuspectPrices(
       [...unrated, ...cheapRest, hotel('Dear unrated', 1800, 0)],
       'Own tier wins',

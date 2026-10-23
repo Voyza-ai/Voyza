@@ -165,8 +165,8 @@ type SearchHotelsParams = {
  *     $5383.47/night, the provider returned it FIRST, and it became 95% of a
  *     $17,039 total shown as "Best price for these dates".
  *  2. Deleting it. The first fix compared each row to the whole search's
- *     median. Over 58 real production searches that scored 1 true positive
- *     against 4 legitimate hotels deleted — a Bora Bora search lost all three
+ *     median. Over 45 independent real production searches that scored 1 true
+ *     positive against 4 legitimate hotels deleted — Bora Bora lost all three
  *     overwater resorts, the exact properties someone searching Bora Bora
  *     wants, and the customer was left the guesthouses.
  *
@@ -211,30 +211,67 @@ function medianOf(values: number[]): number {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-/** A hotel priced above this multiple of its OWN STAR TIER's median is suspect. */
-const OUTLIER_MEDIAN_MULTIPLE = 5;
+/**
+ * A hotel priced above this multiple of its OWN STAR TIER's median is suspect.
+ *
+ * Was 5, raised to 8 on measurement. Across 777 independent captured
+ * production rows the distribution of `price / tierMedian` is p50 1.00,
+ * p90 1.72, p99 3.07 — and then a gap. The dearest legitimate row sits at
+ * 4.76x (a Cannes festival-week apartment) and the single confirmed glitch at
+ * 13.93x, with nothing in between. Every value from 5x to 13.9x catches the
+ * same one row and flags no real hotel.
+ *
+ * 5 sat 5% above the highest real row, which is the edge of the data rather
+ * than the headroom the previous comment here claimed; one Cannes re-quote
+ * would have crossed it. 8 is near the geometric middle of the gap and leaves
+ * 68%. Below 4.5x the cost appears fast: 4.5x flags that Cannes apartment, 4x
+ * also flags a transit hotel with 3,185 reviews, and 3x flags Atlantis, The
+ * Palm with 18,820.
+ */
+const OUTLIER_MEDIAN_MULTIPLE = 8;
 
 /**
  * Multiple of the WHOLE SEARCH's median above which an UNRATED row whose own
  * tier is too thin to judge is suspect.
  *
- * This is the one gap the per-tier rule leaves open. A lone 0-star row has no
- * peers to be compared with, so nothing judged it at all: a Val d'Isère search
- * returned a single 0-star listing at $3377.84/night — a tier of one, and
- * exempt from the star ceiling below for being unrated — and it reached
- * customers unchallenged.
+ * Covers an unrated row in a thin tier WITHIN a search that has other rows to
+ * compare against — two or three 0-star listings among twenty, say, where the
+ * tier itself is too small for a median but the search is not.
+ *
+ * READ THIS BEFORE TUNING IT. It does NOT cover the case it was written for,
+ * and no value of this constant can. That case was a Val d'Isère search
+ * returning a single 0-star listing at $3377.84/night. Measured against the
+ * captured corpus, it fails three ways over:
+ *
+ *  1. That search returned exactly ONE row, so `allPrices.length` is 1, below
+ *     MIN_RESULTS_TO_FILTER, and the rule switches itself off.
+ *  2. The median is self-inclusive. A lone row's ratio to a median computed
+ *     from itself is exactly 1.00 by construction — so not 5x, not 1.1x, no
+ *     multiple reaches it.
+ *  3. Flagging would not help anyway. With one row `rankHotels` has nothing to
+ *     demote it below, so it is `hotels[0]` and the trip total either way.
+ *     The safety argument in `flagSuspectPrices` below is false at n=1.
+ *
+ * A single-row search defeats every relative rule here. Covering it needs a
+ * reference from OUTSIDE the search — a per-city price band, or a second
+ * provider — not a threshold. Note also that the row in question is most
+ * likely a real hotel: Le Refuge de Solaise, a converted 2551m cable-car
+ * station, 9.6 from 137 reviews, in Val d'Isère in peak ski week. Legitimate
+ * 0-star rows in the same corpus reach $2713 (Cannes in May) and $1604
+ * (St Moritz in February), so $3377 is not separable from real inventory by
+ * price alone, and an absolute 0-star ceiling could not do it either.
  *
  * Only unrated rows fall through to this. A thin 4 or 5 star tier is left
  * alone, because the provider's own star rating is independent evidence that
  * the property really is in that price class — that is exactly what spares
  * Bora Bora's resorts. A 0-star row carries no such evidence.
  *
- * Deliberately the same 5x as the per-tier rule, even though a whole villa can
- * genuinely cost several times a city's median. A false flag here is nearly
- * free: an expensive row was already going to sort last on its price term, so
- * flagging costs it a position it did not hold. That is the dividend of
- * flagging rather than deleting — the threshold can be set by what catches the
- * glitch instead of by what we are afraid to lose.
+ * 5 rather than the per-tier rule's 8 because the whole-search median is a
+ * weaker comparison than a same-tier one and this is the looser net. Measured:
+ * 17 rows in the corpus qualify for this rule and the dearest sits at 2.23x,
+ * so anything from 2.5x up flags nothing real. It has caught 0 true positives
+ * in 777 rows — kept because the thin-tier-but-not-lone case is real, not
+ * because it has earned its place.
  */
 const UNRATED_SEARCH_MEDIAN_MULTIPLE = 5;
 
@@ -248,8 +285,11 @@ const UNRATED_SEARCH_MEDIAN_MULTIPLE = 5;
  *
  * 10x below its own star tier is not a bargain, it is a different product —
  * a "from" price for a single bed in a shared room, or a quote for one night
- * of a week. Validated against 832 captured production rows: it flags none of
- * them.
+ * of a week. Validated against 777 independent captured production rows: it
+ * flags none of them. The widest real underprice measured is 3.81x below its
+ * tier median (a Zanzibar hostel at $31.75 against $120.96, 8.5 from 231
+ * reviews), so 10 sits 2.6x clear of anything real. There is no measured true
+ * positive on this side, so there is nothing to justify tightening it.
  */
 const UNDERPRICE_MEDIAN_DIVISOR = 10;
 
@@ -362,16 +402,39 @@ export function dropUnusablePrices(hotels: HotelResult[], city: string): HotelRe
  *
  * Every row is returned either way. Ordering is the frontend's job: `rankHotels`
  * sorts flagged rows below every unflagged one, so a flagged row can still be
- * browsed and booked but can never become `hotels[0]`, the auto-selected hotel
- * or part of the trip total.
+ * browsed and booked but will not become `hotels[0]`, the auto-selected hotel
+ * or part of the trip total — PROVIDED the search returned an unflagged row to
+ * put above it. Where every row is flagged, or where only one came back, there
+ * is nothing to demote it below and it is the trip's hotel regardless. That is
+ * a deliberate fallback (a suspicious price beats an empty city) but it is not
+ * protection, and a one-row search is the case it fails at. See
+ * UNRATED_SEARCH_MEDIAN_MULTIPLE.
  */
 export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelResult[] {
   const starsOf = (h: HotelResult) => (Number.isFinite(h.stars) ? h.stars : 0);
+
+  // The absolute rule first, because it needs no comparison set — and because
+  // its verdicts must be kept OUT of the medians below.
+  //
+  // The guards this replaced ran as two passes, deleting star-ceiling
+  // violators before the relative pass computed any median. Flagging instead
+  // of deleting quietly lost that, and a row the absolute rule has already
+  // condemned should not get a vote on where its own tier's ceiling sits.
+  //
+  // The reachable consequence is padding rather than masking. A median is
+  // robust enough that one huge value barely moves a ceiling — I could not
+  // construct a case where it hides a second glitch — but it does inflate the
+  // tier's COUNT, which can lift a tier over MIN_RESULTS_TO_FILTER and
+  // manufacture a floor that then flags a legitimately cheap room. There is a
+  // test for exactly that.
+  const overStarCeiling = (h: HotelResult) =>
+    starsOf(h) >= 1 && starsOf(h) <= 3 && h.pricePerNight > BUDGET_STARS_PRICE_CEILING;
 
   const tiers = new Map<number, HotelResult[]>();
   const allPrices: number[] = [];
   for (const h of hotels) {
     if (!isUsablePrice(h.pricePerNight)) continue;
+    if (overStarCeiling(h)) continue;
     allPrices.push(h.pricePerNight);
     const tier = tiers.get(starsOf(h));
     if (tier) tier.push(h);
@@ -401,7 +464,7 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
     const stars = starsOf(h);
     const price = h.pricePerNight;
 
-    if (stars >= 1 && stars <= 3 && price > BUDGET_STARS_PRICE_CEILING) {
+    if (overStarCeiling(h)) {
       return 'above-star-ceiling';
     }
 
