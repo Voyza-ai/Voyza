@@ -749,7 +749,14 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     const { convertToUsd } = await import('./currency');
     const converted = await Promise.all(
       hotels.map(async (h): Promise<HotelResult | null> => {
-        if (!h.currency || h.currency === 'USD') return h;
+        // No "is it already USD" short-circuit here on purpose. convertToUsd
+        // is the single place that decides, and it returns null for a blank
+        // or malformed code instead of trusting the raw number. All three
+        // services used to carry their own `!x.currency || x.currency ===
+        // 'USD'` test, and the `!x.currency` half was wrong in every one:
+        // `currency: ''` meant "skip conversion", so a foreign amount was
+        // read as dollars. A USD row costs one extra await that returns
+        // before any rate lookup.
         const usdTotal = await convertToUsd(h.price, h.currency);
         const usdPerNight = await convertToUsd(h.pricePerNight, h.currency);
         if (usdTotal === null || usdPerNight === null) {
@@ -768,7 +775,31 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
         };
       }),
     );
+    const beforeCurrencyDrop = hotels.length;
+    const currenciesSeen = [...new Set(hotels.map((h) => h.currency || '(blank)'))];
     hotels = converted.filter((h): h is HotelResult => h !== null);
+
+    // Currency coverage is the one filter here that can clear a whole city,
+    // and it used to do it silently — a per-row warn says nothing about the
+    // city having been emptied, so "Mauritius returns no hotels" read exactly
+    // like "Mauritius has no hotels". This is the line that tells them apart,
+    // and it names the currencies so the fix is a table entry rather than an
+    // investigation. Error level on purpose: every other drop in this file
+    // still leaves the customer a choice, and this one leaves them nothing.
+    if (hotels.length === 0 && beforeCurrencyDrop > 0) {
+      logger.error('Hotel search emptied — no USD rate for any row', {
+        city,
+        rows: beforeCurrencyDrop,
+        currencies: currenciesSeen,
+      });
+    } else if (hotels.length < beforeCurrencyDrop) {
+      logger.warn('Hotel rows lost to currency coverage', {
+        city,
+        dropped: beforeCurrencyDrop - hotels.length,
+        of: beforeCurrencyDrop,
+        currencies: currenciesSeen,
+      });
+    }
 
     // Drop first, flag second: an unusable price must not be in the set the
     // medians are computed from, or a row of 0s drags every floor down with it.
@@ -777,6 +808,21 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
 
     if (maxPrice !== undefined) {
       hotels = hotels.filter((h) => h.price <= maxPrice);
+    }
+
+    // A search this thin disables every relative rule in `flagSuspectPrices`
+    // (they all require MIN_RESULTS_TO_FILTER rows), and at one row
+    // `rankHotels` has nothing to demote anything below either — so hotels[0]
+    // is whatever the provider said, unchecked. That is the Val d'Isère case,
+    // and it is structural rather than fixable with a threshold: covering it
+    // needs a reference from outside the search. Until there is one, make it
+    // visible — ordinary searches return 17-20 rows, so this is rare.
+    if (hotels.length > 0 && hotels.length < MIN_RESULTS_TO_FILTER) {
+      logger.warn('Hotel search too thin to price-check — hotels[0] is unverified', {
+        city,
+        rows: hotels.length,
+        needed: MIN_RESULTS_TO_FILTER,
+      });
     }
 
     // Last, so it also covers the case a price cap leaves only flagged rows:

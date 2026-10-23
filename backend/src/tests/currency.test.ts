@@ -133,21 +133,6 @@ describe('XPF — the Bora Bora case', () => {
     expect(await convertToUsd(200_000, 'xpf')).toBe(await convertToUsd(200_000, 'XPF'));
   });
 
-  it('converts a whole page of XPF hotels, leaving unpriced rows alone', async () => {
-    fxDown();
-    const { convertManyToUsd } = loadCurrency();
-
-    const converted = await convertManyToUsd([200_000, 95_000, 0], 'XPF');
-
-    expect(converted).not.toBeNull();
-    expect(converted![0]).toBeGreaterThan(1_500);
-    expect(converted![1]).toBeGreaterThan(700);
-    expect(converted![1]).toBeLessThan(1_000);
-    // 0 means "unknown" across this codebase; dividing it by a rate would
-    // dress it up as a real $0.00 price.
-    expect(converted![2]).toBe(0);
-  });
-
   it('still converts when the live API answers without XPF in its table', async () => {
     fxUp({ EUR: 0.5 }); // live, but missing the code we need
     const { convertToUsd } = loadCurrency();
@@ -222,15 +207,6 @@ describe('a currency we have no rate for', () => {
     expect(await convertToUsd(800_000, 'ZZZ')).toBeNull();
   });
 
-  it('fails the whole batch rather than part of it', async () => {
-    fxDown();
-    const { convertManyToUsd } = loadCurrency();
-
-    expect(await convertManyToUsd([100, 200], 'ZZZ')).toBeNull();
-    // An empty batch is not a failure.
-    expect(await convertManyToUsd([], 'ZZZ')).toEqual([]);
-  });
-
   it('says so in the log, since the caller drops the row silently', async () => {
     fxDown();
     const { convertToUsd } = loadCurrency();
@@ -242,18 +218,49 @@ describe('a currency we have no rate for', () => {
     expect(unknown[0]).toMatchObject({ level: 'warn', code: 'ZZZ', amount: 800_000 });
   });
 
-  it('returns 0 and NaN amounts untouched, before any rate lookup', async () => {
+  it('passes 0 through before any rate lookup', async () => {
     fxDown();
     const { convertToUsd } = loadCurrency();
 
-    // Documented: 0 means "unknown" elsewhere, so it is passed through as-is
-    // for any currency, known or not.
+    // Zero is genuinely zero in any currency, known or not.
     expect(await convertToUsd(0, 'ZZZ')).toBe(0);
-    // Current behaviour, pinned rather than endorsed: a NaN price is NOT
-    // null, so the callers' `=== null` check does not catch it and a NaN
-    // survives conversion. Reported separately; the fix belongs in the
-    // callers that parseFloat provider prices.
-    expect(Number.isNaN((await convertToUsd(NaN, 'XPF')) as number)).toBe(true);
+  });
+
+  it('returns null for a non-finite amount rather than passing it through', async () => {
+    fxDown();
+    const { convertToUsd } = loadCurrency();
+
+    // This used to `return amount`, and because NaN !== null every caller's
+    // `=== null` check waved it through — so a NaN fare reached the trip
+    // total. Hotels happened to catch it downstream in dropUnusablePrices;
+    // flights and trains did not.
+    expect(await convertToUsd(Number.NaN, 'XPF')).toBeNull();
+    expect(await convertToUsd(Number.POSITIVE_INFINITY, 'EUR')).toBeNull();
+    expect(await convertToUsd(Number.NEGATIVE_INFINITY, 'USD')).toBeNull();
+  });
+
+  it('returns null for a blank or malformed currency instead of assuming USD', async () => {
+    fxDown();
+    const { convertToUsd } = loadCurrency();
+
+    // The 800,000-COP-as-"$800,000" failure from the other side. A blank code
+    // used to land in the same branch as 'USD' and return the raw number,
+    // while everything downstream reads these fields as dollars. All three
+    // services carried their own `!x.currency` short-circuit doing the same,
+    // so an empty code was trusted in four separate places.
+    for (const bad of ['', '   ', 'US', 'EURO', '123', null, undefined]) {
+      expect(await convertToUsd(800_000, bad as any)).toBeNull();
+    }
+  });
+
+  it('accepts a lowercase or padded code rather than dropping the row', async () => {
+    fxDown();
+    const { convertToUsd } = loadCurrency();
+
+    const clean = await convertToUsd(100, 'EUR');
+    expect(await convertToUsd(100, 'eur')).toBe(clean);
+    expect(await convertToUsd(100, ' EUR ')).toBe(clean);
+    expect(await convertToUsd(100, 'usd')).toBe(100);
   });
 });
 

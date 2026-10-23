@@ -131,6 +131,11 @@ const FALLBACK_FLOATS: Record<string, number> = {
   KHR: 4060, // Siem Reap, Phnom Penh ("Southeast Asia Adventure" preset)
   LAK: 22358, // Luang Prabang
   FJD: 2.2511, // Nadi
+  // Indian Ocean beach destinations. Both were still missing after the first
+  // audit, and both are destinations production returns no hotels for today —
+  // so they would have been dropped twice over.
+  MUR: 47.27, // Mauritius — Port Louis, Grand Baie, Flic-en-Flac
+  SCR: 14.03, // Seychelles — Mahé, Praslin, La Digue
 };
 
 /**
@@ -255,13 +260,43 @@ async function getRates(): Promise<RateCache> {
  *
  * On success returns `Math.round(amount * 100) / 100` — 2-decimal precision.
  */
+
 export async function convertToUsd(
   amount: number,
   fromCurrency: string,
 ): Promise<number | null> {
-  if (!Number.isFinite(amount) || amount === 0) return amount;
+  // A non-finite amount is not convertible, and must not be returned as
+  // though it were. This used to `return amount`, and because NaN !== null
+  // every caller's `=== null` check passed it straight through — so a NaN
+  // fare reached the trip total. Hotels happened to catch it downstream in
+  // `dropUnusablePrices`; flights and trains did not.
+  if (!Number.isFinite(amount)) return null;
+
+  // Zero is genuinely zero in any currency, so it needs no rate.
+  if (amount === 0) return 0;
+
   const code = fromCurrency?.toUpperCase().trim();
-  if (!code || code === 'USD') return Math.round(amount * 100) / 100;
+
+  // A BLANK OR MALFORMED CODE IS UNKNOWN, NOT USD. This used to fall into the
+  // same branch as 'USD' and return the raw number, which is the
+  // 800,000-COP-shown-as-$800,000 failure from the other side: the amount is
+  // in some unit nobody has established, and everything downstream reads
+  // HotelResult.price / FlightOffer.price as dollars. The three callers each
+  // had their own `!x.currency` short-circuit doing the same thing, so a
+  // provider sending `currency: ''` was trusted in four separate places.
+  //
+  // Returning null routes it to the drop path the callers already have for an
+  // unconvertible currency, which is the honest answer: a row we cannot price
+  // is a row we cannot show.
+  if (!code || !/^[A-Z]{3}$/.test(code)) {
+    logger.warn('Missing or malformed currency code — cannot convert to USD', {
+      code: fromCurrency ?? null,
+      amount,
+    });
+    return null;
+  }
+
+  if (code === 'USD') return Math.round(amount * 100) / 100;
 
   const { rates } = await getRates();
   const rate = rates[code] ?? FALLBACK_RATES[code];
@@ -272,34 +307,4 @@ export async function convertToUsd(
 
   // rates are "1 USD = N <currency>", so to go from foreign → USD divide
   return Math.round((amount / rate) * 100) / 100;
-}
-
-/**
- * Batch conversion helper — converts a list of numbers at once using
- * a single rate lookup. Useful when converting many offers from the
- * same currency (e.g. a page of hotels all priced in JPY).
- *
- * Returns `null` for the whole batch when we have no rate, for the same
- * reason `convertToUsd` does: the batch is one currency, so it's all-or
- * -nothing, and a silent pass-through would be relabelled 'USD' by the
- * caller.
- */
-export async function convertManyToUsd(
-  amounts: number[],
-  fromCurrency: string,
-): Promise<number[] | null> {
-  if (amounts.length === 0) return [];
-  const code = fromCurrency?.toUpperCase().trim();
-  if (!code || code === 'USD') return amounts.map((a) => Math.round(a * 100) / 100);
-
-  const { rates } = await getRates();
-  const rate = rates[code] ?? FALLBACK_RATES[code];
-  if (!rate || rate <= 0) {
-    logger.warn('Unknown currency — cannot convert batch to USD', { code, count: amounts.length });
-    return null;
-  }
-
-  return amounts.map((a) =>
-    Number.isFinite(a) && a !== 0 ? Math.round((a / rate) * 100) / 100 : a,
-  );
 }

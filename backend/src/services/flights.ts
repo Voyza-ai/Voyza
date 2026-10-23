@@ -339,7 +339,8 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
     const { convertToUsd } = await import('./currency');
     const converted = await Promise.all(
       mapped.map(async (o): Promise<FlightOffer | null> => {
-        if (!o.currency || o.currency === 'USD') return o;
+        // No USD short-circuit: convertToUsd decides, and returns null for a
+        // blank or malformed code rather than trusting the number.
         const usd = await convertToUsd(o.price, o.currency);
         if (usd === null) {
           logger.warn('Flight offer dropped — no USD rate for its currency', {

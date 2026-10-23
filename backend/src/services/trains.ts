@@ -277,7 +277,9 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
     const { convertToUsd } = await import('./currency');
     return await Promise.all(
       mapped.map(async (t) => {
-        if (t.pricePerPerson == null || !t.currency || t.currency === 'USD') return t;
+        // No USD short-circuit: convertToUsd decides, and returns null for a
+        // blank or malformed code rather than trusting the number.
+        if (t.pricePerPerson == null) return t;
         const usd = await convertToUsd(t.pricePerPerson, t.currency);
         if (usd === null) {
           logger.warn('Train fare unpriced — no USD rate for its currency', {
