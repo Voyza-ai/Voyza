@@ -9,6 +9,7 @@ jest.mock('../config/env', () => ({
 import {
   dropUnusablePrices,
   flagSuspectPrices,
+  nameVariants,
   pickByRating,
   pickDestination,
   trustedFirst,
@@ -859,5 +860,56 @@ describe('pickByRating', () => {
     const widened = pickByRating(rows as any, "Val d'Isere");
     expect(widened).toHaveLength(5);
     expect(suspect(flagSuspectPrices(widened, "Val d'Isere"))).toEqual(['Glitch']);
+  });
+});
+
+/**
+ * Booking's location search is literal about "and" versus "&", and the
+ * difference is the whole destination. Measured against production:
+ * "Turks and Caicos" returns 0 hotels, "Turks & Caicos" returns 17.
+ */
+describe('nameVariants', () => {
+  it('offers the ampersand spelling for a name with "and"', () => {
+    expect(nameVariants('Turks and Caicos')).toEqual(['Turks & Caicos']);
+  });
+
+  it('offers the spelled-out form for a name with "&"', () => {
+    expect(nameVariants('Turks & Caicos')).toEqual(['Turks and Caicos']);
+  });
+
+  it('never offers the name it was given', () => {
+    for (const name of ['Turks and Caicos', 'Turks & Caicos', 'Florence']) {
+      expect(nameVariants(name)).not.toContain(name);
+    }
+  });
+
+  it('offers nothing for a name with neither', () => {
+    expect(nameVariants('Florence')).toEqual([]);
+    expect(nameVariants('Bora Bora')).toEqual([]);
+  });
+
+  it('does not fire on "and" inside a word', () => {
+    // Santander, Andorra, Auckland — a substring match would mangle all three.
+    expect(nameVariants('Santander')).toEqual([]);
+    expect(nameVariants('Andorra la Vella')).toEqual([]);
+    expect(nameVariants('Auckland')).toEqual([]);
+  });
+
+  it('is case-insensitive about the conjunction', () => {
+    expect(nameVariants('Antigua AND Barbuda')).toEqual(['Antigua & Barbuda']);
+  });
+
+  it('handles several conjunctions', () => {
+    expect(nameVariants('Saint Kitts and Nevis and More')).toEqual([
+      'Saint Kitts & Nevis & More',
+    ]);
+  });
+
+  it('is not a fuzzy matcher', () => {
+    // A wrong destination that returns hotels is worse than a name that
+    // returns none: the traveller gets prices for somewhere they did not ask
+    // about. So no truncation, no qualifier stripping, no near-miss spelling.
+    expect(nameVariants('Turks and Caicos Islands')).toEqual(['Turks & Caicos Islands']);
+    expect(nameVariants('Flrence')).toEqual([]);
   });
 });
