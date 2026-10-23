@@ -6,17 +6,43 @@ jest.mock('../config/env', () => ({
   },
 }));
 
+/**
+ * Chainable stand-in for the postgrest query builder.
+ *
+ * Every method returns the same object, so the chain order doesn't matter, and
+ * the object is thenable so the awaited write path
+ * (`.upsert(...).abortSignal(...)`) resolves without a terminal method.
+ *
+ * `.single()` resolves to a real PGRST116 — PostgREST's "0 rows" code — which
+ * is what a cold cache actually returns. The old mock resolved to a bare
+ * `{ data: null }` with no `error` at all, a shape the real client never
+ * produces.
+ */
+const cacheMiss = {
+  data: null,
+  error: {
+    code: 'PGRST116',
+    message: 'JSON object requested, multiple (or no) rows returned',
+    details: 'The result contains 0 rows',
+    hint: null,
+  },
+};
+
 jest.mock('../services/supabase', () => ({
-  getSupabase: () => ({
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          single: () => Promise.resolve({ data: null }),
-        }),
-      }),
-      upsert: () => Promise.resolve({ data: null }),
-    }),
-  }),
+  getSupabase: () => {
+    const builder: any = {
+      select: () => builder,
+      eq: () => builder,
+      upsert: () => builder,
+      retry: () => builder,
+      abortSignal: () => builder,
+      single: () => Promise.resolve(cacheMiss),
+      // Awaiting the builder itself (the write path) succeeds.
+      then: (onOk: any, onErr: any) =>
+        Promise.resolve({ data: null, error: null }).then(onOk, onErr),
+    };
+    return { from: () => builder };
+  },
 }));
 
 const mockFetch = jest.fn();
