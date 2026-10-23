@@ -6,6 +6,16 @@ import { getStaticIata } from '../data/cityAirports';
 import { parseIsoDuration } from '../utils/duration';
 import { elapsedMinutesBetween } from '../utils/localTime';
 
+/**
+ * No real fare costs less than this, once taxes are counted.
+ *
+ * Exists to catch an ABSENT price: Duffel's `total_amount` missing becomes
+ * parseFloat('0') === 0 at the mapping, and compareLeg picks the cheapest
+ * offer, so a 0 wins its leg and is cached for two hours. $1 is orders of
+ * magnitude below any bookable fare, so it binds on certainty.
+ */
+const FLIGHT_PRICE_FLOOR = 1;
+
 export type FlightOffer = {
   id: string;
   /**
@@ -339,7 +349,31 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
     const { convertToUsd } = await import('./currency');
     const converted = await Promise.all(
       mapped.map(async (o): Promise<FlightOffer | null> => {
-        if (!o.currency || o.currency === 'USD') return o;
+        // A price that cannot be real is dropped, not carried. `total_amount`
+        // absent becomes parseFloat('0') === 0 at the mapping above, and 0 is
+        // the most dangerous value on this path: compareLeg picks the CHEAPEST
+        // offer, so a $0 flight wins its leg outright, lands in the trip
+        // total, and is written to leg_price_cache for two hours — so one bad
+        // response poisons the route for everyone until it expires.
+        //
+        // hotels.ts has had a floor for exactly this reason and called 0 "the
+        // single most dangerous value in the system"; flights had none. $1 is
+        // far below any real fare once taxes are counted, so this binds on
+        // certainty rather than judgement.
+        if (!Number.isFinite(o.price) || o.price < FLIGHT_PRICE_FLOOR) {
+          logger.warn('Flight offer dropped — price cannot be a real fare', {
+            price: o.price,
+            offerCurrency: o.currency,
+            floor: FLIGHT_PRICE_FLOOR,
+            origin,
+            destination,
+            date,
+          });
+          return null;
+        }
+
+        // No USD short-circuit: convertToUsd decides, and returns null for a
+        // blank or malformed code rather than trusting the number.
         const usd = await convertToUsd(o.price, o.currency);
         if (usd === null) {
           logger.warn('Flight offer dropped — no USD rate for its currency', {
@@ -350,10 +384,44 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
           });
           return null;
         }
+
+        // The floor again, on the CONVERTED figure. Conversion rounds to cents,
+        // so it can manufacture a zero out of a small amount in a weak
+        // currency — 100 VND converts to $0.00 — and a $0 fare wins every
+        // price comparison it enters. Checking only the raw amount let that
+        // through, because 100 is comfortably over the floor and $0.00 is not.
+        if (!Number.isFinite(usd) || usd < FLIGHT_PRICE_FLOOR) {
+          logger.warn('Flight offer dropped — converted price below the floor', {
+            raw: o.price,
+            offerCurrency: o.currency,
+            usd,
+            floor: FLIGHT_PRICE_FLOOR,
+            origin,
+            destination,
+            date,
+          });
+          return null;
+        }
+
         return { ...o, price: usd, currency: 'USD' };
       }),
     );
-    return converted.filter((o): o is FlightOffer => o !== null);
+    const usable = converted.filter((o): o is FlightOffer => o !== null);
+
+    // Losing every offer to a filter is not the same as the route having no
+    // flights, and it used to look identical in the logs. The hotel path got
+    // this signal; this one did not.
+    if (usable.length === 0 && mapped.length > 0) {
+      logger.error('Flight search emptied — no offer survived price or currency checks', {
+        origin,
+        destination,
+        date,
+        rows: mapped.length,
+        currencies: [...new Set(mapped.map((o) => o.currency || '(blank)'))],
+      });
+    }
+
+    return usable;
   } catch (err: any) {
     if (err instanceof AppError) throw err;
     // DuffelError extends Error but calls super() with NO message — the

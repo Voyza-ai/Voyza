@@ -1,5 +1,9 @@
 # Application Drafts — Kiwi, Travelpayouts, Direct Ferries
 
+> **Renamed.** This product was called Voyza; it is now **BlueMurr**, live at
+> https://bluemurr.com. The old `voyza-nine.vercel.app` alias 404s, so never
+> send it to a provider. The GitHub org and repo are still `Voyza-ai/Voyza`.
+
 _Copy-paste answers for the signups in [SIGNUP_GUIDE.md](SIGNUP_GUIDE.md).
 Trainline's draft lives separately in [TRAINLINE_APPLICATION.md](TRAINLINE_APPLICATION.md)._
 
@@ -11,15 +15,15 @@ Trainline's draft lives separately in [TRAINLINE_APPLICATION.md](TRAINLINE_APPLI
 
 ## Reusable building blocks (every form asks for some of these)
 
-**Project / company name:** `Voyza`
+**Project / company name:** `BlueMurr`
 
-**Website URL:** `https://voyza-nine.vercel.app`
+**Website URL:** `https://bluemurr.com`
 
 **One-liner:**
-> Voyza is an AI-powered trip planner that finds the cheapest way to travel by comparing flights and trains (and soon ferries) across a whole multi-city route.
+> BlueMurr is an AI-powered trip planner that finds the cheapest way to travel by comparing flights and trains (and soon ferries) across a whole multi-city route.
 
 **Two-sentence description:**
-> Voyza is an AI multi-modal trip planner. We optimize multi-city itineraries across flights, trains and ferries — comparing real door-to-door time and price on every leg — and send travelers to partner sites to book.
+> BlueMurr is an AI multi-modal trip planner. We optimize multi-city itineraries across flights, trains and ferries — comparing real door-to-door time and price on every leg — and send travelers to partner sites to book.
 
 **Category / vertical:** Travel — flights, hotels, trains, ferries (metasearch / trip planning)
 
@@ -42,10 +46,10 @@ Trainline's draft lives separately in [TRAINLINE_APPLICATION.md](TRAINLINE_APPLI
 |---|---|
 | Name | `[your name]` |
 | Work email | `[your email]` |
-| Company | `Voyza` |
-| Solution name | `Voyza` |
+| Company | `BlueMurr` |
+| Solution name | `BlueMurr` |
 | **Solution type** | **Affiliate / Metasearch** (search + redirect to Kiwi — free). ❌ *Not* "Booking" (that needs a deposit + makes you merchant-of-record; only for in-app booking later) |
-| Website | `https://voyza-nine.vercel.app` |
+| Website | `https://bluemurr.com` |
 | Description | _One-liner above_ |
 | Expected market / region | Europe (expanding globally) |
 
@@ -55,15 +59,15 @@ Trainline's draft lives separately in [TRAINLINE_APPLICATION.md](TRAINLINE_APPLI
 
 ## 2. Travelpayouts (hotels via Booking.com + flights)
 
-**Sign up** at travelpayouts.com, **add Voyza as a project**, then **activate
+**Sign up** at travelpayouts.com, **add BlueMurr as a project**, then **activate
 programs** (Booking.com, Hotellook, and a flights program like Aviasales/WayAway).
 
 ### Account / project
 | Field | Answer |
 |---|---|
 | Name / email | `[your name]` / `[your email]` |
-| Project name | `Voyza` |
-| Project URL | `https://voyza-nine.vercel.app` |
+| Project name | `BlueMurr` |
+| Project URL | `https://bluemurr.com` |
 | Project type | Website / Web app |
 | Category | Travel (flights & hotels) |
 | Description | _Two-sentence description above_ |
@@ -92,8 +96,8 @@ Two things: **affiliate signup** (revenue now) + **Connect API email** (data/boo
 | Field | Answer |
 |---|---|
 | Name / email | `[your name]` / `[your email]` |
-| Company | `Voyza` |
-| Website | `https://voyza-nine.vercel.app` |
+| Company | `BlueMurr` |
+| Website | `https://bluemurr.com` |
 | Country | `[your country]` |
 | How will you promote? | _One-liner above_ + "We integrate ferry options into multi-modal trip itineraries and deep-link travelers to Direct Ferries to book." |
 | Markets / regions | Europe (Balearics, Greece, Italy, Croatia, Portugal) |
@@ -103,11 +107,11 @@ Two things: **affiliate signup** (revenue now) + **Connect API email** (data/boo
 ### Connect API (data + booking — start now, lands later)
 Email **partnerships@directferries.com**. Copy-paste:
 
-> Subject: API partnership inquiry — Voyza (AI multi-modal trip planner)
+> Subject: API partnership inquiry — BlueMurr (AI multi-modal trip planner)
 >
 > Hi Direct Ferries Connect team,
 >
-> I'm building Voyza, an AI-powered multi-modal trip planner that optimizes
+> I'm building BlueMurr, an AI-powered multi-modal trip planner that optimizes
 > itineraries across flights, trains and ferries and sends travelers to partners
 > to book. Ferries are essential to our European coverage (Balearics, Greek
 > islands, Sardinia/Sicily, Croatia), and your Connect API looks like the right
@@ -117,7 +121,7 @@ Email **partnerships@directferries.com**. Copy-paste:
 > entry point (affiliate vs. API) for a fast-growing trip planner?
 >
 > Thanks!
-> [your name], Voyza — https://voyza-nine.vercel.app
+> [your name], BlueMurr — https://bluemurr.com
 
 _(Optional: also ping **Ferryhopper** about their MCP server — a fast path to
 live Mediterranean ferry data.)_

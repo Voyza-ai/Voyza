@@ -248,11 +248,52 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
             session,
             OFFER_TIMEOUT_MS,
           );
-          const amounts = (offerData.getJourneyOffer.itinerary ?? [])
-            .flatMap((item) => item.offers ?? [])
-            .map((o) => o.price?.amount)
-            .filter((a): a is number => typeof a === 'number' && a > 0);
-          if (amounts.length > 0) priced.set(idx, Math.min(...amounts) / 100 / party);
+          // `price.currency` was selected in the query above and typed on
+          // AaOffer, but never read: the amount was taken as-is and then
+          // stamped `currency: 'USD'` below, so a non-USD fare would be read
+          // as dollars by the trip total and by compareLeg's cheapest and
+          // priceDifference. Same failure as the hotel and flight paths, in
+          // the one provider that was missed.
+          //
+          // The query DOES ask for USD (`currency: "USD"` above), so an absent
+          // code means "as requested" and is trusted — dropping those would
+          // lose all rail pricing over a field the provider simply did not
+          // echo. But asking is not receiving: Booking ignores the same kind
+          // of request often enough that there is a comment about it in
+          // hotels.ts, so a code that comes back DIFFERENT is converted rather
+          // than believed. Rates are per unit, so convert after the cents
+          // divide.
+          const { convertToUsd } = await import('./currency');
+          const offers = (offerData.getJourneyOffer.itinerary ?? []).flatMap(
+            (item) => item.offers ?? [],
+          );
+          const usdAmounts: number[] = [];
+          for (const o of offers) {
+            const raw = o.price?.amount;
+            if (typeof raw !== 'number' || !(raw > 0)) continue;
+            const units = raw / 100;
+            const code = o.price?.currency?.trim().toUpperCase();
+
+            if (!code || code === 'USD') {
+              usdAmounts.push(units);
+              continue;
+            }
+
+            const usd = await convertToUsd(units, code);
+            if (usd === null || !Number.isFinite(usd) || usd <= 0) {
+              logger.warn('All Aboard offer dropped — no USD rate for its currency', {
+                journey: journeys[idx]?.id,
+                currency: code,
+              });
+              continue;
+            }
+            logger.warn('All Aboard quoted a currency other than the USD requested', {
+              journey: journeys[idx]?.id,
+              currency: code,
+            });
+            usdAmounts.push(usd);
+          }
+          if (usdAmounts.length > 0) priced.set(idx, Math.min(...usdAmounts) / party);
         } catch (err: any) {
           logger.warn('All Aboard offer pricing failed (non-fatal)', {
             message: err?.message,
