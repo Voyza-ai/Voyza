@@ -9,6 +9,7 @@ jest.mock('../config/env', () => ({
 import {
   dropUnusablePrices,
   flagSuspectPrices,
+  pickByRating,
   pickDestination,
   trustedFirst,
 } from '../services/hotels';
@@ -775,5 +776,88 @@ describe('the star ceiling yields when it would condemn a whole tier', () => {
     const out = flagSuspectPrices([...chalets, ...budget, budgetGlitch], 'Mixed');
 
     expect(suspect(out)).toEqual(['Budget glitch']);
+  });
+});
+
+/**
+ * The 7.0 review-score bar is OURS, not the provider's, and on a thin search it
+ * worked against us twice: fewer options for the traveller, AND fewer peers for
+ * every price check. A Val d'Isère search came back with exactly one hotel at
+ * $3377.84/night, and one row cannot be an outlier — the median of a one-row
+ * set is that row.
+ *
+ * So the bar bends when, and only when, there is not enough to compare.
+ */
+describe('pickByRating', () => {
+  const rated = (name: string, rating: number) =>
+    ({ ...hotel(name, 200, 3), rating }) as any;
+
+  it('keeps the bar at 7.0 when there are enough good hotels', () => {
+    const rows = [
+      rated('A', 9.1),
+      rated('B', 8.4),
+      rated('C', 7.9),
+      rated('D', 7.2),
+      rated('Mediocre', 5.5),
+    ];
+
+    expect(names(pickByRating(rows, 'Rome'))).toEqual(['A', 'B', 'C', 'D']);
+  });
+
+  it('relaxes only as far as it needs to', () => {
+    // Three rows clear 7.0, one more clears 6.0, one more clears 5.0. Stopping
+    // at 6.0 reaches four, so the 5.2 stays out.
+    const rows = [
+      rated('A', 9.1),
+      rated('B', 8.4),
+      rated('C', 7.9),
+      rated('Six', 6.4),
+      rated('Five', 5.2),
+    ];
+
+    const kept = names(pickByRating(rows, 'Rome'));
+    expect(kept).toContain('Six');
+    expect(kept).not.toContain('Five');
+    expect(kept).toHaveLength(4);
+  });
+
+  it('takes everything rather than leave a lone unverifiable hotel', () => {
+    // The Val d'Isere shape: one row clears the bar and nothing can check it.
+    const rows = [rated('Lone good', 9.6), rated('Poor', 4.1), rated('Worse', 3.0)];
+
+    expect(pickByRating(rows, "Val d'Isere")).toHaveLength(3);
+  });
+
+  it('keeps an unrated row when that is all there is', () => {
+    const rows = [rated('Unrated', 0), rated('Also unrated', 0)];
+
+    expect(pickByRating(rows, 'Nowhere')).toHaveLength(2);
+  });
+
+  it('does not invent rows it was not given', () => {
+    expect(pickByRating([], 'Empty')).toEqual([]);
+  });
+
+  it('treats a non-finite rating as unrated rather than crashing', () => {
+    const rows = [rated('NaN rating', Number.NaN), rated('Good', 8.5)];
+
+    expect(pickByRating(rows, 'Odd')).toHaveLength(2);
+  });
+
+  it('gives the price checks something to work with', () => {
+    // The whole point: widening turns an uncheckable search into a checkable
+    // one. Four rows in a tier is where flagSuspectPrices starts working, so
+    // the glitch below is caught only because the bar bent.
+    const rows = [
+      rated('Normal A', 8.1),
+      rated('Normal B', 7.4),
+      { ...rated('Mediocre', 5.9), pricePerNight: 210 },
+      { ...rated('Also mediocre', 5.1), pricePerNight: 190 },
+      { ...rated('Glitch', 8.8), pricePerNight: 9000 },
+    ];
+
+    const widened = pickByRating(rows as any, "Val d'Isere");
+    expect(widened).toHaveLength(5);
+    expect(suspect(flagSuspectPrices(widened, "Val d'Isere"))).toEqual(['Glitch']);
   });
 });
