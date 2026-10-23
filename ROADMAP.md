@@ -45,26 +45,27 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ---
 
-## 🚧 In-flight (this branch: `feat/voyza-ai-chat`)
+## 🚧 In-flight
 
-All major work on this branch is committed and pushed. See the
-"Previously shipped" section below for the full breakdown. Branch
-currently has 4 commits, not yet merged to `claude_code_backend`:
+Nothing in flight. `feat/voyza-ai-chat` and `feat/map-redesign` are both
+merged all the way to `voyza_main`; the branch flow is now
+**feature branch → `dev` → `voyza_main`**, not `claude_code_backend`.
+See "Previously shipped" below for what landed.
 
-```
-d4007d9  polish: fixed-size transport pills + home card refinements
-984a553  feat: home anchor — origin, multi-airport, full permutations, round-trip
-1704365  feat: AI chat refreshes flowchart transport card (leg_refresh)
-0fbbd20  feat: Voyza AI chat with trip-aware prompts + constraint proposals
-```
+Of the two items this section used to list as remaining:
 
-Remaining on the branch:
-- [ ] Top-4 options per between-city leg (swap `compareLeg()` →
-  `searchLegOptions(limit: 4)` in `scoreRoute`). Home legs already
-  use searchLegOptions; this extends it to inter-city legs so every
-  Connector card has 4 alternatives out of the box.
-- [ ] Backfill UI for pre-home-anchor trips without `origin_city`
-  (old trips render without a home card — graceful but unsettable).
+- [x] **Top-4 options per between-city leg.** Done, but not the way this
+  entry proposed. Swapping `compareLeg()` for `searchLegOptions()` inside
+  `scoreRoute` would mean M legs × N permutations of option lookups, which
+  explodes API cost. Instead `optimizer.ts` has a Step 7.5 that re-fetches
+  the full options list for the WINNING route only — M extra calls, bounded,
+  reusing Duffel's per-request offer caching from the scoring pass that just
+  ran. Connector cards get their 4 alternatives either way.
+- [ ] **Backfill UI for pre-home-anchor trips without `origin_city`.** Still
+  open. `origin` is only settable during planning (`PlanningChat`,
+  `ConversationalPlanner`); there is no way to set it on a trip that is
+  already saved, so old trips render without a home card and cannot be
+  given one.
 
 ---
 
@@ -222,6 +223,60 @@ Home anchor / origin model (984a553 + d4007d9)
 ---
 
 ## 📋 Backlog
+
+### Feature: Surface a price we cannot vouch for (frontend — needs design)
+
+Two hotel-price states exist in the data today and **neither is visible to the
+traveller**. The backend decides both; nothing renders either.
+
+**State 1 — distrusted (`priceSuspect`, already plumbed).** The price is out of
+line with its peers, so we demote it: `trustedFirst` in
+`backend/src/services/hotels.ts` puts it last, so it can never be the
+auto-selected hotel or reach the trip total. The flag reaches the frontend via
+`frontend/lib/hotelShape.ts` and survives the save/load round trip. But it
+appears nowhere under `frontend/components/` or `frontend/app/`, so a traveller
+who picks it from the list gets a price we do not believe, unmarked.
+`cycleHotel` steps over these, so only a deliberate pick reaches one.
+
+**State 2 — unverifiable (no flag yet).** Every price check here is a
+*comparison*: a row is suspect because it is out of line with the others in its
+search. So a search with almost nothing in it cannot be checked at all — one
+row cannot be an outlier, because the median of a one-row set is that row. No
+threshold reaches it, at any value. Measured: a Val d'Isère search returned
+exactly one hotel at **$3,377.84/night** and it went into the trip total with
+nothing having looked at it.
+
+`pickByRating` reduced how often this happens by relaxing our own 7.0
+review-score bar when a search is thin, and `searchHotels` logs
+`'Hotel search too thin to price-check — hotels[0] is unverified'` when it
+still is. But it cannot be eliminated: `Grand Turk` returns exactly **1 row**
+because the provider has nothing more to give, and `Grace Bay` returns none at
+all. Frequency before widening: 1 search in 45 returned fewer than 4 rows.
+
+**Work:**
+- [ ] Decide whether to show anything at all — doing nothing is defensible for
+      state 2, since the Val d'Isère row was most likely a *real* hotel (a
+      converted 2551m cable-car station, 9.6 from 137 reviews, peak ski week).
+      A caveat on a correct price costs trust too.
+- [ ] Design the treatment. `CLAUDE.md` applies: no glass morphism, no glows,
+      no gradient-purple AI look — derive from the existing DNA (dark `#0f0f1a`
+      surfaces, pastel city cards, dashed-route motif, blue brand). Get it
+      approved before committing.
+- [ ] One treatment may cover both states, or they may need different words:
+      "we think this price is wrong" and "we could not check this price" are
+      different claims and should not be conflated into one badge.
+- [ ] For state 2, add the flag — the backend currently only logs it. Mirror
+      the `limitedCoverage` pattern `backend/src/services/trains.ts` already
+      uses for an unpriced fare, carry it through `lib/hotelShape.ts` beside
+      `priceSuspect`, and add it to `Hotel` in `frontend/lib/types.ts`.
+- [ ] Decide what the trip total does with an unverified hotel. Trains set
+      `pricePerPerson: null` rather than inventing a figure; hotels currently
+      put the number straight in the headline.
+
+**Do not** solve this by tuning a threshold. That has been tried three times
+and each pass created a new regression — see the comment block at the top of
+the price-plausibility section in `backend/src/services/hotels.ts` for the full
+history and why deleting rows was abandoned in favour of demoting them.
 
 ### Feature: Notifications system (separate task — complex)
 - [x] `notifications` table with RLS
@@ -557,12 +612,33 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 
 ## 🏗️ Infrastructure / ops
 
+- [ ] 🔴 **No database backups exist.** Not "the runbook isn't written" — there
+      is nothing configured to restore from. There is ONE Supabase project
+      (`vzptwvrgiaqveckrdmke`) and it holds the real trips; `dev` writes to it
+      too (see `ENVIRONMENTS.md`), so a bad migration or a bad delete run from
+      a dev branch is unrecoverable. Enable Point-in-Time Recovery or scheduled
+      backups in the Supabase dashboard — this is a dashboard change, nothing
+      in this repo can do it. Listed first here because it is the only item on
+      this page where the cost of being wrong is permanent.
+- [ ] `backend/src/tests/transportCoverage.test.ts` **does not run in CI.** It
+      is gated on `DUFFEL_ACCESS_TOKEN`, which CI does not set, so the suite
+      skips in full — and it is the only one that exercises live provider
+      responses. Everything else mocks the provider. So "all tests pass" means
+      the mocked contract holds, not that the real API still answers the way we
+      expect. Either give CI a token (a sandbox one is enough; sandbox is what
+      Duffel returns today anyway) or run it on a schedule and alert on
+      failure, so a provider changing its response shape is not discovered by a
+      traveller.
 - [ ] Rate limiting middleware (per-IP + per-user) on all `/api` routes
-- [ ] Error monitoring (Sentry or Datadog)
+- [ ] Error monitoring (Sentry or Datadog) — note `logger.error` currently goes
+      to stderr and nothing else, so an error log pages nobody
 - [ ] Structured logging with request IDs
-- [ ] Staging environment / preview deploys
+- [ ] Staging environment / preview deploys — `dev` currently shares the
+      production backend AND database, so backend changes cannot be tested
+      anywhere but production (`ENVIRONMENTS.md:13`)
 - [ ] Automated E2E tests in CI (Playwright)
-- [ ] Backup & restore runbook
+- [ ] Backup & restore runbook (the process; see the first item for the fact
+      that there is currently nothing to restore from)
 - [ ] Data retention policies documented
 
 ---
