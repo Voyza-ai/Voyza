@@ -164,3 +164,100 @@ describe('dropImplausiblePrices', () => {
     expect(dropImplausiblePrices([], 'Empty')).toEqual([]);
   });
 });
+
+/**
+ * Comparing a hotel against the median of its WHOLE search was measured over
+ * 58 real production searches (832 rows) and lost badly: 1 true positive
+ * against 4 legitimate hotels deleted. Comparing it only against others of the
+ * same star rating drops exactly one row over the same data. These pin that
+ * difference, since reverting to a global median would look like a tidy-up.
+ */
+describe('dropPriceOutliers compares within star tier', () => {
+  it('keeps the luxury end of a bimodal market (the Bora Bora failure)', () => {
+    // Shape taken from a real Bora Bora search: a handful of overwater resorts
+    // beside a long budget tail. Against the combined median ($172, ceiling
+    // $861) the old guard deleted all three resorts and left the guesthouses.
+    const lodges = [62, 78, 95, 110, 119, 128, 140, 155, 167, 180, 201, 229, 248, 266].map(
+      (p, i) => hotel(`Lodge ${i + 1}`, p, 0),
+    );
+    const resorts = [
+      hotel('Westin Bora Bora', 1942.66, 5),
+      hotel('InterContinental Le Moana', 1282.28, 4),
+      hotel('Le Bora Bora by Pearl Resorts', 1121.9, 4),
+    ];
+
+    const kept = dropPriceOutliers([...lodges, ...resorts], 'Bora Bora').map((h) => h.name);
+
+    expect(kept).toContain('Westin Bora Bora');
+    expect(kept).toContain('InterContinental Le Moana');
+    expect(kept).toContain('Le Bora Bora by Pearl Resorts');
+    expect(kept).toHaveLength(17);
+  });
+
+  it('still drops a genuine outlier inside a large tier (the Positano case)', () => {
+    // Real: "La Terrazza del Sole a Positano", 0-star, $6466.42/night against
+    // a $464.29 tier median — 13.93x, and 5.8x the next dearest row in its own
+    // tier. The absolute star guard exempts it for being 0-star, so this is
+    // the only thing that catches it.
+    const tier = [
+      210, 265, 310, 355, 390, 420, 450, 464, 470, 495, 520, 560, 610, 680, 740, 820, 900, 1115,
+    ].map((p, i) => hotel(`Positano ${i + 1}`, p, 0));
+    const outlier = hotel('La Terrazza del Sole a Positano', 6466.42, 0);
+
+    const kept = dropPriceOutliers([...tier, outlier], 'Positano').map((h) => h.name);
+
+    expect(kept).not.toContain('La Terrazza del Sole a Positano');
+    expect(kept).toHaveLength(18);
+  });
+
+  it('judges a hotel against its own tier, not a cheaper one', () => {
+    // Same price, different stars: the 5-star is ordinary for its tier while
+    // the 0-star is 10x its own. A global median could not tell them apart.
+    const budget = [100, 110, 120, 130].map((p, i) => hotel(`Budget ${i}`, p, 0));
+    const luxury = [900, 950, 1000, 1100].map((p, i) => hotel(`Luxury ${i}`, p, 5));
+    const odd = hotel('Suspicious guesthouse', 1200, 0);
+    const fine = hotel('Expensive but normal suite', 1200, 5);
+
+    const kept = dropPriceOutliers([...budget, ...luxury, odd, fine], 'Mixed').map((h) => h.name);
+
+    expect(kept).toContain('Expensive but normal suite');
+    expect(kept).not.toContain('Suspicious guesthouse');
+  });
+
+  it('leaves a tier alone when it is too thin to have a median', () => {
+    // Two 5-star rooms at wildly different prices: with only two of them there
+    // is nothing to compare against, so neither is touched.
+    const budget = [100, 110, 120, 130].map((p, i) => hotel(`Budget ${i}`, p, 0));
+    const pair = [hotel('Suite A', 400, 5), hotel('Suite B', 4000, 5)];
+
+    const kept = dropPriceOutliers([...budget, ...pair], 'Thin').map((h) => h.name);
+
+    expect(kept).toContain('Suite B');
+    expect(kept).toHaveLength(6);
+  });
+
+  it('filters one tier while leaving another unfiltered in the same search', () => {
+    const big = [100, 105, 110, 115].map((p, i) => hotel(`Big ${i}`, p, 2));
+    const bigOutlier = hotel('Big outlier', 900, 2);
+    const small = [hotel('Small A', 300, 4), hotel('Small B', 3000, 4)];
+
+    const kept = dropPriceOutliers([...big, bigOutlier, ...small], 'Split').map((h) => h.name);
+
+    expect(kept).not.toContain('Big outlier');
+    expect(kept).toContain('Small B');
+  });
+
+  it('treats a missing star rating as its own tier rather than crashing', () => {
+    const rows = [
+      { name: 'No stars A', rating: 8, pricePerNight: 100, price: 300, currency: 'USD' },
+      { name: 'No stars B', rating: 8, pricePerNight: 110, price: 330, currency: 'USD' },
+      { name: 'No stars C', rating: 8, pricePerNight: 120, price: 360, currency: 'USD' },
+      { name: 'No stars D', rating: 8, pricePerNight: 130, price: 390, currency: 'USD' },
+      { name: 'No stars outlier', rating: 8, pricePerNight: 2000, price: 6000, currency: 'USD' },
+    ] as any[];
+
+    const kept = dropPriceOutliers(rows, 'Unrated').map((h) => h.name);
+    expect(kept).not.toContain('No stars outlier');
+    expect(kept).toHaveLength(4);
+  });
+});
