@@ -275,7 +275,7 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
     // inventing a dollar figure. Relabelling the raw amount 'USD' would
     // instead let it win the cheapest comparison.
     const { convertToUsd } = await import('./currency');
-    return await Promise.all(
+    const priced = await Promise.all(
       mapped.map(async (t) => {
         // No USD short-circuit: convertToUsd decides, and returns null for a
         // blank or malformed code rather than trusting the number.
@@ -292,6 +292,21 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
         return { ...t, pricePerPerson: usd, currency: 'USD' };
       }),
     );
+
+    // Trains do not drop an unconvertible fare, they null it — so the failure
+    // shows up as a route where every option is "limited coverage" rather than
+    // as an empty list, which is quieter still. Say it once for the route.
+    const unpriced = priced.filter((t) => t.pricePerPerson == null).length;
+    if (unpriced > 0 && unpriced === priced.length) {
+      logger.warn('Every train fare on this route is unpriced', {
+        origin,
+        destination,
+        offers: priced.length,
+        currencies: [...new Set(mapped.map((t) => t.currency || '(blank)'))],
+      });
+    }
+
+    return priced;
   } catch (err: any) {
     logger.warn('DB train search failed (non-fatal)', { message: err?.message, origin, destination });
     return [];

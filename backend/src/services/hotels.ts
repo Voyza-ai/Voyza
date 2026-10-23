@@ -746,6 +746,15 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     // label poisons the total AND makes maxPrice throw away the whole city.
     // Dropping is the only honest option until the UI can render a foreign
     // currency.
+    // BEFORE conversion, so a broken price is attributed to the right cause.
+    // `convertToUsd` returns null for a non-finite amount as well as for an
+    // unknown currency, and the caller below cannot tell those apart — so a
+    // row with an unparseable `min_total_price` was being logged as "no USD
+    // rate for any row" against a currency of USD, which is exactly the
+    // investigation this logging is supposed to save. A price that is not a
+    // number is not a currency problem, whatever its label.
+    hotels = dropUnusablePrices(hotels, city);
+
     const { convertToUsd } = await import('./currency');
     const converted = await Promise.all(
       hotels.map(async (h): Promise<HotelResult | null> => {
@@ -807,7 +816,21 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     hotels = flagSuspectPrices(hotels, city);
 
     if (maxPrice !== undefined) {
+      const beforeCap = hotels.length;
       hotels = hotels.filter((h) => h.price <= maxPrice);
+
+      // The one remaining filter that could clear a city in silence. It is the
+      // user's own budget so an empty result is a legitimate answer, but it
+      // must be distinguishable from the city having no hotels at all —
+      // otherwise "no hotels in Florence" and "no hotels under your cap" look
+      // the same in the logs and to anyone debugging a blank city.
+      if (hotels.length === 0 && beforeCap > 0) {
+        logger.warn('Hotel search emptied — every row was over the price cap', {
+          city,
+          maxPrice,
+          rows: beforeCap,
+        });
+      }
     }
 
     // A search this thin disables every relative rule in `flagSuspectPrices`

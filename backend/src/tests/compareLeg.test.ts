@@ -233,3 +233,88 @@ describe('compareLeg', () => {
     expect(result.recommendation).toBe('unavailable');
   });
 });
+
+/**
+ * An unpriced train (no fare coverage for that operator) carries
+ * `price: null`. Two guards here read `trainPrice !== null` AFTER `?? Infinity`
+ * had already replaced the null, so they could never be false — they looked
+ * like null checks and did nothing.
+ */
+describe('an unpriced train is not compared on price', () => {
+  const unpricedTrain = {
+    id: 't1',
+    price: null,
+    durationMinutes: 180,
+    operator: 'B',
+    trainType: 'IC',
+    departure: '',
+    arrival: '',
+    currency: 'EUR',
+    bookingUrl: '',
+    limitedCoverage: true,
+  };
+  const flight = {
+    id: 'f1',
+    price: 300,
+    durationMinutes: 90,
+    carrier: 'A',
+    carrierCode: 'A',
+    departure: '',
+    arrival: '',
+    currency: 'USD',
+    stops: 0,
+    bookingUrl: '',
+    raw: {},
+  };
+
+  it('reports no price difference rather than the whole flight fare', async () => {
+    // `Math.abs((flight ?? 0) - (train ?? 0))` made the difference $300 — as
+    // though the train were free and the flight cost $300 more than it.
+    searchFlights.mockResolvedValue([flight]);
+    searchTrains.mockResolvedValue([unpricedTrain as any]);
+
+    const result = await compareLeg({
+      origin: 'Rome',
+      destination: 'Florence',
+      date: '2026-06-01',
+      travelers: 1,
+    });
+
+    expect(result.priceDifference).toBe(0);
+    expect(result.cheapest).not.toBe('train');
+  });
+
+  it('does not call an unpriced train the cheapest option', async () => {
+    searchFlights.mockResolvedValue([flight]);
+    searchTrains.mockResolvedValue([unpricedTrain as any]);
+
+    const result = await compareLeg({
+      origin: 'Rome',
+      destination: 'Florence',
+      date: '2026-06-01',
+      travelers: 1,
+    });
+
+    expect(result.cheapest).toBe('flight');
+    expect(result.recommendation).toBe('flight');
+  });
+
+  it('still offers the train when it is the only option', async () => {
+    // No flight at all. The train is the only way to make the leg, so it is
+    // still recommended — `limitedCoverage` is what tells callers the fare is
+    // unknown, and they must not turn that into a $0 leg.
+    searchFlights.mockResolvedValue([]);
+    searchTrains.mockResolvedValue([unpricedTrain as any]);
+
+    const result = await compareLeg({
+      origin: 'Rome',
+      destination: 'Florence',
+      date: '2026-06-01',
+      travelers: 1,
+    });
+
+    expect(result.recommendation).toBe('train');
+    expect(result.trainOption?.limitedCoverage).toBe(true);
+    expect(result.priceDifference).toBe(0);
+  });
+});

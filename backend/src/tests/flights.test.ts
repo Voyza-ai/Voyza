@@ -485,3 +485,98 @@ describe('retryDelayFromHeaders', () => {
     expect(retryDelayFromHeaders({})).toBeNull();
   });
 });
+
+/**
+ * A flight price floor, for the same reason hotels have one — except the
+ * consequence here is worse. `total_amount` absent becomes parseFloat('0'),
+ * compareLeg picks the CHEAPEST offer, so a $0 fare wins its leg outright,
+ * lands in the trip total, and is written to leg_price_cache for two hours.
+ * One bad response poisons the route for everyone until it expires.
+ */
+describe('offers whose price cannot be real are dropped', () => {
+  const offerWith = (over: Record<string, unknown>) => ({
+    id: 'offer_x',
+    total_amount: '199.99',
+    total_currency: 'USD',
+    slices: [
+      {
+        duration: 'PT2H30M',
+        segments: [
+          segment({
+            departingAt: '2026-06-01T08:00:00',
+            arrivingAt: '2026-06-01T10:30:00',
+            originIata: 'FCO',
+            originTimeZone: 'Europe/Rome',
+            destinationIata: 'FLR',
+            destinationTimeZone: 'Europe/Rome',
+            duration: 'PT2H30M',
+          }),
+        ],
+      },
+    ],
+    ...over,
+  });
+
+  // A unique date per call: searchFlights memoises by search params for 10
+  // minutes (cachedSearch), so reusing one date would serve the first test's
+  // offers to every later test in this block.
+  let n = 0;
+  const search = () =>
+    searchFlights({
+      origin: 'FCO',
+      destination: 'FLR',
+      date: `2026-07-${String(++n).padStart(2, '0')}`,
+      travelers: 1,
+    });
+
+  it('drops an offer with no total_amount at all', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValue({
+      data: { offers: [offerWith({ total_amount: undefined })] },
+    });
+
+    expect(await search()).toEqual([]);
+  });
+
+  it('drops a zero fare', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValue({
+      data: { offers: [offerWith({ total_amount: '0' })] },
+    });
+
+    expect(await search()).toEqual([]);
+  });
+
+  it('drops an unparseable fare', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValue({
+      data: { offers: [offerWith({ total_amount: 'free' })] },
+    });
+
+    expect(await search()).toEqual([]);
+  });
+
+  it('keeps the real offer and drops only the broken one', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValue({
+      data: {
+        offers: [
+          offerWith({ id: 'broken', total_amount: '0' }),
+          offerWith({ id: 'real', total_amount: '89.50' }),
+        ],
+      },
+    });
+
+    const offers = await search();
+    expect(offers).toHaveLength(1);
+    expect(offers[0].price).toBe(89.5);
+  });
+
+  it('keeps a genuinely cheap fare', async () => {
+    // The floor is $1, orders of magnitude below any bookable fare once taxes
+    // are counted, so it binds on certainty rather than judgement.
+    mockDuffel.offerRequests.create.mockResolvedValue({
+      data: { offers: [offerWith({ total_amount: '14.99' })] },
+    });
+
+    const offers = await search();
+    expect(offers).toHaveLength(1);
+    expect(offers[0].price).toBe(14.99);
+  });
+});
