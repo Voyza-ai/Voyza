@@ -32,49 +32,60 @@ let cache: RateCache | null = null;
 let inflightFetch: Promise<RateCache> | null = null;
 
 /**
- * Floating rates. Last-resort values in case the API is down — approximate,
- * Apr 2026, and internally consistent with each other at that vintage (the
- * European block all sits around EUR/USD 1.087). They are a stand-in for
- * what the live table WOULD have said, not an economic claim: where a country
- * runs an official rate alongside a divergent street rate, the number here is
- * the official one, the same as the API's.
+ * Floating rates. Last-resort values in case the API is down.
  *
- * Pegged currencies do NOT belong here — see FALLBACK_PEGS below.
+ * Taken verbatim from open.er-api.com/v6/latest/USD on 2026-10-23, rounded to
+ * four significant figures, so they are internally consistent with each other
+ * at that one vintage (EUR/USD 1.122). They are a stand-in for what the live
+ * table WOULD have said, not an economic claim: where a country runs an
+ * official rate alongside a divergent street rate, the number here is whatever
+ * the API quotes, which is the same thing the live path would have used.
+ *
+ * THESE DRIFT. The previous set was labelled Apr 2026 and by Oct 2026 twenty of
+ * them were more than 10% from live, the worst three being ARS at -41%, TRY at
+ * -36% and ILS at +19%. A stale rate is worse than a missing currency: a
+ * missing one drops the row visibly, a stale one quotes a confidently wrong
+ * price. Re-read the feed and replace this block wholesale rather than patching
+ * individual numbers from memory, and update the date above when you do.
+ *
+ * Pegged currencies do NOT belong here — see FALLBACK_PEGS below. AED is the
+ * one exception: it is a hard peg at 3.6725, but it predates that split and the
+ * value above is exact, so moving it would be churn for its own sake.
  */
 const FALLBACK_FLOATS: Record<string, number> = {
   USD: 1,
-  EUR: 0.92,
-  GBP: 0.78,
-  JPY: 150,
-  CNY: 7.2,
-  KRW: 1350,
-  INR: 83,
-  CAD: 1.36,
-  AUD: 1.52,
-  CHF: 0.88,
-  SEK: 10.5,
-  NOK: 10.8,
-  DKK: 6.9,
-  MXN: 17,
-  BRL: 5.1,
-  ZAR: 18.5,
-  THB: 36,
-  SGD: 1.35,
-  HKD: 7.8,
-  NZD: 1.65,
-  TRY: 32,
-  AED: 3.67,
-  RUB: 92,
-  PLN: 4.0,
-  CZK: 23,
-  HUF: 360,
-  IDR: 15800,
-  PHP: 56,
-  VND: 25000,
-  MYR: 4.7,
-  ILS: 3.7,
-  ARS: 900,
-  EGP: 49,
+  EUR: 0.8915,
+  GBP: 0.7467,
+  JPY: 156.9,
+  CNY: 6.6882,
+  KRW: 1325,
+  INR: 94.9,
+  CAD: 1.4014,
+  AUD: 1.4253,
+  CHF: 0.8213,
+  SEK: 9.9102,
+  NOK: 9.344,
+  DKK: 6.6678,
+  MXN: 18.73,
+  BRL: 5.0428,
+  ZAR: 16.5,
+  THB: 33.73,
+  SGD: 1.2773,
+  HKD: 7.8372,
+  NZD: 1.7596,
+  TRY: 49.68,
+  AED: 3.6725,
+  RUB: 81.52,
+  PLN: 3.8993,
+  CZK: 21.63,
+  HUF: 326.2,
+  IDR: 18082,
+  PHP: 63.53,
+  VND: 25831,
+  MYR: 4.083,
+  ILS: 3.1107,
+  ARS: 1528,
+  EGP: 55.22,
 
   // ── Added after auditing the table against the destinations this app can
   // actually reach. Hotel search resolves ANY city name through Booking's
@@ -84,38 +95,42 @@ const FALLBACK_FLOATS: Record<string, number> = {
   // Same standard as the block above: approximate, not exact.
 
   // Europe — Browse presets and both city tables.
-  ISK: 136, // Reykjavik ("Reykjavik Adventure Weekend" preset)
-  UAH: 41.5, // Kyiv
-  RON: 4.65, // Bucharest (managed, ~5.05 per EUR)
-  RSD: 108, // Belgrade (managed, ~117 per EUR)
+  ISK: 121.4, // Reykjavik ("Reykjavik Adventure Weekend" preset)
+  UAH: 45.07, // Kyiv
+  RON: 4.7649, // Bucharest (managed, ~5.05 per EUR)
+  RSD: 104.8, // Belgrade (managed, ~117 per EUR)
 
   // Latin America — the "South America Grand Tour" preset plus worldCities.
-  PEN: 3.75, // Lima, Cusco, Machu Picchu
-  COP: 4000, // Bogotá, Medellín, Cartagena
-  CLP: 950, // Santiago
-  UYU: 40, // Montevideo
-  BOB: 6.9, // La Paz — official rate; the street rate is far weaker
-  CRC: 510, // San José
+  PEN: 3.4409, // Lima, Cusco, Machu Picchu
+  COP: 3184, // Bogotá, Medellín, Cartagena
+  CLP: 981.1, // Santiago
+  UYU: 40.17, // Montevideo
+  // La Paz. Bolivia ran an official ~6.9 for years with a far weaker street
+  // rate; the feed now quotes 11.74, so the gap has moved into the official
+  // number. Taking the feed is the point — this table's job is to say what the
+  // live path would have said, not to pick a side.
+  BOB: 11.74,
+  CRC: 456.1, // San José
   // Two Caribbean floats, alongside the pegged ones further down: both are
   // mass-market beach destinations the planner suggests unprompted.
-  DOP: 62, // Punta Cana, Santo Domingo
-  JMD: 157, // Montego Bay, Kingston
+  DOP: 61.42, // Punta Cana, Santo Domingo
+  JMD: 158.8, // Montego Bay, Kingston
 
   // Africa & Middle East.
-  MAD: 9.9, // Marrakech, Casablanca, Fez (basket-managed, ~10.8 per EUR)
-  TND: 3.1, // Tunis
-  KES: 129, // Nairobi
-  TZS: 2600, // Zanzibar
-  NGN: 1550, // Lagos — volatile; the widest band of anything here
+  MAD: 9.8106, // Marrakech, Casablanca, Fez (basket-managed, ~10.8 per EUR)
+  TND: 2.9987, // Tunis
+  KES: 129.9, // Nairobi
+  TZS: 2645, // Zanzibar
+  NGN: 1325, // Lagos — volatile; the widest band of anything here
 
   // Asia-Pacific.
-  TWD: 31.5, // Taipei
-  LKR: 295, // Colombo
-  MVR: 15.4, // Malé — band 12.85–15.42, sits at the ceiling in practice
-  UZS: 12600, // Tashkent, Samarkand — crawling depreciation
-  KHR: 4050, // Siem Reap, Phnom Penh ("Southeast Asia Adventure" preset)
-  LAK: 21700, // Luang Prabang
-  FJD: 2.25, // Nadi
+  TWD: 32.59, // Taipei
+  LKR: 332, // Colombo
+  MVR: 15.45, // Malé — band 12.85–15.42, sits at the ceiling in practice
+  UZS: 11901, // Tashkent, Samarkand — crawling depreciation
+  KHR: 4060, // Siem Reap, Phnom Penh ("Southeast Asia Adventure" preset)
+  LAK: 22358, // Luang Prabang
+  FJD: 2.2511, // Nadi
 };
 
 /**

@@ -67,6 +67,16 @@ afterEach(() => {
   errSpy.mockRestore();
 });
 
+/**
+ * What `convertToUsd` must return for EUR while the fallback table is active,
+ * computed the same way the implementation does (round to 2dp). Deriving it
+ * keeps these tests pinned to the fallback ENGAGING rather than to a rate that
+ * is refreshed whenever the table drifts.
+ */
+const eurFromTable = (amount: number) =>
+  Math.round((amount / loadCurrency().FALLBACK_RATES.EUR) * 100) / 100;
+
+
 describe('FALLBACK_RATES coverage', () => {
   it('converts every currency in the table to a finite positive number', async () => {
     fxDown();
@@ -255,8 +265,11 @@ describe('fallback engagement and cache TTL', () => {
     fxDown();
     const { convertToUsd } = loadCurrency();
 
-    // 0.92 EUR to the dollar, from the table.
-    expect(await convertToUsd(100, 'EUR')).toBe(108.7);
+    // Derived from the table rather than hardcoded: these tests pin that the
+    // fallback ENGAGED, not what today's EUR rate happens to be. A literal
+    // here breaks every time the rates are refreshed, which is a false
+    // alarm on a chore that should stay cheap.
+    expect(await convertToUsd(100, 'EUR')).toBe(eurFromTable(100));
 
     const failures = warnings.filter(
       (w) => w.message === 'Currency API failed, using fallback rates',
@@ -270,14 +283,14 @@ describe('fallback engagement and cache TTL', () => {
   it('engages on a non-200 and on a non-success body too', async () => {
     mockFetch.mockResolvedValueOnce({ ok: false, status: 503, json: () => Promise.resolve({}) });
     const down = loadCurrency();
-    expect(await down.convertToUsd(100, 'EUR')).toBe(108.7);
+    expect(await down.convertToUsd(100, 'EUR')).toBe(eurFromTable(100));
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ result: 'error', 'error-type': 'quota-reached' }),
     });
     const quota = loadCurrency();
-    expect(await quota.convertToUsd(100, 'EUR')).toBe(108.7);
+    expect(await quota.convertToUsd(100, 'EUR')).toBe(eurFromTable(100));
   });
 
   it('reuses the fallback for 5 minutes, then retries', async () => {
@@ -290,7 +303,7 @@ describe('fallback engagement and cache TTL', () => {
 
     // Inside the retry window: no second call.
     atTime(t0 + 4 * 60 * 1000);
-    expect(await convertToUsd(100, 'EUR')).toBe(108.7);
+    expect(await convertToUsd(100, 'EUR')).toBe(eurFromTable(100));
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     // Past it: retry, and a recovered API takes over immediately.
