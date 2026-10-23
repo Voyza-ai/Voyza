@@ -71,7 +71,7 @@ Of the two items this section used to list as remaining:
 
 ## 📦 Previously shipped (ordered recent → older)
 
-### Map tab rebuild (on `feat/map-redesign`, not yet merged)
+### Map tab rebuild (merged to `voyza_main`)
 
 Five phases, all landed. The organising idea is a **drill-down**: the map
 shows the level of detail the camera is at, and the panel always agrees with
@@ -343,6 +343,75 @@ Decisions needed before building:
 Separately, and not map-specific: the navbar overlaps itself at 375px —
 "BlueMurr" collides with "Flowchart", and "Schedule" collides with "Log in".
 
+### Feature: Points & miles — "your points could cover this"
+
+Tell a traveller what their existing points are worth against the trip in front
+of them: *you have 60k Amex MR, that covers the Rome leg*, *Delta is running a
+transfer bonus*, *combine these two balances and the whole outbound is free*.
+
+A real differentiator — nobody comparing cash fares does this well — but the
+phases below are ordered by **what data actually exists**, not by what sounds
+best, because the obvious version of this feature depends on data we cannot get
+today.
+
+**The blocker, stated up front.** Award availability is not in Duffel. Duffel
+sells cash fares; award inventory is a different system and the airlines do not
+expose it publicly. Delta, United and JetBlue have also moved to dynamic award
+pricing with no published award chart, so "60k gets you this seat" cannot be
+derived from a table either. Any phase that quotes a real award price needs a
+dedicated award-availability source (seats.aero is the usual answer — its API
+terms, coverage and cost all need checking before committing). Phase 1 is
+designed to be useful **without** that, so this is not blocked on it.
+
+**Do NOT store loyalty credentials.** Phase 1 takes balances the user types in.
+Scraping or storing airline/card logins to read balances is a serious liability
+and is somebody else's business model (AwardWallet, MaxRewards) — if automatic
+balances are wanted, integrate one of them rather than holding the credentials.
+
+#### Phase 1 — manual balances + what they're worth (no new provider needed)
+- [ ] `user_profiles.preferences` (or a `loyalty_balances` table) holds
+      `{ program, balance, updated_at }` rows the user enters by hand
+- [ ] Program list with transfer partners and ratios — the flexible currencies
+      are the valuable part (Amex MR, Chase UR, Citi TYP, Capital One, Bilt),
+      since one balance reaches many airlines
+- [ ] Cents-per-point valuation table, **editable and visible**, not hidden in
+      code. This is subjective and travellers disagree about it; showing the
+      assumption is the difference between a useful estimate and a number
+      nobody trusts
+- [ ] Surface on the results page: "your 60k Amex MR ≈ $720 toward this trip"
+      against the cash total we already compute
+- [ ] Decide what "cheapest" means once points exist. The optimizer ranks on
+      cash today; 60k points + $50 versus $400 cash is not a comparison it can
+      make without a valuation, and the answer differs per traveller. Likely
+      answer: keep ranking on cash and show points as an overlay, rather than
+      letting a subjective rate reorder the route
+
+#### Phase 2 — real award prices (needs the availability source)
+- [ ] Pick and integrate an award-availability provider; confirm coverage for
+      the European corridors this product actually plans
+- [ ] Per-leg award option beside the cash option in the Connector card, same
+      shape as the existing flight/train comparison
+- [ ] Combine balances across programs for one itinerary — the "combine with
+      your other miles" case — including transfer ratios and transfer time
+      (some transfers take days, which matters for a trip booked next week)
+- [ ] Show the cash-plus-fees side of an award booking; "free" flights carry
+      taxes and carrier surcharges, and on some routes those are substantial
+
+#### Phase 3 — deals and transfer bonuses
+- [ ] Transfer bonuses and award sales are published as promotions, not APIs.
+      Decide curated-and-dated entries versus scraping the usual blogs —
+      curation is more work per week but cannot silently go stale or wrong
+- [ ] Alert only when it is actionable: the traveller holds the source
+      currency AND the bonus helps a trip they are actually planning. A generic
+      "Delta bonus!" banner is noise and trains people to ignore the feature
+- [ ] Expiry handling — a stale promotion is worse than none, so every entry
+      needs an end date and must disappear on its own
+
+**Open questions to settle in Phase 1:** whether points are a planning input
+(filter: "show me where my points can take me") or only an output ("here's what
+they're worth on this trip"). The first is a much bigger feature and a
+different product, so decide deliberately rather than drifting into it.
+
 ### Feature: Taste-based recommendations (map suggestions → personalized)
 
 The map's "Also worth seeing" layer today shows *general* picks for a city.
@@ -604,7 +673,7 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 - [ ] Activity duration clipping: 4h activities render as 2h blocks because morning slot caps at 12:00 (full duration in notes only)
 - [ ] Intent picker animation timing on rapid interactions (currently fixed via StrictMode refs, watch for regressions)
 - [ ] Canvas → Back → Flights gone — partially fixed by DB persistence work (pending full verification)
-- [ ] Canvas save silently drops transports — FIXED in feat/db-persistence
+- [x] ~~Canvas save silently drops transports~~ — FIXED in feat/db-persistence
 - [ ] Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice). No back button, no edit-previous-message. Partial workaround exists via city picker's "+ another city" but it's awkward. Full fix = task 4 (planning-phase conversational revision).
 - [ ] Origin-location lookup misses non-city inputs (states, regions, neighborhoods). User typing "from New Jersey" / "Newark" / "Long Island" / "Connecticut" → AI returns the literal string → `getOriginAirports()` lookup misses → empty `originAirports` → home flight search never runs → schedule view shows no transport blocks for day 1. Already partially fixed for "<City> City" suffix variants (commit `0f24996`). Need: state-name aliases (NJ → EWR or NYC metro, CT → BDL, etc.), region aliases (Long Island → JFK/LGA, Bay Area is already in), and a smarter normalization layer at the AI-parse step that resolves vague locations to canonical metro keys before the lookup table is queried. Affects both `frontend/lib/originAirports.ts` and `backend/src/data/originAirports.ts`.
 - [x] ~~AI chat: "are there more flights?" returns an answer-only response instead of showing options~~ — FIXED in 1704365 (leg_refresh + `show_transport_options` tool + clarifying "which leg?" routing).
