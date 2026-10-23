@@ -16,17 +16,66 @@ export type HotelResult = {
   amenities: string[];
 };
 
+/**
+ * How long `booking_locations` is allowed to hold up a hotel search.
+ *
+ * That table is only ever a cache: a miss costs one extra Booking.com
+ * locations call, which the code below already knows how to make. So waiting
+ * on the cache is worth it only while it stays cheaper than its own fallback —
+ * a slow cache is strictly worse than a missing one.
+ *
+ * 1.5s is roughly 20x a healthy indexed single-row read, so it should never
+ * fire against a working database. It is here to bound a Supabase that hangs
+ * rather than one that refuses.
+ */
+const LOCATION_CACHE_TIMEOUT_MS = 1500;
+
+/**
+ * PostgREST's "no rows matched" code from `.single()`.
+ *
+ * This is an ordinary cache miss on a city we haven't looked up yet — the
+ * common case on a cold table, and not worth a log line.
+ */
+const PGRST_NO_ROWS = 'PGRST116';
+
 async function getDestinationId(
   cityName: string,
 ): Promise<{ dest_id: string; dest_type: string }> {
   const supabase = getSupabase();
 
-  // Check cache
-  const { data: cached } = await supabase
+  // Check cache.
+  //
+  // `.retry(false)` is the important part. postgrest-js retries a failed GET
+  // three times with 1s, 2s and 4s of backoff sleep in between; measured
+  // against an unreachable Supabase that put ~7.0s of pure sleep on every
+  // hotel search before the code fell through to the API below. The DNS
+  // failures themselves cost ~80ms of it — the rest was the backoff.
+  //
+  // Retrying is simply the wrong trade for a cache read: the fallback is one
+  // HTTP call away, so three rounds of backoff buy nothing we don't already
+  // have cheaper. The timeout then bounds the case retries don't cover, a
+  // Supabase that accepts the connection and never answers.
+  const { data: cached, error: cacheReadError } = await supabase
     .from('booking_locations')
     .select('dest_id, dest_type')
     .eq('city_name', cityName.toLowerCase())
+    .retry(false)
+    .abortSignal(AbortSignal.timeout(LOCATION_CACHE_TIMEOUT_MS))
     .single();
+
+  // A failed read is not fatal — we fall through to the locations API and the
+  // search still returns the right answer. But it must not be SILENT: the old
+  // code destructured only `data`, so a hard Supabase outage was
+  // indistinguishable from a cold cache and showed up as nothing but a search
+  // that had become mysteriously slow.
+  if (cacheReadError && cacheReadError.code !== PGRST_NO_ROWS) {
+    logger.warn('booking_locations cache read failed — falling back to the locations API', {
+      city: cityName,
+      code: cacheReadError.code || undefined,
+      error: cacheReadError.message,
+      timeoutMs: LOCATION_CACHE_TIMEOUT_MS,
+    });
+  }
 
   if (cached?.dest_id) {
     return { dest_id: cached.dest_id, dest_type: cached.dest_type ?? 'city' };
@@ -57,12 +106,29 @@ async function getDestinationId(
     throw new Error(`No destination found for "${cityName}"`);
   }
 
-  // Cache
-  await supabase.from('booking_locations').upsert({
-    city_name: cityName.toLowerCase(),
-    dest_id: String(city.dest_id),
-    dest_type: city.dest_type,
-  });
+  // Cache. Bounded for the same reason as the read above: this write is the
+  // last thing standing between the caller and their results, and a Supabase
+  // that hangs must not hold them. Losing the write only means the next search
+  // for this city misses the cache too.
+  //
+  // No `.retry(false)` needed here — postgrest only retries idempotent methods
+  // and this is a POST, so it was never on the retry ladder.
+  const { error: cacheWriteError } = await supabase
+    .from('booking_locations')
+    .upsert({
+      city_name: cityName.toLowerCase(),
+      dest_id: String(city.dest_id),
+      dest_type: city.dest_type,
+    })
+    .abortSignal(AbortSignal.timeout(LOCATION_CACHE_TIMEOUT_MS));
+
+  if (cacheWriteError) {
+    logger.warn('booking_locations cache write failed — this city will miss again', {
+      city: cityName,
+      code: cacheWriteError.code || undefined,
+      error: cacheWriteError.message,
+    });
+  }
 
   return { dest_id: String(city.dest_id), dest_type: city.dest_type };
 }
@@ -76,7 +142,7 @@ type SearchHotelsParams = {
   maxPrice?: number;
 };
 
-/** A hotel priced above this multiple of the set's median is treated as junk. */
+/** A hotel priced above this multiple of its OWN STAR TIER's median is junk. */
 const OUTLIER_MEDIAN_MULTIPLE = 5;
 
 /**
@@ -89,7 +155,14 @@ const OUTLIER_MEDIAN_MULTIPLE = 5;
  */
 const BUDGET_STARS_PRICE_CEILING = 1000;
 
-/** Below this many results the median isn't meaningful, so don't filter on it. */
+/**
+ * Below this many hotels IN A STAR TIER the median isn't meaningful, so that
+ * tier isn't filtered at all.
+ *
+ * This is what spares the luxury end of a thin market. A Bora Bora search
+ * returns three overwater resorts beside fourteen local lodges; the resorts
+ * land in tiers of one and three, fall under this floor, and are left alone.
+ */
 const MIN_RESULTS_TO_FILTER = 4;
 
 /**
@@ -134,9 +207,16 @@ export function dropImplausiblePrices(hotels: HotelResult[], city: string): Hote
   return kept.length > 0 ? kept : hotels;
 }
 
+/** Median of a non-empty list of positive numbers. */
+function medianOf(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 /**
- * Drop provider rows whose per-night price is wildly out of line with the rest
- * of the same search.
+ * Drop provider rows whose per-night price is wildly out of line with OTHER
+ * HOTELS OF THE SAME STAR RATING in the same search.
  *
  * Measured in production: a Florence search (2027-04-10 → 04-13, 2 adults)
  * returned "Hotel Aldobrandini" at $5383.47/night against a $267 median — and
@@ -147,26 +227,54 @@ export function dropImplausiblePrices(hotels: HotelResult[], city: string): Hote
  * not our arithmetic: the provider is quoting for a different occupancy or
  * room count than we asked for. We can't fix their data, only refuse it.
  *
+ * WHY PER STAR TIER, not per search. This compared against the whole set's
+ * median until a sweep of 58 real production searches showed that losing
+ * badly: 1 true positive against 4 legitimate hotels deleted. A Bora Bora
+ * search returns three overwater resorts beside fourteen local lodges at
+ * $62-$266. The combined median lands at $172, the ceiling at $861, and the
+ * guard removed all three resorts — the exact properties somebody searching
+ * Bora Bora is looking for — leaving the guesthouses. Mykonos lost Cavo Tagoo
+ * by $16, about 1% over the line.
+ *
+ * A bimodal market defeats any single global multiple, because the budget tail
+ * drags the median below everything at the top. Comparing a hotel only against
+ * its own tier removes that: either the tier is large enough to have a
+ * meaningful median of its own, or it is too small to filter and is left alone.
+ * Re-run over the same 832 captured rows, this drops exactly one — the genuine
+ * outlier, a 0-star Positano listing at $6466.42/night against a $464 tier
+ * median, 13.93x. The nearest legitimate row sits at 4.76x, so 5x has real
+ * headroom rather than being tuned to the edge of the data.
+ *
  * Deliberately a median rather than a mean — a mean is dragged upward by the
- * very outlier we're trying to catch. An expensive city just has an expensive
- * median, so the multiple travels without needing per-city thresholds.
+ * very outlier we're trying to catch.
  */
 export function dropPriceOutliers(hotels: HotelResult[], city: string): HotelResult[] {
-  if (hotels.length < MIN_RESULTS_TO_FILTER) return hotels;
+  const tiers = new Map<number, HotelResult[]>();
+  for (const h of hotels) {
+    if (!Number.isFinite(h.pricePerNight) || h.pricePerNight <= 0) continue;
+    const stars = Number.isFinite(h.stars) ? h.stars : 0;
+    const tier = tiers.get(stars);
+    if (tier) tier.push(h);
+    else tiers.set(stars, [h]);
+  }
 
-  const prices = hotels
-    .map((h) => h.pricePerNight)
-    .filter((p) => Number.isFinite(p) && p > 0)
-    .sort((a, b) => a - b);
-  if (prices.length < MIN_RESULTS_TO_FILTER) return hotels;
+  const ceilings = new Map<number, number>();
+  for (const [stars, tier] of tiers) {
+    // Too thin to say anything about: the one or two luxury rooms in an
+    // otherwise budget market land here, and are exempt by construction.
+    if (tier.length < MIN_RESULTS_TO_FILTER) continue;
+    const median = medianOf(tier.map((h) => h.pricePerNight));
+    if (!Number.isFinite(median) || median <= 0) continue;
+    ceilings.set(stars, median * OUTLIER_MEDIAN_MULTIPLE);
+  }
+  if (ceilings.size === 0) return hotels;
 
-  const mid = Math.floor(prices.length / 2);
-  const median =
-    prices.length % 2 === 1 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
-  if (!Number.isFinite(median) || median <= 0) return hotels;
-
-  const ceiling = median * OUTLIER_MEDIAN_MULTIPLE;
-  const kept = hotels.filter((h) => !(Number.isFinite(h.pricePerNight) && h.pricePerNight > ceiling));
+  const kept = hotels.filter((h) => {
+    const stars = Number.isFinite(h.stars) ? h.stars : 0;
+    const ceiling = ceilings.get(stars);
+    if (ceiling === undefined) return true;
+    return !(Number.isFinite(h.pricePerNight) && h.pricePerNight > ceiling);
+  });
 
   // If everything looks like an outlier, the median is the thing that's wrong.
   // Returning nothing would silently empty the city, which is worse than
@@ -175,12 +283,14 @@ export function dropPriceOutliers(hotels: HotelResult[], city: string): HotelRes
 
   for (const h of hotels) {
     if (!kept.includes(h)) {
-      logger.warn('Hotel dropped — price far above the median for this search', {
+      const stars = Number.isFinite(h.stars) ? h.stars : 0;
+      logger.warn('Hotel dropped — price far above others of its star rating', {
         city,
         hotel: h.name,
+        stars,
         pricePerNight: h.pricePerNight,
-        median,
-        ceiling,
+        tierCeiling: ceilings.get(stars),
+        tierSize: tiers.get(stars)?.length,
       });
     }
   }
