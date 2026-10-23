@@ -187,4 +187,77 @@ describe('searchHotels', () => {
     expect(hotels).toHaveLength(1);
     expect(hotels[0].name).toBe('Affordable Hotel');
   });
+
+  /**
+   * The real failure this was written from: Bora Bora returns hotels priced
+   * by the provider in XPF, XPF was missing from the FX fallback table, and
+   * so every row was dropped by the conversion step above — a city card with
+   * zero hotels whenever the FX API happened to be unreachable. The unit
+   * coverage lives in currency.test.ts; this is the caller, end to end, in
+   * the state the user actually hit.
+   */
+  it('keeps a page priced in XPF while the FX fallback is the active table', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      const u = String(url);
+      // The FX API is down — this is the whole premise of the test.
+      if (u.includes('open.er-api.com')) {
+        return Promise.reject(new Error('getaddrinfo ENOTFOUND open.er-api.com'));
+      }
+      if (u.includes('/locations')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([{ dest_id: '-860', dest_type: 'city' }]),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: [
+              {
+                hotel_id: 'bb1',
+                hotel_name: 'Le Bora Bora by Pearl Resorts',
+                // 3 nights at 200,000 XPF — the shape of a real overwater
+                // bungalow quote, in local currency.
+                min_total_price: '600000',
+                currency_code: 'XPF',
+                review_score: '9.1',
+                review_nr: '420',
+                class: '5',
+              },
+              {
+                hotel_id: 'bb2',
+                hotel_name: 'Village Temanuata',
+                min_total_price: '75000',
+                currency_code: 'XPF',
+                review_score: '8.2',
+                review_nr: '310',
+                class: '2',
+              },
+            ],
+          }),
+      });
+    });
+
+    const hotels = await searchHotels({
+      city: 'Bora Bora',
+      checkin: '2026-06-01',
+      checkout: '2026-06-04',
+      adults: 2,
+      rooms: 1,
+    });
+
+    // Both rows survive. Before XPF was in the table this was [].
+    expect(hotels).toHaveLength(2);
+    expect(hotels.map((h) => h.currency)).toEqual(['USD', 'USD']);
+
+    const resort = hotels.find((h) => h.name.startsWith('Le Bora Bora'))!;
+    expect(resort.pricePerNight).toBeGreaterThan(1_500);
+    expect(resort.pricePerNight).toBeLessThan(2_200);
+    expect(resort.price).toBeCloseTo(resort.pricePerNight * 3, 0);
+
+    const guesthouse = hotels.find((h) => h.name === 'Village Temanuata')!;
+    expect(guesthouse.pricePerNight).toBeGreaterThan(150);
+    expect(guesthouse.pricePerNight).toBeLessThan(350);
+  });
 });
