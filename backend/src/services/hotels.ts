@@ -16,17 +16,66 @@ export type HotelResult = {
   amenities: string[];
 };
 
+/**
+ * How long `booking_locations` is allowed to hold up a hotel search.
+ *
+ * That table is only ever a cache: a miss costs one extra Booking.com
+ * locations call, which the code below already knows how to make. So waiting
+ * on the cache is worth it only while it stays cheaper than its own fallback —
+ * a slow cache is strictly worse than a missing one.
+ *
+ * 1.5s is roughly 20x a healthy indexed single-row read, so it should never
+ * fire against a working database. It is here to bound a Supabase that hangs
+ * rather than one that refuses.
+ */
+const LOCATION_CACHE_TIMEOUT_MS = 1500;
+
+/**
+ * PostgREST's "no rows matched" code from `.single()`.
+ *
+ * This is an ordinary cache miss on a city we haven't looked up yet — the
+ * common case on a cold table, and not worth a log line.
+ */
+const PGRST_NO_ROWS = 'PGRST116';
+
 async function getDestinationId(
   cityName: string,
 ): Promise<{ dest_id: string; dest_type: string }> {
   const supabase = getSupabase();
 
-  // Check cache
-  const { data: cached } = await supabase
+  // Check cache.
+  //
+  // `.retry(false)` is the important part. postgrest-js retries a failed GET
+  // three times with 1s, 2s and 4s of backoff sleep in between; measured
+  // against an unreachable Supabase that put ~7.0s of pure sleep on every
+  // hotel search before the code fell through to the API below. The DNS
+  // failures themselves cost ~80ms of it — the rest was the backoff.
+  //
+  // Retrying is simply the wrong trade for a cache read: the fallback is one
+  // HTTP call away, so three rounds of backoff buy nothing we don't already
+  // have cheaper. The timeout then bounds the case retries don't cover, a
+  // Supabase that accepts the connection and never answers.
+  const { data: cached, error: cacheReadError } = await supabase
     .from('booking_locations')
     .select('dest_id, dest_type')
     .eq('city_name', cityName.toLowerCase())
+    .retry(false)
+    .abortSignal(AbortSignal.timeout(LOCATION_CACHE_TIMEOUT_MS))
     .single();
+
+  // A failed read is not fatal — we fall through to the locations API and the
+  // search still returns the right answer. But it must not be SILENT: the old
+  // code destructured only `data`, so a hard Supabase outage was
+  // indistinguishable from a cold cache and showed up as nothing but a search
+  // that had become mysteriously slow.
+  if (cacheReadError && cacheReadError.code !== PGRST_NO_ROWS) {
+    logger.warn('booking_locations cache read failed — falling back to the locations API', {
+      city: cityName,
+      code: cacheReadError.code || undefined,
+      error: cacheReadError.message,
+      timeoutMs: LOCATION_CACHE_TIMEOUT_MS,
+    });
+  }
 
   if (cached?.dest_id) {
     return { dest_id: cached.dest_id, dest_type: cached.dest_type ?? 'city' };
@@ -57,12 +106,29 @@ async function getDestinationId(
     throw new Error(`No destination found for "${cityName}"`);
   }
 
-  // Cache
-  await supabase.from('booking_locations').upsert({
-    city_name: cityName.toLowerCase(),
-    dest_id: String(city.dest_id),
-    dest_type: city.dest_type,
-  });
+  // Cache. Bounded for the same reason as the read above: this write is the
+  // last thing standing between the caller and their results, and a Supabase
+  // that hangs must not hold them. Losing the write only means the next search
+  // for this city misses the cache too.
+  //
+  // No `.retry(false)` needed here — postgrest only retries idempotent methods
+  // and this is a POST, so it was never on the retry ladder.
+  const { error: cacheWriteError } = await supabase
+    .from('booking_locations')
+    .upsert({
+      city_name: cityName.toLowerCase(),
+      dest_id: String(city.dest_id),
+      dest_type: city.dest_type,
+    })
+    .abortSignal(AbortSignal.timeout(LOCATION_CACHE_TIMEOUT_MS));
+
+  if (cacheWriteError) {
+    logger.warn('booking_locations cache write failed — this city will miss again', {
+      city: cityName,
+      code: cacheWriteError.code || undefined,
+      error: cacheWriteError.message,
+    });
+  }
 
   return { dest_id: String(city.dest_id), dest_type: city.dest_type };
 }
