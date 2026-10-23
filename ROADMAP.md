@@ -223,6 +223,60 @@ Home anchor / origin model (984a553 + d4007d9)
 
 ## 📋 Backlog
 
+### Feature: Surface a price we cannot vouch for (frontend — needs design)
+
+Two hotel-price states exist in the data today and **neither is visible to the
+traveller**. The backend decides both; nothing renders either.
+
+**State 1 — distrusted (`priceSuspect`, already plumbed).** The price is out of
+line with its peers, so we demote it: `trustedFirst` in
+`backend/src/services/hotels.ts` puts it last, so it can never be the
+auto-selected hotel or reach the trip total. The flag reaches the frontend via
+`frontend/lib/hotelShape.ts` and survives the save/load round trip. But it
+appears nowhere under `frontend/components/` or `frontend/app/`, so a traveller
+who picks it from the list gets a price we do not believe, unmarked.
+`cycleHotel` steps over these, so only a deliberate pick reaches one.
+
+**State 2 — unverifiable (no flag yet).** Every price check here is a
+*comparison*: a row is suspect because it is out of line with the others in its
+search. So a search with almost nothing in it cannot be checked at all — one
+row cannot be an outlier, because the median of a one-row set is that row. No
+threshold reaches it, at any value. Measured: a Val d'Isère search returned
+exactly one hotel at **$3,377.84/night** and it went into the trip total with
+nothing having looked at it.
+
+`pickByRating` reduced how often this happens by relaxing our own 7.0
+review-score bar when a search is thin, and `searchHotels` logs
+`'Hotel search too thin to price-check — hotels[0] is unverified'` when it
+still is. But it cannot be eliminated: `Grand Turk` returns exactly **1 row**
+because the provider has nothing more to give, and `Grace Bay` returns none at
+all. Frequency before widening: 1 search in 45 returned fewer than 4 rows.
+
+**Work:**
+- [ ] Decide whether to show anything at all — doing nothing is defensible for
+      state 2, since the Val d'Isère row was most likely a *real* hotel (a
+      converted 2551m cable-car station, 9.6 from 137 reviews, peak ski week).
+      A caveat on a correct price costs trust too.
+- [ ] Design the treatment. `CLAUDE.md` applies: no glass morphism, no glows,
+      no gradient-purple AI look — derive from the existing DNA (dark `#0f0f1a`
+      surfaces, pastel city cards, dashed-route motif, blue brand). Get it
+      approved before committing.
+- [ ] One treatment may cover both states, or they may need different words:
+      "we think this price is wrong" and "we could not check this price" are
+      different claims and should not be conflated into one badge.
+- [ ] For state 2, add the flag — the backend currently only logs it. Mirror
+      the `limitedCoverage` pattern `backend/src/services/trains.ts` already
+      uses for an unpriced fare, carry it through `lib/hotelShape.ts` beside
+      `priceSuspect`, and add it to `Hotel` in `frontend/lib/types.ts`.
+- [ ] Decide what the trip total does with an unverified hotel. Trains set
+      `pricePerPerson: null` rather than inventing a figure; hotels currently
+      put the number straight in the headline.
+
+**Do not** solve this by tuning a threshold. That has been tried three times
+and each pass created a new regression — see the comment block at the top of
+the price-plausibility section in `backend/src/services/hotels.ts` for the full
+history and why deleting rows was abandoned in favour of demoting them.
+
 ### Feature: Notifications system (separate task — complex)
 - [x] `notifications` table with RLS
 - [x] GET/PATCH/DELETE endpoints
