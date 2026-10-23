@@ -190,9 +190,16 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
   const flightPrice = bestFlight?.price ?? Infinity;
   const trainPrice = bestTrain?.price ?? Infinity;
 
+  // A train fare of null (no coverage for that operator) becomes Infinity
+  // through the `??` above, so the `trainPrice !== null` tests these guards
+  // used to carry could never be false — they read as a null check and did
+  // nothing. An unpriced option must not be compared on price at all.
+  const flightPriced = Number.isFinite(flightPrice);
+  const trainPriced = Number.isFinite(trainPrice);
+
   // Determine cheapest
   let cheapest: LegComparison['cheapest'] = 'unavailable';
-  if (bestFlight && bestTrain && trainPrice !== null) {
+  if (bestFlight && bestTrain && trainPriced && flightPriced) {
     if (flightPrice < trainPrice) cheapest = 'flight';
     else if (trainPrice < flightPrice) cheapest = 'train';
     else cheapest = 'same';
@@ -220,7 +227,7 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
 
   // Recommendation logic
   let recommendation: LegComparison['recommendation'] = 'unavailable';
-  if (bestFlight && bestTrain && trainPrice !== null) {
+  if (bestFlight && bestTrain && trainPriced && flightPriced) {
     // If train has limited coverage, prefer flight
     if (bestTrain.limitedCoverage) {
       recommendation = 'flight';
@@ -241,10 +248,14 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
         else if (fastest === 'train') recommendation = 'train';
       }
     }
+  } else if (bestFlight && flightPriced) {
+    recommendation = 'flight';
+  } else if (bestTrain) {
+    // The only option, priced or not. `limitedCoverage` already tells callers
+    // the fare is unknown; what they must not do is turn that into a $0 leg.
+    recommendation = 'train';
   } else if (bestFlight) {
     recommendation = 'flight';
-  } else if (bestTrain && trainPrice !== null) {
-    recommendation = 'train';
   }
 
   // Cache results (2 hour expiry). One timestamp for the whole write so the
@@ -328,9 +339,11 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
     cheapest,
     fastest,
     recommendation,
-    priceDifference: Math.abs(
-      (bestFlight?.price ?? 0) - (bestTrain?.price ?? 0),
-    ),
+    // Only a real difference when BOTH sides have a real price. Coercing a
+    // missing side to 0 made the "difference" equal the whole of the other
+    // fare — an unpriced train made it look like the flight cost that much
+    // more than the train, rather than unknown.
+    priceDifference: flightPriced && trainPriced ? Math.abs(flightPrice - trainPrice) : 0,
     // 0 when there's nothing real to subtract. Infinity/NaN here used to
     // serialize to JSON `null` against a `number` field on the client.
     timeDifference: durationsComparable

@@ -112,7 +112,28 @@ export const useTripStore = create<TripStore>((set) => ({
       const c = cities[cityIndex];
       if (!c || c.hotels.length === 0) return state;
       const len = c.hotels.length;
-      const next = (c.selectedHotelIndex + direction + len) % len;
+
+      // Step OVER rows whose price the backend does not trust.
+      //
+      // This used to be a plain modulo walk, which made the price guards
+      // protect the auto-selection and nothing else. Measured on the real
+      // store with the production Florence set: one backward click from a
+      // $600 trip landed on the flagged $5383.47/night row and the total
+      // became $16,150. "Flagged rows can never reach the trip total" was
+      // simply false under manual selection.
+      //
+      // Cycling means "show me another option", and a price we cannot stand
+      // behind is not an option to offer. The row stays in the list and stays
+      // reachable through setSelectedHotel, so nothing is hidden and nothing
+      // is unbookable — it just is not what a next/previous click hands you.
+      //
+      // If every row is flagged there is nothing better to land on, so the
+      // walk falls back to plain cycling rather than refusing to move.
+      let next = (c.selectedHotelIndex + direction + len) % len;
+      for (let step = 0; step < len && c.hotels[next]?.priceSuspect; step++) {
+        next = (next + direction + len) % len;
+      }
+
       cities[cityIndex] = {
         ...c,
         selectedHotelIndex: next,

@@ -351,12 +351,20 @@ router.post(
             })
               .then((results) => {
                 if (results.length > 0) {
+                  // `priceSuspect` and `reviewCount` are carried deliberately.
+                  // Dropping them made the verdict die at this boundary: the
+                  // flag could not survive the JSONB round trip, so nothing
+                  // downstream could warn, and a re-rank would read every thin
+                  // rating at face value. `searchHotels` already returns
+                  // trusted rows first, so index 0 below is safe.
                   city.hotels = results.map((r) => ({
                     name: r.name,
                     rating: r.rating,
                     pricePerNight: r.pricePerNight,
                     area: '',
                     bookingUrl: r.bookingUrl,
+                    reviewCount: r.reviewCount,
+                    priceSuspect: r.priceSuspect,
                   }));
                   city.hotel = city.hotels[0];
                   city.selectedHotelIndex = 0;
