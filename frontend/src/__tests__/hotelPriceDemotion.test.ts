@@ -1,4 +1,5 @@
 import { hotelScore, rankHotels } from '@/lib/hotelScore';
+import { hotelFromResult } from '@/lib/hotelShape';
 
 /**
  * `hotels[0]` is the trip's hotel. `app/results/page.tsx` and
@@ -213,5 +214,65 @@ describe('rankHotels ordering of trusted rows is unchanged', () => {
 
   it('is a no-op on an empty list', () => {
     expect(rankHotels([])).toEqual([]);
+  });
+});
+
+/**
+ * The price verdict has to survive the boundary between the provider shape and
+ * the trip shape. It did not: four separate copies of this mapping each copied
+ * the same five fields, so `Hotel.priceSuspect` was permanently `undefined` in
+ * production — the flag reached the list order and nothing else, never the
+ * store, the database or any UI that could warn on it.
+ */
+describe('hotelFromResult carries the fields a trip needs', () => {
+  const result = {
+    id: '1',
+    name: 'Hotel Aldobrandini',
+    price: 16150.41,
+    pricePerNight: 5383.47,
+    currency: 'USD',
+    rating: 8.2,
+    reviewCount: 412,
+    stars: 3,
+    thumbnail: '',
+    bookingUrl: 'https://booking.example/x',
+    amenities: [],
+    priceSuspect: true,
+    priceSuspectReason: 'above-star-ceiling',
+  };
+
+  it('carries priceSuspect through', () => {
+    expect(hotelFromResult(result).priceSuspect).toBe(true);
+  });
+
+  it('carries reviewCount through, so a re-rank keeps the confidence discount', () => {
+    expect(hotelFromResult(result).reviewCount).toBe(412);
+  });
+
+  it('leaves both undefined when the provider sent neither', () => {
+    const { priceSuspect, priceSuspectReason, reviewCount, ...bare } = result;
+    const mapped = hotelFromResult(bare as any);
+
+    expect(mapped.priceSuspect).toBeUndefined();
+    expect(mapped.reviewCount).toBeUndefined();
+    expect(mapped.name).toBe('Hotel Aldobrandini');
+  });
+
+  it('survives a JSON round trip, which is how a trip is persisted', () => {
+    const restored = JSON.parse(JSON.stringify(hotelFromResult(result)));
+
+    expect(restored.priceSuspect).toBe(true);
+    expect(restored.reviewCount).toBe(412);
+  });
+
+  it('keeps a mapped suspect row demoted once it is back in a list', () => {
+    // The end-to-end point: map, persist, restore, re-rank — and the flagged
+    // row is still not the one a trip total would be built from.
+    const mapped = [hotelFromResult(result), ...realistic];
+    const restored: typeof mapped = JSON.parse(JSON.stringify(mapped));
+    const ranked = rankHotels(restored);
+
+    expect(ranked[0].name).not.toBe('Hotel Aldobrandini');
+    expect(ranked[ranked.length - 1].name).toBe('Hotel Aldobrandini');
   });
 });

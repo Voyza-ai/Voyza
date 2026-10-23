@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { interpretPlan, optimizeTrip, searchHotels, searchActivities, searchRestaurants, suggestDestinations, OptimizeResult, ActivitySuggestion, RestaurantSuggestion } from '@/lib/api';
 import { Trip, City, Transport, ScheduledEvent, Restaurant, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
+import { hotelFromResult } from '@/lib/hotelShape';
 import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput } from '@/lib/parseDate';
 import { parseLocal, toIso } from '@/lib/dateHelpers';
@@ -1686,13 +1687,7 @@ export default function PlanningChat() {
               : {}),
           });
           if (results.length > 0) {
-            const hotels = results.map((r) => ({
-              name: r.name,
-              rating: r.rating,
-              pricePerNight: r.pricePerNight,
-              area: '',
-              bookingUrl: r.bookingUrl,
-            }));
+            const hotels = results.map(hotelFromResult);
             return { hotels, hotel: hotels[0], selectedHotelIndex: 0 };
           }
         } catch {

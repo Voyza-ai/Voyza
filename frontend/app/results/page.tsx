@@ -20,6 +20,7 @@ import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, getTrip, fetchHomeLegs, updateTrip } from '@/lib/api';
+import { hotelFromResult } from '@/lib/hotelShape';
 import { getOriginAirports } from '@/lib/originAirports';
 import { Hotel, City, Transport } from '@/lib/types';
 import { useAuthStore } from '@/store/authStore';
@@ -227,13 +228,7 @@ function ResultsPageInner() {
       })
         .then((results) => {
           if (results.length === 0) return;
-          const hotels: Hotel[] = results.map((r) => ({
-            name: r.name,
-            rating: r.rating,
-            pricePerNight: r.pricePerNight,
-            area: '',
-            bookingUrl: r.bookingUrl,
-          }));
+          const hotels: Hotel[] = results.map(hotelFromResult);
           const idx = useTripStore
             .getState()
             .currentTrip?.cities.findIndex(

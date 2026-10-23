@@ -47,6 +47,70 @@ const LOCATION_CACHE_TIMEOUT_MS = 1500;
  */
 const PGRST_NO_ROWS = 'PGRST116';
 
+/** Destination kinds a hotel search must never be pointed at. */
+const UNSEARCHABLE_DEST_TYPES = new Set(['hotel', 'airport']);
+
+/**
+ * Preference order when the provider offers more than one kind of match.
+ * Narrowest first, so a real city always wins over the region containing it.
+ */
+const DEST_TYPE_PREFERENCE = ['city', 'region', 'district', 'island', 'country'];
+
+/**
+ * Choose which of Booking's location matches to search.
+ *
+ * This used to be `locations.find((l) => l.dest_type === 'city')`, which threw
+ * for anything that is not a city in Booking's taxonomy — and the caller
+ * swallows that into an empty result list with a single non-fatal warn. So a
+ * whole class of destination silently returned NO HOTELS AT ALL.
+ *
+ * Measured against production on 2026-10-23, two adults, with the same dates
+ * the rest of this file's cases use. Zero rows returned for: Tahiti, Maldives,
+ * Mauritius, Seychelles, Aruba, Bahamas, Fiji, Turks and Caicos, Santorini,
+ * Tuscany. Rows returned normally for Bora Bora (20), Florence (18) and
+ * Phuket (17) — all of which have a city entry. That asymmetry is the bug;
+ * currency is not involved, since Bora Bora prices in XPF and worked while
+ * Turks and Caicos prices in USD and did not.
+ *
+ * Santorini is a destination in a shipped preset itinerary, so this reached
+ * the product's own suggested trips.
+ *
+ * Deliberately monotonic: 'city' is still preferred first, so every search
+ * that works today resolves to exactly the same destination it does now. The
+ * only behaviour that changes is a lookup that would have thrown. Hotels and
+ * airports are excluded rather than ranked — a single property would return a
+ * one-row search dressed up as a city, which is worse than a clear failure.
+ * An unrecognised kind falls through to the provider's own top match, because
+ * its ranking is better than our list of names being exhaustive.
+ */
+export function pickDestination(
+  locations: unknown,
+  cityName: string,
+): { dest_id: string; dest_type: string } | null {
+  if (!Array.isArray(locations)) return null;
+
+  const usable = locations.filter(
+    (l: any) => l?.dest_id && !UNSEARCHABLE_DEST_TYPES.has(String(l.dest_type)),
+  );
+  if (usable.length === 0) return null;
+
+  const chosen =
+    DEST_TYPE_PREFERENCE.map((want) =>
+      usable.find((l: any) => String(l.dest_type) === want),
+    ).find(Boolean) ?? usable[0];
+
+  const picked = chosen as any;
+  if (String(picked.dest_type ?? 'city') !== 'city') {
+    logger.warn('Hotel destination resolved to a non-city match', {
+      city: cityName,
+      destType: picked.dest_type,
+      destId: String(picked.dest_id),
+    });
+  }
+
+  return { dest_id: String(picked.dest_id), dest_type: String(picked.dest_type ?? 'city') };
+}
+
 async function getDestinationId(
   cityName: string,
 ): Promise<{ dest_id: string; dest_type: string }> {
@@ -107,9 +171,7 @@ async function getDestinationId(
   }
 
   const locations = await res.json();
-  const city = Array.isArray(locations)
-    ? locations.find((l: any) => l.dest_type === 'city')
-    : null;
+  const city = pickDestination(locations, cityName);
 
   if (!city?.dest_id) {
     throw new Error(`No destination found for "${cityName}"`);
@@ -296,11 +358,21 @@ const UNDERPRICE_MEDIAN_DIVISOR = 10;
 /**
  * Absolute per-night ceiling for a hotel the provider itself calls 1-3 stars.
  *
- * Deliberately generous — roughly 4x the top end of a 3-star in an expensive
- * city in peak season — because the case this catches sits 5x above it.
- * "Hotel Aldobrandini", stars: 3, came back at $5383.47/night.
+ * Was $1000, raised to $2000 on measurement. $1000 was not generous at all: the
+ * dearest real 1-3 star row in the captured corpus is $860.58 (a Courchevel
+ * chalet in February), so it had 16% headroom — and peak-season Alpine stock
+ * goes well past it. A Val d'Isère February search of 3-star chalets at
+ * $1200-$1800 had every row condemned by this rule, which is both wrong on its
+ * own terms and compounding: a flagged row is excluded from its tier's
+ * statistics, so condemning the whole tier left nothing to judge a genuine
+ * glitch against.
+ *
+ * $2000 sits between the data and the failure: 2.3x above the dearest real row
+ * and 2.7x below "Hotel Aldobrandini", stars: 3, which came back at
+ * $5383.47/night. Same detection, with room for a market the corpus does not
+ * cover.
  */
-const BUDGET_STARS_PRICE_CEILING = 1000;
+const BUDGET_STARS_PRICE_CEILING = 2000;
 
 /**
  * No real room for two adults costs less than this per night.
@@ -310,13 +382,20 @@ const BUDGET_STARS_PRICE_CEILING = 1000;
  * 0 is the single most dangerous value in the system because `100 / price`
  * turns it into the highest-scoring hotel in the search.
  *
- * $5 is far below anything bookable for two adults — a hostel dorm bed in the
- * cheapest market this app covers is several times it — so no real inventory
- * sits under this line, while everything that does sit under it is a data
- * error. Unlike the suspicion rules above, this one deletes, because there is
- * no hotel behind a missing price to preserve.
+ * Was $5, lowered to $1. This function DELETES, so it has to bind on certainty
+ * alone, and $5 did not: converted to USD, a genuinely cheap room in the
+ * weakest markets lands near it — 70,000 IDR is $4.43, 100,000 VND is $4.00,
+ * ₹350 is $4.21 — and deleting one of those is a false positive in the one
+ * place that is supposed to have none. (The captured corpus does not contain
+ * such a row; its cheapest is $12.02. So this is a precaution against a market
+ * the corpus does not cover, not a measured failure.)
+ *
+ * $1 is below any of those by 4x while still catching the near-zero values the
+ * floor exists for. Cheap-but-plausible rows are left to the relative floor,
+ * which flags rather than deletes — and that is the correct division of labour:
+ * delete only what cannot be a price, flag what merely looks wrong.
  */
-const ABSOLUTE_PRICE_FLOOR = 5;
+const ABSOLUTE_PRICE_FLOOR = 1;
 
 /**
  * Below this many hotels IN A STAR TIER the median isn't meaningful, so that
@@ -338,6 +417,23 @@ export type PriceSuspectReason =
 /** A price that could be a real nightly rate. Not a judgement on how good it is. */
 function isUsablePrice(price: number): boolean {
   return Number.isFinite(price) && price >= ABSOLUTE_PRICE_FLOOR;
+}
+
+/**
+ * The provider's star class, normalised to 0 (unrated) unless it is a whole
+ * number from 1 to 5.
+ *
+ * `parseInt(h.class ?? '0', 10) || 0` at the mapping passes any integer
+ * through, negatives included. Normalising only non-finite values left
+ * `stars: -1` escaping BOTH the 1-3 star ceiling (`>= 1 && <= 3`) and the
+ * unrated fallback (`=== 0`) — so it landed in the one bucket that trusts a
+ * row unconditionally, "4-5 star, independent evidence of its price class".
+ * The same row with `stars` absent was correctly flagged, which made it a gap
+ * rather than a policy.
+ */
+function starClass(h: { stars: number }): number {
+  const s = h.stars;
+  return Number.isInteger(s) && s >= 1 && s <= 5 ? s : 0;
 }
 
 /**
@@ -411,7 +507,7 @@ export function dropUnusablePrices(hotels: HotelResult[], city: string): HotelRe
  * UNRATED_SEARCH_MEDIAN_MULTIPLE.
  */
 export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelResult[] {
-  const starsOf = (h: HotelResult) => (Number.isFinite(h.stars) ? h.stars : 0);
+  const starsOf = starClass;
 
   // The absolute rule first, because it needs no comparison set — and because
   // its verdicts must be kept OUT of the medians below.
@@ -450,7 +546,23 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
     const median = medianOf(tier.map((h) => h.pricePerNight));
     if (!Number.isFinite(median) || median <= 0) continue;
     ceilings.set(stars, median * OUTLIER_MEDIAN_MULTIPLE);
-    floors.set(stars, median / UNDERPRICE_MEDIAN_DIVISOR);
+
+    // A FLOOR ONLY FOR STARRED TIERS. The 0-star "tier" is not a price class —
+    // it means Booking assigned no star rating, which lumps hostel private
+    // rooms in with B&Bs, apartments and whole villas. It is intrinsically
+    // bimodal and routinely spans more than 10x on its own, so a relative
+    // floor there flags real budget stock: a Bangkok search of
+    // [8, 10, 12, 150, 180, 200, 220, 250] has a median of 165 and a floor of
+    // 16.50, which condemns all three genuine $8-12 rooms and hands hotels[0]
+    // to the $150 apartment — 18x the cheapest room the search actually found,
+    // and the exact opposite of what a price-led planner should do.
+    //
+    // A star rating is what makes a tier a price class, which is the same
+    // reasoning that spares thin luxury tiers from the ceiling. With 1-5 stars
+    // the floor means something; without them it is noise.
+    if (stars >= 1) {
+      floors.set(stars, median / UNDERPRICE_MEDIAN_DIVISOR);
+    }
   }
 
   // Only used for unrated rows with no tier of their own to be judged against.
@@ -503,6 +615,42 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
 
     return { ...h, priceSuspect: true, priceSuspectReason: reason };
   });
+}
+
+/**
+ * Move rows whose price we do not trust to the END of the list, keeping
+ * provider order within each group.
+ *
+ * THIS IS WHY IT LIVES HERE AND NOT ONLY IN THE FRONTEND. The first version of
+ * this change put the whole demotion guarantee in `rankHotels`
+ * (frontend/lib/hotelScore.ts) and asserted that `rankHotels` was the single
+ * boundary every consumer passes through. It is not. `backend/src/routes/
+ * canvas.ts` calls `searchHotels` directly when a city is saved with no hotels,
+ * maps five fields, and takes `city.hotels[0]` straight out of provider order —
+ * no ranking anywhere on that path, and `tripShape.ts` reads it back from the
+ * database without re-ranking either.
+ *
+ * The guards this replaced survived that path by accident: they DELETED the bad
+ * row, so index 0 was safe however it was chosen. Flagging instead of deleting
+ * silently handed that path back its worst case. Measured on the production
+ * Florence set in provider order, index 0 went from Radisson Blu at $170.31 to
+ * Hotel Aldobrandini at $5383.47 — the $17,039 headline this whole change
+ * exists to prevent, reintroduced by the fix for it.
+ *
+ * So the invariant belongs where the rows are produced: after this, `hotels[0]`
+ * is a row we trust for EVERY caller — this route, the canvas route, the
+ * frontend, and anything added later that reaches for index 0 without reading
+ * this file. `rankHotels` still refines the ordering by score on top.
+ *
+ * The one case it cannot fix is a list with nothing trustworthy in it. If every
+ * row is flagged the order is unchanged and index 0 is flagged, because a
+ * suspicious price still beats an empty city.
+ */
+export function trustedFirst(hotels: HotelResult[]): HotelResult[] {
+  const trusted: HotelResult[] = [];
+  const suspect: HotelResult[] = [];
+  for (const h of hotels) (h.priceSuspect ? suspect : trusted).push(h);
+  return [...trusted, ...suspect];
 }
 
 export async function searchHotels(params: SearchHotelsParams): Promise<HotelResult[]> {
@@ -631,7 +779,10 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
       hotels = hotels.filter((h) => h.price <= maxPrice);
     }
 
-    return hotels;
+    // Last, so it also covers the case a price cap leaves only flagged rows:
+    // an under-priced glitch is the one row guaranteed to survive a budget
+    // filter, and the legitimate rows the ones guaranteed not to.
+    return trustedFirst(hotels);
   } catch (err: any) {
     logger.warn('Hotel search failed (non-fatal)', { message: err?.message, city });
     return [];

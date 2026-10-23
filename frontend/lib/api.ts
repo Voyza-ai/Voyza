@@ -102,6 +102,7 @@ export type HotelResult = {
   priceSuspectReason?: string;
 };
 
+
 export async function searchHotels(params: {
   city: string;
   checkin: string;

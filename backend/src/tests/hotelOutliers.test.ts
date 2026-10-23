@@ -6,7 +6,12 @@ jest.mock('../config/env', () => ({
   },
 }));
 
-import { dropUnusablePrices, flagSuspectPrices } from '../services/hotels';
+import {
+  dropUnusablePrices,
+  flagSuspectPrices,
+  pickDestination,
+  trustedFirst,
+} from '../services/hotels';
 
 /**
  * Price plausibility, in two halves that must not be confused:
@@ -74,23 +79,23 @@ describe('dropUnusablePrices', () => {
   });
 
   it('drops a price below the absolute floor', () => {
-    // $3/night is not a room for two adults, it is a data error — and it
-    // scored 16415.7, i.e. first.
-    const hotels = [hotel('Real', 180, 3), hotel('Three dollars', 3, 3)];
+    const hotels = [hotel('Real', 180, 3), hotel('Half a cent', 0.005, 3)];
 
     expect(names(dropUnusablePrices(hotels, 'Florence'))).toEqual(['Real']);
   });
 
-  it('keeps a cheap but plausible price', () => {
-    // A hostel bed really does go for this. The floor is set to catch an
-    // ABSENT price, not a cheap one, so it must not reach genuine budget stock.
-    const hotels = [hotel('Hostel', 12, 1), hotel('Normal', 180, 3)];
+  it('does NOT delete a cheap-but-positive price', () => {
+    // $3/night is almost certainly a glitch, but this function deletes and so
+    // must bind on certainty alone. A cheap row is the relative floor's
+    // business, where the verdict is reversible. The previous $5 floor deleted
+    // these outright.
+    const hotels = [hotel('Three dollars', 3, 3), hotel('Hostel', 12, 1), hotel('Normal', 180, 3)];
 
-    expect(names(dropUnusablePrices(hotels, 'Bangkok'))).toHaveLength(2);
+    expect(dropUnusablePrices(hotels, 'Bangkok')).toHaveLength(3);
   });
 
   it('keeps a price sitting exactly on the floor', () => {
-    const hotels = [hotel('Edge', 5, 1), hotel('Under', 4.99, 1)];
+    const hotels = [hotel('Edge', 1, 1), hotel('Under', 0.99, 1)];
 
     expect(names(dropUnusablePrices(hotels, 'Edge'))).toEqual(['Edge']);
   });
@@ -330,9 +335,17 @@ describe('flagSuspectPrices — absolute star ceiling', () => {
   });
 
   it('keeps a budget hotel sitting exactly on the ceiling trusted', () => {
-    const hotels = [hotel('Edge', 1000, 3), hotel('Over', 1000.01, 3)];
+    const hotels = [hotel('Edge', 2000, 3), hotel('Over', 2000.01, 3)];
 
     expect(suspect(flagSuspectPrices(hotels, 'Edge'))).toEqual(['Over']);
+  });
+
+  it('trusts peak-season Alpine 3-star stock', () => {
+    // The $1000 ceiling condemned every one of these, which also stripped the
+    // tier of the statistics needed to catch a real glitch in it.
+    const chalets = [1200, 1400, 1600, 1800].map((p, i) => hotel(`Chalet ${i}`, p, 3));
+
+    expect(suspect(flagSuspectPrices(chalets, "Val d'Isere"))).toEqual([]);
   });
 });
 
@@ -442,5 +455,237 @@ describe('flagSuspectPrices — under-priced against its own tier', () => {
     const pair = [hotel('Suite A', 2000, 5), hotel('Suite B', 60, 5)];
 
     expect(suspect(flagSuspectPrices([...base, ...pair], 'Thin'))).toEqual([]);
+  });
+});
+
+/**
+ * The ordering guarantee, and why it is the backend's job.
+ *
+ * The first version of this change put demotion entirely in the frontend's
+ * `rankHotels` and claimed that was the single boundary every consumer passes
+ * through. It was not: `backend/src/routes/canvas.ts` calls `searchHotels`
+ * directly when a city is saved with no hotels and takes `hotels[0]` out of
+ * raw provider order, and `tripShape.ts` reads it back without re-ranking.
+ *
+ * The guards this replaced survived that path by accident — they DELETED the
+ * bad row, so index 0 was safe however it was chosen. Flagging handed that path
+ * back its worst case: measured on the production Florence set in provider
+ * order, index 0 went from Radisson Blu at $170.31 to Hotel Aldobrandini at
+ * $5383.47. These pin the fix.
+ */
+describe('trustedFirst', () => {
+  it('keeps the Florence outlier out of index 0 in provider order', () => {
+    // Provider order, exactly as the live API returned it — Aldobrandini first.
+    const florence = flagSuspectPrices(
+      [
+        hotel('Hotel Aldobrandini', 5383.47, 3),
+        hotel('Radisson Blu Hotel, Florence', 170.31, 4),
+        hotel('B&B Hotel Firenze Laurus Al Duomo', 301.99, 4),
+        hotel('Plus Florence Hotel & Hostel', 159.87, 4),
+        hotel('Hotel David', 204.32, 4),
+        hotel('Bed & Breakfast Il Bargello', 197.58, 4),
+      ],
+      'Florence',
+    );
+
+    // Before the fix this was the $17,039 headline.
+    expect(florence[0].name).toBe('Hotel Aldobrandini');
+
+    const ordered = trustedFirst(florence);
+    expect(ordered[0].name).toBe('Radisson Blu Hotel, Florence');
+    expect(ordered[0].pricePerNight).toBe(170.31);
+    expect(ordered[ordered.length - 1].name).toBe('Hotel Aldobrandini');
+    // Nothing deleted.
+    expect(ordered).toHaveLength(6);
+  });
+
+  it('preserves provider order within each group', () => {
+    const rows = [
+      { ...hotel('A', 100, 3) },
+      { ...hotel('B', 200, 3), priceSuspect: true },
+      { ...hotel('C', 300, 3) },
+      { ...hotel('D', 400, 3), priceSuspect: true },
+      { ...hotel('E', 500, 3) },
+    ];
+
+    expect(trustedFirst(rows).map((h) => h.name)).toEqual(['A', 'C', 'E', 'B', 'D']);
+  });
+
+  it('leaves an all-suspect list alone — a suspicious price beats an empty city', () => {
+    const rows = [
+      { ...hotel('A', 100, 3), priceSuspect: true },
+      { ...hotel('B', 200, 3), priceSuspect: true },
+    ];
+
+    expect(trustedFirst(rows).map((h) => h.name)).toEqual(['A', 'B']);
+  });
+
+  it('treats priceSuspect: false the same as absent', () => {
+    const rows = [
+      { ...hotel('Flagged', 100, 3), priceSuspect: true },
+      { ...hotel('Explicitly fine', 200, 3), priceSuspect: false },
+    ];
+
+    expect(trustedFirst(rows).map((h) => h.name)).toEqual(['Explicitly fine', 'Flagged']);
+  });
+
+  it('is a no-op on an empty list', () => {
+    expect(trustedFirst([])).toEqual([]);
+  });
+});
+
+/**
+ * Eleven destinations returned ZERO hotels in production because the lookup
+ * accepted only `dest_type === 'city'` and the caller swallows the throw into
+ * an empty list. Santorini is one of them, and it ships in a preset itinerary.
+ */
+describe('pickDestination', () => {
+  const loc = (dest_type: string, dest_id: string | number = '123') => ({ dest_type, dest_id });
+
+  it('prefers a city over everything else', () => {
+    const picked = pickDestination(
+      [loc('country', '1'), loc('region', '2'), loc('city', '3'), loc('district', '4')],
+      'Florence',
+    );
+    expect(picked).toEqual({ dest_id: '3', dest_type: 'city' });
+  });
+
+  it('resolves a region when there is no city — the Tuscany case', () => {
+    expect(pickDestination([loc('country', '1'), loc('region', '2')], 'Tuscany')).toEqual({
+      dest_id: '2',
+      dest_type: 'region',
+    });
+  });
+
+  it('resolves a country when that is all there is — the Maldives case', () => {
+    expect(pickDestination([loc('country', '9')], 'Maldives')).toEqual({
+      dest_id: '9',
+      dest_type: 'country',
+    });
+  });
+
+  it('resolves an island — the Santorini case', () => {
+    expect(pickDestination([loc('island', '7'), loc('hotel', '8')], 'Santorini')).toEqual({
+      dest_id: '7',
+      dest_type: 'island',
+    });
+  });
+
+  it('never points a search at a single hotel or an airport', () => {
+    // A one-property search dressed up as a city is worse than a clear failure.
+    expect(pickDestination([loc('hotel', '1'), loc('airport', '2')], 'Somewhere')).toBeNull();
+  });
+
+  it('falls through to the provider ranking for an unrecognised kind', () => {
+    // Our list of names must not be the thing that decides a search is
+    // impossible — Booking's own ordering is better than our vocabulary.
+    expect(pickDestination([loc('municipality', '5')], 'Elsewhere')).toEqual({
+      dest_id: '5',
+      dest_type: 'municipality',
+    });
+  });
+
+  it('is monotonic: a city match resolves identically to the old behaviour', () => {
+    // The only behaviour that may change is a lookup that previously threw.
+    const locations = [loc('region', '1'), loc('city', '2'), loc('country', '3')];
+    const old = locations.find((l) => l.dest_type === 'city');
+
+    expect(pickDestination(locations, 'Florence')?.dest_id).toBe(String(old!.dest_id));
+  });
+
+  it('returns null on junk rather than throwing', () => {
+    expect(pickDestination(null, 'X')).toBeNull();
+    expect(pickDestination([], 'X')).toBeNull();
+    expect(pickDestination({ error: 'nope' }, 'X')).toBeNull();
+    expect(pickDestination([{ dest_type: 'city' }], 'X')).toBeNull(); // no dest_id
+  });
+
+  it('coerces a numeric dest_id to a string', () => {
+    expect(pickDestination([loc('city', 4242)], 'X')).toEqual({
+      dest_id: '4242',
+      dest_type: 'city',
+    });
+  });
+});
+
+/** `stars` is an untyped provider field run through parseInt, so it can be anything. */
+describe('flagSuspectPrices normalises the star class', () => {
+  it('treats a negative star class as unrated, not as luxury', () => {
+    // stars: -1 used to escape BOTH ceilings — `>= 1 && <= 3` missed it and
+    // `=== 0` missed it too, so it landed in the "4-5 star, trust it" bucket.
+    // The same row with stars absent was correctly flagged.
+    const tier = [200, 210, 190, 220].map((p, i) => hotel(`Normal ${i}`, p, 0));
+    const negative = hotel('Negative stars', 5383.47, -1);
+
+    const out = flagSuspectPrices([...tier, negative], 'Florence');
+
+    expect(suspect(out)).toEqual(['Negative stars']);
+  });
+
+  it('treats an out-of-range or fractional star class as unrated', () => {
+    const tier = [200, 210, 190, 220].map((p, i) => hotel(`Normal ${i}`, p, 0));
+
+    for (const bad of [6, 99, 2.5, Number.NaN]) {
+      const out = flagSuspectPrices([...tier, hotel('Odd stars', 5383.47, bad)], 'Florence');
+      expect(suspect(out)).toEqual(['Odd stars']);
+    }
+  });
+
+  it('still honours a legitimate 1-5 star class', () => {
+    const tier = [200, 210, 190, 220].map((p, i) => hotel(`Normal ${i}`, p, 0));
+    // 5 stars is independent evidence of price class, so it is left alone.
+    const out = flagSuspectPrices([...tier, hotel('Real resort', 5383.47, 5)], 'Tokyo');
+
+    expect(suspect(out)).toEqual([]);
+  });
+});
+
+/**
+ * The 0-star "tier" is not a price class — it means Booking assigned no star
+ * rating, which lumps hostel private rooms in with B&Bs, apartments and whole
+ * villas. A relative floor there condemns real budget stock.
+ */
+describe('the under-price floor skips unrated tiers', () => {
+  it('trusts genuine budget rooms in a bimodal unrated market', () => {
+    // Real Bangkok shape: hostel private rooms beside serviced apartments.
+    // Median 165, so a floor of 16.50 would condemn all three cheap rooms and
+    // hand hotels[0] to the $150 apartment — 18x the cheapest room found.
+    const bangkok = [8, 10, 12, 150, 180, 200, 220, 250].map((p, i) =>
+      hotel(`Unrated ${i}`, p, 0),
+    );
+
+    const out = flagSuspectPrices(bangkok, 'Bangkok');
+
+    expect(suspect(out)).toEqual([]);
+    expect(trustedFirst(out)[0].pricePerNight).toBe(8);
+  });
+
+  it('still applies the floor where stars make the tier a price class', () => {
+    // Val d'Isere in February: 3-star chalets, and one glitched from-price.
+    const chalets = [1200, 1400, 1600, 1800].map((p, i) => hotel(`Chalet ${i}`, p, 3));
+    const glitch = hotel('Six dollar chalet', 6, 3);
+
+    const out = flagSuspectPrices([...chalets, glitch], "Val d'Isere");
+
+    expect(suspect(out)).toContain('Six dollar chalet');
+    expect(reasonOf(out, 'Six dollar chalet')).toBe('below-tier-median');
+  });
+});
+
+/** The floor deletes, so it must bind on certainty alone. */
+describe('dropUnusablePrices floor is set below real inventory', () => {
+  it('keeps a genuinely cheap converted room', () => {
+    // 100,000 VND is $4.00 and 70,000 IDR is $4.43. The previous $5 floor
+    // deleted both, in the one function that is supposed to have no false
+    // positives.
+    const hotels = [hotel('Hanoi room', 4.0, 1), hotel('Bali room', 4.43, 1)];
+
+    expect(dropUnusablePrices(hotels, 'Hanoi')).toHaveLength(2);
+  });
+
+  it('still deletes the near-zero values the floor exists for', () => {
+    const hotels = [hotel('Real', 180, 3), hotel('Cent', 0.01, 3), hotel('Zero', 0, 3)];
+
+    expect(names(dropUnusablePrices(hotels, 'Florence'))).toEqual(['Real']);
   });
 });

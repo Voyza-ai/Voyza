@@ -55,6 +55,12 @@ export type Hotel = {
   maxGuests?: number;
   /** Set when the backend does not trust this row's price — see hotelScore.ts */
   priceSuspect?: boolean;
+  /**
+   * Reviews behind `rating`. Carried through from the provider so a re-rank
+   * applies the same confidence discount the first ranking did — without it,
+   * `effectiveRating` takes a 9.5-from-3-reviews at face value.
+   */
+  reviewCount?: number;
 };
 
 /** A user-supplied hotel/Airbnb that overrides the ranked list selection. */
