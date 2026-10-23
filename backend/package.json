@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'add eslint later'",
-    "test": "jest --forceExit --detectOpenHandles"
+    "test": "jest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
