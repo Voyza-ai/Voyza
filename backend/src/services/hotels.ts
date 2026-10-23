@@ -47,6 +47,23 @@ const LOCATION_CACHE_TIMEOUT_MS = 1500;
  */
 const PGRST_NO_ROWS = 'PGRST116';
 
+/**
+ * Alternate spellings to try when a destination name finds nothing at all.
+ *
+ * Only the ampersand swap, because that is the one measured against
+ * production: "Turks and Caicos" returns no hotels and "Turks & Caicos"
+ * returns 17. Deliberately not a general fuzzy-matcher — a wrong destination
+ * that returns hotels is worse than a name that returns none, because the
+ * traveller gets prices for somewhere they did not ask about.
+ */
+export function nameVariants(cityName: string): string[] {
+  const variants = new Set<string>();
+  if (/\sand\s/i.test(cityName)) variants.add(cityName.replace(/\sand\s/gi, ' & '));
+  if (/\s&\s/.test(cityName)) variants.add(cityName.replace(/\s&\s/g, ' and '));
+  variants.delete(cityName);
+  return [...variants];
+}
+
 /** Destination kinds a hotel search must never be pointed at. */
 const UNSEARCHABLE_DEST_TYPES = new Set(['hotel', 'airport']);
 
@@ -181,20 +198,50 @@ async function getDestinationId(
     throw new Error('RAPIDAPI_KEY not configured');
   }
 
-  const url = `https://booking-com.p.rapidapi.com/v1/hotels/locations?name=${encodeURIComponent(cityName)}&locale=en-gb`;
-  const res = await fetch(url, {
-    headers: {
-      'X-RapidAPI-Key': env.RAPIDAPI_KEY,
-      'X-RapidAPI-Host': 'booking-com.p.rapidapi.com',
-    },
-  });
+  // Captured after the guard above: narrowing from `if (!env.RAPIDAPI_KEY)`
+  // does not survive into a closure, since the closure could run later.
+  const apiKey = env.RAPIDAPI_KEY;
 
-  if (!res.ok) {
-    throw new Error(`Booking.com locations API returned ${res.status}`);
+  const lookup = async (name: string) => {
+    const url = `https://booking-com.p.rapidapi.com/v1/hotels/locations?name=${encodeURIComponent(name)}&locale=en-gb`;
+    const res = await fetch(url, {
+      headers: {
+        'X-RapidAPI-Key': apiKey,
+        'X-RapidAPI-Host': 'booking-com.p.rapidapi.com',
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`Booking.com locations API returned ${res.status}`);
+    }
+    return pickDestination(await res.json(), name);
+  };
+
+  let city = await lookup(cityName);
+
+  // Booking's location search is literal about "and" versus "&", and the
+  // difference is the whole destination. Measured against production:
+  //
+  //   "Turks and Caicos"          ->  0 hotels
+  //   "Turks & Caicos"            -> 17 hotels
+  //   "Turks and Caicos Islands"  -> 19 hotels
+  //
+  // That is a name-matching failure, not a dest_type one, so it survived the
+  // fix for the other ten dead destinations. The retry only runs when the
+  // first lookup found nothing at all — which previously meant the search was
+  // over anyway — so it costs a call only where the alternative is no hotels.
+  if (!city?.dest_id) {
+    for (const variant of nameVariants(cityName)) {
+      city = await lookup(variant);
+      if (city?.dest_id) {
+        logger.warn('Destination resolved only under an alternate spelling', {
+          city: cityName,
+          resolvedAs: variant,
+          destType: city.dest_type,
+        });
+        break;
+      }
+    }
   }
-
-  const locations = await res.json();
-  const city = pickDestination(locations, cityName);
 
   if (!city?.dest_id) {
     throw new Error(`No destination found for "${cityName}"`);
