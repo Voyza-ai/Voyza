@@ -612,12 +612,33 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 
 ## 🏗️ Infrastructure / ops
 
+- [ ] 🔴 **No database backups exist.** Not "the runbook isn't written" — there
+      is nothing configured to restore from. There is ONE Supabase project
+      (`vzptwvrgiaqveckrdmke`) and it holds the real trips; `dev` writes to it
+      too (see `ENVIRONMENTS.md`), so a bad migration or a bad delete run from
+      a dev branch is unrecoverable. Enable Point-in-Time Recovery or scheduled
+      backups in the Supabase dashboard — this is a dashboard change, nothing
+      in this repo can do it. Listed first here because it is the only item on
+      this page where the cost of being wrong is permanent.
+- [ ] `backend/src/tests/transportCoverage.test.ts` **does not run in CI.** It
+      is gated on `DUFFEL_ACCESS_TOKEN`, which CI does not set, so the suite
+      skips in full — and it is the only one that exercises live provider
+      responses. Everything else mocks the provider. So "all tests pass" means
+      the mocked contract holds, not that the real API still answers the way we
+      expect. Either give CI a token (a sandbox one is enough; sandbox is what
+      Duffel returns today anyway) or run it on a schedule and alert on
+      failure, so a provider changing its response shape is not discovered by a
+      traveller.
 - [ ] Rate limiting middleware (per-IP + per-user) on all `/api` routes
-- [ ] Error monitoring (Sentry or Datadog)
+- [ ] Error monitoring (Sentry or Datadog) — note `logger.error` currently goes
+      to stderr and nothing else, so an error log pages nobody
 - [ ] Structured logging with request IDs
-- [ ] Staging environment / preview deploys
+- [ ] Staging environment / preview deploys — `dev` currently shares the
+      production backend AND database, so backend changes cannot be tested
+      anywhere but production (`ENVIRONMENTS.md:13`)
 - [ ] Automated E2E tests in CI (Playwright)
-- [ ] Backup & restore runbook
+- [ ] Backup & restore runbook (the process; see the first item for the fact
+      that there is currently nothing to restore from)
 - [ ] Data retention policies documented
 
 ---
