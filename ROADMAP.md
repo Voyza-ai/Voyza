@@ -45,26 +45,27 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ---
 
-## 🚧 In-flight (this branch: `feat/voyza-ai-chat`)
+## 🚧 In-flight
 
-All major work on this branch is committed and pushed. See the
-"Previously shipped" section below for the full breakdown. Branch
-currently has 4 commits, not yet merged to `claude_code_backend`:
+Nothing in flight. `feat/voyza-ai-chat` and `feat/map-redesign` are both
+merged all the way to `voyza_main`; the branch flow is now
+**feature branch → `dev` → `voyza_main`**, not `claude_code_backend`.
+See "Previously shipped" below for what landed.
 
-```
-d4007d9  polish: fixed-size transport pills + home card refinements
-984a553  feat: home anchor — origin, multi-airport, full permutations, round-trip
-1704365  feat: AI chat refreshes flowchart transport card (leg_refresh)
-0fbbd20  feat: Voyza AI chat with trip-aware prompts + constraint proposals
-```
+Of the two items this section used to list as remaining:
 
-Remaining on the branch:
-- [ ] Top-4 options per between-city leg (swap `compareLeg()` →
-  `searchLegOptions(limit: 4)` in `scoreRoute`). Home legs already
-  use searchLegOptions; this extends it to inter-city legs so every
-  Connector card has 4 alternatives out of the box.
-- [ ] Backfill UI for pre-home-anchor trips without `origin_city`
-  (old trips render without a home card — graceful but unsettable).
+- [x] **Top-4 options per between-city leg.** Done, but not the way this
+  entry proposed. Swapping `compareLeg()` for `searchLegOptions()` inside
+  `scoreRoute` would mean M legs × N permutations of option lookups, which
+  explodes API cost. Instead `optimizer.ts` has a Step 7.5 that re-fetches
+  the full options list for the WINNING route only — M extra calls, bounded,
+  reusing Duffel's per-request offer caching from the scoring pass that just
+  ran. Connector cards get their 4 alternatives either way.
+- [ ] **Backfill UI for pre-home-anchor trips without `origin_city`.** Still
+  open. `origin` is only settable during planning (`PlanningChat`,
+  `ConversationalPlanner`); there is no way to set it on a trip that is
+  already saved, so old trips render without a home card and cannot be
+  given one.
 
 ---
 
