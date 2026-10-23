@@ -378,6 +378,43 @@ describe('retryDelayFromHeaders', () => {
     headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
   });
 
+  /**
+   * The clock is frozen for every case in this block.
+   *
+   * Each absolute-time case builds its header from `Date.now()` and then
+   * hands it to `retryDelayFromHeaders`, which reads the clock a SECOND
+   * time. On a real clock the millisecond can tick between those two reads
+   * and the delta comes back short: `Expected: 60000, Received: 59999`.
+   * Measured here, that is 498 bad deltas in 200,000 executions (495 of
+   * them exactly 59999), which surfaces as 1 red run in 200 on an idle
+   * machine and 3 in 60 under CPU contention — the ~6% CI flake.
+   *
+   * Freezing is also what lets these assert EXACT values instead of a
+   * tolerance band, and the band is the part that mattered. Two of the
+   * forms below truncate: `toUTCString()` has no sub-second field, and the
+   * epoch-seconds form floors to whole seconds. So they only ever land on a
+   * round 45s when "now" is itself on a whole second — on a real clock an
+   * exact assertion there is right 122 times in 200,000. Hence a frozen
+   * instant on `.000Z` rather than slop added back: a tolerance band is
+   * precisely what let the off-by-a-second `Date.parse` bugs documented on
+   * `parseResetHeader` through in the first place, so a band is the one
+   * thing these tests must not use.
+   *
+   * Scoped to this describe deliberately. `withRetry` sleeps on a real
+   * `setTimeout`, so freezing globally would hang the 429 backoff test in
+   * the `searchFlights` block above until its 15s timeout.
+   */
+  const FROZEN_NOW = '2026-06-01T12:00:00.000Z';
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(FROZEN_NOW));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   // Delta-seconds — the IETF RateLimit-Reset form, and what many proxies
   // normalise to. These used to be swallowed by Date.parse ('60' parses as
   // 1960, '120' as year 120, '2' as 2001) and clamped to a 0ms sleep, while
@@ -396,19 +433,22 @@ describe('retryDelayFromHeaders', () => {
 
   it('still parses a real HTTP-date', () => {
     const httpDate = new Date(Date.now() + 45_000).toUTCString();
-    const delay = retryDelayFromHeaders(errWith({ 'ratelimit-reset': httpDate }));
-    // toUTCString() drops sub-second precision, so allow a second of slop.
-    expect(delay).toBeGreaterThan(43_000);
-    expect(delay).toBeLessThanOrEqual(45_000);
+    // Spelled out so this also guards the frozen clock itself: if the fake
+    // timers above are ever dropped, this fails outright instead of the
+    // block quietly going flaky again.
+    expect(httpDate).toBe('Mon, 01 Jun 2026 12:00:45 GMT');
+    expect(retryDelayFromHeaders(errWith({ 'ratelimit-reset': httpDate }))).toBe(45_000);
   });
 
   it("still parses Duffel's ISO timestamp", () => {
     const iso = new Date(Date.now() + 60_000).toISOString();
+    expect(iso).toBe('2026-06-01T12:01:00.000Z');
     expect(retryDelayFromHeaders(errWith({ 'ratelimit-reset': iso }))).toBe(60_000);
   });
 
   it('clamps a window that already reset to 0', () => {
     const past = new Date(Date.now() - 30_000).toISOString();
+    expect(past).toBe('2026-06-01T11:59:30.000Z');
     expect(retryDelayFromHeaders(errWith({ 'ratelimit-reset': past }))).toBe(0);
   });
 
@@ -416,11 +456,21 @@ describe('retryDelayFromHeaders', () => {
     expect(retryDelayFromHeaders(errWith({ 'ratelimit-reset': '3600' }))).toBe(120_000);
   });
 
+  it('caps an absurd absolute reset time too', () => {
+    // The cap was only covered through the delta-seconds branch above, but
+    // the two branches compute `ms` differently — this one goes through
+    // Date.parse. Ten minutes out must still clamp to the 2-minute ceiling.
+    const farFuture = new Date(Date.now() + 10 * 60_000).toISOString();
+    expect(retryDelayFromHeaders(errWith({ 'ratelimit-reset': farFuture }))).toBe(120_000);
+  });
+
   it('treats an epoch-seconds reset as an absolute time', () => {
+    // 1_780_315_245 — above EPOCH_SECONDS_FLOOR (1e9), so it must be read as
+    // a timestamp, not as a 1.78-billion-second delta. Flooring to whole
+    // seconds costs nothing here only because FROZEN_NOW is on a whole
+    // second; that is why the assertion can be exact.
     const epochSecs = String(Math.floor((Date.now() + 45_000) / 1000));
-    const delay = retryDelayFromHeaders(errWith({ 'ratelimit-reset': epochSecs }));
-    expect(delay).toBeGreaterThan(43_000);
-    expect(delay).toBeLessThanOrEqual(45_000);
+    expect(retryDelayFromHeaders(errWith({ 'ratelimit-reset': epochSecs }))).toBe(45_000);
   });
 
   it('falls back to retry-after when ratelimit-reset is unusable', () => {
