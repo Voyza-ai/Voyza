@@ -43,10 +43,37 @@ export function hotelScore(
   },
   priorMeanRating?: number,
 ): number {
-  const safePrice = Math.max(1, h.pricePerNight);
+  // A price that cannot be a real rate scores 0 instead of being clamped up.
+  //
+  // This line used to read `Math.max(1, h.pricePerNight)`, which turned 0 and
+  // -50 into 1 — making the price term 100, the largest value it can take, so
+  // the worst possible data scored BEST. Measured through this function: a
+  // $0/night row scored 40028.8 and a $3/night row 16415.7, against ~235 for a
+  // legitimate hotel. Both sorted first, and first is the trip's hotel and the
+  // headline total.
+  //
+  // Note the asymmetry this corrects. An over-priced row is self-punishing —
+  // $3377.84/night scores 11.9, i.e. last — which is why the over-priced
+  // direction never needed rescuing and the under-priced one did.
+  if (!Number.isFinite(h.pricePerNight) || h.pricePerNight <= 0) return 0;
+
   const ratingTerm = Math.pow(effectiveRating(h, priorMeanRating), 2.8);
-  const priceTerm = 100 / safePrice;
-  return ratingTerm * priceTerm;
+  const priceTerm = 100 / h.pricePerNight;
+  const score = ratingTerm * priceTerm;
+
+  // A non-finite rating would otherwise propagate NaN into the comparator.
+  return Number.isFinite(score) ? score : 0;
+}
+
+/**
+ * Whether a row must sort below every trusted row, whatever its score.
+ *
+ * A hard partition rather than a score penalty, because a penalty would have
+ * to be larger than any possible score gap to be reliable and there is no such
+ * number — legitimate scores here span three orders of magnitude.
+ */
+function isDemoted(h: { priceSuspect?: boolean; score: number }): boolean {
+  return h.priceSuspect === true || !Number.isFinite(h.score) || h.score <= 0;
 }
 
 /**
@@ -99,6 +126,7 @@ export function rankHotels<
     rating: number;
     pricePerNight: number;
     reviewCount?: number;
+    priceSuspect?: boolean;
   },
 >(hotels: T[]): (T & { score: number })[] {
   // The prior comes from the set itself rather than a constant, so it travels
@@ -111,7 +139,23 @@ export function rankHotels<
 
   return hotels
     .map((h) => ({ ...h, score: hotelScore(h, priorMeanRating) }))
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => {
+      // Rows the backend distrusts, and rows with an unrankable price, go
+      // below everything else. This is what makes flagging rather than
+      // deleting safe: a suspect row stays browsable and bookable, but it can
+      // never be `hotels[0]`, so it can never be the auto-selected hotel or
+      // reach the trip total.
+      const aDemoted = isDemoted(a) ? 1 : 0;
+      const bDemoted = isDemoted(b) ? 1 : 0;
+      if (aDemoted !== bDemoted) return aDemoted - bDemoted;
+
+      // Explicit comparison, not `b.score - a.score`. Subtraction returns NaN
+      // for two equal infinities, and a comparator that returns NaN is
+      // incoherent — the engine then falls back on input order, which is
+      // exactly how an untrusted row could still surface first.
+      if (a.score === b.score) return 0;
+      return b.score > a.score ? 1 : -1;
+    });
 }
 
 /** Number of nights between two ISO yyyy-mm-dd dates (local). */

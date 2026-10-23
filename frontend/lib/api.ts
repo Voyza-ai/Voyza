@@ -93,6 +93,13 @@ export type HotelResult = {
   thumbnail: string;
   bookingUrl: string;
   amenities: string[];
+  /**
+   * Set by the backend when it does not trust this row's price. Such a row is
+   * kept and shown, but `rankHotels` sorts it below every trusted row so it
+   * cannot become the auto-selected hotel or part of the trip total.
+   */
+  priceSuspect?: boolean;
+  priceSuspectReason?: string;
 };
 
 export async function searchHotels(params: {

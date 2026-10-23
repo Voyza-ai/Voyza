@@ -53,6 +53,8 @@ export type Hotel = {
   bookable?: boolean;
   /** Maximum guests per room — defaults to 2 when unset */
   maxGuests?: number;
+  /** Set when the backend does not trust this row's price — see hotelScore.ts */
+  priceSuspect?: boolean;
 };
 
 /** A user-supplied hotel/Airbnb that overrides the ranked list selection. */

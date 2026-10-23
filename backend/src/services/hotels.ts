@@ -14,6 +14,15 @@ export type HotelResult = {
   thumbnail: string;
   bookingUrl: string;
   amenities: string[];
+  /**
+   * Set when this row's price is not trusted — see `flagSuspectPrices`.
+   *
+   * Optional because it is an annotation on an otherwise ordinary result, and
+   * trips saved before it existed simply don't carry it. Absent and `false`
+   * mean the same thing: the price looks fine.
+   */
+  priceSuspect?: boolean;
+  priceSuspectReason?: PriceSuspectReason;
 };
 
 /**
@@ -142,70 +151,58 @@ type SearchHotelsParams = {
   maxPrice?: number;
 };
 
-/** A hotel priced above this multiple of its OWN STAR TIER's median is junk. */
-const OUTLIER_MEDIAN_MULTIPLE = 5;
-
 /**
- * Absolute per-night ceiling for a hotel the provider itself calls 1-3 stars.
+ * ─── Price plausibility ──────────────────────────────────────────────────────
  *
- * Deliberately generous — roughly 4x the top end of a 3-star in an expensive
- * city in peak season — because a false drop costs a real option, while the
- * case this catches sits 5x above it. "Hotel Aldobrandini", stars: 3, came
- * back at $5383.47/night.
+ * WHY THIS IS SHAPED THE WAY IT IS. Read before tuning a number here.
+ *
+ * The provider sometimes quotes `min_total_price` for something other than what
+ * we asked for — a different occupancy, a whole property, a longer stay. We
+ * cannot fix their data, only decide what to do with a row we distrust, and
+ * that decision has been got wrong twice in opposite directions:
+ *
+ *  1. Trusting it. A Florence search returned "Hotel Aldobrandini" at
+ *     $5383.47/night, the provider returned it FIRST, and it became 95% of a
+ *     $17,039 total shown as "Best price for these dates".
+ *  2. Deleting it. The first fix compared each row to the whole search's
+ *     median. Over 58 real production searches that scored 1 true positive
+ *     against 4 legitimate hotels deleted — a Bora Bora search lost all three
+ *     overwater resorts, the exact properties someone searching Bora Bora
+ *     wants, and the customer was left the guesthouses.
+ *
+ * The lesson is not "find a better threshold". It is that DELETING is the wrong
+ * verb. We cannot reliably tell a data glitch from a genuinely expensive hotel,
+ * and when we are wrong, deleting costs the customer a room they can never know
+ * existed, while the alternative costs almost nothing. So:
+ *
+ *   - A price that CANNOT be a real rate (missing, zero, negative, NaN, or
+ *     below any plausible floor) is dropped. There is no hotel behind it to
+ *     lose, and leaving it in is actively dangerous — see below.
+ *   - A price that merely looks WRONG is flagged, not removed. A flagged row
+ *     still appears in the list, so no real inventory is ever lost; it just
+ *     sorts below every unflagged row, so it can never become the auto-selected
+ *     hotel or land in the trip total.
+ *
+ * That asymmetry is the whole point. Mis-tuning a threshold now costs a ranking
+ * position instead of a deleted hotel or a $17,039 headline, which is why this
+ * should stop needing revisits.
+ *
+ * WHY THE FLOOR MATTERS MORE THAN THE CEILING, which is the part every previous
+ * pass missed. The ranking formula in frontend/lib/hotelScore.ts has a
+ * `100 / pricePerNight` term, so price works in opposite directions:
+ *
+ *   - An over-priced row is SELF-PUNISHING. It sinks to the bottom unaided.
+ *     Measured: a $3377.84/night row scores 11.9 against ~235 for its normal
+ *     neighbours, i.e. last place. Every guard written so far has been aimed
+ *     at this, the direction that was already safe.
+ *   - An under-priced row is SELF-REWARDING. Measured through the real shipped
+ *     `rankHotels`: a $0/night row scores 40028.8 and a $3/night row 16415.7,
+ *     against ~235 for a legitimate hotel. Both come FIRST, which means
+ *     `hotels[0]` — the trip's hotel, the trip total, the headline price.
+ *
+ * So the dangerous direction was the unguarded one. A floor is not a nicety
+ * here; it is the half of this that stops a $0 hotel becoming the trip.
  */
-const BUDGET_STARS_PRICE_CEILING = 1000;
-
-/**
- * Below this many hotels IN A STAR TIER the median isn't meaningful, so that
- * tier isn't filtered at all.
- *
- * This is what spares the luxury end of a thin market. A Bora Bora search
- * returns three overwater resorts beside fourteen local lodges; the resorts
- * land in tiers of one and three, fall under this floor, and are left alone.
- */
-const MIN_RESULTS_TO_FILTER = 4;
-
-/**
-/**
- * Reject prices that are implausible on their own terms, without comparing
- * them to anything.
- *
- * `dropPriceOutliers` below is *relative* — it asks whether a hotel is out of
- * line with its own search. That is blind to two cases: a small result set
- * where the median means nothing, and a feed that is uniformly wrong, where
- * the median moves with the error and every row looks reasonable next to its
- * neighbours.
- *
- * The provider hands us a star rating it assigned itself, and a 1-3 star
- * property cannot credibly cost four figures a night. That judgement needs no
- * comparison set, so it still holds when the relative check cannot help.
- *
- * Only applied to 1-3 stars. 4-5 stars genuinely reach those prices, and 0
- * means unrated — which covers B&Bs, apartments and whole villas, where there
- * is no defensible ceiling.
- */
-export function dropImplausiblePrices(hotels: HotelResult[], city: string): HotelResult[] {
-  const kept = hotels.filter((h) => {
-    const budgetTier = h.stars >= 1 && h.stars <= 3;
-    const absurd =
-      budgetTier && Number.isFinite(h.pricePerNight) && h.pricePerNight > BUDGET_STARS_PRICE_CEILING;
-    if (absurd) {
-      logger.warn('Hotel dropped — price implausible for its star rating', {
-        city,
-        hotel: h.name,
-        stars: h.stars,
-        pricePerNight: h.pricePerNight,
-        ceiling: BUDGET_STARS_PRICE_CEILING,
-      });
-    }
-    return !absurd;
-  });
-
-  // Same reasoning as the median guard: an empty city is worse than a
-  // suspicious one. If this would clear the board, the data is wrong in some
-  // way this rule doesn't model.
-  return kept.length > 0 ? kept : hotels;
-}
 
 /** Median of a non-empty list of positive numbers. */
 function medianOf(values: number[]): number {
@@ -214,51 +211,175 @@ function medianOf(values: number[]): number {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+/** A hotel priced above this multiple of its OWN STAR TIER's median is suspect. */
+const OUTLIER_MEDIAN_MULTIPLE = 5;
+
 /**
- * Drop provider rows whose per-night price is wildly out of line with OTHER
- * HOTELS OF THE SAME STAR RATING in the same search.
+ * Multiple of the WHOLE SEARCH's median above which an UNRATED row whose own
+ * tier is too thin to judge is suspect.
  *
- * Measured in production: a Florence search (2027-04-10 → 04-13, 2 adults)
- * returned "Hotel Aldobrandini" at $5383.47/night against a $267 median — and
- * the provider returned it FIRST, so it became the trip's hotel and 95% of a
- * $17,039 total displayed as "Best price for these dates".
+ * This is the one gap the per-tier rule leaves open. A lone 0-star row has no
+ * peers to be compared with, so nothing judged it at all: a Val d'Isère search
+ * returned a single 0-star listing at $3377.84/night — a tier of one, and
+ * exempt from the star ceiling below for being unrated — and it reached
+ * customers unchallenged.
  *
- * `pricePerNight` is already `totalPrice / nights` by this point, so this is
- * not our arithmetic: the provider is quoting for a different occupancy or
- * room count than we asked for. We can't fix their data, only refuse it.
+ * Only unrated rows fall through to this. A thin 4 or 5 star tier is left
+ * alone, because the provider's own star rating is independent evidence that
+ * the property really is in that price class — that is exactly what spares
+ * Bora Bora's resorts. A 0-star row carries no such evidence.
  *
- * WHY PER STAR TIER, not per search. This compared against the whole set's
- * median until a sweep of 58 real production searches showed that losing
- * badly: 1 true positive against 4 legitimate hotels deleted. A Bora Bora
- * search returns three overwater resorts beside fourteen local lodges at
- * $62-$266. The combined median lands at $172, the ceiling at $861, and the
- * guard removed all three resorts — the exact properties somebody searching
- * Bora Bora is looking for — leaving the guesthouses. Mykonos lost Cavo Tagoo
- * by $16, about 1% over the line.
- *
- * A bimodal market defeats any single global multiple, because the budget tail
- * drags the median below everything at the top. Comparing a hotel only against
- * its own tier removes that: either the tier is large enough to have a
- * meaningful median of its own, or it is too small to filter and is left alone.
- * Re-run over the same 832 captured rows, this drops exactly one — the genuine
- * outlier, a 0-star Positano listing at $6466.42/night against a $464 tier
- * median, 13.93x. The nearest legitimate row sits at 4.76x, so 5x has real
- * headroom rather than being tuned to the edge of the data.
- *
- * Deliberately a median rather than a mean — a mean is dragged upward by the
- * very outlier we're trying to catch.
+ * Deliberately the same 5x as the per-tier rule, even though a whole villa can
+ * genuinely cost several times a city's median. A false flag here is nearly
+ * free: an expensive row was already going to sort last on its price term, so
+ * flagging costs it a position it did not hold. That is the dividend of
+ * flagging rather than deleting — the threshold can be set by what catches the
+ * glitch instead of by what we are afraid to lose.
  */
-export function dropPriceOutliers(hotels: HotelResult[], city: string): HotelResult[] {
+const UNRATED_SEARCH_MEDIAN_MULTIPLE = 5;
+
+/**
+ * A row priced below its tier median divided by this is suspect.
+ *
+ * The mirror of OUTLIER_MEDIAN_MULTIPLE, and far more conservative at 10x
+ * rather than 5x, because the two errors are not symmetric: flagging an
+ * over-priced row costs nothing, while flagging a genuine bargain demotes the
+ * exact room a price-led planner should be putting first.
+ *
+ * 10x below its own star tier is not a bargain, it is a different product —
+ * a "from" price for a single bed in a shared room, or a quote for one night
+ * of a week. Validated against 832 captured production rows: it flags none of
+ * them.
+ */
+const UNDERPRICE_MEDIAN_DIVISOR = 10;
+
+/**
+ * Absolute per-night ceiling for a hotel the provider itself calls 1-3 stars.
+ *
+ * Deliberately generous — roughly 4x the top end of a 3-star in an expensive
+ * city in peak season — because the case this catches sits 5x above it.
+ * "Hotel Aldobrandini", stars: 3, came back at $5383.47/night.
+ */
+const BUDGET_STARS_PRICE_CEILING = 1000;
+
+/**
+ * No real room for two adults costs less than this per night.
+ *
+ * The floor exists to catch an ABSENT price, not a cheap one. `min_total_price`
+ * missing or unparseable becomes 0 (see the mapping in `searchHotels`), and a
+ * 0 is the single most dangerous value in the system because `100 / price`
+ * turns it into the highest-scoring hotel in the search.
+ *
+ * $5 is far below anything bookable for two adults — a hostel dorm bed in the
+ * cheapest market this app covers is several times it — so no real inventory
+ * sits under this line, while everything that does sit under it is a data
+ * error. Unlike the suspicion rules above, this one deletes, because there is
+ * no hotel behind a missing price to preserve.
+ */
+const ABSOLUTE_PRICE_FLOOR = 5;
+
+/**
+ * Below this many hotels IN A STAR TIER the median isn't meaningful, so that
+ * tier gets no relative ceiling or floor of its own.
+ *
+ * This is what spares the luxury end of a thin market. A Bora Bora search
+ * returns three overwater resorts beside fourteen local lodges; the resorts
+ * land in tiers of one and three, fall under this floor, and are left alone.
+ */
+const MIN_RESULTS_TO_FILTER = 4;
+
+/** Why a row's price is not trusted. Carried through to the logs. */
+export type PriceSuspectReason =
+  | 'above-tier-median'
+  | 'above-search-median-unrated'
+  | 'above-star-ceiling'
+  | 'below-tier-median';
+
+/** A price that could be a real nightly rate. Not a judgement on how good it is. */
+function isUsablePrice(price: number): boolean {
+  return Number.isFinite(price) && price >= ABSOLUTE_PRICE_FLOOR;
+}
+
+/**
+ * Remove rows whose price cannot be a real rate at all.
+ *
+ * This is the only place that deletes, and it deletes on certainty rather than
+ * suspicion: a missing, zero, negative or non-finite price has no hotel behind
+ * it, so nothing is lost. See ABSOLUTE_PRICE_FLOOR for why this is the
+ * dangerous direction rather than the obvious one.
+ *
+ * `price` (the whole stay) is checked as well as `pricePerNight`. They are
+ * derived from each other at the mapping, but currency conversion converts
+ * them independently, so they can diverge on the way here.
+ */
+export function dropUnusablePrices(hotels: HotelResult[], city: string): HotelResult[] {
+  const kept = hotels.filter((h) => {
+    const usable = isUsablePrice(h.pricePerNight) && isUsablePrice(h.price);
+    if (!usable) {
+      logger.warn('Hotel dropped — price cannot be a real rate', {
+        city,
+        hotel: h.name,
+        pricePerNight: h.pricePerNight,
+        price: h.price,
+        floor: ABSOLUTE_PRICE_FLOOR,
+      });
+    }
+    return usable;
+  });
+
+  // No "empty is worse than suspicious" fallback here, unlike the old guards.
+  // That reasoning applied when we were deleting rows that might have been
+  // real; these cannot be. A city of $0 hotels and a $0 trip total is not a
+  // better answer than no hotels, it is a confidently wrong one.
+  if (kept.length === 0 && hotels.length > 0) {
+    logger.warn('Hotel search emptied — every row had an unusable price', {
+      city,
+      rows: hotels.length,
+    });
+  }
+
+  return kept;
+}
+
+/**
+ * Mark rows whose price is out of line, WITHOUT removing them.
+ *
+ * Three rules, in order of how much evidence they need:
+ *
+ *  - `above-star-ceiling`: a 1-3 star property over BUDGET_STARS_PRICE_CEILING.
+ *    Needs no comparison set, so it still works on a result set of one, or on a
+ *    feed that is uniformly wrong and therefore looks internally consistent.
+ *  - `above-tier-median` / `below-tier-median`: compared against other rows of
+ *    the SAME star rating. Per tier rather than per search because a bimodal
+ *    market defeats any single global multiple — the budget tail drags the
+ *    median below everything at the top, which is how Bora Bora's resorts came
+ *    to be deleted.
+ *  - `above-search-median-unrated`: the fallback for an unrated row whose own
+ *    tier is too thin to say anything. See UNRATED_SEARCH_MEDIAN_MULTIPLE.
+ *
+ * Medians throughout, never means — a mean is dragged by the very outlier
+ * we are looking for.
+ *
+ * Every row is returned either way. Ordering is the frontend's job: `rankHotels`
+ * sorts flagged rows below every unflagged one, so a flagged row can still be
+ * browsed and booked but can never become `hotels[0]`, the auto-selected hotel
+ * or part of the trip total.
+ */
+export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelResult[] {
+  const starsOf = (h: HotelResult) => (Number.isFinite(h.stars) ? h.stars : 0);
+
   const tiers = new Map<number, HotelResult[]>();
+  const allPrices: number[] = [];
   for (const h of hotels) {
-    if (!Number.isFinite(h.pricePerNight) || h.pricePerNight <= 0) continue;
-    const stars = Number.isFinite(h.stars) ? h.stars : 0;
-    const tier = tiers.get(stars);
+    if (!isUsablePrice(h.pricePerNight)) continue;
+    allPrices.push(h.pricePerNight);
+    const tier = tiers.get(starsOf(h));
     if (tier) tier.push(h);
-    else tiers.set(stars, [h]);
+    else tiers.set(starsOf(h), [h]);
   }
 
   const ceilings = new Map<number, number>();
+  const floors = new Map<number, number>();
   for (const [stars, tier] of tiers) {
     // Too thin to say anything about: the one or two luxury rooms in an
     // otherwise budget market land here, and are exempt by construction.
@@ -266,36 +387,59 @@ export function dropPriceOutliers(hotels: HotelResult[], city: string): HotelRes
     const median = medianOf(tier.map((h) => h.pricePerNight));
     if (!Number.isFinite(median) || median <= 0) continue;
     ceilings.set(stars, median * OUTLIER_MEDIAN_MULTIPLE);
+    floors.set(stars, median / UNDERPRICE_MEDIAN_DIVISOR);
   }
-  if (ceilings.size === 0) return hotels;
 
-  const kept = hotels.filter((h) => {
-    const stars = Number.isFinite(h.stars) ? h.stars : 0;
-    const ceiling = ceilings.get(stars);
-    if (ceiling === undefined) return true;
-    return !(Number.isFinite(h.pricePerNight) && h.pricePerNight > ceiling);
-  });
+  // Only used for unrated rows with no tier of their own to be judged against.
+  const searchCeiling =
+    allPrices.length >= MIN_RESULTS_TO_FILTER
+      ? medianOf(allPrices) * UNRATED_SEARCH_MEDIAN_MULTIPLE
+      : undefined;
 
-  // If everything looks like an outlier, the median is the thing that's wrong.
-  // Returning nothing would silently empty the city, which is worse than
-  // showing suspicious prices.
-  if (kept.length === 0) return hotels;
+  const reasonFor = (h: HotelResult): PriceSuspectReason | null => {
+    if (!isUsablePrice(h.pricePerNight)) return null;
+    const stars = starsOf(h);
+    const price = h.pricePerNight;
 
-  for (const h of hotels) {
-    if (!kept.includes(h)) {
-      const stars = Number.isFinite(h.stars) ? h.stars : 0;
-      logger.warn('Hotel dropped — price far above others of its star rating', {
-        city,
-        hotel: h.name,
-        stars,
-        pricePerNight: h.pricePerNight,
-        tierCeiling: ceilings.get(stars),
-        tierSize: tiers.get(stars)?.length,
-      });
+    if (stars >= 1 && stars <= 3 && price > BUDGET_STARS_PRICE_CEILING) {
+      return 'above-star-ceiling';
     }
-  }
 
-  return kept;
+    const ceiling = ceilings.get(stars);
+    if (ceiling !== undefined) {
+      if (price > ceiling) return 'above-tier-median';
+      const floor = floors.get(stars);
+      if (floor !== undefined && price < floor) return 'below-tier-median';
+      return null;
+    }
+
+    // No tier ceiling: the tier is too thin. Unrated rows have no star rating
+    // vouching for them either, so they fall back to the whole search.
+    if (stars === 0 && searchCeiling !== undefined && price > searchCeiling) {
+      return 'above-search-median-unrated';
+    }
+
+    return null;
+  };
+
+  return hotels.map((h) => {
+    const reason = reasonFor(h);
+    if (!reason) return h;
+
+    logger.warn('Hotel price flagged as suspect — demoted, not removed', {
+      city,
+      hotel: h.name,
+      stars: starsOf(h),
+      pricePerNight: h.pricePerNight,
+      reason,
+      tierCeiling: ceilings.get(starsOf(h)),
+      tierFloor: floors.get(starsOf(h)),
+      tierSize: tiers.get(starsOf(h))?.length,
+      searchCeiling,
+    });
+
+    return { ...h, priceSuspect: true, priceSuspectReason: reason };
+  });
 }
 
 export async function searchHotels(params: SearchHotelsParams): Promise<HotelResult[]> {
@@ -415,10 +559,10 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     );
     hotels = converted.filter((h): h is HotelResult => h !== null);
 
-    // Absolute check first: it works on any size of result set, so it can
-    // catch a row the median guard would be powerless against.
-    hotels = dropImplausiblePrices(hotels, city);
-    hotels = dropPriceOutliers(hotels, city);
+    // Drop first, flag second: an unusable price must not be in the set the
+    // medians are computed from, or a row of 0s drags every floor down with it.
+    hotels = dropUnusablePrices(hotels, city);
+    hotels = flagSuspectPrices(hotels, city);
 
     if (maxPrice !== undefined) {
       hotels = hotels.filter((h) => h.price <= maxPrice);
