@@ -142,7 +142,7 @@ type SearchHotelsParams = {
   maxPrice?: number;
 };
 
-/** A hotel priced above this multiple of the set's median is treated as junk. */
+/** A hotel priced above this multiple of its OWN STAR TIER's median is junk. */
 const OUTLIER_MEDIAN_MULTIPLE = 5;
 
 /**
@@ -155,7 +155,14 @@ const OUTLIER_MEDIAN_MULTIPLE = 5;
  */
 const BUDGET_STARS_PRICE_CEILING = 1000;
 
-/** Below this many results the median isn't meaningful, so don't filter on it. */
+/**
+ * Below this many hotels IN A STAR TIER the median isn't meaningful, so that
+ * tier isn't filtered at all.
+ *
+ * This is what spares the luxury end of a thin market. A Bora Bora search
+ * returns three overwater resorts beside fourteen local lodges; the resorts
+ * land in tiers of one and three, fall under this floor, and are left alone.
+ */
 const MIN_RESULTS_TO_FILTER = 4;
 
 /**
@@ -200,9 +207,16 @@ export function dropImplausiblePrices(hotels: HotelResult[], city: string): Hote
   return kept.length > 0 ? kept : hotels;
 }
 
+/** Median of a non-empty list of positive numbers. */
+function medianOf(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 /**
- * Drop provider rows whose per-night price is wildly out of line with the rest
- * of the same search.
+ * Drop provider rows whose per-night price is wildly out of line with OTHER
+ * HOTELS OF THE SAME STAR RATING in the same search.
  *
  * Measured in production: a Florence search (2027-04-10 → 04-13, 2 adults)
  * returned "Hotel Aldobrandini" at $5383.47/night against a $267 median — and
@@ -213,26 +227,54 @@ export function dropImplausiblePrices(hotels: HotelResult[], city: string): Hote
  * not our arithmetic: the provider is quoting for a different occupancy or
  * room count than we asked for. We can't fix their data, only refuse it.
  *
+ * WHY PER STAR TIER, not per search. This compared against the whole set's
+ * median until a sweep of 58 real production searches showed that losing
+ * badly: 1 true positive against 4 legitimate hotels deleted. A Bora Bora
+ * search returns three overwater resorts beside fourteen local lodges at
+ * $62-$266. The combined median lands at $172, the ceiling at $861, and the
+ * guard removed all three resorts — the exact properties somebody searching
+ * Bora Bora is looking for — leaving the guesthouses. Mykonos lost Cavo Tagoo
+ * by $16, about 1% over the line.
+ *
+ * A bimodal market defeats any single global multiple, because the budget tail
+ * drags the median below everything at the top. Comparing a hotel only against
+ * its own tier removes that: either the tier is large enough to have a
+ * meaningful median of its own, or it is too small to filter and is left alone.
+ * Re-run over the same 832 captured rows, this drops exactly one — the genuine
+ * outlier, a 0-star Positano listing at $6466.42/night against a $464 tier
+ * median, 13.93x. The nearest legitimate row sits at 4.76x, so 5x has real
+ * headroom rather than being tuned to the edge of the data.
+ *
  * Deliberately a median rather than a mean — a mean is dragged upward by the
- * very outlier we're trying to catch. An expensive city just has an expensive
- * median, so the multiple travels without needing per-city thresholds.
+ * very outlier we're trying to catch.
  */
 export function dropPriceOutliers(hotels: HotelResult[], city: string): HotelResult[] {
-  if (hotels.length < MIN_RESULTS_TO_FILTER) return hotels;
+  const tiers = new Map<number, HotelResult[]>();
+  for (const h of hotels) {
+    if (!Number.isFinite(h.pricePerNight) || h.pricePerNight <= 0) continue;
+    const stars = Number.isFinite(h.stars) ? h.stars : 0;
+    const tier = tiers.get(stars);
+    if (tier) tier.push(h);
+    else tiers.set(stars, [h]);
+  }
 
-  const prices = hotels
-    .map((h) => h.pricePerNight)
-    .filter((p) => Number.isFinite(p) && p > 0)
-    .sort((a, b) => a - b);
-  if (prices.length < MIN_RESULTS_TO_FILTER) return hotels;
+  const ceilings = new Map<number, number>();
+  for (const [stars, tier] of tiers) {
+    // Too thin to say anything about: the one or two luxury rooms in an
+    // otherwise budget market land here, and are exempt by construction.
+    if (tier.length < MIN_RESULTS_TO_FILTER) continue;
+    const median = medianOf(tier.map((h) => h.pricePerNight));
+    if (!Number.isFinite(median) || median <= 0) continue;
+    ceilings.set(stars, median * OUTLIER_MEDIAN_MULTIPLE);
+  }
+  if (ceilings.size === 0) return hotels;
 
-  const mid = Math.floor(prices.length / 2);
-  const median =
-    prices.length % 2 === 1 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
-  if (!Number.isFinite(median) || median <= 0) return hotels;
-
-  const ceiling = median * OUTLIER_MEDIAN_MULTIPLE;
-  const kept = hotels.filter((h) => !(Number.isFinite(h.pricePerNight) && h.pricePerNight > ceiling));
+  const kept = hotels.filter((h) => {
+    const stars = Number.isFinite(h.stars) ? h.stars : 0;
+    const ceiling = ceilings.get(stars);
+    if (ceiling === undefined) return true;
+    return !(Number.isFinite(h.pricePerNight) && h.pricePerNight > ceiling);
+  });
 
   // If everything looks like an outlier, the median is the thing that's wrong.
   // Returning nothing would silently empty the city, which is worse than
@@ -241,12 +283,14 @@ export function dropPriceOutliers(hotels: HotelResult[], city: string): HotelRes
 
   for (const h of hotels) {
     if (!kept.includes(h)) {
-      logger.warn('Hotel dropped — price far above the median for this search', {
+      const stars = Number.isFinite(h.stars) ? h.stars : 0;
+      logger.warn('Hotel dropped — price far above others of its star rating', {
         city,
         hotel: h.name,
+        stars,
         pricePerNight: h.pricePerNight,
-        median,
-        ceiling,
+        tierCeiling: ceilings.get(stars),
+        tierSize: tiers.get(stars)?.length,
       });
     }
   }
