@@ -697,6 +697,56 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
 }
 
 /**
+ * The review score we want, and the lower bars we will settle for to get
+ * enough hotels to compare prices against.
+ *
+ * 7.0 was a flat filter applied to every search. It is OUR filter, not the
+ * provider's, and on a thin search it was working against us twice over: it
+ * left the traveller fewer options, AND it removed the peers every price check
+ * depends on. A Val d'Isère search came back with exactly ONE hotel at
+ * $3377.84/night, and a single row cannot be an outlier — the median of a
+ * one-row set is that row, so no comparison of any kind reaches it.
+ *
+ * So the bar is a preference now, not a rule. Below MIN_RESULTS_TO_FILTER
+ * hotels there is nothing to check a price against, and at that point four
+ * hotels including some mediocre ones beats one hotel nobody can vouch for.
+ * Ranking still puts the good ones first — `rating^2.8` is unkind to a 5.5 —
+ * so widening costs ordering, not correctness.
+ *
+ * Free in both latency and quota: the rows are already in the response we
+ * have. Only the floor we apply to them changes.
+ */
+const RATING_FLOORS = [7.0, 6.0, 5.0, 0];
+
+/**
+ * Take the best-rated rows we can while still having enough to compare.
+ *
+ * Walks down RATING_FLOORS until the set reaches MIN_RESULTS_TO_FILTER, or
+ * until the floor runs out and we take everything the provider sent.
+ */
+export function pickByRating(rows: HotelResult[], city: string): HotelResult[] {
+  const ratingOf = (h: HotelResult) => (Number.isFinite(h.rating) ? h.rating : 0);
+
+  for (const floor of RATING_FLOORS) {
+    const kept = rows.filter((h) => ratingOf(h) >= floor);
+    if (kept.length >= MIN_RESULTS_TO_FILTER || floor === 0) {
+      if (floor !== RATING_FLOORS[0] && kept.length > 0) {
+        logger.warn('Hotel rating bar lowered to get enough rows to price-check', {
+          city,
+          floor,
+          kept: kept.length,
+          atPreferredFloor: rows.filter((h) => ratingOf(h) >= RATING_FLOORS[0]).length,
+          offered: rows.length,
+        });
+      }
+      return kept;
+    }
+  }
+
+  return rows;
+}
+
+/**
  * Move rows whose price we do not trust to the END of the list, keeping
  * provider order within each group.
  *
@@ -792,27 +842,24 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
       Math.ceil((checkoutDate.getTime() - checkinDate.getTime()) / (1000 * 60 * 60 * 24)),
     );
 
-    let hotels: HotelResult[] = results
-      .filter((h: any) => {
-        const score = parseFloat(h.review_score ?? '0');
-        return score >= 7.0;
-      })
-      .map((h: any) => {
-        const totalPrice = parseFloat(h.min_total_price ?? h.price_breakdown?.gross_price ?? '0');
-        return {
-          id: String(h.hotel_id ?? h.id ?? ''),
-          name: h.hotel_name ?? h.name ?? 'Unknown Hotel',
-          price: totalPrice,
-          pricePerNight: Math.round((totalPrice / nights) * 100) / 100,
-          currency: h.currency_code ?? h.currencycode ?? 'USD',
-          rating: parseFloat(h.review_score ?? '0'),
-          reviewCount: parseInt(h.review_nr ?? h.review_score_word ?? '0', 10) || 0,
-          stars: parseInt(h.class ?? '0', 10) || 0,
-          thumbnail: h.main_photo_url ?? h.max_photo_url ?? '',
-          bookingUrl: h.url ?? `https://www.booking.com/hotel/${h.hotel_id ?? ''}.html`,
-          amenities: [] as string[],
-        };
-      });
+    const mapRow = (h: any): HotelResult => {
+      const totalPrice = parseFloat(h.min_total_price ?? h.price_breakdown?.gross_price ?? '0');
+      return {
+        id: String(h.hotel_id ?? h.id ?? ''),
+        name: h.hotel_name ?? h.name ?? 'Unknown Hotel',
+        price: totalPrice,
+        pricePerNight: Math.round((totalPrice / nights) * 100) / 100,
+        currency: h.currency_code ?? h.currencycode ?? 'USD',
+        rating: parseFloat(h.review_score ?? '0'),
+        reviewCount: parseInt(h.review_nr ?? h.review_score_word ?? '0', 10) || 0,
+        stars: parseInt(h.class ?? '0', 10) || 0,
+        thumbnail: h.main_photo_url ?? h.max_photo_url ?? '',
+        bookingUrl: h.url ?? `https://www.booking.com/hotel/${h.hotel_id ?? ''}.html`,
+        amenities: [] as string[],
+      };
+    };
+
+    let hotels = pickByRating(results.map(mapRow), city);
 
     // Convert all non-USD prices to USD before returning.
     // Booking frequently ignores filter_by_currency=USD and returns

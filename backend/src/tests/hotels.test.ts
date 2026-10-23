@@ -55,7 +55,7 @@ describe('searchHotels', () => {
     jest.clearAllMocks();
   });
 
-  it('normalizes hotel results and filters by rating >= 7.0', async () => {
+  it('normalizes hotel results and relaxes the rating bar on a thin search', async () => {
     // First call: getDestinationId
     mockFetch
       .mockResolvedValueOnce({
@@ -116,13 +116,16 @@ describe('searchHotels', () => {
       rooms: 1,
     });
 
-    // Budget Hostel should be filtered out (5.2 < 7.0)
-    expect(hotels).toHaveLength(2);
-    expect(hotels.find((h) => h.name === 'Budget Hostel')).toBeUndefined();
+    // The 7.0 bar is a PREFERENCE now, not a rule. Only three rows came back
+    // and two of them clear 7.0 — below MIN_RESULTS_TO_FILTER, so there is
+    // nothing to check a price against. At that point the bar relaxes: three
+    // hotels including a mediocre one beats two nobody can cross-check, and
+    // the 5.2 ranks last anyway because rating dominates the score.
+    expect(hotels).toHaveLength(3);
+    expect(hotels.find((h) => h.name === 'Budget Hostel')).toBeDefined();
     expect(hotels[0].name).toBe('Grand Hotel');
     expect(hotels[0].price).toBe(300);
     expect(hotels[0].pricePerNight).toBe(100); // 300 / 3 nights
-    expect(hotels[1].name).toBe('Nice B&B');
   });
 
   it('returns empty array when RAPIDAPI_KEY is missing', async () => {
