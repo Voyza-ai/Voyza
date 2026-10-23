@@ -275,7 +275,20 @@ export async function convertToUsd(
   // Zero is genuinely zero in any currency, so it needs no rate.
   if (amount === 0) return 0;
 
-  const code = fromCurrency?.toUpperCase().trim();
+  // `String(... ?? '')` and not `fromCurrency?.toUpperCase()`: optional
+  // chaining only guards nullish, so a NUMBER, boolean or object code raised
+  // `TypeError: fromCurrency?.toUpperCase is not a function`. The throw
+  // happens inside the callers' `Promise.all`, so one malformed row took the
+  // whole search with it — an empty city for hotels and trains, and a 502 to
+  // the client for flights. The provider mapping only defaults on nullish
+  // (`h.currency_code ?? h.currencycode ?? 'USD'`), so a numeric
+  // `currency_code` reaches here intact.
+  //
+  // This function's contract is that it ANSWERS for a code it cannot use. It
+  // must never be the thing that fails.
+  const code = String(fromCurrency ?? '')
+    .toUpperCase()
+    .trim();
 
   // A BLANK OR MALFORMED CODE IS UNKNOWN, NOT USD. This used to fall into the
   // same branch as 'USD' and return the raw number, which is the

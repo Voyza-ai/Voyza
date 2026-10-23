@@ -174,6 +174,27 @@ jest.mock('@/lib/api', () => ({
   // null-safe default: an unchanged role never toasts or locks the canvas.
   getCanvasRole: jest.fn().mockResolvedValue({ role: 'editor' }),
   cloneTrip: jest.fn().mockResolvedValue({ tripId: 'trip-clone-1', trip: {}, clonedFrom: 'trip-1' }),
+  // These seven were live in app code but absent from this factory, so they
+  // came back `undefined` in 20 suites. The sharp edge was ResultsHeader's
+  // handleRename, which calls updateTrip inside a try/catch that rolls back and
+  // toasts on failure — under the mock the TypeError was indistinguishable from
+  // a 500, so a test asserting the error toast passed, and would have kept
+  // passing if updateTrip had been deleted outright. See the guard test in
+  // apiMockSurface.test.ts, which fails if this list drifts again.
+  updateTrip: jest.fn().mockResolvedValue({ trip: {} }),
+  fetchHomeLegs: jest.fn().mockResolvedValue([]),
+  searchActivities: jest.fn().mockResolvedValue([]),
+  searchRestaurants: jest.fn().mockResolvedValue([]),
+  suggestDestinationsForVibe: jest.fn().mockResolvedValue([]),
+  updateCurrentUser: jest.fn().mockResolvedValue({}),
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+      this.name = 'ApiError';
+    }
+  },
 }));
 
 // Mock styled-jsx (used by Flowchart)

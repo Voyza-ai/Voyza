@@ -289,6 +289,21 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
           });
           return { ...t, pricePerPerson: null, limitedCoverage: true };
         }
+
+        // Conversion rounds to cents, so a small amount in a weak currency can
+        // come out as exactly 0 — and a $0 fare is not a free train, it is an
+        // unknown one. This path already has the right way to say that.
+        if (!Number.isFinite(usd) || usd <= 0) {
+          logger.warn('Train fare unpriced — converted price rounded to zero', {
+            raw: t.pricePerPerson,
+            currency: t.currency,
+            usd,
+            origin,
+            destination,
+          });
+          return { ...t, pricePerPerson: null, limitedCoverage: true };
+        }
+
         return { ...t, pricePerPerson: usd, currency: 'USD' };
       }),
     );

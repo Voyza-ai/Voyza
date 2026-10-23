@@ -86,7 +86,7 @@ const DEST_TYPE_PREFERENCE = ['city', 'region', 'district', 'island', 'country']
 export function pickDestination(
   locations: unknown,
   cityName: string,
-): { dest_id: string; dest_type: string } | null {
+): { dest_id: string; dest_type: string; certain: boolean } | null {
   if (!Array.isArray(locations)) return null;
 
   const usable = locations.filter(
@@ -94,21 +94,44 @@ export function pickDestination(
   );
   if (usable.length === 0) return null;
 
-  const chosen =
-    DEST_TYPE_PREFERENCE.map((want) =>
-      usable.find((l: any) => String(l.dest_type) === want),
-    ).find(Boolean) ?? usable[0];
+  const preferred = DEST_TYPE_PREFERENCE.map((want) =>
+    usable.find((l: any) => String(l.dest_type) === want),
+  ).find(Boolean);
 
-  const picked = chosen as any;
-  if (String(picked.dest_type ?? 'city') !== 'city') {
+  const picked = (preferred ?? usable[0]) as any;
+  const rawType = picked.dest_type;
+  const known = typeof rawType === 'string' && rawType.length > 0;
+
+  // Do NOT relabel an unknown kind as 'city'. This used to end with
+  // `String(picked.dest_type ?? 'city')`, which meant a match with no
+  // dest_type was sent to the search as a city and then UPSERT into
+  // booking_locations under that claim — one uncertain resolution cached
+  // permanently for that city name. The warn condition was
+  // `!== 'city'`, so it was false for exactly the most uncertain case and the
+  // only silent branch was the one that most needed a line in the log.
+  //
+  // `certain` is false whenever we are guessing, and the caller skips the cache
+  // write in that case, so a guess is re-made next time rather than frozen.
+  if (!known) {
+    logger.warn('Hotel destination has no dest_type — guessing city, not caching', {
+      city: cityName,
+      destId: String(picked.dest_id),
+      offered: usable.map((l: any) => l?.dest_type ?? null),
+    });
+  } else if (rawType !== 'city') {
     logger.warn('Hotel destination resolved to a non-city match', {
       city: cityName,
-      destType: picked.dest_type,
+      destType: rawType,
       destId: String(picked.dest_id),
+      viaPreference: Boolean(preferred),
     });
   }
 
-  return { dest_id: String(picked.dest_id), dest_type: String(picked.dest_type ?? 'city') };
+  return {
+    dest_id: String(picked.dest_id),
+    dest_type: known ? rawType : 'city',
+    certain: known,
+  };
 }
 
 async function getDestinationId(
@@ -184,21 +207,34 @@ async function getDestinationId(
   //
   // No `.retry(false)` needed here — postgrest only retries idempotent methods
   // and this is a POST, so it was never on the retry ladder.
-  const { error: cacheWriteError } = await supabase
-    .from('booking_locations')
-    .upsert({
-      city_name: cityName.toLowerCase(),
-      dest_id: String(city.dest_id),
-      dest_type: city.dest_type,
-    })
-    .abortSignal(AbortSignal.timeout(LOCATION_CACHE_TIMEOUT_MS));
-
-  if (cacheWriteError) {
-    logger.warn('booking_locations cache write failed — this city will miss again', {
+  //
+  // An UNCERTAIN resolution is deliberately not cached. `pickDestination`
+  // reports `certain: false` when the provider gave it no `dest_type` to go
+  // on, and writing a guess here would freeze it for that city name for good —
+  // every later search inheriting one bad response. Re-guessing costs a
+  // locations call; a cached wrong answer costs the destination.
+  if (!city.certain) {
+    logger.warn('Destination resolution uncertain — skipping the cache write', {
       city: cityName,
-      code: cacheWriteError.code || undefined,
-      error: cacheWriteError.message,
+      destId: String(city.dest_id),
     });
+  } else {
+    const { error: cacheWriteError } = await supabase
+      .from('booking_locations')
+      .upsert({
+        city_name: cityName.toLowerCase(),
+        dest_id: String(city.dest_id),
+        dest_type: city.dest_type,
+      })
+      .abortSignal(AbortSignal.timeout(LOCATION_CACHE_TIMEOUT_MS));
+
+    if (cacheWriteError) {
+      logger.warn('booking_locations cache write failed — this city will miss again', {
+        city: cityName,
+        code: cacheWriteError.code || undefined,
+        error: cacheWriteError.message,
+      });
+    }
   }
 
   return { dest_id: String(city.dest_id), dest_type: city.dest_type };
@@ -523,8 +559,51 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
   // tier's COUNT, which can lift a tier over MIN_RESULTS_TO_FILTER and
   // manufacture a floor that then flags a legitimately cheap room. There is a
   // test for exactly that.
-  const overStarCeiling = (h: HotelResult) =>
+  const overStarCeilingRaw = (h: HotelResult) =>
     starsOf(h) >= 1 && starsOf(h) <= 3 && h.pricePerNight > BUDGET_STARS_PRICE_CEILING;
+
+  // IF THE CEILING CONDEMNS A WHOLE TIER, THE CEILING IS WHAT IS WRONG.
+  //
+  // This is the one absolute rule here: no comparison set, and unlike the
+  // relative rules it never switches itself off on a thin result set. That
+  // made it the last way for a search to end up with every row flagged — and
+  // then `trustedFirst` has nothing to promote and `hotels[0]` is suspect,
+  // which voids the guarantee the whole design rests on. Demonstrated on nine
+  // realistic New-Year ski chalets at $2180-$3260: all nine flagged, sole
+  // reason `above-star-ceiling`.
+  //
+  // Raising the number does not fix this, it moves the cliff: an absolute
+  // ceiling on a quantity with no absolute bound will always have a market
+  // above it somewhere. So the rule now yields to its own evidence, the same
+  // way the median rules do — a tier where every row is over the line is
+  // telling us about the market, not about a glitch. A single absurd row among
+  // normal ones is still caught, which is the case it was built for.
+  const condemnedTiers = new Set<number>();
+  for (const [stars, tier] of (() => {
+    const byStars = new Map<number, HotelResult[]>();
+    for (const h of hotels) {
+      if (!isUsablePrice(h.pricePerNight)) continue;
+      const k = starsOf(h);
+      const t = byStars.get(k);
+      if (t) t.push(h);
+      else byStars.set(k, [h]);
+    }
+    return byStars;
+  })()) {
+    if (tier.length >= MIN_RESULTS_TO_FILTER && tier.every(overStarCeilingRaw)) {
+      condemnedTiers.add(stars);
+      logger.warn('Star ceiling ignored — it would condemn the whole tier', {
+        city,
+        stars,
+        tierSize: tier.length,
+        ceiling: BUDGET_STARS_PRICE_CEILING,
+        cheapestInTier: Math.min(...tier.map((h) => h.pricePerNight)),
+      });
+    }
+  }
+
+  const overStarCeiling = (h: HotelResult) =>
+    overStarCeilingRaw(h) && !condemnedTiers.has(starsOf(h));
 
   const tiers = new Map<number, HotelResult[]>();
   const allPrices: number[] = [];
@@ -767,7 +846,13 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
         // read as dollars. A USD row costs one extra await that returns
         // before any rate lookup.
         const usdTotal = await convertToUsd(h.price, h.currency);
-        const usdPerNight = await convertToUsd(h.pricePerNight, h.currency);
+        // Derive the nightly rate rather than converting a second time.
+        // `pricePerNight` is `totalPrice / nights` by construction at the
+        // mapping above, so a second conversion bought nothing and cost a
+        // second rate lookup and a second warn line per row — twenty
+        // blank-currency rows emitted sixty-one log lines between them.
+        const usdPerNight =
+          usdTotal === null ? null : Math.round((usdTotal / nights) * 100) / 100;
         if (usdTotal === null || usdPerNight === null) {
           logger.warn('Hotel dropped — no USD rate for its currency', {
             city,

@@ -1,5 +1,5 @@
 import { hotelScore, rankHotels } from '@/lib/hotelScore';
-import { hotelFromResult } from '@/lib/hotelShape';
+import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 
 /**
  * `hotels[0]` is the trip's hotel. `app/results/page.tsx` and
@@ -274,5 +274,97 @@ describe('hotelFromResult carries the fields a trip needs', () => {
 
     expect(ranked[0].name).not.toBe('Hotel Aldobrandini');
     expect(ranked[ranked.length - 1].name).toBe('Hotel Aldobrandini');
+  });
+});
+
+/**
+ * Trips already in the database were never re-ranked or re-flagged on load, so
+ * one saved before the price guards existed keeps raw provider order — and its
+ * hotels[0], the trip's hotel and headline total, can still be the glitch row.
+ */
+describe('rerankSavedCityHotels repairs a saved trip', () => {
+  const saved = (pricePerNight: number, name: string, extra: object = {}) => ({
+    name,
+    rating: 8.2,
+    pricePerNight,
+    area: '',
+    ...extra,
+  });
+
+  // Provider order, as a legacy trip has it: the glitch first.
+  const legacyCity = () => ({
+    name: 'Florence',
+    selectedHotelIndex: 0,
+    hotels: [
+      saved(5383.47, 'Hotel Aldobrandini'),
+      saved(170.31, 'Radisson Blu'),
+      saved(204.32, 'Hotel David'),
+      saved(197.58, 'Il Bargello'),
+    ],
+  });
+
+  it('moves the glitch row off index 0', () => {
+    const city = rerankSavedCityHotels(legacyCity() as any);
+
+    expect(city.hotels![0].name).not.toBe('Hotel Aldobrandini');
+    expect(city.selectedHotelIndex).toBe(0);
+    expect(city.hotel!.pricePerNight).toBeLessThan(400);
+  });
+
+  it('keeps every hotel — nothing is dropped on load', () => {
+    expect(rerankSavedCityHotels(legacyCity() as any).hotels).toHaveLength(4);
+  });
+
+  it("preserves a traveller's deliberate pick through the reorder", () => {
+    // They chose Il Bargello at index 3. After reordering it is somewhere
+    // else, and it must still be their selection.
+    const before = legacyCity() as any;
+    before.selectedHotelIndex = 3;
+
+    const city = rerankSavedCityHotels(before);
+
+    expect(city.hotels![city.selectedHotelIndex!].name).toBe('Il Bargello');
+    expect(city.hotel!.name).toBe('Il Bargello');
+  });
+
+  it('moves a selection off a flagged row', () => {
+    const before = {
+      name: 'Florence',
+      selectedHotelIndex: 1,
+      hotels: [saved(170.31, 'Radisson Blu'), saved(5383.47, 'Flagged', { priceSuspect: true })],
+    };
+
+    const city = rerankSavedCityHotels(before as any);
+
+    expect(city.hotel!.name).toBe('Radisson Blu');
+  });
+
+  it('moves a selection off an impossible price', () => {
+    const before = {
+      name: 'Florence',
+      selectedHotelIndex: 1,
+      hotels: [saved(170.31, 'Radisson Blu'), saved(0, 'Zero')],
+    };
+
+    const city = rerankSavedCityHotels(before as any);
+
+    expect(city.hotel!.name).toBe('Radisson Blu');
+    expect(city.hotel!.pricePerNight).toBe(170.31);
+  });
+
+  it('leaves a city with no hotels untouched', () => {
+    expect(rerankSavedCityHotels({ name: 'X', hotels: [] } as any).hotels).toEqual([]);
+    expect(rerankSavedCityHotels({ name: 'X' } as any).hotels).toBeUndefined();
+    expect(rerankSavedCityHotels({ name: 'X', hotels: null } as any).hotels).toBeNull();
+  });
+
+  it('is idempotent — loading twice changes nothing further', () => {
+    const once = rerankSavedCityHotels(legacyCity() as any);
+    const twice = rerankSavedCityHotels(once);
+
+    const namesOf = (c: { hotels?: Array<{ name: string }> | null }) =>
+      (c.hotels ?? []).map((h) => h.name);
+    expect(namesOf(twice)).toEqual(namesOf(once));
+    expect(twice.selectedHotelIndex).toBe(once.selectedHotelIndex);
   });
 });

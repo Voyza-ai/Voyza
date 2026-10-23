@@ -547,13 +547,14 @@ describe('pickDestination', () => {
       [loc('country', '1'), loc('region', '2'), loc('city', '3'), loc('district', '4')],
       'Florence',
     );
-    expect(picked).toEqual({ dest_id: '3', dest_type: 'city' });
+    expect(picked).toEqual({ dest_id: '3', dest_type: 'city', certain: true });
   });
 
   it('resolves a region when there is no city — the Tuscany case', () => {
     expect(pickDestination([loc('country', '1'), loc('region', '2')], 'Tuscany')).toEqual({
       dest_id: '2',
       dest_type: 'region',
+      certain: true,
     });
   });
 
@@ -561,6 +562,7 @@ describe('pickDestination', () => {
     expect(pickDestination([loc('country', '9')], 'Maldives')).toEqual({
       dest_id: '9',
       dest_type: 'country',
+      certain: true,
     });
   });
 
@@ -568,6 +570,7 @@ describe('pickDestination', () => {
     expect(pickDestination([loc('island', '7'), loc('hotel', '8')], 'Santorini')).toEqual({
       dest_id: '7',
       dest_type: 'island',
+      certain: true,
     });
   });
 
@@ -582,6 +585,7 @@ describe('pickDestination', () => {
     expect(pickDestination([loc('municipality', '5')], 'Elsewhere')).toEqual({
       dest_id: '5',
       dest_type: 'municipality',
+      certain: true,
     });
   });
 
@@ -604,6 +608,7 @@ describe('pickDestination', () => {
     expect(pickDestination([loc('city', 4242)], 'X')).toEqual({
       dest_id: '4242',
       dest_type: 'city',
+      certain: true,
     });
   });
 });
@@ -687,5 +692,88 @@ describe('dropUnusablePrices floor is set below real inventory', () => {
     const hotels = [hotel('Real', 180, 3), hotel('Cent', 0.01, 3), hotel('Zero', 0, 3)];
 
     expect(names(dropUnusablePrices(hotels, 'Florence'))).toEqual(['Real']);
+  });
+});
+
+/**
+ * A resolution with no `dest_type` to go on is a guess, and a guess must not be
+ * cached. `getDestinationId` upserts into `booking_locations`, so writing one
+ * would freeze it for that city name for good — every later search inheriting
+ * a single bad response.
+ */
+describe('pickDestination reports whether it is certain', () => {
+  it('is certain about a real dest_type', () => {
+    const picked = pickDestination([{ dest_type: 'region', dest_id: '2' }], 'Tuscany');
+    expect(picked?.certain).toBe(true);
+  });
+
+  it('is NOT certain when the provider gave no dest_type', () => {
+    // This used to be the only silent branch, and the one that most needed a
+    // log line: `String(undefined ?? 'city')` made the warn condition false
+    // and cached the guess as a city.
+    const picked = pickDestination([{ dest_id: '8' }], 'Nowhere');
+
+    expect(picked).toEqual({ dest_id: '8', dest_type: 'city', certain: false });
+  });
+
+  it('is not certain about an empty-string dest_type either', () => {
+    expect(pickDestination([{ dest_type: '', dest_id: '8' }], 'Nowhere')?.certain).toBe(false);
+  });
+
+  it('still prefers a real city over an entry with no dest_type', () => {
+    const picked = pickDestination(
+      [{ dest_id: '8' }, { dest_type: 'city', dest_id: '9' }],
+      'Florence',
+    );
+
+    expect(picked).toEqual({ dest_id: '9', dest_type: 'city', certain: true });
+  });
+});
+
+/**
+ * The absolute star ceiling is the one rule with no comparison set and no
+ * thin-result-set escape, which made it the last way for every row in a search
+ * to be flagged — and then `trustedFirst` has nothing to promote and
+ * `hotels[0]` is suspect, voiding the guarantee the design rests on.
+ */
+describe('the star ceiling yields when it would condemn a whole tier', () => {
+  it('trusts a peak-season market that sits entirely above the ceiling', () => {
+    // Nine realistic New-Year ski chalets. Every one is over $2000, so the
+    // ceiling would flag all nine and leave nothing to select.
+    const chalets = [2180, 2300, 2450, 2600, 2750, 2900, 3050, 3180, 3260].map((p, i) =>
+      hotel(`Chalet ${i}`, p, 3),
+    );
+
+    const out = flagSuspectPrices(chalets, "Val d'Isere");
+
+    expect(suspect(out)).toEqual([]);
+    expect(trustedFirst(out)[0].priceSuspect).toBeFalsy();
+  });
+
+  it('still catches one absurd row among normal ones', () => {
+    // The case the ceiling was built for must keep working.
+    const normal = [180, 200, 220, 240].map((p, i) => hotel(`Normal ${i}`, p, 3));
+    const glitch = hotel('Hotel Aldobrandini', 5383.47, 3);
+
+    expect(suspect(flagSuspectPrices([...normal, glitch], 'Florence'))).toEqual([
+      'Hotel Aldobrandini',
+    ]);
+  });
+
+  it('does not yield for a tier too thin to speak for itself', () => {
+    // Two rows over the ceiling is not evidence of a market.
+    const pair = [hotel('A', 2500, 3), hotel('B', 2600, 3)];
+
+    expect(suspect(flagSuspectPrices(pair, 'Thin'))).toEqual(['A', 'B']);
+  });
+
+  it('yields per tier, not across the search', () => {
+    const chalets = [2180, 2300, 2450, 2600].map((p, i) => hotel(`Chalet ${i}`, p, 3));
+    const budget = [100, 110, 120, 130].map((p, i) => hotel(`Budget ${i}`, p, 2));
+    const budgetGlitch = hotel('Budget glitch', 4000, 2);
+
+    const out = flagSuspectPrices([...chalets, ...budget, budgetGlitch], 'Mixed');
+
+    expect(suspect(out)).toEqual(['Budget glitch']);
   });
 });

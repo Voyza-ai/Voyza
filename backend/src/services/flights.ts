@@ -384,6 +384,25 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
           });
           return null;
         }
+
+        // The floor again, on the CONVERTED figure. Conversion rounds to cents,
+        // so it can manufacture a zero out of a small amount in a weak
+        // currency — 100 VND converts to $0.00 — and a $0 fare wins every
+        // price comparison it enters. Checking only the raw amount let that
+        // through, because 100 is comfortably over the floor and $0.00 is not.
+        if (!Number.isFinite(usd) || usd < FLIGHT_PRICE_FLOOR) {
+          logger.warn('Flight offer dropped — converted price below the floor', {
+            raw: o.price,
+            offerCurrency: o.currency,
+            usd,
+            floor: FLIGHT_PRICE_FLOOR,
+            origin,
+            destination,
+            date,
+          });
+          return null;
+        }
+
         return { ...o, price: usd, currency: 'USD' };
       }),
     );
