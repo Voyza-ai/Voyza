@@ -127,20 +127,54 @@ this rule rejects. The memory budget stays.
 The research pass found this and it will consume most of the pipeline effort:
 
 - `municipality == "Paris"` returns **zero** scheduled-IATA airports. CDG is
-  filed as `"Paris (Roissy-en-France, Val-d'Oise)"`. 6.1% of values carry
-  parentheticals or commas.
-- After cleaning, `"London"` matches **London, Ontario**, and `"Milan"` still
-  matches nothing — GeoNames spells it `Milano`.
+  filed as `"Paris (Roissy-en-France, Val-d'Oise)"`. 6.0% of values carry
+  parentheticals or commas (measured on the 2026-10-24 dump).
+- After cleaning, `"London"` matches **London, Ontario**.
 - OurAirports **has no metro concept**. LTN, STN and SEN do not group to London;
   EWR does not group to New York.
 - `keywords` is not an alias field — 40% populated, mostly FAA identifiers.
 
-So the join is: geographic (nearest scheduled airports within a radius) plus a
-curated metro override layer, verified against a golden set. Not a string match.
+So the join is geographic plus a curated metro override layer, verified against
+a golden set. Not a string match.
 
-**Assign by largest city within radius, never nearest.** Measured Spearman
-against route traffic: nearest-within-50km scores **0.073**, largest-within-100km
-scores **0.451**. Nearest attaches LHR to a suburb instead of to London.
+### Three corrections, from building it
+
+**1. "GeoNames spells it Milano" was wrong.** The dump's `name` and `asciiname`
+are `Milan` — likewise Rome, Naples, Florence, Turin, Genoa. The local spellings
+live in `alternatenames` only. The golden test asserts **both** directions so it
+survives a flip back. Same correction for the alias layer: `nyc` and `la` *are*
+in `alternatenames`; only `the bay area`, `silicon valley` and `dc` are genuinely
+absent.
+
+**2. "Largest city within radius" breaks Paros — do not use it.** It was the
+documented rule and it is wrong: raw largest-within-100km sends PAS to
+Ermoúpolis 50 km away, AMS to Rotterdam, SFO and OAK to San Jose, SOU to a
+London borough.
+
+The shipped rule is **distance-decayed prominence**:
+
+```
+score = population / (1 + (km / 25)²)
+```
+
+Still prominence-driven rather than nearest — it keeps every case the
+"largest, not nearest" rule existed for (LTN/STN/SEN→London, BVA→Paris,
+SNA/ONT→Los Angeles, NRT→Tokyo, SWF→New York) — but differs on **21 of 70**
+hand-checkable airports and is right on all 21.
+
+**3. Same-country assignment is worth more than any radius tuning.** One rule
+removes BUF→Hamilton Ontario, HKG→Shenzhen, SAN→Tijuana, ELP→Ciudad Juárez,
+TLL→Helsinki across the Gulf, FAO→Huelva, EIN→Brussels, BTS→Vienna.
+
+**Plus a municipality anchor.** Gravity alone recovers only 566 airport-serving
+cities (17.6%); adding "the airport's own `municipality` names a city within
+30 km in the same country" gives **773 (21.0%)**. Without it Campbeltown
+(pop 4,500, 5 km from CAL) loses to Ayr (pop 46,260, 66 km away).
+
+**The join universe is `cities1000`, not `cities5000`.** Campbeltown (4,500),
+Unalaska (4,491) and Kununurra (4,515) are all below 5,000 — three of the five
+canaries the trim rule exists for. 346 airport-serving cities sit below the
+`cities5000` line.
 
 ## The model
 
@@ -257,6 +291,16 @@ type Context = {
 4. Exact lookup of the head segment, narrowed by any qualifier.
 5. **Prune**: drop candidates with no scheduled airport within range. This alone
    removes Paris KY, Buffalo MN, Hartford WI, Providence UT.
+
+   **This step is mandatory, not an optimisation.** The built artifact contains
+   **2,470 places with an empty `airports[]`** — mostly small admin1 regions
+   kept so they can act as qualifiers. Without the prune they resolve
+   "silently thin", which is failure mode 3 reintroduced through the new system.
+
+   Note also that `Place.population` on a **region** is the sum of its included
+   cities, not a census figure. It is raw and documented, but it is not
+   comparable to a city's population — scoring the two against each other would
+   make every region outrank every city inside it.
 6. Fuzzy, only if 4 found nothing, within the same narrowing.
 7. Decide.
 
