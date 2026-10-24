@@ -43,7 +43,7 @@ import {
   type CanvasIntent,
 } from '@/lib/canvasHandoff';
 import { detectNearestAirportCity } from '@/lib/nearestAirport';
-import { getOriginAirports } from '@/lib/originAirports';
+import { originAirportsForCity } from '@/lib/locationResolver';
 import { getUseLocationPref, setUseLocationPref } from '@/lib/locationPref';
 
 const VIBES: Array<{ key: Vibe; label: string }> = [
@@ -174,7 +174,20 @@ export default function BrowsePage() {
         city: result.city.city,
         // Empty for single-airport cities — the backend resolves the IATA
         // code from the city name, same as a typed planner answer.
-        airports: getOriginAirports(result.city.city),
+        //
+        // No `context.userLatLon`: this path is geolocation-derived, but the
+        // coordinates do not survive it. `detectNearestAirportCity` consumes
+        // `pos.coords` inside its own callback and returns only the matched
+        // AIRPORT_CITIES row, whose lat/lon is that city's own centre at
+        // ~0.1° precision — passing it as "the user's location" would just be
+        // feeding the query its own coordinates back. So this stays the
+        // synchronous, offline lookup.
+        //
+        // TODO(location-phase-4): nothing to ask here either — this fires
+        // during a save, with no prompt on screen. The fix for an ambiguous
+        // detected city is to carry the real `pos.coords` out of
+        // `nearestAirport.ts` and let the server decide, not a question.
+        airports: originAirportsForCity(result.city.city),
       };
       setDetectedOrigin(origin);
       return origin;

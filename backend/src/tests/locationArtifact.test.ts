@@ -620,11 +620,19 @@ describe('location artifact: airports[0] for multi-airport metros', () => {
     expect(problems).toEqual([]);
   });
 
-  it('sorts every unpinned pair by rank descending then distance ascending', () => {
+  it('sorts every unpinned pair by serves, then rank descending, then distance ascending', () => {
     // Checked across the WHOLE artifact, not spot-checked. Outside the pinned
-    // prefixes the sort key is (type ordinal desc, km asc, iata asc) and
-    // nothing else; any other order silently changes which airport
-    // `estimateHomeLegCost` prices from.
+    // prefixes the sort key is (servesPlace desc, type ordinal desc, km asc,
+    // iata asc) and nothing else; any other order silently changes which
+    // airport `estimateHomeLegCost` searches when it ranks permutations, and
+    // which ones survive into buildHomeLeg's capped fan-out.
+    //
+    // `servesPlace` leads the key. Without it the type ordinal alone could
+    // promote an airport the place is NOT served by over one it is: GEG, 107
+    // km from Moscow, Idaho and serves=false, outranked PUW at 9 km and
+    // serves=true. So an inversion in rank or km is only a problem WITHIN one
+    // servesPlace value — a serving small airport ahead of a non-serving large
+    // one is the rule working, not breaking.
     const problems: string[] = [];
     let checked = 0;
     for (const place of places) {
@@ -642,7 +650,15 @@ describe('location artifact: airports[0] for multi-airport metros', () => {
         const previousRank = locationAirportRanks.ranks[previous.iata];
         const currentRank = locationAirportRanks.ranks[current.iata];
         checked++;
-        if (previousRank < currentRank) {
+        if (!previous.servesPlace && current.servesPlace) {
+          problems.push(
+            `${place.id} ${place.name}: ${previous.iata}(serves=false) before ` +
+              `${current.iata}(serves=true)`,
+          );
+        } else if (previous.servesPlace !== current.servesPlace) {
+          // A serving airport ahead of a non-serving one: the first term of
+          // the key is satisfied and the rank/km terms do not apply across it.
+        } else if (previousRank < currentRank) {
           problems.push(
             `${place.id} ${place.name}: ${previous.iata}(rank ${previousRank}) before ` +
               `${current.iata}(rank ${currentRank})`,

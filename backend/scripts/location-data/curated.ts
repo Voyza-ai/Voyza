@@ -526,6 +526,120 @@ export const AIRPORT_OVERRIDES: AirportOverride[] = [
     airports: ['ZNZ'],
     why: 'Migrated from cityAirports.ts; the island\'s airport is filed under a different municipality.',
   },
+  // KYOTO AND NARA ARE AUTHORED, NOT INHERITED.
+  //
+  // Both are members of the `osaka` metro group, whose `why` names them
+  // explicitly ("Kyoto and Nara are served by Kansai"). They used to get KIX
+  // first by riding the group's hand order, which is the same propagation that
+  // put New York's JFK on Newark — so the order has to be written for these
+  // two places or it is not theirs.
+  //
+  // It cannot be left to the derived sort. Measured from each centre, ITM is
+  // simply nearer (Kyoto: ITM 39 km, KIX 81; Nara: ITM 35 km, KIX 51), so
+  // serves-then-rank-then-distance leads with Itami — which is domestic-focused
+  // and carries almost no long-haul. Kansai is the international gateway both
+  // cities actually fly from, which is what the override protects.
+  {
+    place: { name: 'Kyoto', country: 'JP', admin: '22' },
+    airports: ['KIX'],
+    why:
+      'THE KYOTO BUG, authored for Kyoto itself. Kyoto has no airport and once ' +
+      'resolved to ACC, Accra, Ghana. ITM is nearer (39 km vs 81) but ' +
+      'domestic-focused; Kansai is the gateway. Only KIX is pinned — ITM and ' +
+      'UKB follow by the derived sort.',
+  },
+  {
+    place: { name: 'Nara-shi', country: 'JP', admin: '28' },
+    airports: ['KIX'],
+    why:
+      'Same as Kyoto: ITM is nearer (35 km vs 51) and domestic-focused, and ' +
+      'Nara is served by Kansai. Authored here rather than inherited from the ' +
+      'osaka group.',
+  },
+  // ─── GATEWAY VERSUS CLOSE-IN AIRPORT, AUTHORED PER CITY ────────────────────
+  //
+  // Every entry below is the three-level `type` ordinal failing in exactly the
+  // way point 3 of this file's header describes. In each case BOTH airports are
+  // `large_airport`, so the ordinal cannot separate them, `km` decides, and the
+  // nearer one is the domestic or secondary field while the farther one is the
+  // city's only international gateway. Distances are measured from each city
+  // centre on the current dump, pre-pin lead first.
+  //
+  // These are not new opinions. Each one is a decision already written down in
+  // the tables this layer replaces — `src/data/originAirports.ts` and
+  // `src/data/cityAirports.ts` — which the derived order had started to
+  // contradict. Only the gateway is pinned; the rest of each list follows the
+  // derived serves-then-rank-then-distance sort, as with Kyoto above.
+  {
+    place: { name: 'Manhattan', country: 'US', admin: 'NY' },
+    airports: ['JFK'],
+    why:
+      'LGA 7.9 km led JFK 22.5 on distance alone — the JFK-versus-LGA case ' +
+      'this file\'s header names. LaGuardia carries no long-haul. ' +
+      'originAirports.ts keys `manhattan` to JFK, LGA, EWR; the artifact had ' +
+      'stopped agreeing.',
+  },
+  {
+    place: { name: 'The Bronx', country: 'US', admin: 'NY' },
+    airports: ['JFK'],
+    why:
+      'Same as Manhattan: LGA 8.1 km led JFK 24.5. originAirports.ts keys ' +
+      '`bronx` and `the bronx` to JFK, LGA, EWR. Authored for this place, not ' +
+      'copied from New York City — Brooklyn, Queens, Staten Island and Jersey ' +
+      'City already lead correctly on the derived sort and are left alone.',
+  },
+  {
+    place: { name: 'Kuala Lumpur', country: 'MY', admin: '14' },
+    airports: ['KUL'],
+    why:
+      'SZB (Subang) 15.3 km led KUL (Sepang) 44.1. Subang is the turboprop and ' +
+      'business-aviation field; Kuala Lumpur International is the gateway. ' +
+      'cityAirports.ts and originAirports.ts both key `kuala lumpur` to KUL.',
+  },
+  {
+    place: { name: 'Doha', country: 'QA', admin: '01' },
+    airports: ['DOH'],
+    why:
+      'DIA is the OLD Doha International, still filed large_airport with ' +
+      'scheduled service, and at 4.5 km it led Hamad (DOH) at 7.9 — 3.4 km ' +
+      'decided which airport every Qatar trip was priced from. cityAirports.ts ' +
+      'keys `doha` to DOH.',
+  },
+  {
+    place: { name: 'Amman', country: 'JO', admin: '16' },
+    airports: ['AMM'],
+    why:
+      'ADJ (Marka, the civil and military field) 4.8 km led Queen Alia (AMM) ' +
+      '26.3. Queen Alia is Jordan\'s only international gateway. ' +
+      'cityAirports.ts keys `amman` to AMM.',
+  },
+  {
+    place: { name: 'Colombo', country: 'LK', admin: '36' },
+    airports: ['CMB'],
+    why:
+      'RML (Ratmalana) 13.3 km led Bandaranaike (CMB) 27.6. Ratmalana is ' +
+      'domestic. cityAirports.ts keys `colombo` to CMB.',
+  },
+  // The two below are NEW claims — no legacy table covered either city — and
+  // are here because the measurement is the same shape and is not a close call.
+  {
+    place: { name: 'Tehran', country: 'IR', admin: '26' },
+    airports: ['IKA'],
+    why:
+      'THR (Mehrabad) 9.7 km led Imam Khomeini (IKA) 39.4. Mehrabad is the ' +
+      'domestic airport; essentially all international service is at IKA, so ' +
+      'the derived order priced every Iranian trip from an airport that cannot ' +
+      'fly it.',
+  },
+  {
+    place: { name: 'Incheon', country: 'KR', admin: '12' },
+    airports: ['ICN'],
+    why:
+      'ICN is Incheon\'s OWN airport — OurAirports files it under municipality ' +
+      '"Incheon" — and Korea\'s gateway, but GMP (Seoul\'s domestic airport) ' +
+      'at 13.6 km led it at 22.5. Scoped to Incheon alone: Suwon and the other ' +
+      'Seoul satellites have no claim on ICN and are left on the derived sort.',
+  },
 ];
 
 // ─── Airport overrides for states and regions ────────────────────────────────
@@ -554,5 +668,96 @@ export const REGION_AIRPORT_OVERRIDES: RegionAirportOverride[] = [
     admin1: 'IN.33',
     airports: ['GOI'],
     why: 'GeoNames has no city row named Goa; the state is the name travellers use. Migrated from cityAirports.ts.',
+  },
+  // THE KYOTO AND NARA PREFECTURES, AUTHORED RATHER THAN INHERITED.
+  //
+  // "Kyoto" and "Nara" each name a city and a prefecture, and the prefecture is
+  // the more populous of the two — so a traveller typing either can land on the
+  // region. Both centroids are nearer Itami than Kansai (Kyoto: ITM 35 km, KIX
+  // 77; Nara: ITM 38 km, KIX 51), so the derived sort leads with ITM, which is
+  // domestic-focused and carries almost no long-haul.
+  //
+  // Same reasoning as US.DC below it: a region does NOT inherit its leading
+  // metro's order any more, so where the close-in airport is the wrong lead it
+  // has to be written down for that region. Only KIX is pinned; ITM and UKB
+  // follow by the derived sort.
+  {
+    admin1: 'JP.22',
+    airports: ['KIX'],
+    why:
+      'Kyoto prefecture, matching the Kyoto city override. Kansai is the ' +
+      'international gateway; Itami is nearer but domestic-focused, and a ' +
+      'long-haul planner must not lead with it.',
+  },
+  {
+    admin1: 'JP.28',
+    airports: ['KIX'],
+    why: 'Nara prefecture, matching the Nara-shi override. Same Kansai-vs-Itami reasoning as JP.22.',
+  },
+  // ─── THE MULTI-AIRPORT-METRO REGIONS ──────────────────────────────────────
+  //
+  // A region orders by the derived sort and inherits no order from the metro
+  // inside it. That is right nearly everywhere, and wrong for exactly one
+  // shape: the region's population-weighted centroid lands beside the metro's
+  // CLOSE-IN SECONDARY airport, both airports are `large_airport` so the
+  // three-level ordinal cannot separate them, and `km` then picks the
+  // secondary. Measured on this dump, that priced an intercontinental trip
+  // from Orly, Ciampino, Linate, Gimpo, Hongqiao, Halim, Don Mueang,
+  // Aeroparque, Viracopos, Itami, Taichung, Birmingham, Burbank, Midway,
+  // Newark, Vnukovo, Subang, Marka, Mehrabad, old Doha International or
+  // Ratmalana — one level up from the city, where the city's own pin cannot
+  // reach because a pin is never inherited.
+  //
+  // km below is from that region's centroid, pre-pin lead first. Only the
+  // gateway is pinned; everything after it follows the derived sort.
+  //
+  // A DERIVED RULE WAS TRIED HERE AND MEASURED NOT TO PAY. Promoting the most
+  // populous member city's own lead airport fixes these cases and REGRESSES
+  // ten US states — Florida to JAX 327 km (Jacksonville's consolidated
+  // city-county figure beats Miami), Connecticut to LGA 106 km (in New York),
+  // Virginia to ORF, Missouri to MCI, Alabama to HSV, Kansas to ICT, Montana
+  // to BIL, North Dakota to FAR, South Carolina to CAE, Wyoming to CYS — plus
+  // Buenos Aires province to MDQ (rank 2, 307 km, against EZE at 74). "Most
+  // populous city proper" is as bad a proxy for a region's gateway as centroid
+  // distance is, and no scalar separates Texas (+145 km, right) from Florida
+  // (+230 km, wrong). So the handful that matter are authored here instead.
+  { admin1: 'FR.11', airports: ['CDG'], why: 'Île-de-France: ORY 13.7 led CDG 23.2. Orly carries little long-haul; Roissy is the gateway. Matches the paris metro group.' },
+  { admin1: 'IT.07', airports: ['FCO'], why: 'Lazio: CIA 3.4 led FCO 27.3. Ciampino is the low-cost field; Fiumicino is the gateway. Matches the rome group.' },
+  { admin1: 'IT.09', airports: ['MXP'], why: 'Lombardy: LIN 8.5 and BGY 35.4 both led MXP 46.9. Linate is the city-centre airport; Malpensa is the gateway. Matches the milan group.' },
+  { admin1: 'GB.ENG', airports: ['LHR'], why: 'England: BHX 51.2, LTN 64.4 and EMA 64.9 all led LHR 98 — the centroid sits in the Midlands. Heathrow is the gateway. Matches the london group.' },
+  { admin1: 'RU.48', airports: ['SVO'], why: 'Moscow federal city: VKO 27.9 led SVO 28.4 by half a kilometre. Sheremetyevo leads in the moscow group and in originAirports.ts.' },
+  { admin1: 'KR.11', airports: ['ICN'], why: 'Seoul: GMP 16.5 led ICN 47.7. Gimpo is domestic-focused; Incheon is the gateway. Matches the seoul group.' },
+  { admin1: 'KR.12', airports: ['ICN'], why: 'Incheon: GMP 13.5 led ICN 22.3 — Seoul\'s domestic airport ahead of the gateway that sits inside this region. Matches the Incheon city override.' },
+  { admin1: 'CN.23', airports: ['PVG'], why: 'Shanghai: SHA 8.9 led PVG 36.8. Hongqiao is the domestic airport; Pudong is the gateway. Matches the shanghai group.' },
+  { admin1: 'JP.32', airports: ['KIX'], why: 'Osaka prefecture: ITM 13.9 and UKB 27.6 both led KIX 37.5. Itami is domestic-focused; Kansai is the gateway. Matches the osaka group and the JP.22/JP.28 pins.' },
+  { admin1: 'TW.04', airports: ['TPE'], why: 'Taiwan province: RMQ 51 led TPE 70.1. Taichung is regional; Taoyuan is the gateway. Matches the taipei group.' },
+  { admin1: 'TR.34', airports: ['IST'], why: 'Istanbul: IST 33.2 leads SAW 34.3 by 1.1 km with no pin at all, so an upstream coordinate nudge flips a traveller from the gateway to the low-cost field on the far side of the Bosphorus. Pinned for stability rather than to change the answer — it is already right, and 1.1 km is not a margin.' },
+  { admin1: 'TH.40', airports: ['BKK'], why: 'Bangkok: DMK 19.8 led BKK 24.8. Don Mueang is the low-cost field; Suvarnabhumi is the gateway. Matches the bangkok group.' },
+  { admin1: 'ID.04', airports: ['CGK'], why: 'Jakarta: HLP 7.7 led CGK 23.2. Halim is the secondary; Soekarno-Hatta is the gateway. Matches the jakarta group.' },
+  { admin1: 'MY.14', airports: ['KUL'], why: 'Kuala Lumpur federal territory: SZB 15 led KUL 45. Subang is the turboprop field; KLIA is the gateway. Matches the Kuala Lumpur city override.' },
+  { admin1: 'IR.26', airports: ['IKA'], why: 'Tehran province: THR 7.1 led IKA 33.1. Mehrabad is domestic; Imam Khomeini is the gateway. Matches the Tehran city override.' },
+  { admin1: 'JO.16', airports: ['AMM'], why: 'Amman governorate: ADJ 7.1 led AMM 25.4. Marka is the civil/military field; Queen Alia is the gateway. Matches the Amman city override.' },
+  { admin1: 'QA.01', airports: ['DOH'], why: 'Doha municipality: DIA 4.4 led DOH 7.8 — the old Doha International ahead of Hamad. Matches the Doha city override.' },
+  { admin1: 'LK.36', airports: ['CMB'], why: 'Western Province, Sri Lanka: RML 10.5 led CMB 29.4. Ratmalana is domestic; Bandaranaike is the gateway. Matches the Colombo city override.' },
+  { admin1: 'BR.27', airports: ['GRU'], why: 'São Paulo state: VCP 6.5 led GRU 79.8 — the centroid lands by Viracopos in Campinas. Guarulhos is the gateway. Matches the sao-paulo group.' },
+  { admin1: 'AR.07', airports: ['EZE'], why: 'Buenos Aires F.D.: AEP 6.9 led EZE 27.4. Aeroparque is the domestic airport; Ezeiza is the gateway. Matches the buenos-aires group.' },
+  { admin1: 'US.CA', airports: ['LAX'], why: 'California: BUR 146.9 led LAX 169.5, with FAT and LGB also rank 3 — the named Burbank failure, one level up from the city. Matches the los-angeles group.' },
+  { admin1: 'US.IL', airports: ['ORD'], why: 'Illinois: MDW 41.5 led ORD 49.1, both rank 3. originAirports.ts keys `illinois` to ORD then MDW. Matches the chicago group.' },
+  { admin1: 'US.NY', airports: ['JFK'], why: 'New York state: EWR 30.1 and LGA 33.4 both led JFK 49.5. originAirports.ts keys `new york state` and `ny` to JFK, LGA, EWR.' },
+  {
+    admin1: 'US.TX',
+    airports: ['DFW'],
+    why:
+      'Texas: the derived order led AUS 93, with DAL 212, DFW 213 and IAH 238 ' +
+      'all rank 3 — the centroid sits by Austin, which carries limited ' +
+      'long-haul. DFW is the largest gateway in the state and one of the ' +
+      'busiest airports in the world. CORRECTED: an earlier version pinned ' +
+      'IAH on the stated grounds that originAirports.ts keys Texas to it. It ' +
+      'does not key Texas at all — it lists DFW/IAH/AUS under its ' +
+      '"deliberately NOT keyed" set as competing hubs, so there was no ' +
+      'authored answer to reproduce and the premise was wrong. This is ' +
+      'therefore a fresh claim and the weakest entry in this block: a bare ' +
+      '`Texas` is genuinely contested between Dallas and Houston. DFW over ' +
+      'IAH on size alone. Delete the entry if AUS-by-centroid is preferred.',
   },
 ];

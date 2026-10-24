@@ -106,8 +106,16 @@ describe('what a traveller types, against 36,000 real places', () => {
     // The owner's rule in so many words: "we give them all the ny options,
     // right including buffalo as well, any airport within ny".
     expect(codes).toContain('JFK');
+    expect(codes).toContain('LGA');
+    expect(codes).toContain('EWR');
     expect(codes).toContain('BUF');
-    expect(result.airports[0].iata).toBe('JFK');
+
+    // Led by a NYC-area major rather than an upstate field. Which of the
+    // three leads is settled by distance from the state's
+    // population-weighted centre (EWR 30 km, LGA 33, JFK 50), and it is not
+    // the trip price: `buildHomeLeg` fans out across this whole list and
+    // takes the cheapest. `airports[0]` steers permutation ranking.
+    expect(['EWR', 'LGA', 'JFK']).toContain(result.airports[0].iata);
   });
 });
 

@@ -31,12 +31,26 @@ import { Grid, haversineKm, roundCoord, roundKm } from './geo';
 import { fold, hasLatin, parseCsv, parseTsv } from './text';
 
 /**
- * Bumped when the emitted shape changes.
+ * Bumped when the emitted shape or the emitted ORDER changes.
  *
  * 2: `Place.curatedAliases` — the hand-written subset of `aliases`, so the
  *    resolver can trust a curated decision over a GeoNames alternate name.
+ * 3: `airports[]` gained `servesPlace` descending as its first sort term, and
+ *    an authored pin stopped being propagated to a metro group's other
+ *    members, to a parent state or to a region. Before this, Newark was
+ *    priced from JFK 35 km away while EWR sat 5 km out, and Moscow, Idaho
+ *    led with Spokane 107 km away and flagged as not serving the place.
+ * 4: added a `memberLeads` field, promoting the most populous member city's
+ *    lead airport to a state or region. REVERTED in 5 — see "A state's lead
+ *    airport: a measured negative result" in docs/LOCATION_RESOLUTION.md.
+ *    Nothing emits this field; the number is burnt so no artifact claiming
+ *    version 4 is ever mistaken for a current one.
+ * 5: `memberLeads` removed. State and region leads are authored pins in
+ *    `curated.ts` instead, which is what the pin mechanism is for: the
+ *    three-level airport ordinal cannot separate a gateway from a close-in
+ *    secondary, so a human names the ones that matter.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 5;
 
 // ─── ASSIGNMENT ──────────────────────────────────────────────────────────────
 //
@@ -247,12 +261,20 @@ export type BuildStats = {
 /**
  * What was actually used to order `airports[]`, emitted so it can be asserted.
  *
- * The contract says "annual passengers descending, then distance". Annual
- * passenger counts are not openly licensed globally — confirmed — so the
- * passenger term is the OurAirports `type` ordinal (large 3, medium 2, small
- * 1), measured Spearman 0.578 against real route traffic. Three levels cannot
- * separate LHR from LCY, which is why the multi-airport metros carry a hand
- * order in `curated.ts`.
+ * The sort is `servesPlace` descending, then this rank descending, then `km`
+ * ascending, with an authored pin ahead of all three.
+ *
+ * `servesPlace` leads because an airport merely in attach range must neither
+ * take index 0 — the only airport `estimateHomeLegCost` searches when it ranks
+ * route permutations — nor a slot in the capped fan-out `buildHomeLeg` prices.
+ * GEG, 107 km from Moscow, Idaho and flagged as not serving it, used to
+ * outrank PUW at 9 km on the type ordinal alone.
+ *
+ * The rank term stands in for annual passengers, which are not openly licensed
+ * globally — confirmed — so it is the OurAirports `type` ordinal (large 3,
+ * medium 2, small 1), measured Spearman 0.578 against real route traffic.
+ * Three levels cannot separate LHR from LCY, which is why the multi-airport
+ * metros carry a hand order in `curated.ts`.
  *
  * This table is emitted rather than left implicit so a test can check the sort
  * invariant across every place in the artifact instead of spot-checking.
@@ -266,6 +288,18 @@ export type AirportRankTable = {
   /**
    * Places whose `airports[]` leads with a hand-written order instead of the
    * derived one, and what that order is.
+   *
+   * AUTHORED PLACES ONLY — a place is pinned if and only if `curated.ts` names
+   * that place's own airport order: the anchor city of a metro group
+   * (`members[0]`), an `AIRPORT_OVERRIDES` place, a
+   * `REGION_AIRPORT_OVERRIDES` region, or a `CURATED_PLACES` entry.
+   *
+   * A pin is never copied to a sibling member of a metro group, and a region
+   * never inherits one from its leading metro. Both used to happen, and both
+   * were wrong wherever the geometry differed from the anchor's: Newark
+   * carried New York's ["JFK","LGA","EWR"] and led with JFK 35 km away while
+   * EWR sat 5 km from the traveller. Where a member does need its own order,
+   * it is authored for that member — see Kyoto and Nara.
    *
    * Emitted so the derived sort can be asserted EXACTLY across the rest of the
    * artifact rather than spot-checked: a test that cannot tell a pinned place
@@ -547,6 +581,19 @@ function orderAirports(
     const ra = rank.has(a.iata) ? rank.get(a.iata)! : Number.MAX_SAFE_INTEGER;
     const rb = rank.has(b.iata) ? rank.get(b.iata)! : Number.MAX_SAFE_INTEGER;
     if (ra !== rb) return ra - rb;
+    // AN AIRPORT THAT DOES NOT SERVE THE PLACE MAY NEVER LEAD ITS LIST.
+    //
+    // `servesPlace: false` means "in attach range, but not an airport this
+    // place is served by". Leaving it out of the sort let the type ordinal
+    // promote such an airport to index 0, which is the one slot
+    // `estimateHomeLegCost` prices from. Measured before this term existed:
+    //
+    //     Moscow, Idaho: GEG km=107 serves=false rank=3   <- led the list
+    //                    PUW km=  9 serves=true  rank=2
+    //
+    // so a Moscow traveller was quoted from Spokane, 107 km away, instead of
+    // Pullman-Moscow 9 km away.
+    if (a.servesPlace !== b.servesPlace) return a.servesPlace ? -1 : 1;
     // Annual passengers are not openly licensed, so the OurAirports type
     // ordinal stands in for them, then distance. Ties break on the code so the
     // artifact diff is stable across rebuilds.
@@ -616,14 +663,40 @@ export function build(inputs: BuildInputs): BuildResult {
   }
 
   // 2. Curated references, resolved and asserted.
-  const curatedOrderByCity = new Map<string, string[]>();
+  //
+  // A HAND ORDER IS SCOPED TO THE PLACE IT WAS AUTHORED FOR.
+  //
+  // These are two different questions and they used to share one map:
+  //
+  //   curatedServesByCity — WHICH airports attach to this city. Group-wide:
+  //     every member of a metro group is served by the whole pool, which is
+  //     the owner's rule and not "inside the border".
+  //   curatedPinByCity    — WHICH ORDER this city's list leads with. Authored
+  //     per place, so it belongs to the anchor city alone.
+  //
+  // Propagating the order to every member put the New York pin
+  // ["JFK","LGA","EWR"] on Newark, whose own airport is 5 km away while JFK is
+  // 35 km away, and on Hoboken (EWR 13 km, JFK 24 km). Those travellers were
+  // priced from JFK. The pin is right for New York City — three type levels
+  // cannot separate JFK from LGA — and wrong for everyone else in the group,
+  // who are better served by the derived serves-then-rank-then-distance sort.
+  const curatedPinByCity = new Map<string, string[]>();
   const curatedServesByCity = new Map<string, Set<string>>();
   const metroCodeByCity = new Map<string, string>();
   const extraAliasesByCity = new Map<string, string[]>();
   const curatedCityIds = new Set<string>();
   const exhaustiveCities = new Set<string>();
 
-  const addCuratedAirports = (city: City, iatas: string[], context: string) => {
+  /**
+   * @param pinOrder true only when `iatas` is the order authored FOR this
+   *   place. Attachment is group-wide; the pin is not.
+   */
+  const addCuratedAirports = (
+    city: City,
+    iatas: string[],
+    context: string,
+    pinOrder: boolean,
+  ) => {
     for (const iata of iatas) {
       if (!byIata.has(iata)) {
         throw new Error(
@@ -633,9 +706,11 @@ export function build(inputs: BuildInputs): BuildResult {
       }
     }
     curatedCityIds.add(city.geonameId);
-    const order = curatedOrderByCity.get(city.geonameId) ?? [];
-    for (const iata of iatas) if (!order.includes(iata)) order.push(iata);
-    curatedOrderByCity.set(city.geonameId, order);
+    if (pinOrder) {
+      const order = curatedPinByCity.get(city.geonameId) ?? [];
+      for (const iata of iatas) if (!order.includes(iata)) order.push(iata);
+      curatedPinByCity.set(city.geonameId, order);
+    }
     const serves = curatedServesByCity.get(city.geonameId) ?? new Set<string>();
     for (const iata of iatas) serves.add(iata);
     curatedServesByCity.set(city.geonameId, serves);
@@ -643,16 +718,30 @@ export function build(inputs: BuildInputs): BuildResult {
 
   let metroGroupMembers = 0;
   for (const group of METRO_GROUPS) {
-    for (const ref of group.members) {
+    // A PIN IS AUTHORED, NEVER PROPAGATED.
+    //
+    // members[0] is the city the group's order was written for — checked
+    // against every multi-member group: New York City before Newark, London
+    // before Luton, Washington before Arlington, San Francisco before Oakland,
+    // Osaka before Kyoto, Dallas before Fort Worth, Miami before Fort
+    // Lauderdale, Basel before Mulhouse. The rest of the group shares the
+    // POOL, not the ORDER.
+    //
+    // A member that genuinely needs its own order gets one in
+    // AIRPORT_OVERRIDES, which is read after this loop and pins what it names:
+    // Kyoto and Nara are authored there for KIX. That is the whole
+    // distinction — authored for this place, or copied from a sibling.
+    group.members.forEach((ref, i) => {
       const city = resolveRef(index, ref, `metro group ${group.key}`);
       metroGroupMembers++;
-      addCuratedAirports(city, group.airports, `metro group ${group.key}`);
+      addCuratedAirports(city, group.airports, `metro group ${group.key}`, i === 0);
       if (group.metro) metroCodeByCity.set(city.geonameId, group.metro);
-    }
+    });
   }
   for (const override of AIRPORT_OVERRIDES) {
     const city = resolveRef(index, override.place, 'airport override');
-    addCuratedAirports(city, override.airports, `override for ${override.place.name}`);
+    // An override names one place and one order: that place IS the author.
+    addCuratedAirports(city, override.airports, `override for ${override.place.name}`, true);
     if (override.exhaustive) exhaustiveCities.add(city.geonameId);
   }
   for (const alias of CURATED_ALIASES) {
@@ -685,7 +774,7 @@ export function build(inputs: BuildInputs): BuildResult {
   // 4. Geographic attachment.
   const airportGrid = new Grid(airports);
   const places: Place[] = [];
-  /** Place id -> the hand or inherited prefix its airports[] leads with. */
+  /** Place id -> the authored prefix its airports[] leads with. */
   const pinned: Record<string, string[]> = {};
   const attachmentsFor = (
     origin: { lat: number; lon: number },
@@ -710,7 +799,7 @@ export function build(inputs: BuildInputs): BuildResult {
   for (const city of include) {
     const id = `gn:${city.geonameId}`;
     placeIdByCity.set(city.geonameId, id);
-    const curatedOrder = curatedOrderByCity.get(city.geonameId) ?? [];
+    const curatedOrder = curatedPinByCity.get(city.geonameId) ?? [];
     const curatedServes = curatedServesByCity.get(city.geonameId) ?? new Set<string>();
     const attachments: Attachment[] = exhaustiveCities.has(city.geonameId)
       ? []
@@ -864,20 +953,27 @@ export function build(inputs: BuildInputs): BuildResult {
     const weightSum = members.reduce((sum, c) => sum + weight(c), 0) || 1;
     const lat = members.reduce((sum, c) => sum + c.lat * weight(c), 0) / weightSum;
     const lon = members.reduce((sum, c) => sum + c.lon * weight(c), 0) / weightSum;
-    // A REGION INHERITS THE HAND ORDER OF ITS LEADING METRO.
+    // A REGION INHERITS ITS LEADING METRO'S AIRPORTS, BUT NOT THEIR ORDER.
     //
-    // Without this, `Kyoto` the prefecture leads with ITM while `Kyoto` the
-    // city leads with KIX, and the District of Columbia leads with DCA while
-    // Washington leads with IAD — because the derived sort is type-then-
-    // distance and the close-in airport wins. A caller that resolves the
-    // region instead of the city would then price from a different airport
-    // than the one the curated layer chose, which is the exact failure the
-    // hand order exists to prevent. Inheriting costs no hand maintenance.
+    // Inheriting the order too is how the New York pin reached New Jersey:
+    // the state led with JFK at 49 km while EWR sat 24 km from the same
+    // centroid. A region's geometry is its own, so it orders by the derived
+    // rule. Attachment still inherits — the pool a region's leading metro
+    // flies from is a pool that region is served by, and dropping it would
+    // lose airports the geographic join does not reach.
+    //
+    // Where a region genuinely needs a hand order, it is authored for that
+    // region in REGION_AIRPORT_OVERRIDES: US.DC carries IAD, DCA, BWI for
+    // exactly the District-of-Columbia case this comment used to cite.
     const leadingMember = [...members].sort((a, b) => b.population - a.population)[0];
-    const inherited = leadingMember ? (curatedOrderByCity.get(leadingMember.geonameId) ?? []) : [];
-    const curatedOrder = regionOverrides.get(code) ?? inherited;
-    for (const iata of curatedOrder) {
+    const inheritedAttach = leadingMember
+      ? [...(curatedServesByCity.get(leadingMember.geonameId) ?? [])]
+      : [];
+    const curatedOrder = regionOverrides.get(code) ?? [];
+    const attachCodes: string[] = [];
+    for (const iata of [...curatedOrder, ...inheritedAttach]) {
       if (!byIata.has(iata)) throw new Error(`region override ${code} names unknown airport ${iata}`);
+      if (!attachCodes.includes(iata)) attachCodes.push(iata);
     }
     const attachments: Attachment[] = [];
     // Airports whose primary city is in this region are in it by construction.
@@ -891,7 +987,7 @@ export function build(inputs: BuildInputs): BuildResult {
         });
       }
     }
-    for (const iata of curatedOrder) {
+    for (const iata of attachCodes) {
       const airport = byIata.get(iata)!;
       attachments.push({
         iata,
@@ -905,6 +1001,13 @@ export function build(inputs: BuildInputs): BuildResult {
     for (const attachment of attachmentsFor({ lat, lon }, row.country, true)) {
       attachments.push(attachment);
     }
+    // A bare state orders by the derived key, with no lead rule of its own.
+    //
+    // Leading with the primary airport of the state's most prominent member
+    // city was tried and MEASURED NOT TO PAY — it fixed 5 US states and
+    // regressed 10, because "most populous city proper" is as bad a proxy for
+    // "the state's main gateway" as centroid distance is. See the negative
+    // result recorded in docs/LOCATION_RESOLUTION.md before re-proposing it.
     const ordered = orderAirports(attachments, curatedOrder, MAX_AIRPORTS_REGION);
     if (curatedOrder.length) pinned[`adm:${code}`] = [...curatedOrder];
     const aliases: string[] = [];

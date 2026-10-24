@@ -176,6 +176,72 @@ Unalaska (4,491) and Kununurra (4,515) are all below 5,000 — three of the five
 canaries the trim rule exists for. 346 airport-serving cities sit below the
 `cities5000` line.
 
+### A state's lead airport: a measured negative result
+
+`airports[]` sorts by `servesPlace` desc, then the OurAirports `type` ordinal
+desc, then `km` asc, with an authored pin ahead of all three. For a **bare
+state or region** that key can lead with a secondary airport of the state's
+dominant metro: California leads **BUR**, not LAX, and both are rank 3, so the
+ordinal cannot separate them and the km tiebreak picks Burbank — 147 km from the
+population-weighted centroid against LAX's 170.
+
+**Rule tried:** lead a state with the primary airport of its most prominent
+member city, promoted only if already in the state's list. It needs no hand
+data and it reproduced every judgement the old table encoded.
+
+**Measured, and it does not pay.** 2,571 states/regions got a promotion, but
+only **343 reordered anything**; of those 239 promoted a lower-rank airport.
+Across US states it fixed 5 and regressed 10:
+
+| Fixed | Regressed |
+|---|---|
+| California BUR→**LAX** | Florida MCO(97 km)→**JAX(327 km)** |
+| Illinois MDW→**ORD** | Connecticut BDL(60)→**LGA(106)** — LGA is in New York |
+| New York EWR→**JFK** | Alabama BHM(r3,59)→**HSV(r2,178)** |
+| Texas AUS→**IAH** | Virginia RIC(27)→**ORF(128)** |
+| North Carolina GSO→**CLT** | Kansas, Missouri, Montana, N. Dakota, S. Carolina, Wyoming |
+
+**Why.** "Most populous city proper" is as bad a proxy for "the state's main
+gateway" as centroid distance is. Jacksonville's 1,009,833 is a consolidated
+city-county figure that outweighs Miami's 487,014, so Florida led with JAX from
+index 9 of its own list — the same class of error the rule was meant to fix,
+with a different bad proxy. Huntsville over Birmingham and Virginia Beach over
+Richmond are the same story.
+
+**Guards measured over the 343 effective promotions**, none of which rescue it:
+
+| Guard | Keeps | Blocks |
+|---|---|---|
+| must not lower the rank | 104 | 239 |
+| lead within derived top 3 | 321 | 22 |
+| lead within derived top 5 | 341 | 2 |
+| rank + top 5 | 103 | 240 |
+
+The rank guard is blunt and also kills genuine wins (Cat Island leading its own
+strip ATC at 0.8 km instead of ZSA at 132 km). The surgical top-5 guard blocks
+exactly two promotions artifact-wide — Florida and `PL.84` — and rescues **only
+Florida**: Connecticut, Virginia, Alabama, Kansas, Missouri, Montana, North
+Dakota, South Carolina and Wyoming are all same-rank promotions inside the
+derived top 5, so no measured guard touches them. Fixing 5 states and breaking
+9 is a wash, and a wash does not justify a new artifact field plus a guard.
+
+A third proxy — a derived hub score counting how many places lead with each
+airport — fails too: LGA leads for every city in the New York metro, so it
+would outcount BDL and win Connecticut outright.
+
+**What would actually fix it is per-airport passenger volume**, which is not
+openly licensed globally. That is a data-acquisition question, not a sorting
+one. Until then the state key stays as it is.
+
+**Why that is safe to leave imperfect.** `airports[0]` only drives the cheap
+permutation-ranking signal in `estimateHomeLegCost`; `buildHomeLeg` then prices
+every origin airport that survives the `MAX_HOME_AIRPORTS` cap and takes the
+cheapest. California leading BUR therefore costs a traveller **nothing in
+fare** — it gives a slightly worse route ordering for a bare state-name origin,
+a rare input. There is also no parity regression against the hand-written table
+for California or Texas, which it answered with nothing; only Illinois and New
+York differ, and both are same-metro swaps the fan-out covers.
+
 ## The model
 
 ```ts
@@ -492,6 +558,146 @@ rollback.
 Given there is one Supabase project holding real trips, this is the only
 responsible way to find out whether the resolver is worse than what it replaces.
 
+## As built: phases 2 and 3
+
+### Shadow mode, and the census that did not need a week
+
+`LOCATION_RESOLVER_MODE` is `off` | `shadow` | `live`, read per call so the
+rollback is an env change rather than a deploy. `shadow` is the default: both
+run, the TABLE is served, disagreements are logged with the raw input.
+`services/location/shadow.ts` holds it; `optimizer.ts` is the only backend
+caller and resolves at the top of the run, before any paid call.
+
+The plan said a week of production traffic would produce a golden set. It did
+not have to wait: the table being replaced ships with its own 109-case test
+suite, which is a census of 132 real inputs with known answers. Running both
+sides over it found, in minutes, what a week would have:
+
+| | count | meaning |
+|---|---|---|
+| agree | 32 | identical, order included |
+| `resolver-superset` | 36 | same lead, same order, extra fallbacks — benign |
+| `legacy-empty` | 18 | the table refused, the resolver answers |
+| `different-order` | 12 | same airports, different lead |
+| `different-airports` | 11 | genuinely different |
+| `resolver-empty` | 2 | **the table answered and the resolver did not** |
+
+Those last two were `Washington State` and `New York State` — a bug, now
+fixed, and the reason the resolver has an admin-suffix path at all. The
+eighteen `legacy-empty` rows are the clearest wins: `Paris, Texas` → TYR,
+`Berlin, DE` → BER, `Baton Rouge, LA` → MSY, `Tbilisi, Georgia` → TBS, all of
+which the table returned nothing for.
+
+`resolver-superset` exists because it is the most common shape and it is
+harmless: 36 of 77 disagreements were the resolver knowing about one more
+fallback airport (`Chicago` → `ORD, MDW, GYY`). Lumping those in with real
+conflicts buried the two rows that mattered, so price-changing kinds log at
+`warn` (stderr) and benign ones at `info`.
+
+**`airports[0]` matters less than it first appears, and this is worth stating
+because it changes how severe an ordering disagreement is.**
+`estimateHomeLegCost` searches `airports[0]` alone, but only as a cheap signal
+for ranking route PERMUTATIONS; the real multi-airport fan-out happens in
+`buildHomeLeg` on the winning permutation, which prices every origin airport
+and takes the cheapest. So a wrong lead costs ranking quality and a slot under
+the `MAX_HOME_AIRPORTS` cap — not the quoted fare.
+
+### The endpoint
+
+`POST /api/locations/resolve`. POST rather than GET even though a typeahead is
+the obvious caller and a GET would be cacheable: the context that makes this
+better than a table includes the traveller's coordinates, and coordinates in a
+query string end up in access logs. The response is a trimmed shape, not the
+internal `Place` — the browser has no business depending on the artifact's
+layout, and an ambiguous answer would otherwise ship eight full airport lists.
+
+It has its own limiter (600 per 15 minutes) and is **excluded from the shared
+`/api` budget**, because one person naming their origin city can spend a dozen
+calls on a single field and would otherwise 429 the planning flow they were
+trying to use.
+
+### The hot set, and the "two copies" problem
+
+The owner's instruction was "lets not build 2 copies, find a way to have a
+shared file". One file imported by both is not available: the packages have no
+workspace root, backend's tsconfig pins `rootDir: ./src`, and Next's bundler
+scope stops at `frontend/`. Changing any of those is a build-system project
+with a live deploy attached.
+
+So nothing is hand-maintained twice any more. `build-location-hotset.ts`
+derives a 60 KB hot set from the artifact and writes it to both packages,
+along with a byte-for-byte copy of `keys.ts` — which has NO IMPORTS precisely
+so that copy is safe. A parity test in each package compares the bytes. A copy
+a person edits drifts; a copy a script writes is a build output.
+
+**The property that makes a hot set safe:** a subset of the data is not a
+subset of the answers. A browser holding Venice, Italy but not Venice, Florida
+would answer `Venice` confidently while the server asked. So the hot set
+stores ANSWERS, and a key is admitted only when every place its answer names
+ships with it. `locationHotSet.test.ts` asserts that over all 5,000-odd keys
+against the full artifact.
+
+Context is handled by the same honesty. `via: 'prominence'` is the only
+outcome the resolver reaches with rivals in hand, so those keys — 53 of them,
+against 4,668 that cannot be swayed — are answered offline only when the
+caller has no context, and deferred to the server when it has some.
+
+Two seed rules were wrong before measurement, both recorded in the script:
+requiring rivals to be seeds in their own right dropped `los angeles`,
+`london`, `paris` and `rome` while keeping `la`; and seeding regions on
+prominence put all 2,842 admin regions ahead of every city, because a region's
+`population` is a SUM — Paris ranked 543rd and Venice 10,827th. Seeds are now
+the curated entries, the US states, every place the old table can answer, and
+then cities by prominence.
+
+There is deliberately no fuzzy index in the browser. A typo is rare, the
+trigram index is 25 MB, and a round trip is the right price for `pariss`.
+
+### The frontend prefill bypasses shadow mode
+
+Found while migrating the call sites, and it would have made the whole rollout
+a fiction.
+
+`optimizer.ts` takes `originAirports` **straight from the request body** when
+it is non-empty and never looks anything up:
+
+```ts
+if (originAirports && originAirports.length > 0) {
+  resolvedOriginAirports = originAirports;   // no lookup at all
+}
+```
+
+Every synchronous frontend call site prefills that array. So a frontend that
+called the resolver directly would serve resolver answers to every real trip
+no matter what `LOCATION_RESOLVER_MODE` said — the backend's shadow log would
+sit there recording nothing while the resolver quietly decided every booking.
+There is one Supabase project and it holds real trips.
+
+So `originAirportsForCity` in `frontend/lib/locationResolver.ts` is
+**additive by construction**: the hand-written table answers first, and the
+hot set is consulted only when the table returns nothing.
+
+```ts
+const fromTable = legacyOriginAirports(query, max);
+if (fromTable.length > 0) return fromTable;
+return originAirportsLocally(query, max);
+```
+
+Every input the table answers keeps the table's answer, byte for byte. The
+only behaviour that changes is the inputs it answered with NOTHING — 18 of
+them in its own 132-key corpus, including `Paris, Texas`, `Baton Rouge, LA`,
+`Berlin, DE` and `Tbilisi, Georgia`, which previously fell through to a
+single-airport guess or a logged warning.
+
+That it matters is measured, not assumed: across the table's own keys the two
+sides disagree on the leading airport for 9 of them, and before the curated
+pins were authored those included `doha` (table DOH, artifact DIA — the *old*
+Doha International) and `kuala lumpur` (table KUL, artifact SZB — the
+secondary field).
+
+**Phase 5 deletes the first line of that function.** Until the flip is
+justified by the log, the frontend can only add coverage.
+
 ## Observability
 
 The original bug was silent, so: **log every `unknown` and `ambiguous` with the
@@ -506,13 +712,41 @@ so this is invisible locally. Specify a max input length.
 
 ## Budgets, asserted by tests
 
-| | Target |
+| | Target | Measured, on the real 36,009-place artifact |
+|---|---|---|
+| Exact hit | < 0.1 ms | **0.005 ms** p50 |
+| Fuzzy path | < 5 ms | **0.19 ms** p50, 1.4 ms p95, 2.4 ms worst seen |
+| Index memory | < 50 MB | **88.2 MiB — over budget, see below** |
+| Browser hot set | < 60 KB gzipped | **59.9 KB**, asserted by the builder and a test |
+| Index build | — | **1.1 s**, lazy, once per process |
+| AI calls | **zero** | zero |
+
+**The memory budget is exceeded and the number is the measured one, not the
+hoped-for one.** Broken down, with `--expose-gc` and a forced collection
+between each step:
+
+| | |
 |---|---|
-| Exact hit | < 0.1 ms |
-| Fuzzy path | < 5 ms (trigram measures ~1 ms at 50k) |
-| Index memory | < 50 MB |
-| Browser hot set | < 60 KB gzipped |
-| AI calls | **zero** |
+| parsed artifact (36,009 places) | 30.5 MiB |
+| the four indexes | 57.7 MiB — of which the trigram index is 24.8 MiB |
+| **total cost of having the resolver in a process** | **88.2 MiB** |
+
+The 50 MB figure was written before any of this existed, and the honest
+reading is that it was optimistic rather than that the implementation is
+wasteful: 175,921 exact keys over 36,009 places is the index, and the trigram
+index is the price of typo tolerance.
+
+What makes it affordable rather than fine: the index is built **lazily on
+first use**, so a process that never resolves a location — a worker, a
+migration, most of the test suite — pays nothing, and the cost lands once.
+88 MiB on top of Node, Express and the app is a real increase on a small
+Railway instance but not close to a 512 MB limit.
+
+If it ever needs to come down, the trigram index is 28% of it and serves only
+typos; the browser already ships without one for exactly that reason. Dropping
+it server-side would cost the "did you mean" list, which is the one thing
+standing between a typo and a silent miss, so it is not a trade to make
+casually.
 
 An AI fallback is out of scope for v1. Airports, cities and countries are a
 finite, slowly-changing set; a table is faster, cheaper, reproducible and
@@ -607,6 +841,62 @@ its cases.
 Both suites are kept. The fixture stays the place to write a case for a *rule*;
 the artifact suite is the place a case about *data* belongs.
 
+## Phase 4: the question itself — NOT BUILT, needs design approval
+
+Everything behind the question is finished and tested. Nothing renders it,
+because the question is a design change and this repo's rule is that design
+changes are approved before they are committed.
+
+**What already carries the data, end to end:**
+
+| Layer | Field |
+|---|---|
+| resolver | `Resolution.ambiguous.candidates`, each with `label`, `airports`, `distanceKm` |
+| endpoint | `POST /api/locations/resolve` → `{status:'ambiguous', reason, candidates}` |
+| browser | `resolveOffline` / `resolveLocation` → the same `LocationAnswer` |
+| optimizer | `OptimizeResult.originClarification` — `{input, reason, candidates}` |
+| frontend API type | `OptimizeResult.originClarification`, same shape |
+
+Each candidate already has everything a question needs: something to read, a
+stable `placeId` to persist, the airports it would be priced from, and the
+distance from wherever the traveller is.
+
+**Where a question would appear**, and what each caller currently does
+instead — every one of these has a `TODO(location-phase-4)` at the call site:
+
+- the planner conversation, when the origin is ambiguous. It can ask properly;
+  today it silently takes the best reading.
+- `HomeEditModal`, when a typed city is ambiguous. Synchronous, so it has the
+  candidates in hand already.
+- the results page, when a trip's total was priced from a guessed origin. This
+  is the one with real money attached: `originClarification` means the figure
+  on screen rests on a reading nobody confirmed.
+
+**The decisions that are the owner's, not mine:**
+
+1. Is an ambiguous origin a blocking question, or a banner on a trip that was
+   already priced? The architecture note says "flag rather than block" and the
+   non-asking callers are all built that way, but the planner conversation
+   could reasonably block, since it is a conversation.
+2. How a `not-found` differs from an `ambiguous` on screen. They are different
+   questions — "which of these?" against "we have not heard of this, did you
+   mean?" — and a typo must never be applied silently, so the second one needs
+   a shape that does not look like a confirmation.
+3. Whether to show distance. Every candidate has it, and "2,057 km away" is
+   the single most useful distinguisher between two places called Paris. It is
+   also the kind of detail that makes a card look busy.
+4. Whether a resolved origin should be persisted. `trips` has `origin_city` and
+   `origin_airports` but no place id, so every caller re-derives and may
+   re-derive differently. Adding `origin_place_id` would make a resolution
+   happen once — and it is a migration against the one Supabase project that
+   holds real trips, so it is an explicit decision rather than a tidy-up.
+
+Constraints already understood from the repo's design rules: no glass
+morphism, no glows, no gradient-purple; derive from the product's own DNA —
+the dark `#0f0f1a` AI surfaces, the pastel city cards, the dashed-route motif,
+the blue brand. And narrow-screen layout is deferred, so this is a
+desktop-first shape.
+
 ## Abbreviations
 
 **31 of the 56 US state and territory codes are also ISO country codes** — `CA`
@@ -636,18 +926,84 @@ Where no curated decision exists, the ladder still applies and `DE`, `IN` and
 
 ## Phases
 
-| Phase | Deliverable |
-|---|---|
-| 0 | Fix `ConversationalPlanner.originAirports`. Independent, ships alone. |
-| 1 | Pipeline, artifacts, resolver, tests. **Shadow mode** on the backend. |
-| 2 | `optimizer.ts` switched first — in-process, has context, no asking problem |
-| 3 | Endpoint, browser hot set, frontend callers |
-| 4 | Clarification UI — **needs design approval** |
-| 5 | Delete `originAirports.ts` ×2, `nearestAirport.ts`, `airportNames.ts`, `cityAirports.ts` |
+| Phase | Deliverable | State |
+|---|---|---|
+| 0 | Fix `ConversationalPlanner.originAirports`. Independent, ships alone. | done |
+| 1 | Pipeline, artifacts, resolver, tests. | done |
+| 2 | `optimizer.ts` switched first — in-process, has context, no asking problem. **Shadow mode.** | done |
+| 3 | Endpoint, browser hot set, frontend callers | done |
+| 4 | Clarification UI — **needs design approval** | data path ready, UI NOT built |
+| 5 | Delete `originAirports.ts` ×2, `nearestAirport.ts`, `airportNames.ts`, `cityAirports.ts` | pending phase 4 |
 
 Phase 5 matters: v1 deleted two tables and left three, including the two
 implicated in the Kyoto→Accra bug and the "use my location" path. Folding them
 in is a scoping line today and a second project later.
+
+### Phase 5 is not five deletions — corrected after checking
+
+Written as "delete five files", and three of the five cannot simply go. Checked
+against the code rather than assumed:
+
+| File | Blocked on | Why |
+|---|---|---|
+| `originAirports.ts` ×2 | the shadow log | it IS the comparison baseline, and `originAirportsForCity` still leads with it. Deleting it before the flip to `live` removes the only evidence that the replacement is not worse. |
+| `nearestAirport.ts` | a new capability | it answers coords → nearest airport city, for "use my location". The resolver takes coordinates as CONTEXT to disambiguate a name; it has no reverse-geocoding entry point at all. The artifact has lat/lon on all 36,009 places, so a `nearestPlace(lat, lon)` would be both easy and better than the handful of major cities embedded today — but it is an addition, not a deletion. |
+| `airportNames.ts` | artifact data, and probably should stay | IATA → display name. `PlaceAirport` is `{iata, km, servesPlace}` with no name, so there is nothing to replace it with. It also has no backend twin, so it is not part of the duplication problem the owner asked to fix — and putting ~267 airport names in the hot set costs budget the hot set does not have. |
+| `cityAirports.ts` | nothing | does not exist. Already gone. |
+
+So the honest shape of phase 5 is: flip to `live` on the evidence, add
+`nearestPlace`, then delete two files and keep `airportNames.ts`.
+
+### The gate for flipping to `live`
+
+Stated concretely, because "it seems fine" is not a gate and there is one
+Supabase project holding real trips:
+
+1. **The resolver reproduces every lead the table had, bar one named
+   exception.** Measured across all 132 keys the table answers: **0 missing,
+   and the leading airport matches on 131 of 132**. The leading airport is what
+   matters because it is the one `estimateHomeLegCost` ranks permutations from;
+   extra fallbacks after it are a gain, not a difference.
+
+   The leads come from the table itself, carried into `curated.ts` as an
+   authored seed block — the table's 132 keys already held exactly the human
+   judgement the curated layer exists for, in the wrong file. Seeding was a
+   one-time materialisation, not a build step, because phase 5 deletes the
+   table and a build-time read would take the leads with it.
+
+   **The exception is bare `washington`, and it is deliberate. Do not "fix" it
+   back.** The table answers IAD; the resolver answers SEA and asks. Every one
+   of the other 131 was a disagreement about airport ORDER WITHIN a place,
+   which is what a pin fixes. This one is a disagreement about WHICH PLACE
+   WINS: bare `Washington` is an ask across Washington state, Washington DC,
+   Washington UT and Washington IL, and the state leads on prominence. Pinning
+   IAD onto the DC city does not change which candidate ranks first, and
+   pinning it onto Washington *state* would be plainly wrong.
+
+   A curated alias `washington` → Washington DC would reproduce the table
+   exactly, since the curated tier beats canonical in the narrowing — the
+   mechanism that makes `la` resolve to Los Angeles. It was **considered and
+   rejected**: the table silently guessed DC, whereas the resolver offers both
+   DC and Washington state with labels and distances so the traveller picks.
+   The owner's instruction on this exact input was "we can't return nothing"
+   and "yes it should ask". Washington state is a major destination, not a
+   long-tail curiosity, so an alias here would suppress a real question in
+   order to match a table we are replacing *because* it guessed. `la` is not
+   the same case: nobody means Louisiana or Laos by "LA", so there is no
+   question to suppress.
+
+   The cost is bounded and measured: a non-asking caller gets SEA instead of
+   IAD, which moves only the permutation-ranking signal, because
+   `buildHomeLeg` fans out across every surviving origin airport and takes the
+   cheapest fare. The table's own `washington dc`, `dc` and `washington state`
+   keys all still agree, so the only input that changes is the bare ambiguous
+   one.
+2. **No price-changing disagreement left unexplained in the shadow log.**
+   `shadow.ts` logs those at `warn` and benign supersets at `info`, precisely so
+   this is readable rather than a wall.
+3. **The owner says so.** 1 and 2 are necessary, not sufficient — see "Say so
+   when data gets edited" in CLAUDE.md. The flip is an env change and so is the
+   rollback, which is the whole reason it was built that way.
 
 Everything lands on `feat/location-resolver` and merges only on the owner's
 approval.

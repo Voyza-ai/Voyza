@@ -23,6 +23,21 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
 
+  /**
+   * Which location resolver answers origin-airport lookups.
+   *
+   *   off     the hand-written table in data/originAirports.ts, alone
+   *   shadow  both run, the TABLE is served, disagreements are logged
+   *   live    both run, the RESOLVER is served, disagreements are logged
+   *
+   * Defaults to `shadow`: on by default so disagreements accumulate from real
+   * inputs, but serving the behaviour the existing suite pinned down. There is
+   * one Supabase project and it holds real trips, so the flip to `live` is a
+   * decision to make on that log — and setting this back is the rollback,
+   * without a deploy. See docs/LOCATION_RESOLUTION.md.
+   */
+  LOCATION_RESOLVER_MODE: z.enum(['off', 'shadow', 'live']).default('shadow'),
+
   // Supabase (server-side only — service role has full DB access)
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),

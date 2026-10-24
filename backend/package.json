@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "build:location-data": "tsx scripts/build-location-data.ts",
+    "build:location-hotset": "tsx scripts/build-location-hotset.ts",
     "lint": "echo 'add eslint later'",
     "test": "jest"
   },

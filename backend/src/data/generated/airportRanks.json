@@ -1,6 +1,6 @@
 {
- "schemaVersion": 2,
- "generatedAt": "2026-10-24T19:18:07.597Z",
+ "schemaVersion": 5,
+ "generatedAt": "2026-10-24T20:29:23.809Z",
  "basis": "ourairports-type-ordinal",
  "ranks": {
   "AAA": 2,
@@ -4013,132 +4013,77 @@
   "ZYL": 3
  },
  "pinned": {
-  "adm:AE.03": [
-   "DXB",
-   "DWC"
-  ],
   "adm:AR.07": [
-   "EZE",
-   "AEP"
-  ],
-  "adm:BR.21": [
-   "GIG",
-   "SDU"
+   "EZE"
   ],
   "adm:BR.27": [
-   "GRU",
-   "CGH"
-  ],
-  "adm:CA.08": [
-   "YYZ",
-   "YTZ"
-  ],
-  "adm:CA.10": [
-   "YUL"
-  ],
-  "adm:CH.BS": [
-   "BSL"
-  ],
-  "adm:CN.22": [
-   "PEK",
-   "PKX"
+   "GRU"
   ],
   "adm:CN.23": [
-   "PVG",
-   "SHA"
+   "PVG"
   ],
   "adm:FR.11": [
-   "CDG",
-   "ORY",
-   "BVA"
+   "CDG"
   ],
   "adm:GB.ENG": [
-   "LHR",
-   "LGW",
-   "STN",
-   "LTN",
-   "LCY",
-   "SEN"
+   "LHR"
   ],
   "adm:ID.04": [
-   "CGK",
-   "HLP"
+   "CGK"
   ],
   "adm:IN.33": [
    "GOI"
   ],
+  "adm:IR.26": [
+   "IKA"
+  ],
   "adm:IT.07": [
-   "FCO",
-   "CIA"
+   "FCO"
   ],
   "adm:IT.09": [
-   "MXP",
-   "LIN",
-   "BGY"
+   "MXP"
   ],
-  "adm:JP.13": [
-   "KIX",
-   "ITM",
-   "UKB"
+  "adm:JO.16": [
+   "AMM"
   ],
   "adm:JP.22": [
-   "KIX",
-   "ITM",
-   "UKB"
+   "KIX"
   ],
   "adm:JP.28": [
-   "KIX",
-   "ITM",
-   "UKB"
+   "KIX"
   ],
   "adm:JP.32": [
-   "KIX",
-   "ITM",
-   "UKB"
-  ],
-  "adm:JP.40": [
-   "HND",
-   "NRT"
+   "KIX"
   ],
   "adm:KR.11": [
-   "ICN",
-   "GMP"
+   "ICN"
   ],
-  "adm:MX.09": [
-   "MEX",
-   "NLU"
+  "adm:KR.12": [
+   "ICN"
+  ],
+  "adm:LK.36": [
+   "CMB"
+  ],
+  "adm:MY.14": [
+   "KUL"
+  ],
+  "adm:QA.01": [
+   "DOH"
   ],
   "adm:RU.48": [
-   "SVO",
-   "DME",
-   "VKO"
-  ],
-  "adm:SE.26": [
-   "ARN",
-   "BMA",
-   "NYO"
+   "SVO"
   ],
   "adm:TH.40": [
-   "BKK",
-   "DMK"
+   "BKK"
   ],
   "adm:TR.34": [
-   "IST",
-   "SAW"
+   "IST"
   ],
   "adm:TW.04": [
-   "TPE",
-   "TSA"
-  ],
-  "adm:TZ.25": [
-   "ZNZ"
+   "TPE"
   ],
   "adm:US.CA": [
-   "LAX",
-   "BUR",
-   "LGB",
-   "SNA",
-   "ONT"
+   "LAX"
   ],
   "adm:US.DC": [
    "IAD",
@@ -4149,22 +4094,13 @@
    "PHL"
   ],
   "adm:US.IL": [
-   "ORD",
-   "MDW"
-  ],
-  "adm:US.NJ": [
-   "JFK",
-   "LGA",
-   "EWR"
+   "ORD"
   ],
   "adm:US.NY": [
-   "JFK",
-   "LGA",
-   "EWR"
+   "JFK"
   ],
   "adm:US.TX": [
-   "IAH",
-   "HOU"
+   "DFW"
   ],
   "ap:AAA": [
    "AAA"
@@ -5090,6 +5026,12 @@
    "SFO",
    "OAK"
   ],
+  "gn:112931": [
+   "IKA"
+  ],
+  "gn:1248991": [
+   "CMB"
+  ],
   "gn:148730": [
    "ZNZ"
   ],
@@ -5108,6 +5050,9 @@
    "TPE",
    "TSA"
   ],
+  "gn:1735161": [
+   "KUL"
+  ],
   "gn:1796236": [
    "PVG",
    "SHA"
@@ -5120,6 +5065,9 @@
    "ICN",
    "GMP"
   ],
+  "gn:1843564": [
+   "ICN"
+  ],
   "gn:1850147": [
    "HND",
    "NRT"
@@ -5130,35 +5078,13 @@
    "UKB"
   ],
   "gn:1855612": [
-   "KIX",
-   "ITM",
-   "UKB"
+   "KIX"
   ],
   "gn:1857910": [
-   "KIX",
-   "ITM",
-   "UKB"
+   "KIX"
   ],
-  "gn:1859171": [
-   "KIX",
-   "ITM",
-   "UKB"
-  ],
-  "gn:2637433": [
-   "LHR",
-   "LGW",
-   "STN",
-   "LTN",
-   "LCY",
-   "SEN"
-  ],
-  "gn:2643339": [
-   "LHR",
-   "LGW",
-   "STN",
-   "LTN",
-   "LCY",
-   "SEN"
+  "gn:250441": [
+   "AMM"
   ],
   "gn:2643743": [
    "LHR",
@@ -5176,6 +5102,9 @@
    "BMA",
    "NYO"
   ],
+  "gn:290030": [
+   "DOH"
+  ],
   "gn:292223": [
    "DXB",
    "DWC"
@@ -5184,9 +5113,6 @@
    "CDG",
    "ORY",
    "BVA"
-  ],
-  "gn:2991214": [
-   "BSL"
   ],
   "gn:3169070": [
    "FCO",
@@ -5218,10 +5144,6 @@
    "DCA",
    "BWI"
   ],
-  "gn:4155966": [
-   "MIA",
-   "FLL"
-  ],
   "gn:4164138": [
    "MIA",
    "FLL"
@@ -5230,74 +5152,21 @@
    "DFW",
    "DAL"
   ],
-  "gn:4691930": [
-   "DFW",
-   "DAL"
-  ],
   "gn:4699066": [
    "IAH",
    "HOU"
-  ],
-  "gn:4744091": [
-   "IAD",
-   "DCA",
-   "BWI"
-  ],
-  "gn:4744709": [
-   "IAD",
-   "DCA",
-   "BWI"
   ],
   "gn:4887398": [
    "ORD",
    "MDW"
   ],
-  "gn:5099133": [
-   "JFK",
-   "LGA",
-   "EWR"
-  ],
-  "gn:5099836": [
-   "JFK",
-   "LGA",
-   "EWR"
-  ],
-  "gn:5101798": [
-   "JFK",
-   "LGA",
-   "EWR"
-  ],
   "gn:5110266": [
-   "JFK",
-   "LGA",
-   "EWR"
-  ],
-  "gn:5110302": [
-   "JFK",
-   "LGA",
-   "EWR"
+   "JFK"
   ],
   "gn:5125771": [
-   "JFK",
-   "LGA",
-   "EWR"
+   "JFK"
   ],
   "gn:5128581": [
-   "JFK",
-   "LGA",
-   "EWR"
-  ],
-  "gn:5133273": [
-   "JFK",
-   "LGA",
-   "EWR"
-  ],
-  "gn:5139568": [
-   "JFK",
-   "LGA",
-   "EWR"
-  ],
-  "gn:5145215": [
    "JFK",
    "LGA",
    "EWR"
@@ -5307,22 +5176,12 @@
    "DME",
    "VKO"
   ],
-  "gn:5327684": [
-   "SFO",
-   "OAK",
-   "SJC"
-  ],
   "gn:5368361": [
    "LAX",
    "BUR",
    "LGB",
    "SNA",
    "ONT"
-  ],
-  "gn:5378538": [
-   "SFO",
-   "OAK",
-   "SJC"
   ],
   "gn:5391959": [
    "SFO",

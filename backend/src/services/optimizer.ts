@@ -3,7 +3,8 @@ import { getIataCode, searchFlights } from './flights';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
-import { getOriginAirports } from '../data/originAirports';
+import { originAirports as resolveOrigin } from './location/shadow';
+import type { OriginCandidate } from './location/originAirports';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
 
 type CityInput = {
@@ -110,6 +111,24 @@ export type HomeLeg = {
   alternatives?: Omit<HomeLeg, 'alternatives'>[];
 };
 
+/**
+ * An origin name that had more than one real reading, carried out on the
+ * result instead of asked about mid-run.
+ *
+ * An optimize run is already spending money on Duffel by the time the origin
+ * matters, so it prices the most prominent reading and reports this. The
+ * planner conversation can ask; the callers that cannot ask at least have
+ * something to show, and a place id to persist once someone chooses.
+ *
+ * Absent on every unambiguous origin, which is the overwhelming majority.
+ */
+export type OriginClarification = {
+  /** The raw string, exactly as it arrived. */
+  input: string;
+  reason: 'multi-country' | 'near-tie' | 'not-found';
+  candidates: OriginCandidate[];
+};
+
 export type OptimizeResult = {
   routes: OptimizedRoute[];
   bestRoute: OptimizedRoute;
@@ -130,6 +149,11 @@ export type OptimizeResult = {
    * AND the return search succeeded.
    */
   returnLeg?: HomeLeg | null;
+  /**
+   * Set when the origin name was ambiguous and the run picked a reading to
+   * continue. The legs above were priced from `candidates[0]`.
+   */
+  originClarification?: OriginClarification;
 };
 
 type OptimizeParams = {
@@ -806,18 +830,36 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
 
   const cityMap = new Map(cities.map((c) => [c.name, c]));
 
-  // Resolve origin airports: caller may pass explicit list (from
-  // originAirports.ts lookup or user prefs); otherwise we look up the
-  // multi-airport map, and fall back to a single getIataCode result
-  // if the city isn't a multi-airport metro.
+  // Resolve origin airports: caller may pass explicit list (from the
+  // originAirports lookup or user prefs); otherwise resolve the name, and
+  // fall back to a single getIataCode result if nothing matched.
+  //
+  // The lookup goes through shadow.ts, which runs the hand-written table and
+  // the artifact-backed resolver together and serves whichever
+  // LOCATION_RESOLVER_MODE selects. Resolution happens HERE, at the top,
+  // before any paid call — an optimize run cannot stop to ask a question once
+  // it is spending money on Duffel, so an ambiguous origin is priced from its
+  // best reading and the question is carried out on the result instead.
   let resolvedOriginAirports: string[] = [];
+  let originClarification: OriginClarification | undefined;
   if (hasOrigin) {
     if (originAirports && originAirports.length > 0) {
       resolvedOriginAirports = originAirports;
     } else {
-      const lookup = getOriginAirports(origin!);
-      if (lookup.length > 0) {
-        resolvedOriginAirports = lookup;
+      const resolution = resolveOrigin(origin!, {
+        // The destinations are the strongest context available here and cost
+        // nothing: a trip through Florence and Venice says which Rome is home.
+        tripDestinationNames: cities.map((c) => c.name),
+      });
+      if (resolution.needsClarification) {
+        originClarification = {
+          input: origin!,
+          reason: resolution.needsClarification.reason,
+          candidates: resolution.needsClarification.candidates,
+        };
+      }
+      if (resolution.airports.length > 0) {
+        resolvedOriginAirports = resolution.airports;
       } else {
         try {
           const single = await getIataCode(origin!);
@@ -1086,5 +1128,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     dateShiftSuggestion,
     outboundLeg,
     returnLeg,
+    // Only present when the origin had more than one real reading. The legs
+    // above were priced from the first candidate, so this is how a caller
+    // learns the total it is showing rests on a guess.
+    ...(originClarification ? { originClarification } : {}),
   };
 }

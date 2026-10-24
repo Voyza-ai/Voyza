@@ -85,10 +85,43 @@ export type Place = {
    */
   metro: IataCode | null;
   /**
-   * Ordered, and the ORDER IS LOAD-BEARING: `estimateHomeLegCost` prices every
-   * route permutation from `airports[0]` alone. Alphabetical order would price
-   * every Los Angeles trip from Burbank instead of LAX and silently change the
-   * chosen itinerary. Sort: annual passengers descending, then distance.
+   * Ordered, and the ORDER IS LOAD-BEARING, in two measured ways:
+   *
+   *  - `estimateHomeLegCost` searches `airports[0]` and nothing else, as a
+   *    cheap signal for ranking route PERMUTATIONS. A bad lead degrades that
+   *    ranking, so a worse itinerary can win.
+   *  - only the first `MAX_HOME_AIRPORTS` (3) codes survive into the fan-out
+   *    `buildHomeLeg` runs on the winning permutation, so the order decides
+   *    which origins get priced at all.
+   *
+   * It is NOT the quoted fare on its own: `buildHomeLeg` prices every airport
+   * that survives the cap and takes the cheapest. Alphabetical order would
+   * still lead every Los Angeles trip with Burbank instead of LAX.
+   *
+   * Sort, in order:
+   *   1. `servesPlace` descending — true before false. An airport in attach
+   *      range that the place is not served by must never lead, nor take a
+   *      capped slot from one that does: GEG, 107 km from Moscow, Idaho and
+   *      flagged as not serving it, used to outrank PUW at 9 km.
+   *   2. rank descending — large before medium before small. Stands in for
+   *      annual passengers, which are not openly licensed globally; it is the
+   *      OurAirports `type` ordinal, emitted in `airportRanks.json`.
+   *   3. `km` ascending — nearer first, as the final tiebreak.
+   *
+   * A `state` or `region` gets no lead rule of its own, so a bare state name
+   * can lead with a secondary airport of its dominant metro — California leads
+   * with Burbank, not LAX. That is measured and accepted, not an oversight:
+   * every proxy for "the state's main gateway" available from this data was
+   * tried and was worse (see docs/LOCATION_RESOLUTION.md), and the cost is
+   * bounded to the permutation-ranking signal rather than the fare.
+   *
+   * An authored pin overrides all of it, for the one place it was written for
+   * (the LAX case above is a pin). A pin is never copied to a sibling city,
+   * nor inherited by a parent state or region: copying is how Newark came to
+   * lead with JFK, 35 km away, while EWR sat 5 km from the traveller. Where a
+   * member of a metro group needs its own order it is authored for that place
+   * — Kyoto and Nara are pinned to KIX, which is nearer no airport but is the
+   * gateway they actually fly from.
    */
   airports: PlaceAirport[];
 };

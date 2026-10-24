@@ -47,8 +47,51 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ## 🚧 In-flight
 
-Nothing in flight. `feat/voyza-ai-chat` and `feat/map-redesign` are both
-merged all the way to `voyza_main`; the branch flow is now
+### Location resolution rebuild (`feat/location-resolver`, not merged)
+
+Replaces five hand-maintained lookup tables with one generated artifact and a
+real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
+
+- [x] **Phase 0–3 done.** Pipeline, 36,009-place artifact, resolver, shadow
+  mode on `optimizer.ts`, `POST /api/locations/resolve`, and a 60 KB browser
+  hot set generated into both packages so nothing is hand-maintained twice.
+  Costs 88 MiB of backend heap, built lazily once per process — over the
+  50 MB originally budgeted; measured and recorded in the doc.
+- [ ] **Phase 4: the clarification question. NEEDS DESIGN APPROVAL.** All the
+  data is plumbed through to the frontend and nothing renders it. Four
+  decisions are the owner's — block or flag, how `not-found` differs from
+  `ambiguous` on screen, whether to show distance, and whether to persist
+  `origin_place_id` (a migration against the live project). Spelled out in
+  the "Phase 4" section of the architecture doc.
+- [ ] **Phase 5: retire the old tables — two of five, not five.** Checked
+  against the code rather than assumed. `cityAirports.ts` does not exist.
+  `originAirports.ts` ×2 cannot go until the flip, because it IS the shadow
+  comparison baseline. `nearestAirport.ts` answers coords → nearest airport
+  city for "use my location", which the resolver has no entry point for at
+  all — so retiring it needs a new `nearestPlace(lat, lon)` first (easy, and
+  better than today's handful of cities: the artifact has lat/lon on all
+  36,009). And `airportNames.ts` should probably **stay**: `PlaceAirport` has
+  no name field, it has no backend twin so it is not part of the duplication
+  problem, and putting ~267 airport names in the hot set costs budget it does
+  not have.
+- [ ] **Flip `LOCATION_RESOLVER_MODE` to `live`.** Defaults to `shadow`:
+  both resolvers run, the old table is served, disagreements are logged with
+  the raw input. The flip is an env change, not a deploy, and so is the
+  rollback. The gate is written down in the architecture doc: the resolver
+  must reproduce the LEADING airport on all 132 keys the table answers, no
+  price-changing disagreement may be left unexplained, and the owner says so.
+- [ ] **GeoNames attribution must appear in the app.** CC BY 4.0 requires it
+  and there is no credits page. `ATTRIBUTION.md` records what is owed.
+- [ ] **OurAirports marks some closed airports as in service.** It has DIA
+  (the old Doha International) as `scheduled_service=yes`, type
+  `large_airport` — the same class it gives Hamad. It also types Burbank the
+  same as LAX, which is why the artifact's rank term cannot pick a metro's
+  main airport on its own. The curated pin layer covers the cities we know
+  about; an origin that is a closed field would return zero flights, so it is
+  worth a pass over the pinned set at some point.
+
+Everything else is merged. `feat/voyza-ai-chat` and `feat/map-redesign` are
+both merged all the way to `voyza_main`; the branch flow is now
 **feature branch → `dev` → `voyza_main`**, not `claude_code_backend`.
 See "Previously shipped" below for what landed.
 

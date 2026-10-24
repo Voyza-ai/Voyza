@@ -28,6 +28,7 @@ import type {
   KeyMatch,
   KeyTier,
   Place,
+  PlaceKind,
   ResolveContext,
   Resolution,
   ResolutionReason,
@@ -119,6 +120,49 @@ function narrow(candidates: Place[], qualifiers: QualifierSegment[]): Place[] {
   return candidates.filter((candidate) =>
     qualifiers.every((segment) => segment.places.some((q) => qualifierContains(q, candidate))),
   );
+}
+
+/**
+ * `Washington State`, `New York State` — a trailing kind word.
+ *
+ * The word "state" is the traveller telling us which KIND of place they mean,
+ * and it is the only way to say "the state, not the city of the same name".
+ * Without it, `Washington State` misses `exact` outright and comes back
+ * unknown: the state's name is "Washington", and nothing is indexed under
+ * "washington state". Measured against the table this replaces, which keys
+ * both strings by hand, those were the only two inputs where the resolver
+ * returned NOTHING and the table returned an answer — SEA, and JFK/LGA/EWR.
+ *
+ * Stripping the suffix unconditionally would be the bug the old table's own
+ * comment warns about: `washington state` stripped to `washington` is
+ * Washington DC here, and would price a Seattle traveller out of Dulles. Two
+ * things prevent that. It runs ONLY after `exact` has missed, and it keeps
+ * only candidates of the named kind — so the answer is the state or nothing.
+ *
+ * There is deliberately NO ` city` entry. "City" is part of real names
+ * — Mexico City, Kansas City, Salt Lake City, Jersey City — which all hit
+ * `exact` and never reach this function. Adding it would turn `Kansas City`
+ * into a search for a city called "Kansas".
+ */
+const ADMIN_SUFFIXES = [' state', ' province'] as const;
+
+/**
+ * Both suffixes mean the same thing: the administrative unit, not a city. They
+ * accept `state` AND `region` because the model has one kind per
+ * administrative level and only the 51 US states are `state` — a Canadian
+ * province and a German Land are both `region`, so matching `state` alone
+ * would answer `Ontario Province` with nothing.
+ */
+const ADMIN_KINDS: ReadonlySet<PlaceKind> = new Set<PlaceKind>(['state', 'region']);
+
+function adminSuffixSplit(head: string): string | null {
+  const lower = head.toLowerCase();
+  for (const suffix of ADMIN_SUFFIXES) {
+    if (lower.endsWith(suffix) && lower.length > suffix.length) {
+      return head.slice(0, head.length - suffix.length).trim();
+    }
+  }
+  return null;
 }
 
 /**
@@ -549,6 +593,24 @@ function resolveAt(
   const exactHits = placesOf(bestMatches, index);
   if (exactHits.length === 0) {
     if (iataAllowed) return answer(iataHit, 'iata-code', index, reference);
+    const bareAdmin = adminSuffixSplit(head);
+    if (bareAdmin) {
+      // The KIND filter runs BEFORE the tier narrowing, and the order is the
+      // whole fix: `New York` is a curated alias of New York City, so
+      // narrowing first keeps only the city and the kind filter then finds
+      // nothing. The traveller said "state", which is a stronger signal than
+      // any provenance, so it is applied first.
+      const named = matchesForKeys(keysForQuery(bareAdmin), index).filter((match) =>
+        ADMIN_KINDS.has(index.byId.get(match.id)?.kind as PlaceKind),
+      );
+      const retry = prune(
+        narrow(placesOf(narrowToBestTier(named).matches, index), qualifiers),
+        options,
+      );
+      // `qualified` is true because the traveller qualified it: naming the
+      // kind of place is what a comma segment does by other means.
+      if (retry.length > 0) return decide(retry, context, index, options, true, depth, 'canonical');
+    }
     return suggest(headKeys, qualifiers, index, reference, options);
   }
 

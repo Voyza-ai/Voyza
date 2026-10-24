@@ -21,7 +21,7 @@ import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, getTrip, fetchHomeLegs, updateTrip } from '@/lib/api';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
-import { getOriginAirports } from '@/lib/originAirports';
+import { originAirportsForCity } from '@/lib/locationResolver';
 import { Hotel, City, Transport } from '@/lib/types';
 import { useAuthStore } from '@/store/authStore';
 
@@ -276,10 +276,17 @@ function ResultsPageInner() {
     if (!first?.dates?.arrival) return;
 
     // Airports may be empty on older trips — fall back to the known-airports
-    // lookup for the home city.
+    // lookup for the home city. Synchronous and offline on purpose: this runs
+    // inside an effect that must not become a loading state, and a trip saved
+    // before the resolver existed has to degrade to today's behaviour, which
+    // is a best-effort list or none at all (the `.length > 0` guards below).
+    //
+    // TODO(location-phase-4): no question is possible here — nobody is looking
+    // at a prompt during a backfill. If the owner wants one it belongs on the
+    // home card, from the persisted `origin_place_id`, not in this effect.
     const outAirports = trip.origin.airports?.length
       ? trip.origin.airports
-      : getOriginAirports(trip.origin.city);
+      : originAirportsForCity(trip.origin.city);
     const retAirports = trip.origin.returnAirports?.length
       ? trip.origin.returnAirports
       : outAirports;

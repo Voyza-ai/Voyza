@@ -15,6 +15,9 @@ import { parseLocal, toIso } from '@/lib/dateHelpers';
 import { buildDayTransportContext, placeInSlot } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { vibesFromAnswer } from '@/lib/vibeMap';
+// Type-only, so it is erased at compile time — the resolver itself still
+// arrives through the `await import()` at each call site below.
+import { originAirportsForCity, type LocationAnswer } from '@/lib/locationResolver';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
@@ -22,6 +25,53 @@ import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
 import NightsPicker from './NightsPicker';
+
+/**
+ * The three `LocationAnswer` branches collapsed to the `string[]` that
+ * `getOriginAirports` used to return, so `originAirports` keeps exactly the
+ * shape and the meaning it had:
+ *
+ *   resolved  -> its airports
+ *   ambiguous -> the best reading's airports, which is all the old table
+ *                could ever express (it had no way to ask)
+ *   unknown   -> empty, which is what the table returned on a miss and what
+ *                the backend already treats as "look the city up yourself"
+ *
+ * Phase 4 turns the middle branch into a question instead; until that UI is
+ * designed and approved, discarding it is the no-behaviour-change option.
+ */
+function originAirportsFromAnswer(answer: LocationAnswer): string[] {
+  if (answer.status === 'resolved') return answer.airports.map((a) => a.iata);
+  if (answer.status === 'ambiguous') {
+    return answer.candidates[0]?.airports.map((a) => a.iata) ?? [];
+  }
+  return [];
+}
+
+/**
+ * The hand-written table leads; the resolver's answer is the fallback.
+ *
+ * Two reasons, and driving this very step is what found both.
+ *
+ * `Newark, NJ` came back EMPTY. The table answers it offline — it is one of
+ * its own documented cases — while the resolver needs a round trip for a
+ * comma-qualified name, because the hot set carries no `newark nj` key. Any
+ * failure of that request turned a common input shape into no airports at all.
+ *
+ * And `Washington` came back SEA where the table says IAD. The frontend's
+ * answer WINS: `optimizer.ts` takes `originAirports` from the request body
+ * verbatim when it is non-empty, so serving the resolver here bypasses
+ * `LOCATION_RESOLVER_MODE` and the shadow log that is meant to justify the
+ * change.
+ *
+ * The `answer` is still computed and still passed through, because its
+ * candidates are what the phase-4 question will be built from. This only
+ * decides which airports get used meanwhile.
+ */
+function originAirportsForOrigin(query: string, answer: LocationAnswer): string[] {
+  const fromTable = originAirportsForCity(query);
+  return fromTable.length > 0 ? fromTable : originAirportsFromAnswer(answer);
+}
 
 type StepType = 'intent' | 'text' | 'vibes' | 'dates' | 'travelers' | 'budget' | 'notes' | 'origin' | 'roundtrip' | 'nights';
 
@@ -481,9 +531,15 @@ export default function PlanningChat() {
           content: `Looks like your closest major airport is in ${city.city} — I'll use that as your starting point.`,
         },
       ]);
-      const { getOriginAirports } = await import('@/lib/originAirports');
+      const { resolveLocation } = await import('@/lib/locationResolver');
+      const answer = await resolveLocation(city.city, {
+        tripDestinationNames: answers.destinations,
+      });
+      // TODO(location-phase-4): on `ambiguous` ask which reading they mean —
+      // `answer.candidates` carries the `label` to show and the `placeId` to
+      // persist. Taking the best reading until that UI is approved.
       setAnswer('origin', city.city);
-      setAnswer('originAirports', getOriginAirports(city.city));
+      setAnswer('originAirports', originAirportsForOrigin(city.city, answer));
       advanceToNextStep(currentStepIndex);
     } finally {
       setLocating(false);
@@ -609,8 +665,14 @@ export default function PlanningChat() {
       // without another round-trip. When the city isn't in the lookup,
       // send empty airports — backend falls back to single-IATA via
       // getIataCode().
-      const { getOriginAirports } = await import('@/lib/originAirports');
-      const airports = getOriginAirports(value);
+      const { resolveLocation } = await import('@/lib/locationResolver');
+      const answer = await resolveLocation(value, {
+        tripDestinationNames: answers.destinations,
+      });
+      // TODO(location-phase-4): on `ambiguous` ask which reading they mean —
+      // `answer.candidates` carries the `label` to show and the `placeId` to
+      // persist. Taking the best reading until that UI is approved.
+      const airports = originAirportsForOrigin(value, answer);
       setAnswer('origin', value);
       setAnswer('originAirports', airports);
     }
@@ -663,8 +725,14 @@ export default function PlanningChat() {
       // automatically for NYC/London/Tokyo/etc.
       if (parsed.origin && !answers.origin) {
         setAnswer('origin', parsed.origin);
-        const { getOriginAirports } = await import('@/lib/originAirports');
-        setAnswer('originAirports', getOriginAirports(parsed.origin));
+        const { resolveLocation } = await import('@/lib/locationResolver');
+        const answer = await resolveLocation(parsed.origin, {
+          tripDestinationNames: parsed.destinations ?? answers.destinations,
+        });
+        // TODO(location-phase-4): on `ambiguous` ask which reading they mean —
+        // `answer.candidates` carries the `label` to show and the `placeId` to
+        // persist. Taking the best reading until that UI is approved.
+        setAnswer('originAirports', originAirportsForOrigin(parsed.origin, answer));
       }
       if (typeof parsed.returnToHome === 'boolean' && answers.returnToHome === undefined) {
         setAnswer('returnToHome', parsed.returnToHome);

@@ -282,6 +282,16 @@ function normalize(name: string): string {
 }
 
 /**
+ * Every key this table answers.
+ *
+ * Exported for `scripts/build-location-hotset.ts`, which seeds the browser hot
+ * set from it: the resolver cannot replace this table until the hot set
+ * answers everything the table answered, offline, and that is asserted rather
+ * than assumed. Nothing at runtime reads this.
+ */
+export const MULTI_AIRPORT_CITY_KEYS: readonly string[] = Object.keys(MULTI_AIRPORT_CITIES);
+
+/**
  * Get up to N airports for a city. Returns an empty array if the city
  * isn't in the multi-airport map — callers should fall back to
  * getIataCode() for single-airport cities.

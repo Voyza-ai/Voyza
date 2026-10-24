@@ -44,9 +44,15 @@ export type GeneratedCodeLists = {
 /**
  * What `airports[]` was actually ordered by.
  *
- * The contract asks for annual passengers descending, then distance. Annual
- * passenger counts are not openly licensed globally, so the passenger term is
- * the OurAirports `type` ordinal (large 3, medium 2, small 1) — measured
+ * The sort is `servesPlace` descending, then `ranks` descending, then `km`
+ * ascending, with an authored `pinned` order ahead of all three.
+ *
+ * `servesPlace` leads so that an airport merely in attach range cannot take
+ * index 0, which is the only airport `estimateHomeLegCost` searches when it
+ * ranks route permutations, nor a slot in the capped fan-out `buildHomeLeg`
+ * prices. The rank term
+ * stands in for annual passengers, which are not openly licensed globally, so
+ * it is the OurAirports `type` ordinal (large 3, medium 2, small 1) — measured
  * Spearman 0.578 against real route traffic, against 0.451 at best for
  * population. Three levels cannot separate LHR from LCY, so the multi-airport
  * metros carry a hand order in `scripts/location-data/curated.ts`.
@@ -59,7 +65,15 @@ export type GeneratedAirportRanks = {
   generatedAt: string;
   basis: 'ourairports-type-ordinal';
   ranks: Record<string, number>;
-  /** Place id -> the hand-written prefix its `airports[]` leads with. */
+  /**
+   * Place id -> the hand-written prefix its `airports[]` leads with.
+   *
+   * Authored places only: a place is pinned if and only if `curated.ts` names
+   * that place's own airport order — the anchor city of a metro group, an
+   * airport or region override, or a curated place. A pin is never copied to a
+   * sibling city, nor inherited by a parent state or region; those order by
+   * the derived sort.
+   */
   pinned: Record<string, string[]>;
 };
 
