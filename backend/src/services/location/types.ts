@@ -284,4 +284,13 @@ export type FuzzyIndex = {
   search(key: string, maxDistance: number, limit: number): Array<{ key: string; distance: number }>;
   /** Reported by tests against the memory budget. */
   approxBytes(): number;
+  /**
+   * How many distinct trigrams the index holds. Diagnostics only.
+   *
+   * In the contract rather than reached for with a cast: the perf suite prints
+   * it next to `approxBytes()` so a memory figure comes with the structure
+   * size that explains it, and a test casting its way to a method is a test
+   * the next refactor breaks silently.
+   */
+  trigramCount(): number;
 };

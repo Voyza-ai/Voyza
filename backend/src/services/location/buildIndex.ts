@@ -18,6 +18,7 @@
  */
 
 import type {
+  FuzzyIndex,
   IataCode,
   KeyMatch,
   KeyTier,
@@ -124,6 +125,48 @@ function pushMatch(map: Map<string, KeyMatch[]>, key: string, id: string, tier: 
   if (KEY_TIER_RANK[tier] > KEY_TIER_RANK[held.tier]) held.tier = tier;
 }
 
+/**
+ * The trigram index, built on FIRST USE rather than at boot.
+ *
+ * It is the single largest thing in here and it is consulted only when `exact`
+ * has already missed. A process that resolves nothing but real place names
+ * never needs it, and that is the normal case: every input the optimizer sees
+ * has been through the planner, and the endpoint's misses are typos.
+ *
+ * Measured on the real 36,009-place artifact:
+ *
+ *                            eager      lazy
+ *   resident after build     88.2 MiB   64.5 MiB
+ *   build at boot            1125 ms     521 ms
+ *   first typo                  3 ms     539 ms
+ *   every typo after            3 ms       3 ms
+ *
+ * So the trade is 23.7 MiB and half the boot time against one 539 ms stall,
+ * once per process, on the first query that misses. That is the right way
+ * round: the cost lands only when the feature is used, and it lands on a
+ * request that is already a miss and already returning "did you mean" rather
+ * than an answer. Building it in the background instead would not avoid the
+ * stall — Node is single-threaded, so the 539 ms blocks the event loop
+ * wherever it runs — it would only move it onto an unrelated request and
+ * charge the memory to every process again.
+ *
+ * `approxBytes` deliberately BUILDS rather than reporting 0 for "not yet
+ * built": it exists so tests can assert the memory budget, and a budget
+ * assertion that silently measures nothing is worse than no assertion.
+ */
+function lazyTrigramIndex(keys: () => Iterable<string>): FuzzyIndex {
+  let built: ReturnType<typeof buildTrigramIndex> | null = null;
+  const get = (): ReturnType<typeof buildTrigramIndex> => {
+    if (!built) built = buildTrigramIndex(keys());
+    return built;
+  };
+  return {
+    search: (key, maxDistance, limit) => get().search(key, maxDistance, limit),
+    approxBytes: () => get().approxBytes(),
+    trigramCount: () => get().trigramCount(),
+  };
+}
+
 export function buildIndex(artifact: LocationArtifact): BuiltIndex {
   const exact = new Map<string, KeyMatch[]>();
   const qualifier = new Map<string, string[]>();
@@ -187,7 +230,7 @@ export function buildIndex(artifact: LocationArtifact): BuiltIndex {
     qualifier,
     iata,
     byId,
-    fuzzy: buildTrigramIndex(exact.keys()),
+    fuzzy: lazyTrigramIndex(() => exact.keys()),
     countryNames,
     adminNames,
     prominence,

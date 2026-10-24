@@ -124,7 +124,7 @@ beforeAll(() => {
       `build: ${buildMs.toFixed(0)} ms`,
       `index heap: ${(indexHeapBytes / MEGABYTE).toFixed(1)} MiB (gc ${gcAvailable ? 'forced' : 'UNAVAILABLE'})`,
       `fuzzy structure: ${(index.fuzzy.approxBytes() / MEGABYTE).toFixed(1)} MiB over ${
-        (index.fuzzy as unknown as { trigramCount(): number }).trigramCount()
+        index.fuzzy.trigramCount()
       } trigrams`,
     ].join('\n'),
   );
@@ -200,9 +200,12 @@ describe('budgets at 50,000 places', () => {
 
   it('keeps the whole index under 50 MB', () => {
     expect(gcAvailable).toBe(true);
+    // NOTE: `indexHeapBytes` is measured immediately after `buildIndex`, and
+    // the trigram index is now built lazily — so this figure no longer
+    // includes it. That is the point of the laziness, not a weakened
+    // assertion, but it does mean the line below is what actually covers the
+    // biggest structure: `approxBytes()` builds it in order to measure it.
     expect(indexHeapBytes).toBeLessThan(50 * MEGABYTE);
-    // The structural estimate is reported next to the measurement so a drift
-    // between the two is visible rather than silent.
     expect(index.fuzzy.approxBytes()).toBeLessThan(50 * MEGABYTE);
   });
 
@@ -224,5 +227,46 @@ describe('budgets at 50,000 places', () => {
     // while the real number is ~0.46 s. A bound tight enough to flake is a
     // bound that gets deleted.
     expect(buildMs).toBeLessThan(15000);
+  });
+});
+
+/**
+ * Laziness, asserted on a memory DELTA rather than a clock.
+ *
+ * The trigram index is 24.8 MiB of the 88 MiB the resolver costs on the real
+ * artifact, and it is only consulted when `exact` has missed. If it ever goes
+ * back to being built eagerly, nothing else in this suite would notice: every
+ * budget here would still pass, just with a quarter more memory held by every
+ * process that never sees a typo.
+ *
+ * A fresh index, because the suite above has already forced the shared one to
+ * build by measuring it, and a timing assertion would be load-sensitive in a
+ * way a delta is not.
+ */
+describe('the trigram index is built only when something misses', () => {
+  it('survives exact hits unbuilt, and appears on the first miss', () => {
+    expect(gcAvailable).toBe(true);
+    const fresh = buildIndex(artifact);
+
+    forceGc();
+    const afterBuild = process.memoryUsage().heapUsed;
+
+    // Real keys, so these all hit `exact` and never reach fuzzy.
+    const keys = [...fresh.exact.keys()].slice(0, 25);
+    for (const key of keys) resolve(key, {}, fresh);
+    expect(keys.length).toBe(25);
+
+    forceGc();
+    const afterExactHits = process.memoryUsage().heapUsed;
+
+    // A key that cannot match anything, which forces the fuzzy path.
+    resolve('qqqzzzxxwwvv', {}, fresh);
+    forceGc();
+    const afterMiss = process.memoryUsage().heapUsed;
+
+    // Exact hits must cost approximately nothing...
+    expect(afterExactHits - afterBuild).toBeLessThan(5 * MEGABYTE);
+    // ...and the miss must be where the structure appears.
+    expect(afterMiss - afterExactHits).toBeGreaterThan(5 * MEGABYTE);
   });
 });

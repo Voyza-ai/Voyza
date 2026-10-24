@@ -70,11 +70,16 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
 - [ ] **Phase 5: retire the old tables — two of five, not five.** Checked
   against the code rather than assumed. `cityAirports.ts` does not exist.
   `originAirports.ts` ×2 cannot go until the flip, because it IS the shadow
-  comparison baseline. `nearestAirport.ts` answers coords → nearest airport
-  city for "use my location", which the resolver has no entry point for at
-  all — so retiring it needs a new `nearestPlace(lat, lon)` first (easy, and
-  better than today's handful of cities: the artifact has lat/lon on all
-  36,009). And `airportNames.ts` should probably **stay**: `PlaceAirport` has
+  comparison baseline.
+  `nearestAirport.ts` answers coords to nearest airport
+  city for "use my location", and retiring it is NOT the easy win it looked
+  like -- measured over 14 real coordinates, a hot-set reverse lookup offers
+  Pullman to a Spokane traveller and Berlin to a Gdansk one, because neither
+  city fits the 60 KB budget. Doing it properly means either the full
+  artifact server-side (which costs the coordinates-never-leave-the-device
+  promise) or a bigger hot set (which costs page weight on every visit).
+  Both are decisions; the measured table is in the architecture doc.
+  And `airportNames.ts` should probably **stay**: `PlaceAirport` has
   no name field, it has no backend twin so it is not part of the duplication
   problem, and putting ~267 airport names in the hot set costs budget it does
   not have.

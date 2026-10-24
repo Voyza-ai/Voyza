@@ -786,6 +786,47 @@ the app. Importing the constant is not compliance; rendering it where a user
 can reach it is, and adding a page is a visible change that gets approved
 first.
 
+### `nearestPlace` from the hot set: a measured negative result
+
+Phase 5 wants `nearestAirport.ts` retired, and the obvious replacement is a
+reverse lookup over the hot set: it carries lat/lon for every place it ships,
+against 102 hand-written entries in the table. Measured over 14 real
+coordinates before building it, and **it is not an improvement.**
+
+Mean distance to the matched place does improve, 293 km to 165 km, and that
+number is misleading. What matters is the AIRPORTS the match yields:
+
+| from | hand table | hot set |
+|---|---|---|
+| Lyon | Nice, 299 km | **Vienne 27 km → LYS** ✓ |
+| Burlington VT | Montreal, 117 km | **Vermont 16 km → BTV** ✓ |
+| Boise | Salt Lake City, 476 km | **Idaho 75 km → BOI** ✓ |
+| Omaha | Kansas City, 266 km | **Nebraska 74 km → OMA** ✓ |
+| Spokane | Seattle, 367 km | Moscow ID 108 km → **PUW** ✗ |
+| Gdansk | Warsaw, 283 km | Frankfurt (Oder) 351 km → **BER** ✗ |
+| Fresno | Sacramento, 254 km | California 167 km → **LAX** ✗ |
+
+It wins where a state place happens to be near, because a state's airport list
+is every airport that serves it. It loses where the nearest SHIPPED place is a
+small city whose airports are wrong: Spokane has GEG inside the city and gets
+offered Pullman, and Gdansk gets offered Berlin. That is the same class of
+error as pricing Newark from JFK — the one this whole document is about — so
+the trade is not worth 102 fewer lines.
+
+The reason is the 60 KB budget: the hot set ships 410 places, and Spokane,
+Gdansk and Fresno are not among them. Two ways forward, both the owner's call
+because both spend something:
+
+- **Server-side, over all 36,009 places.** Spokane and Gdansk both exist
+  there with their own airports, so the answer would be right. It costs the
+  promise in `nearestAirport.ts` that geolocation coordinates never leave the
+  device, which the "use my location" affordance rests on.
+- **A bigger hot set.** Costs page weight on every visit, for a feature one
+  tap uses.
+
+So the hand-written table stays for now, and this is written down so the
+replacement is not re-proposed as an obvious win.
+
 ## Observability
 
 The original bug was silent, so: **log every `unknown` and `ambiguous` with the
