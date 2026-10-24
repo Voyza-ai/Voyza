@@ -1,0 +1,14 @@
+{
+  // The main tsconfig has `rootDir: ./src` and `include: ["src/**/*"]`, so
+  // `npm run typecheck` does not see scripts/ at all. Build-time scripts are
+  // still TypeScript and still have to typecheck, so they get their own
+  // no-emit project. `npm run typecheck:scripts` runs it.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*", "src/services/location/types.ts"],
+  "exclude": ["node_modules", "dist"]
+}
