@@ -40,6 +40,16 @@ import { resolveOriginAirports } from '../services/location/originAirports';
  * once somebody has decided the new lead is right.
  */
 const ACCEPTED_LEAD_CHANGES: Record<string, { to: string; why: string; asks?: boolean }> = {
+  'Vancouver, WA': {
+    to: 'PDX',
+    why:
+      'The resolver CORRECTS the table here. Vancouver, Washington sits 7 km ' +
+      'from Portland International; the table answers SEA, about 250 km away ' +
+      'in Seattle, because its fallback reads the `WA` qualifier as "the ' +
+      'Washington metro" rather than as the state the city is in. Accepted ' +
+      'because PDX is right, and recorded rather than silently absorbed ' +
+      'because it is a behaviour change a traveller would notice.',
+  },
   washington: {
     to: 'SEA',
     asks: true,
@@ -55,6 +65,32 @@ const ACCEPTED_LEAD_CHANGES: Record<string, { to: string; why: string; asks?: bo
   },
 };
 
+/**
+ * Qualified input shapes, drawn from the table's own test suite.
+ *
+ * `MULTI_AIRPORT_CITY_KEYS` is only the table's KEYS, and the table answers
+ * far more than its keys: `Newark, NJ` and `Vancouver, WA` are handled by its
+ * comma-walking fallback, not by a key. Gating on the key list alone was
+ * blind to that whole class, and it hid a real difference — `Vancouver, WA`,
+ * where the resolver corrects the table rather than matching it.
+ *
+ * These are the comma and space forms from `originAirportAliases.test.ts`,
+ * which is the closest thing to a record of what real input looks like.
+ */
+const QUALIFIED_INPUTS = [
+  'Newark, NJ',
+  'Jersey City, NJ',
+  'Brooklyn, NY',
+  'Hartford, CT',
+  'Portland, Oregon',
+  'Vancouver, WA',
+  'Washington, DC',
+  'Brooklyn, New York, USA',
+  'New York State',
+  'Washington State',
+  'Oregon State',
+];
+
 type LeadDiff = { key: string; legacy: string; resolver: string };
 
 function leadDiffs(): { empties: string[]; diffs: LeadDiff[]; compared: number } {
@@ -62,7 +98,7 @@ function leadDiffs(): { empties: string[]; diffs: LeadDiff[]; compared: number }
   const diffs: LeadDiff[] = [];
   let compared = 0;
 
-  for (const key of MULTI_AIRPORT_CITY_KEYS) {
+  for (const key of [...MULTI_AIRPORT_CITY_KEYS, ...QUALIFIED_INPUTS]) {
     const legacy = getOriginAirports(key);
     if (legacy.length === 0) continue; // the table refuses it; nothing to compare
     const resolved = resolveOriginAirports(key);

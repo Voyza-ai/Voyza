@@ -1062,7 +1062,7 @@ Where no curated decision exists, the ladder still applies and `DE`, `IN` and
 | 2 | `optimizer.ts` switched first — in-process, has context, no asking problem. **Shadow mode.** | done |
 | 3 | Endpoint, browser hot set, frontend callers | done |
 | 4 | Clarification UI — **needs design approval** | data path ready, UI NOT built |
-| 5 | Delete `originAirports.ts` ×2, `nearestAirport.ts`, `airportNames.ts`, `cityAirports.ts` | pending phase 4 |
+| 5 | Retire the old tables — fewer than the five first listed; see the breakdown below | gated on the `live` flip |
 
 Phase 5 matters: v1 deleted two tables and left three, including the two
 implicated in the Kyoto→Accra bug and the "use my location" path. Folding them
@@ -1078,7 +1078,7 @@ against the code rather than assumed:
 | `originAirports.ts` ×2 | the shadow log | it IS the comparison baseline, and `originAirportsForCity` still leads with it. Deleting it before the flip to `live` removes the only evidence that the replacement is not worse. |
 | `nearestAirport.ts` | a new capability | it answers coords → nearest airport city, for "use my location". The resolver takes coordinates as CONTEXT to disambiguate a name; it has no reverse-geocoding entry point at all. The artifact has lat/lon on all 36,009 places, so a `nearestPlace(lat, lon)` would be both easy and better than the handful of major cities embedded today — but it is an addition, not a deletion. |
 | `airportNames.ts` | artifact data, and probably should stay | IATA → display name. `PlaceAirport` is `{iata, km, servesPlace}` with no name, so there is nothing to replace it with. It also has no backend twin, so it is not part of the duplication problem the owner asked to fix — and putting ~267 airport names in the hot set costs budget the hot set does not have. |
-| `cityAirports.ts` | nothing | does not exist. Already gone. |
+| `cityAirports.ts` | 13 decisions | **It exists** — an earlier version of this table said otherwise. 94 lines, destination-side (city → one primary IATA), read by `getIataCode`, and it holds the Kyoto→Accra override. The resolver reproduces 156 of its 169 entries via `metro ?? airports[0]`; the remaining 13 are metro-vs-specific-airport choices (`seoul` SEL or ICN, `kyoto` OSA or KIX) plus `kyiv`, which does not resolve at all. |
 
 So the honest shape of phase 5 is: flip to `live` on the evidence, add
 `nearestPlace`, then delete two files and keep `airportNames.ts`.

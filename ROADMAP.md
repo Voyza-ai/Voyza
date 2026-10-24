@@ -68,7 +68,11 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
   traveller's own coordinates without sending them anywhere — which is what
   stopped "use my location" in Washington DC from saving Seattle's airports.
 - [ ] **Phase 5: retire the old tables — two of five, not five.** Checked
-  against the code rather than assumed. `cityAirports.ts` does not exist.
+  against the code rather than assumed. `cityAirports.ts` DOES exist (an
+  earlier note here said it did not): 94 lines, destination-side, read by
+  `getIataCode` in flights.ts, and holder of the Kyoto-to-Accra fix. The
+  resolver matches 156 of its 169 entries; the other 13 are metro-code vs
+  specific-airport calls that need deciding one at a time.
   `originAirports.ts` ×2 cannot go until the flip, because it IS the shadow
   comparison baseline.
   `nearestAirport.ts` answers coords to nearest airport
