@@ -24,11 +24,11 @@ application already in).
 Fill the join form with the standard building blocks. If it stalls or you want to
 open a direct line, send:
 
-> **Subject:** API access — Voyza, AI trip planner (flights + trains, Europe-first)
+> **Subject:** API access — BlueMurr, AI trip planner (flights + trains, Europe-first)
 >
 > Hi All Aboard team,
 >
-> I'm building Voyza (https://voyza-nine.vercel.app), an AI trip planner that
+> I'm building BlueMurr (https://bluemurr.com), an AI trip planner that
 > optimizes multi-city itineraries by comparing flights and trains on every leg —
 > real door-to-door time and price. Flights run on Duffel; for rail we currently
 > use Deutsche Bahn's public API, which only really covers DACH. We want trains
@@ -49,7 +49,7 @@ open a direct line, send:
 > love to hear it — and we can integrate within days of getting keys.
 >
 > Thanks,
-> [name] — Voyza
+> [name] — BlueMurr
 
 ---
 
@@ -59,9 +59,9 @@ open a direct line, send:
 
 | Form field (typical) | Answer |
 |---|---|
-| Company name | `Voyza` |
+| Company name | `BlueMurr` |
 | Business type | Online Travel Agency / booking technology (B2C trip planner) |
-| Website | `https://voyza-nine.vercel.app` |
+| Website | `https://bluemurr.com` |
 | Country | United States |
 | Distribution channel | Our own web app (API integration preferred) |
 | Expected rail volume | Pre-launch — no committed volume yet (be honest) |
@@ -69,7 +69,7 @@ open a direct line, send:
 
 **"About your business" / free-text field:**
 
-> Voyza is an AI-powered trip planner that optimizes multi-city itineraries
+> BlueMurr is an AI-powered trip planner that optimizes multi-city itineraries
 > across flights and trains, comparing real price and door-to-door time on every
 > leg. We're Europe-first: our users plan routes like Paris→Amsterdam→Berlin or
 > Rome→Florence→Venice, where rail should win — but we only integrate real,
@@ -98,11 +98,11 @@ Use the same free-text blurb as Rail Europe, swapping the last ask:
 
 **Email:** deploy@junctionconnect.com · https://junctionconnect.com
 
-> **Subject:** Multimodal API access — Voyza (AI trip planner, flights + rail)
+> **Subject:** Multimodal API access — BlueMurr (AI trip planner, flights + rail)
 >
 > Hi Junction team,
 >
-> Voyza (https://voyza-nine.vercel.app) is an AI trip planner that builds
+> BlueMurr (https://bluemurr.com) is an AI trip planner that builds
 > multi-city itineraries by comparing flights and trains per leg. Flights run on
 > Duffel today; we're evaluating partners for pan-European rail search/pricing
 > and, later, booking.
@@ -113,7 +113,7 @@ Use the same free-text blurb as Rail Europe, swapping the last ask:
 > within weeks — "zero to global in weeks" is the timeline we're hoping to test.
 >
 > Thanks,
-> [name] — Voyza
+> [name] — BlueMurr
 
 ---
 
@@ -122,19 +122,23 @@ Use the same free-text blurb as Rail Europe, swapping the last ask:
 Reply to the confirmation email if one exists; otherwise resubmit a short note via
 https://tps.thetrainline.com/get-in-touch/ referencing the earlier inquiry.
 
-> **Subject:** Following up — Voyza partner inquiry (submitted [date])
+_This is the one draft that keeps the old name: the original inquiry was filed as
+**Voyza**, so lead with the rename or Trainline won't find the thread._
+
+> **Subject:** Following up — BlueMurr (formerly Voyza) partner inquiry (submitted [date])
 >
 > Hi Trainline Partner Solutions,
 >
-> Following up on the partner inquiry we submitted on [date] for Voyza, an AI
-> trip planner optimizing multi-city European itineraries across flights and
-> trains. We're keen on Global API search/pricing access — but if the right
-> first step for a company at our stage is the affiliate programme, we'd happily
-> start there while we grow into API access. Is there any update on our inquiry,
-> or someone we should speak to directly?
+> Following up on the partner inquiry we submitted on [date] under our former
+> name, Voyza. We're now BlueMurr (https://bluemurr.com) — same team, same
+> product: an AI trip planner optimizing multi-city European itineraries across
+> flights and trains. We're keen on Global API search/pricing access — but if
+> the right first step for a company at our stage is the affiliate programme,
+> we'd happily start there while we grow into API access. Is there any update on
+> our inquiry, or someone we should speak to directly?
 >
 > Thanks,
-> [name] — Voyza
+> [name] — BlueMurr
 
 _Meanwhile, sign up for the Trainline **affiliate programme** separately (lower
 bar): https://www.thetrainline.com/about-us/partnerships — revenue-tracked

@@ -1,6 +1,6 @@
 # API Providers — Master Plan (real data only)
 
-_Researched 2026-06-15. The complete list of every data source Voyza needs,
+_Researched 2026-06-15. The complete list of every data source BlueMurr needs,
 its status, how to get it, and the recommendation. Principle: **real live data
 only — no fake, no hardcoded.**_
 

@@ -1,6 +1,6 @@
 # Environments
 
-How Voyza is deployed. (Set up 2026-06-16. Minimal-cost prod + dev.)
+How BlueMurr is deployed. (Set up 2026-06-16. Minimal-cost prod + dev.)
 
 ## Repository
 - **GitHub:** `Voyza-ai/Voyza` (org repo). Local `origin` points here.
@@ -64,11 +64,12 @@ so the user appears logged-out even though Supabase recorded the sign-in.
   ```
   http://localhost:3000/**
   http://localhost:3001/**
-  https://voyza-nine.vercel.app/**
   https://voyza-dev.vercel.app/**
   https://bluemurr.com/**
   https://www.bluemurr.com/**
   ```
+  (The dead `voyza-nine` alias is dropped above but may still be listed in the
+  dashboard — remove it there too; it can only ever misdirect an OAuth return.)
 
 > ⚠️ **Rule: every new environment (domain) must be added here**, or Google sign-in
 > from it bounces to prod and fails to log in. Set it in the dashboard, or via the
