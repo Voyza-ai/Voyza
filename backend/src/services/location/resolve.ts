@@ -195,7 +195,33 @@ function candidateOf(
   return candidate;
 }
 
-function resolved(place: Place, via: ResolutionReason): Resolution {
+/**
+ * A resolution must carry at least one airport.
+ *
+ * The pipeline's built artifact holds 2,470 places with an empty `airports[]`,
+ * kept so they can act as qualifiers. Answering `resolved` with an empty list
+ * would put the original bug back at the call site: `estimateHomeLegCost`
+ * prices from `airports[0]`, so an empty list is a trip with no home flight
+ * and no explanation — failure mode 3, reintroduced through the new system.
+ *
+ * So a place with NO airports at all comes back as a question, with itself as
+ * the suggestion, which a non-asking caller sees as "not resolved" and falls
+ * back on.
+ *
+ * A place whose airports are merely FAR is a different case and resolves
+ * normally: the owner's rule is that a 2-hour drive is acceptable as long as
+ * it is shown, and distance is on every airport in every result. Range is for
+ * choosing between candidates, not for hiding the only answer there is.
+ */
+function answer(
+  place: Place,
+  via: ResolutionReason,
+  index: BuiltIndex,
+  reference: LatLon | null,
+): Resolution {
+  if (place.airports.length === 0) {
+    return { status: 'unknown', suggestions: [candidateOf(place, index, reference)] };
+  }
   return { status: 'resolved', place, airports: place.airports, via };
 }
 
@@ -326,39 +352,58 @@ function decide(
   qualified: boolean,
   depth: number,
 ): Resolution {
+  const reference = context.userLatLon ?? null;
   if (candidates.length === 1) {
-    return resolved(candidates[0], qualified ? 'qualifier-pinned' : 'exact-unique');
+    return answer(candidates[0], qualified ? 'qualifier-pinned' : 'exact-unique', index, reference);
   }
 
   if (context.userLatLon) {
     const winner = dominantNearest(candidates, context.userLatLon, options, options.userLocalKm);
-    if (winner) return resolved(winner, 'user-location');
+    if (winner) return answer(winner, 'user-location', index, reference);
   }
 
   const centroid = depth === 0 ? tripCentroid(context.tripDestinationNames, index, options) : null;
   if (centroid) {
     const winner = dominantNearest(candidates, centroid, options);
-    if (winner) return resolved(winner, 'trip-context');
+    if (winner) return answer(winner, 'trip-context', index, reference ?? centroid);
   }
 
-  const reference = context.userLatLon ?? centroid ?? null;
+  const measureFrom = reference ?? centroid ?? null;
   const countries = new Set(candidates.map((p) => p.country.toUpperCase()));
   if (countries.size > 1) {
     return {
       status: 'ambiguous',
-      candidates: groupCandidates(candidates, index, reference, options),
+      candidates: groupCandidates(candidates, index, measureFrom, options),
       reason: 'multi-country',
     };
+  }
+
+  // A city against the region or country AROUND it is not a contest between
+  // two populations, and the pipeline made that explicit: a region's
+  // `population` is the SUM of its member cities, not a census figure, so
+  // scoring the two against each other would make every region outrank every
+  // city inside it. Prefer the point-like place and compare nothing.
+  //
+  // `New York` the city against New York the state resolves to the city.
+  // `Washington` does NOT: DC is not inside Washington state, so those two
+  // really are different places sharing a name, and that stays a question.
+  const pointLike = candidates.filter((p) => p.kind === 'city' || p.kind === 'metro');
+  if (pointLike.length === 1) {
+    const inner = pointLike[0];
+    const rest = candidates.filter((p) => p !== inner);
+    if (rest.every((container) => qualifierContains(container, inner))) {
+      return answer(inner, 'prominence', index, measureFrom);
+    }
   }
 
   const ranked = byProminence(candidates, index);
   const top = scoreOf(ranked[0], index);
   const withinMargin = ranked.filter((p) => scoreOf(p, index) >= top - options.nearTieEpsilon);
-  if (withinMargin.length === 1) return resolved(ranked[0], 'prominence');
+  if (withinMargin.length === 1) return answer(ranked[0], 'prominence', index, measureFrom);
 
   return {
     status: 'ambiguous',
-    candidates: groupCandidates(ranked, index, reference, options),
+    candidates: groupCandidates(ranked, index, measureFrom, options),
     reason: 'near-tie',
   };
 }
@@ -434,17 +479,17 @@ function resolveAt(
 
   // An all-caps three-letter head is a code, not a town: `ORD` is O'Hare while
   // `Ord` is Ord, Nebraska. Mixed case falls through to `exact` first.
-  if (iataAllowed && head === head.toUpperCase()) return resolved(iataHit, 'iata-code');
+  if (iataAllowed && head === head.toUpperCase()) return answer(iataHit, 'iata-code', index, reference);
 
   const exactHits = placesForKeys(headKeys, index);
   if (exactHits.length === 0) {
-    if (iataAllowed) return resolved(iataHit, 'iata-code');
+    if (iataAllowed) return answer(iataHit, 'iata-code', index, reference);
     return suggest(headKeys, qualifiers, index, reference, options);
   }
 
   const narrowed = narrow(exactHits, qualifiers);
   if (narrowed.length === 0) {
-    if (iataAllowed) return resolved(iataHit, 'iata-code');
+    if (iataAllowed) return answer(iataHit, 'iata-code', index, reference);
     // The place exists but not where the traveller said it does. Offering the
     // unqualified matches is a question; applying one would be a guess.
     return {

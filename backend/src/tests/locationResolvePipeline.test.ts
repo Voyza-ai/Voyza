@@ -59,12 +59,25 @@ describe('step 5 — pruning candidates with no airport in range', () => {
     expect(result.status === 'resolved' && result.via).toBe('exact-unique');
   });
 
-  it('is a narrowing, not a filter: it never empties the set', () => {
-    // Paris KY has no airport at all, and with an explicit qualifier it is
-    // still the right answer — the distance is shown, the traveller decides.
+  it('is a narrowing, not a filter: the pruned place can still be the answer', () => {
+    // Paris KY has no airport at all, so the explicit qualifier reaches it —
+    // pruning does not make a named place unreachable — but the answer cannot
+    // be `resolved`, because `resolved` promises airports and there are none.
+    // The pipeline's artifact carries 2,470 such places.
     const result = run('Paris, KY');
-    expect(result.status).toBe('resolved');
-    expect(ids(result)).toEqual(['p-paris-ky']);
+    expect(result.status).toBe('unknown');
+    if (result.status !== 'unknown') return;
+    expect(result.suggestions.map((s) => s.place.id)).toEqual(['p-paris-ky']);
+    expect(result.suggestions[0].airports).toEqual([]);
+  });
+
+  it('never answers `resolved` with an empty airport list', () => {
+    // `airports[0]` is what estimateHomeLegCost prices from, so an empty list
+    // is the original bug: a trip with no home flight and no explanation.
+    for (const input of ['Paris, KY', 'Berlin, NH', 'Bogota, NJ', 'Providence, UT']) {
+      const result = run(input);
+      expect(result.status).not.toBe('resolved');
+    }
   });
 
   it('keeps a far airport in the answer rather than hiding it', () => {
@@ -124,12 +137,28 @@ describe('steps 2-4 — the qualifier pass, right to left', () => {
     ]);
   });
 
-  it('asks when a name is both a city and the state around it', () => {
-    // "New York" is the city and the state, 250 km apart, with nothing in a
-    // bare input to separate them. Context does separate them, which is the
-    // ladder working rather than a special case for one name.
-    expect(run('New York').status).toBe('ambiguous');
-    expect(resolvedIds(run('New York', { userLatLon: POINTS.newYork }))).toEqual(['m-nyc']);
+  it('prefers the city over the region around it, comparing no populations', () => {
+    // A region's population is the SUM of its member cities, not a census
+    // figure, so scoring it against a city's population would make every
+    // region outrank every city inside it. The containment rule decides
+    // instead: "New York" is the city, which is inside the state.
+    expect(resolvedIds(run('New York'))).toEqual(['m-nyc']);
+    const result = run('New York');
+    expect(result.status === 'resolved' && result.airports.map((a) => a.iata)).toEqual([
+      'JFK',
+      'EWR',
+      'LGA',
+    ]);
+  });
+
+  it('still asks when a city and a region merely share a name', () => {
+    // Washington DC is not inside Washington state: these are two different
+    // places with one name, so the containment rule must not fire.
+    const result = run('Washington');
+    expect(result.status).toBe('ambiguous');
+    expect(ids(result)).toEqual(expect.arrayContaining(['s-us-wa', 'p-washington-dc']));
+    // Context still separates them.
+    expect(resolvedIds(run('Washington', { userLatLon: POINTS.seattle }))).toEqual(['s-us-wa']);
   });
 
   it('asks rather than guessing when a qualifier reading is itself ambiguous', () => {
