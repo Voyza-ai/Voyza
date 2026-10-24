@@ -105,6 +105,17 @@ type HotSet = {
   schemaVersion: number;
   generatedAt: string;
   artifact: { schemaVersion: number; generatedAt: string };
+  options: {
+    locationDominanceRatio: number;
+    locationDominanceKm: number;
+    userLocalKm: number;
+  };
+  attribution: {
+    text: string;
+    license: string;
+    url: string;
+    modified: string;
+  };
   places: Record<string, HotPlace>;
   exact: Record<string, HotEntry>;
   iata: Record<string, string>;
@@ -177,6 +188,84 @@ function candidateOf(id: string, max: number): LocationCandidate | null {
   };
 }
 
+/** A `resolved` answer for one hot-set place. */
+function resolvedOf(id: string, place: HotPlace, via: string, max: number): LocationAnswer {
+  return {
+    status: 'resolved',
+    place: {
+      placeId: id,
+      name: place.n,
+      country: place.c,
+      admin: place.a,
+      kind: place.t,
+      lat: place.lat,
+      lon: place.lon,
+    },
+    airports: airportsOf(place, max),
+    via,
+  };
+}
+
+/** Great-circle km. Same formula as the server's `geo.ts`. */
+function haversineKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+  const la1 = (a.lat * Math.PI) / 180;
+  const la2 = (b.lat * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * The server's user-location rule, run HERE rather than by asking the server.
+ *
+ * This is the one context signal the browser can apply without a round trip,
+ * because the hot set already carries lat/lon for every place it ships and
+ * the three constants come from the generated file rather than being copied
+ * — see `options` in the hot set.
+ *
+ * Doing it locally is not just a latency win. `lib/nearestAirport.ts`
+ * promises that geolocation coordinates never leave the device, and the whole
+ * "use my location" flow rests on that. Deferring an ambiguous name to the
+ * server WITH the coordinates attached would quietly break it.
+ *
+ * What it fixes, measured: someone standing in Washington DC taps "use my
+ * location", which produces the string `Washington`. That name is ambiguous
+ * between the District and Washington State, so the resolver asks — and the
+ * best-effort lead is the STATE, 3,700 km away on the other coast. With the
+ * coordinates in hand it is the District, unambiguously.
+ *
+ * Both conditions must hold, exactly as on the server: a ratio, so the rule
+ * scales from a city pair to a continent pair, and an absolute floor, so two
+ * candidates 60 km and 25 km away are not separated by arithmetic that GPS
+ * noise could flip. And beyond `userLocalKm` a position decides nothing,
+ * because a traveller's own position is evidence about places NEAR them —
+ * which is why `Paris` typed in New York still asks instead of resolving to
+ * Texas.
+ */
+function dominantNearest(
+  ids: string[],
+  from: { lat: number; lon: number },
+): string | null {
+  const { locationDominanceRatio, locationDominanceKm, userLocalKm } = set.options;
+  const ranked = ids
+    .map((id) => {
+      const place = placeOf(id);
+      return place ? { id, km: haversineKm(from, place) } : null;
+    })
+    .filter((x): x is { id: string; km: number } => x !== null)
+    .sort((a, b) => a.km - b.km);
+
+  if (ranked.length < 2) return null;
+  const [first, second] = ranked;
+  if (first.km > userLocalKm) return null;
+  const clearRatio = first.km === 0 || second.km / first.km >= locationDominanceRatio;
+  const clearGap = second.km - first.km >= locationDominanceKm;
+  return clearRatio && clearGap ? first.id : null;
+}
+
 function hasContext(context: LocationContext | undefined): boolean {
   if (!context) return false;
   return Boolean(context.userLatLon ?? context.tripDestinationNames?.length);
@@ -228,29 +317,43 @@ export function resolveLocally(
     const entry = set.exact[key];
     if (!entry) continue;
 
-    // Rivals plus context is the server's call: the context rules run before
-    // prominence, so a position or a trip would have been consulted first and
-    // might pick a different candidate than the stored one.
-    if (entry.v === CONTESTED_VIA && hasContext(context)) return null;
-    if (entry.s === 'ask' && hasContext(context)) return null;
+    // A contested key plus context needs care: the server's context rules run
+    // BEFORE prominence, so a position or a trip would have been consulted
+    // first and might pick a different candidate than the stored one.
+    const contested = entry.s === 'ask' || entry.v === CONTESTED_VIA;
+    if (contested) {
+      // The traveller's own position, applied here rather than by asking.
+      // Only possible for an `ask` entry, because that is the one that stores
+      // every candidate; a `prominence` entry stores just its winner, so
+      // there is nothing to measure against and it has to defer.
+      if (context?.userLatLon && entry.s === 'ask') {
+        const winner = dominantNearest(entry.ids, context.userLatLon);
+        if (winner) {
+          const place = placeOf(winner);
+          if (place) return resolvedOf(winner, place, 'user-location', max);
+        }
+      }
+
+      // A trip is the one signal that cannot be reproduced offline: the
+      // server resolves each destination name to a centroid, which is a
+      // second resolution pass this file deliberately does not do.
+      if (context?.tripDestinationNames?.length) return null;
+
+      // A `prominence` key with coordinates that could not be applied above.
+      if (context?.userLatLon && entry.s !== 'ask') return null;
+
+      // Otherwise there is nothing left for the server to use that the
+      // stored answer did not already account for: the position did not
+      // dominate, and the server would fall through to exactly the
+      // no-context ranking this entry holds. Answering is correct, and it
+      // saves a round trip on every contested name in a field with
+      // geolocation switched on.
+    }
 
     if (entry.s === 'ok') {
       const place = placeOf(entry.ids[0]);
       if (!place) return null;
-      return {
-        status: 'resolved',
-        place: {
-          placeId: entry.ids[0],
-          name: place.n,
-          country: place.c,
-          admin: place.a,
-          kind: place.t,
-          lat: place.lat,
-          lon: place.lon,
-        },
-        airports: airportsOf(place, max),
-        via: entry.v ?? 'exact-unique',
-      };
+      return resolvedOf(entry.ids[0], place, entry.v ?? 'exact-unique', max);
     }
 
     const candidates = entry.ids
@@ -320,8 +423,9 @@ function apiBase(): string {
 export function originAirportsLocally(
   query: string | null | undefined,
   max: number = DEFAULT_MAX_AIRPORTS,
+  context?: LocationContext,
 ): string[] {
-  const answer = resolveLocally(query, undefined, max);
+  const answer = resolveLocally(query, context, max);
   if (!answer) return [];
   if (answer.status === 'resolved') return answer.airports.map((a) => a.iata);
   if (answer.status === 'ambiguous') return answer.candidates[0].airports.map((a) => a.iata);
@@ -359,11 +463,27 @@ export function originAirportsLocally(
 export function originAirportsForCity(
   query: string | null | undefined,
   max: number = DEFAULT_MAX_AIRPORTS,
+  context?: LocationContext,
 ): string[] {
   const fromTable = query ? legacyOriginAirports(query, max) : [];
   if (fromTable.length > 0) return fromTable;
-  return originAirportsLocally(query, max);
+  return originAirportsLocally(query, max, context);
 }
+
+/**
+ * GeoNames credit for the data behind every answer in this module.
+ *
+ * REQUIRED, not optional: GeoNames is CC BY 4.0, which obliges credit, a
+ * licence link and an indication of changes wherever the data is shown. It
+ * comes from the generated hot set rather than being typed here, so the UI
+ * renders the licence's own words and there is no second copy to drift.
+ *
+ * Still outstanding, and it is a design decision rather than a code one:
+ * there is no credits surface in the app for this to live on. See
+ * ATTRIBUTION.md for the three places it is owed. Importing this constant is
+ * not compliance on its own — rendering it somewhere a user can reach is.
+ */
+export const LOCATION_DATA_ATTRIBUTION = set.attribution;
 
 /** Which artifact this hot set came from. Shown in diagnostics. */
 export const hotSetInfo = {

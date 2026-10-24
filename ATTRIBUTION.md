@@ -25,18 +25,26 @@ City, region and country data © GeoNames, licensed under CC BY 4.0
 airport data, and reduced.
 ```
 
-### Where it still has to appear in the app — NOT YET DONE
+### Where it has to appear in the app
 
-Phase 1 of the location resolver ships dark: the artifact is generated and
-checked in, and nothing in the running app imports it yet. The moment any user
-can see a place name that came from GeoNames, the credit above has to be
-reachable from the UI. The places it belongs, in the order they will be needed:
+**The trigger condition is now MET.** This section used to say the resolver
+shipped dark and nothing imported the artifact. That changed: the frontend's
+origin lookup falls through to the resolver wherever the hand-written table is
+silent, which is 18 of the table's own 132 keys — `Paris, Texas`,
+`Baton Rouge, LA`, `Berlin, DE` and the rest. Those answers are GeoNames-derived
+and a user can see them today, in `HomeEditModal`'s suggested airports among
+other places. The credit is owed now, not at some later phase.
 
-| Where | Why |
+The wording lives in exactly one place in the code,
+`backend/src/data/attribution.ts`, and `locationAttribution.test.ts` compares
+it to the block above word for word so the two cannot drift.
+
+| Where | State |
 |---|---|
-| **App credits / about page** (`frontend/`) | The canonical home for the notice. There is no credits surface today; one has to be added. |
-| **Anywhere the resolver's output is rendered** — the origin picker, the airport list on a trip, the clarification UI | Needs a link to the credits page, not the full notice. |
-| **Public API responses** that return resolved places (`POST /api/locations/resolve`) | An `attribution` field, or a documented link, if the endpoint is ever consumed by anything other than our own frontend. |
+| **Public API responses** (`POST /api/locations/resolve`) | **DONE.** Every response carries an `attribution` object — credit, licence, link and the modification note. |
+| **The browser** | **DONE as far as code can take it.** The generator emits the same object into the hot set, and `frontend/lib/locationResolver.ts` re-exports it as `LOCATION_DATA_ATTRIBUTION`, so the UI renders the licence's own words with no second copy. |
+| **App credits / about page** (`frontend/`) | **OUTSTANDING, and it is a design decision.** There is no credits surface in the app and adding one is a visible change, which this repo's rules say gets approved before it is committed. Importing the constant is not compliance; rendering it somewhere a user can reach is. |
+| **Anywhere the resolver's output is rendered** — the origin picker, the airport list on a trip, the clarification UI | **OUTSTANDING.** Needs a link to that credits page once it exists, not the full notice inline. |
 
 Checking this off is part of the phase that wires the resolver into the app, not
 part of generating the data.

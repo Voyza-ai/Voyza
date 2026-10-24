@@ -698,6 +698,94 @@ secondary field).
 **Phase 5 deletes the first line of that function.** Until the flip is
 justified by the log, the frontend can only add coverage.
 
+### A qualifier after a space, not just a comma
+
+Step 2 splits on commas, so `Newark NJ` arrived as one long head and missed.
+People leave the comma out, and so do the AI parsers that feed this —
+`originAirports.ts` hand-keys `washington dc` for exactly that reason.
+
+So on an exact MISS, a trailing run of words is tried as a qualifier,
+longest-first. Longest matters, measured: word-by-word from the right turns
+`baton rouge la` into "baton" in Louisiana and `newark new jersey` into
+"newark new" in Jersey-the-country. Trying every split point and preferring
+the longest gives `baton rouge` + `la` and `newark` + `new jersey`.
+
+Running only after an exact miss is what makes it safe. Any real multi-word
+name — `new jersey`, `new york`, `salt lake city`, `jersey city` — is already
+a key and never reaches it, so the pass cannot take those apart. Beyond that
+it is the comma pass exactly: the same `splitHead`, so only a country, state
+or region key may qualify and a city key still cannot.
+
+| input | before | after |
+|---|---|---|
+| `Newark NJ` | unknown | EWR |
+| `Baton Rouge LA` | unknown | BTR |
+| `Springfield Illinois` | unknown | SPI |
+| `Vancouver Washington` | unknown | PDX |
+| `Washington DC` | IAD (curated) | IAD, unchanged |
+
+It also closed a hole in the hot set, which is the other half of why it
+exists — see below.
+
+### The browser answers a comma form, and settles a position offline
+
+Two gaps were measured against the table the hot set replaces, and both are
+closed.
+
+**Comma forms.** `Newark, NJ`, `Buffalo, NY` and `Vancouver, WA` all came back
+EMPTY offline while the table answered them, and `originAirports.ts`'s own
+comments call `"<City>, <State>"` the shape its AI parser emits most often.
+The cause was the hot set keying answers by their NORMALISED form, which turns
+a comma into a space: `Newark, NJ` had no key. The generator now emits those
+forms — asking the resolver for each, so a form that does not resolve to the
+place it was built from is dropped and `Paris, Texas` can never be stored as
+Paris, France. The space-separated pass above is what makes storing them
+honest: without it `resolve('newark nj')` and `resolve('Newark, NJ')` gave
+different answers, so the stored key would have disagreed with the server.
+
+Only qualifiers the index RECOGNISES are used. The naive version generated
+`shanghai 23`, `mumbai 16` and `mexico city 09`, because GeoNames admin1 codes
+are numeric across much of the world — keys nobody types, and keys the server
+answers differently, because with a comma it ignores an unrecognised middle
+segment by design while the comma-less key arrives as one long head.
+
+**The traveller's position.** The browser now applies the user-location rule
+itself rather than deferring, and it has to: `nearestAirport.ts` promises
+geolocation coordinates never leave the device, and deferring with them
+attached would break the promise the "use my location" affordance rests on.
+The hot set already carries lat/lon for every place it ships, and the three
+dominance constants are EMITTED into it from `DEFAULT_OPTIONS` rather than
+copied, so they cannot drift.
+
+What it fixes: the `AIRPORT_CITIES` row for Washington DC is named exactly
+`Washington`, so every "use my location" tap in the DC metro produces that
+string — ambiguous between the District and the state, with the state 3,700 km
+away on the other coast as the more prominent reading. With the coordinates it
+is the District, offline.
+
+Checked rather than claimed: `locationHotSet.test.ts` runs the browser and the
+server over the same (query, coordinates) pairs and requires that the browser
+either DEFERS or gives the identical answer. Measured over the current
+artifact: 8 agree, 3 defer, 0 disagree. A trip is still deferred, because
+reproducing a centroid means a second resolution pass the browser does not do.
+
+### Attribution is wired, and still owed a surface
+
+GeoNames is CC BY 4.0: credit, a licence link and an indication of changes are
+obligations. The trigger condition is MET — the frontend falls through to the
+resolver wherever the table is silent, which is 18 of the table's own 132 keys,
+so GeoNames-derived answers are on screen today.
+
+The wording lives in one place, `backend/src/data/attribution.ts`, and
+`locationAttribution.test.ts` compares it to ATTRIBUTION.md word for word.
+Every `/api/locations/resolve` response carries it, and the generator emits it
+into the hot set so the frontend renders the licence's own words.
+
+**Still outstanding and NOT a code problem:** there is no credits surface in
+the app. Importing the constant is not compliance; rendering it where a user
+can reach it is, and adding a page is a visible change that gets approved
+first.
+
 ## Observability
 
 The original bug was silent, so: **log every `unknown` and `ambiguous` with the

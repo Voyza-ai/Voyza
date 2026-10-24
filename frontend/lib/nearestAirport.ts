@@ -166,14 +166,37 @@ export function findNearestAirportCity(
 }
 
 export type DetectResult =
-  | { ok: true; city: NearestAirportCity }
+  | {
+      ok: true;
+      city: NearestAirportCity;
+      /**
+       * The reading the match was made from.
+       *
+       * Returned because the matched city NAME is not enough to resolve an
+       * origin on its own: this table's DC row is called exactly
+       * `Washington`, which is ambiguous between the District and Washington
+       * State, and the more prominent reading is the state — 3,700 km away on
+       * the other coast. The coordinates settle it, and the city's own centre
+       * cannot, since it IS the answer being disambiguated.
+       *
+       * Callers pass this to `resolveLocally` as `context.userLatLon`, which
+       * applies the position rule against the offline hot set. It must not be
+       * sent to the server: see the promise below.
+       */
+      coords: { lat: number; lon: number };
+    }
   | { ok: false; reason: 'unsupported' | 'denied' | 'nomatch' };
 
 /**
  * Browser-side detection: geolocation permission prompt → nearest airport
  * city. Never throws — every failure mode maps to a typed reason so both
- * planner modes can show the right fallback message. Coordinates never
- * leave the device (the lookup is the offline dataset above).
+ * planner modes can show the right fallback message.
+ *
+ * COORDINATES NEVER LEAVE THE DEVICE. The lookup is the offline dataset
+ * above, and `coords` is returned only so a caller can disambiguate the
+ * matched name against the offline hot set, which also carries coordinates.
+ * Anything that would put them in a request body or a query string breaks
+ * this promise, and the "use my location" affordance rests on it.
  */
 export function detectNearestAirportCity(): Promise<DetectResult> {
   return new Promise((resolve) => {
@@ -183,8 +206,9 @@ export function detectNearestAirportCity(): Promise<DetectResult> {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const city = findNearestAirportCity(pos.coords.latitude, pos.coords.longitude);
-        resolve(city ? { ok: true, city } : { ok: false, reason: 'nomatch' });
+        const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        const city = findNearestAirportCity(coords.lat, coords.lon);
+        resolve(city ? { ok: true, city, coords } : { ok: false, reason: 'nomatch' });
       },
       () => resolve({ ok: false, reason: 'denied' }),
       { timeout: 8000, maximumAge: 300000 },

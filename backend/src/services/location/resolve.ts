@@ -166,6 +166,39 @@ function adminSuffixSplit(head: string): string | null {
 }
 
 /**
+ * Peel a space-separated qualifier off the end of a head, LONGEST FIRST.
+ *
+ * Word-by-word from the right is the obvious way and it is wrong twice:
+ *
+ *   `baton rouge la`    -> peels `la`, then stops at `rouge`, leaving the head
+ *                          as `baton` and finding nothing. Measured; it
+ *                          returned unknown for a city the table answers.
+ *   `newark new jersey` -> peels `jersey` (a country, JE), stops at `new`,
+ *                          and leaves the head as `newark new`.
+ *
+ * So every split point is tried and the longest qualifier wins: `new jersey`
+ * beats `jersey`, and the head keeps all its own words. Returns null when no
+ * trailing run of words is a qualifier at all, which is the common case.
+ *
+ * The last word is never consumed alone — a bare `france` stays a place.
+ */
+function spacedQualifierSplit(
+  head: string,
+  index: BuiltIndex,
+): { head: string; qualifiers: QualifierSegment[] } | null {
+  const words = head.split(' ').filter((w) => w.length > 0);
+  if (words.length < 2) return null;
+
+  for (let i = 1; i < words.length; i += 1) {
+    const raw = words.slice(i).join(' ');
+    const places = qualifierPlaces(raw, index);
+    if (places.length === 0) continue;
+    return { head: words.slice(0, i).join(' '), qualifiers: [{ raw, places }] };
+  }
+  return null;
+}
+
+/**
  * Step 5. A narrowing, not a filter — see `maxAirportKm`.
  *
  * Range is measured from the place's centre, which is only meaningful for a
@@ -611,6 +644,35 @@ function resolveAt(
       // kind of place is what a comma segment does by other means.
       if (retry.length > 0) return decide(retry, context, index, options, true, depth, 'canonical');
     }
+
+    // A qualifier separated by a SPACE rather than a comma: `Newark NJ`,
+    // `Springfield Illinois`, `Washington DC`, `Vancouver Washington`.
+    //
+    // People leave the comma out, and so do the AI parsers that feed this —
+    // `originAirports.ts` hand-keys `washington dc` precisely because the
+    // comma-less form arrives often enough to matter. Step 2 splits on commas
+    // only, so `Newark NJ` reaches here as one long head and misses.
+    //
+    // It runs ONLY after `exact` has missed, which is what makes it safe: any
+    // real multi-word name — `new jersey`, `salt lake city`, `new york` — is
+    // already a key and never gets here, so this cannot take `new jersey`
+    // apart into "New" in Jersey. Everything else is the comma pass exactly:
+    // the same `splitHead`, so only a country/state/region key may act as a
+    // qualifier and a city key still cannot.
+    //
+    // It also keeps the browser hot set honest. The hot set stores answers
+    // under NORMALISED keys, and normalisation turns a comma into a space —
+    // so `Newark, NJ` is stored under `newark nj`, and without this the
+    // server would answer that same string differently from the browser.
+    // That equality is the whole basis for trusting an offline answer.
+    const spaced = spacedQualifierSplit(head, index);
+    if (spaced) {
+      const combined = [...spaced.qualifiers, ...qualifiers];
+      const { matches, tier } = narrowToBestTier(matchesForKeys(keysForQuery(spaced.head), index));
+      const retry = prune(narrow(placesOf(matches, index), combined), options);
+      if (retry.length > 0) return decide(retry, context, index, options, true, depth, tier);
+    }
+
     return suggest(headKeys, qualifiers, index, reference, options);
   }
 

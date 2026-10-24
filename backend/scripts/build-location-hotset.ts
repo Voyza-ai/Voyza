@@ -52,8 +52,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { MULTI_AIRPORT_CITY_KEYS } from '../src/data/originAirports';
+import { LOCATION_DATA_ATTRIBUTION, type DataAttribution } from '../src/data/attribution';
 import { locationArtifact } from '../src/data/locationArtifact';
 import { buildIndex } from '../src/services/location/buildIndex';
+import { keysForQuery, normalizeKeys } from '../src/services/location/normalize';
+import { DEFAULT_OPTIONS } from '../src/services/location/options';
 import { resolve } from '../src/services/location/resolve';
 import { prominenceOf } from '../src/services/location/prominence';
 import type { Place } from '../src/services/location/types';
@@ -110,6 +113,23 @@ export type LocationHotSet = {
   generatedAt: string;
   /** Artifact this was derived from, so a stale pair is visible. */
   artifact: { schemaVersion: number; generatedAt: string };
+  /**
+   * The resolver constants the browser needs to reproduce the
+   * user-location rule, emitted rather than duplicated so the two cannot
+   * drift. From DEFAULT_OPTIONS; see options.ts for what each was measured
+   * against.
+   */
+  options: {
+    locationDominanceRatio: number;
+    locationDominanceKm: number;
+    userLocalKm: number;
+  };
+  /**
+   * GeoNames credit, carried so the frontend renders the licence's own words
+   * rather than a second copy someone paraphrased. CC BY 4.0 requires it
+   * wherever this data is shown.
+   */
+  attribution: DataAttribution;
   places: Record<string, HotPlace>;
   /**
    * Normalised key -> the stored answer.
@@ -343,6 +363,56 @@ function build(limit: number): LocationHotSet {
     }
   }
 
+  // COMMA-QUALIFIED forms: `Newark, NJ`, `Paris, France`, `Berlin, DE`.
+  //
+  // Without these the browser answers nothing for the single most common
+  // shape a user or an AI produces. `originAirports.ts`'s own comments call
+  // `"<City>, <State>"` the form its AI parser emits most often, and measured
+  // against the table, `Newark, NJ`, `Buffalo, NY` and `Vancouver, WA` all
+  // came back empty offline while the table answered all three. That gap is
+  // what keeps the three synchronous call sites on the hand-written table.
+  //
+  // The comma matters on both sides and in different ways. The RESOLVER
+  // splits on commas first, so the truth has to be asked with the comma in
+  // place (`Newark, NJ`) or it looks like one long head and misses. The KEY,
+  // by contrast, has no comma at all: normalisation turns `,` into a space,
+  // so the browser's `keysForQuery('Newark, NJ')` yields `newark nj` and that
+  // is what has to be stored.
+  //
+  // Verified one by one rather than assumed, for the same reason the suffix
+  // block above is: a form that does NOT resolve to the place it was built
+  // from is dropped, so `Paris, Texas` can never be stored as Paris, France.
+  for (const id of [...needed]) {
+    const place = index.byId.get(id);
+    if (!place) continue;
+    const country = place.country.toUpperCase();
+    const qualifiers = [
+      place.admin,
+      place.admin ? index.adminNames.get(`${country}:${place.admin.toUpperCase()}`) : null,
+      country,
+      index.countryNames.get(country),
+    ];
+
+    for (const qualifier of qualifiers) {
+      if (!qualifier) continue;
+      // Only a qualifier the INDEX recognises. GeoNames admin1 codes are
+      // numeric in much of the world, so the naive version generated
+      // `shanghai 23`, `mumbai 16` and `mexico city 09` — keys no human
+      // types, and worse, keys the server answers differently. With a comma
+      // the resolver IGNORES an unrecognised middle segment by design (so
+      // `Paris, 75001, France` is still Paris), but the stored key has no
+      // comma, so `shanghai 23` arrives as one long head and misses. The hot
+      // set would then have claimed an answer the server does not give.
+      if (!normalizeKeys(qualifier).some((key) => index.qualifier.has(key))) continue;
+      const typed = `${place.name}, ${qualifier}`;
+      const [key] = keysForQuery(typed);
+      if (!key || exact[key]) continue;
+      const truth = resolve(typed, {}, index);
+      if (truth.status !== 'resolved' || truth.place.id !== id) continue;
+      exact[key] = { s: 'ok', ids: [id], v: truth.via };
+    }
+  }
+
   const places: LocationHotSet['places'] = {};
   for (const id of needed) {
     const place = index.byId.get(id);
@@ -381,6 +451,12 @@ function build(limit: number): LocationHotSet {
       schemaVersion: locationArtifact.schemaVersion,
       generatedAt: locationArtifact.generatedAt,
     },
+    options: {
+      locationDominanceRatio: DEFAULT_OPTIONS.locationDominanceRatio,
+      locationDominanceKm: DEFAULT_OPTIONS.locationDominanceKm,
+      userLocalKm: DEFAULT_OPTIONS.userLocalKm,
+    },
+    attribution: LOCATION_DATA_ATTRIBUTION,
     places,
     exact,
     iata,

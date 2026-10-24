@@ -19,6 +19,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import { asyncHandler } from '../middleware/asyncHandler';
+import { LOCATION_DATA_ATTRIBUTION } from '../data/attribution';
 import { DEFAULT_OPTIONS } from '../services/location/options';
 import { originIndex } from '../services/location/originAirports';
 import { resolve } from '../services/location/resolve';
@@ -129,7 +130,11 @@ router.post(
       });
     }
 
-    res.json(wire(result, input.max));
+    // CC BY 4.0 requires credit, a licence link and an indication of changes
+    // wherever the data goes. This endpoint is the data leaving the building,
+    // so the notice travels with it rather than depending on a caller having
+    // read ATTRIBUTION.md. ~100 bytes.
+    res.json({ ...wire(result, input.max), attribution: LOCATION_DATA_ATTRIBUTION });
   }),
 );
 

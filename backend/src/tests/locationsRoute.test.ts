@@ -113,6 +113,26 @@ describe('answers', () => {
   });
 });
 
+describe('attribution', () => {
+  it('carries the GeoNames credit on every response', () => {
+    // CC BY 4.0 obliges credit, a licence link and an indication of changes
+    // wherever the data goes, and this endpoint is the data leaving the
+    // building. Asserted per status, because a caller that only ever sees
+    // questions is still seeing GeoNames data.
+    return Promise.all(
+      ['nyc', 'Paris', 'pariss', '東京'].map(async (query) => {
+        const res = await post({ query });
+        expect(res.body.attribution).toEqual({
+          text: expect.stringContaining('GeoNames'),
+          license: 'CC BY 4.0',
+          url: 'https://creativecommons.org/licenses/by/4.0/',
+          modified: expect.stringContaining('oined to airport data'),
+        });
+      }),
+    );
+  });
+});
+
 describe('input bounds', () => {
   it('rejects a missing or empty query', async () => {
     for (const body of [{}, { query: '' }, { query: 123 }]) {

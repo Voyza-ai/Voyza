@@ -63,6 +63,10 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
   `ambiguous` on screen, whether to show distance, and whether to persist
   `origin_place_id` (a migration against the live project). Spelled out in
   the "Phase 4" section of the architecture doc.
+- [x] **Two phase-5 blockers cleared.** Comma-qualified inputs (`Newark, NJ`)
+  are answered offline now, and the browser settles an ambiguous name from the
+  traveller's own coordinates without sending them anywhere — which is what
+  stopped "use my location" in Washington DC from saving Seattle's airports.
 - [ ] **Phase 5: retire the old tables — two of five, not five.** Checked
   against the code rather than assumed. `cityAirports.ts` does not exist.
   `originAirports.ts` ×2 cannot go until the flip, because it IS the shadow
@@ -80,8 +84,13 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
   rollback. The gate is written down in the architecture doc: the resolver
   must reproduce the LEADING airport on all 132 keys the table answers, no
   price-changing disagreement may be left unexplained, and the owner says so.
-- [ ] **GeoNames attribution must appear in the app.** CC BY 4.0 requires it
-  and there is no credits page. `ATTRIBUTION.md` records what is owed.
+- [ ] **GeoNames attribution needs a credits surface — the rest is done.**
+  CC BY 4.0 requires credit, a licence link and an indication of changes, and
+  the condition is now live: the frontend falls through to the resolver
+  wherever the old table is silent, so GeoNames-derived answers are on screen.
+  The endpoint returns the notice, the hot set carries it, and a test holds
+  the wording to `ATTRIBUTION.md` word for word. What is missing is a page to
+  render it on, which is a visible change and so yours to approve.
 - [ ] **OurAirports marks some closed airports as in service.** It has DIA
   (the old Doha International) as `scheduled_service=yes`, type
   `large_airport` — the same class it gives Hamad. It also types Burbank the

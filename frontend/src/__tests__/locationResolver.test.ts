@@ -126,10 +126,49 @@ describe('defers to the server exactly when it must', () => {
     expect(resolveLocally('the bay area', withContext)?.status).toBe('resolved');
   });
 
-  it('defers an ambiguous key when context could settle it', () => {
-    // A question the server can answer should not be asked of the traveller.
+  it('settles an ambiguous key from the traveller’s position, offline', () => {
+    // This used to assert a DEFERRAL. It no longer defers, and that is the
+    // fix: the hot set carries coordinates for every place it ships and the
+    // dominance constants come from the generated file, so the position rule
+    // runs here instead of being posted to the server.
+    //
+    // It has to run here. `lib/nearestAirport.ts` promises that geolocation
+    // coordinates never leave the device, and the "use my location" flow
+    // rests on that — deferring WITH the coordinates attached would break it.
+    //
+    // That the answers match the server's is asserted where both are
+    // importable: `backend/src/tests/locationHotSet.test.ts`.
     expect(resolveLocally('Washington')?.status).toBe('ambiguous');
-    expect(resolveLocally('Washington', { userLatLon: { lat: 47.6, lon: -122.3 } })).toBeNull();
+
+    const seattle = resolveLocally('Washington', { userLatLon: { lat: 47.6, lon: -122.3 } });
+    expect(seattle?.status).toBe('resolved');
+    expect(seattle?.status === 'resolved' && seattle.place.admin).toBe('WA');
+    expect(seattle?.status === 'resolved' && seattle.via).toBe('user-location');
+
+    // The case it exists for: the AIRPORT_CITIES row for Washington DC is
+    // named exactly `Washington`, so every "use my location" tap in the DC
+    // metro produces that string — and the more prominent reading is the
+    // state, 3,700 km away on the other coast.
+    const dc = resolveLocally('Washington', { userLatLon: { lat: 38.9072, lon: -77.0369 } });
+    expect(dc?.status).toBe('resolved');
+    expect(dc?.status === 'resolved' && dc.place.admin).toBe('DC');
+    expect(dc?.status === 'resolved' && dc.airports[0].iata).toBe('IAD');
+  });
+
+  it('still defers when the only context is a trip', () => {
+    // The one signal that cannot be reproduced offline: the server resolves
+    // each destination name to a centroid, which is a second resolution pass
+    // this module deliberately does not do.
+    expect(resolveLocally('Washington', { tripDestinationNames: ['Rome'] })).toBeNull();
+  });
+
+  it('does not let a far-away position decide', () => {
+    // Beyond `userLocalKm` a position is evidence about nothing. A traveller
+    // in Manhattan is 2,057 km from Paris, Texas and 5,837 km from France,
+    // which clears any ratio — so this must stay a question rather than
+    // resolving to a town of 24,782.
+    const answer = resolveLocally('Paris', { userLatLon: { lat: 40.7831, lon: -73.9712 } });
+    expect(answer === null || answer.status === 'ambiguous').toBe(true);
   });
 
   it('treats a country on its own as not enough context to defer for', () => {
@@ -284,14 +323,51 @@ describe('originAirportsForCity — the table leads, the resolver fills gaps', (
     expect(originAirportsLocally('Washington')[0]).not.toBe('IAD');
   });
 
-  it('falls through to the resolver only where the table is silent', () => {
+  it('falls through to the resolver where the table is silent', () => {
     // The whole value of the change: inputs the table never answered.
     for (const input of ['Paris, Texas', 'Baton Rouge, LA', 'Tbilisi, Georgia']) {
       expect(getOriginAirports(input)).toEqual([]);
     }
-    // These need the server, which is blocked here, so the sync path is empty
-    // — the honest offline outcome. `resolveLocation` is what reaches them.
-    expect(originAirportsForCity('Paris, Texas')).toEqual([]);
+
+    // And the comma-qualified ones are now answered OFFLINE. This assertion
+    // used to require `[]` here, on the grounds that a comma form needed the
+    // server: the hot set keys answers by their normalised form, and
+    // normalisation turns `,` into a space, so `Paris, Texas` had no key.
+    // The generator now emits those forms, and the resolver gained a
+    // space-separated qualifier pass so `Paris Texas` and `Paris, Texas`
+    // agree — which is what makes storing the key safe.
+    expect(originAirportsForCity('Paris, Texas')).toEqual(['TYR', 'TXK']);
+    expect(originAirportsForCity('Newark, NJ')[0]).toBe('EWR');
+    expect(originAirportsForCity('Berlin, DE')[0]).toBe('BER');
+  });
+
+  it('answers a qualifier written without a comma, the way people type it', () => {
+    // `originAirports.ts` hand-keys `washington dc` precisely because the
+    // comma-less form arrives often enough to matter. Both forms now reach
+    // the same place.
+    for (const [spaced, commaed] of [
+      ['Newark NJ', 'Newark, NJ'],
+      ['Paris Texas', 'Paris, Texas'],
+      ['Berlin DE', 'Berlin, DE'],
+    ]) {
+      // Compared on the LEADING airport, not the whole list. `Newark, NJ` is
+      // a table key and `Newark NJ` is not, so one answer comes from the
+      // table's hand order (EWR, JFK, LGA) and the other from the artifact's
+      // derived order (EWR, LGA, JFK). Same airport priced from, same place
+      // resolved — and `airports[0]` is the slot that decides anything.
+      expect(originAirportsForCity(spaced)[0]).toBe(originAirportsForCity(commaed)[0]);
+      expect(originAirportsForCity(spaced).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('does not take a real multi-word name apart', () => {
+    // The guard that makes the space-separated pass safe: it runs only after
+    // an exact miss, so a name that IS a key is never split. Without that,
+    // `new jersey` becomes a search for "New" in Jersey the country.
+    expect(originAirportsForCity('new jersey')[0]).toBe('EWR');
+    expect(originAirportsForCity('salt lake city')[0]).toBe('SLC');
+    expect(originAirportsForCity('jersey city')[0]).toBe('EWR');
+    expect(originAirportsForCity('new york')[0]).toBe('JFK');
   });
 
   it('agrees with the table on every key the table answers', () => {

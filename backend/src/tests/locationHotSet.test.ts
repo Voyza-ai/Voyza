@@ -23,7 +23,9 @@ import { locationArtifact } from '../data/locationArtifact';
 import { MULTI_AIRPORT_CITY_KEYS } from '../data/originAirports';
 import { buildIndex } from '../services/location/buildIndex';
 import { keysForQuery } from '../services/location/normalize';
+import { DEFAULT_OPTIONS } from '../services/location/options';
 import { resolve } from '../services/location/resolve';
+import type { Resolution } from '../services/location/types';
 import hotSetJson from '../data/generated/locationHotSet.json';
 
 type HotEntry = { s: 'ok' | 'ask'; ids: string[]; v?: string };
@@ -217,5 +219,111 @@ describe('budget and freshness', () => {
     // server answers from something else.
     expect(set.artifact.generatedAt).toBe(locationArtifact.generatedAt);
     expect(set.artifact.schemaVersion).toBe(locationArtifact.schemaVersion);
+  });
+});
+
+/**
+ * The browser's own resolution, cross-checked against the server.
+ *
+ * `frontend/lib/locationResolver.ts` answers from the hot set without a round
+ * trip, and it applies ONE context rule locally: the traveller's own
+ * position. That is the rule that cannot be deferred, because
+ * `frontend/lib/nearestAirport.ts` promises geolocation coordinates never
+ * leave the device — sending them to the server to disambiguate would break
+ * the promise the "use my location" affordance rests on.
+ *
+ * Reproducing a server rule in a second implementation is exactly the kind of
+ * duplication that drifts, so it is checked here rather than asserted in
+ * prose: this is the only suite where both implementations are importable.
+ * The browser may DEFER (a key it does not hold), but it must never disagree.
+ *
+ * The case that motivated it: the `AIRPORT_CITIES` row for Washington DC is
+ * named exactly `Washington`, so every "use my location" tap in the DC metro
+ * produces that string. It is ambiguous between the District and Washington
+ * State, and the more prominent reading is the state — 3,700 km away on the
+ * other coast.
+ */
+describe('the browser agrees with the server, or defers', () => {
+  // Required lazily: it reads the hot set and pulls in the frontend package.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { resolveLocally } = require('../../../frontend/lib/locationResolver') as {
+    resolveLocally: (
+      q: string,
+      ctx?: { userLatLon?: { lat: number; lon: number } },
+    ) => { status: string; place?: { placeId: string } } | null;
+  };
+
+  const POINTS = {
+    dc: { lat: 38.9072, lon: -77.0369 },
+    seattle: { lat: 47.6062, lon: -122.3321 },
+    manhattan: { lat: 40.7831, lon: -73.9712 },
+    london: { lat: 51.5072, lon: -0.1276 },
+    perth: { lat: -31.95, lon: 115.86 },
+  };
+
+  const shape = (r: Resolution | null): string => {
+    if (r === null) return 'defer';
+    if (r.status === 'resolved') return `resolved:${r.place.id}`;
+    return r.status;
+  };
+  const browserShape = (r: { status: string; place?: { placeId: string } } | null): string => {
+    if (r === null) return 'defer';
+    if (r.status === 'resolved') return `resolved:${r.place!.placeId}`;
+    return r.status;
+  };
+
+  it.each([
+    ['Washington', 'dc'],
+    ['Washington', 'seattle'],
+    ['Paris', 'manhattan'],
+    ['Paris', 'london'],
+    ['Melbourne', 'perth'],
+    ['Venice', 'london'],
+    ['Springfield', 'manhattan'],
+    ['Delaware', 'dc'],
+    ['nyc', 'manhattan'],
+    ['Rome', 'london'],
+    ['Florence', 'london'],
+  ])('%s, from %s', (query, point) => {
+    const context = { userLatLon: POINTS[point as keyof typeof POINTS] };
+    const browser = browserShape(resolveLocally(query, context));
+    if (browser === 'defer') return; // deferring is always allowed
+    expect(browser).toBe(shape(resolve(query, context, index)));
+  });
+
+  it('resolves Washington to the District for someone standing in it', () => {
+    // The whole point, asserted directly rather than only through the table
+    // above — and asserted on the PLACE, because "it resolved" is not the
+    // claim. Before the position rule ran in the browser, this was the state.
+    const answer = resolveLocally('Washington', { userLatLon: POINTS.dc });
+    expect(answer?.status).toBe('resolved');
+    expect(answer?.place?.placeId).toBe(
+      (() => {
+        const truth = resolve('Washington', { userLatLon: POINTS.dc }, index);
+        return truth.status === 'resolved' ? truth.place.id : 'NOT-RESOLVED';
+      })(),
+    );
+    const place = index.byId.get(answer!.place!.placeId);
+    expect(place?.admin).toBe('DC');
+    expect(place?.airports[0].iata).toBe('IAD');
+  });
+
+  it('does not let a far-away position decide, on either side', () => {
+    // 2,057 km to Paris, Texas and 5,837 km to France clears any ratio, which
+    // is why `userLocalKm` exists. Both implementations must honour it.
+    const context = { userLatLon: POINTS.manhattan };
+    expect(resolveLocally('Paris', context)?.status).toBe('ambiguous');
+    expect(resolve('Paris', context, index).status).toBe('ambiguous');
+  });
+
+  it('reads its dominance constants from the artifact, not a copy', () => {
+    // Three numbers the browser needs to reproduce the rule. Emitted by the
+    // generator so they cannot drift from `options.ts`.
+    const emitted = (set as unknown as { options: Record<string, number> }).options;
+    expect(emitted).toEqual({
+      locationDominanceRatio: DEFAULT_OPTIONS.locationDominanceRatio,
+      locationDominanceKm: DEFAULT_OPTIONS.locationDominanceKm,
+      userLocalKm: DEFAULT_OPTIONS.userLocalKm,
+    });
   });
 });
