@@ -112,6 +112,65 @@ bucket by term length ±1 and run bounded Levenshtein within the bucket. Memory
 is the deciding axis, and the numbers are being measured before the choice is
 made. The cheap option is the default unless something beats it on evidence.
 
+## Abbreviations are the hardest input, not the easiest
+
+Two-letter codes look like the simple case and are the opposite. **31 of the 56
+US state and territory codes are also ISO 3166-1 country codes:**
+
+| Code | Reads as | or as |
+|---|---|---|
+| `CA` | California | **Canada** |
+| `LA` | Los Angeles *or* Louisiana | **Laos** |
+| `DE` | Delaware | **Germany** |
+| `IN` | Indiana | **India** |
+| `MA` | Massachusetts | **Morocco** |
+| `ID` | Idaho | **Indonesia** |
+| `IL` `CO` `AZ` `GA` `MD` `MN` `MS` `MT` `NE` `NC` `PA` `SC` `SD` `TN` `VA` `AL` `AR` `KY` `ME` `MO` | US states | Israel, Colombia, Azerbaijan, Gabon, Moldova, Mongolia, Montserrat, Malta, Niger, New Caledonia, Panama, Seychelles, Sudan, Tunisia, Vatican, Albania, Argentina, Cayman Is, Montenegro, Macao |
+| `PR` `VI` `GU` `AS` `MP` | US territories | the same places as countries — harmless, same answer |
+
+Only 25 are unambiguous: `AK CT DC FL HI IA KS MI ND NH NJ NM NV NY OH OK OR RI
+TX UT VT WA WI WV WY`.
+
+**This is where the old bugs lived.** `Berlin, DE` resolved to Philadelphia.
+`Tel Aviv, IL` to Chicago. `Baton Rouge, LA` to Los Angeles — and `la` is a
+*city* alias in the current table, so that one is a three-way collision between
+a city, a state and a country.
+
+### How the design handles it
+
+No special-case list. Three existing mechanisms do the work:
+
+1. **Position.** After a comma the qualifier reading dominates — `Austin, TX`
+   is a state, `Berlin, DE` is a country. Standalone, both readings compete.
+   This is why the qualifier index is separate from the place index.
+2. **Prominence.** A bare `LA` almost certainly means Los Angeles: LAX is a
+   top-five world airport, while Laos and Louisiana are rare trip origins. The
+   score settles it without a question. The collision list is **not** 31 forced
+   questions — it is 31 cases where the scoring has to earn its answer.
+3. **Context.** A trip already holding Rome and Florence makes `CA` → Canada
+   implausible on distance alone, and vice versa for a trip holding Vancouver.
+
+What stays genuinely ambiguous — `CA` with no trip context and no comma — asks.
+That is correct behaviour, not a gap.
+
+### Non-negotiable test cases
+
+These go in the must-never set, because each one shipped as a real bug or is
+one keystroke from it:
+
+```
+Berlin, DE      -> Germany, never Delaware
+Tel Aviv, IL    -> Israel, never Illinois
+Casablanca, MA  -> Morocco, never Massachusetts
+Baton Rouge, LA -> Louisiana, never Los Angeles and never Laos
+Vancouver, WA   -> Washington state, never Vancouver BC
+Bogota, CO      -> Colombia, never Colorado
+```
+
+The lists above were derived programmatically but from **memory of both code
+sets**, so they must be regenerated from the authoritative ISO 3166 and USPS
+sources during the data build and asserted by a test. Do not hand-maintain them.
+
 ## Resolution
 
 ```ts
