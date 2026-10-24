@@ -1,5 +1,9 @@
 # Rail API Applications — All Aboard, Rail Europe, Omio, Junction, Trainline follow-up
 
+> **Renamed.** This product was called Voyza; it is now **BlueMurr**, live at
+> https://bluemurr.com. The old `voyza-nine.vercel.app` alias 404s, so never
+> send it to a provider. The GitHub org and repo are still `Voyza-ai/Voyza`.
+
 _Drafted 2026-07-16. Companion to [APPLICATION_DRAFTS.md](APPLICATION_DRAFTS.md) and
 [TRAINLINE_APPLICATION.md](TRAINLINE_APPLICATION.md). Goal: real pan-European train
 prices for the optimizer now, booking later. Strategy: **apply to all in parallel —

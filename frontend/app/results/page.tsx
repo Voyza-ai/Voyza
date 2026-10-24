@@ -20,6 +20,7 @@ import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, getTrip, fetchHomeLegs, updateTrip } from '@/lib/api';
+import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 import { getOriginAirports } from '@/lib/originAirports';
 import { Hotel, City, Transport } from '@/lib/types';
 import { useAuthStore } from '@/store/authStore';
@@ -93,10 +94,17 @@ function ResultsPageInner() {
           if (fullTrip && Array.isArray(fullTrip.cities) && fullTrip.cities[0]?.transportIn) {
             // AI-planned trips saved before the country fix have none — fill
             // from the world-cities dataset so their cards match presets.
-            fullTrip.cities = fullTrip.cities.map((c: any) => ({
-              ...c,
-              country: c.country || countryForCity(c.name),
-            }));
+            fullTrip.cities = fullTrip.cities.map((c: any) =>
+              // Re-rank on load. Saved trips were never re-ranked or
+              // re-flagged, so one saved before the price guards existed keeps
+              // raw provider order and its hotels[0] can still be the glitch
+              // row that produced the $17,039 total. The traveller's own pick
+              // is preserved by name — see rerankSavedCityHotels.
+              rerankSavedCityHotels({
+                ...c,
+                country: c.country || countryForCity(c.name),
+              }),
+            );
             setTrip(fullTrip);
             setLoading(false);
             return;
@@ -227,13 +235,7 @@ function ResultsPageInner() {
       })
         .then((results) => {
           if (results.length === 0) return;
-          const hotels: Hotel[] = results.map((r) => ({
-            name: r.name,
-            rating: r.rating,
-            pricePerNight: r.pricePerNight,
-            area: '',
-            bookingUrl: r.bookingUrl,
-          }));
+          const hotels: Hotel[] = results.map(hotelFromResult);
           const idx = useTripStore
             .getState()
             .currentTrip?.cities.findIndex(

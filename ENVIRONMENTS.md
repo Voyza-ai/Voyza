@@ -68,8 +68,16 @@ so the user appears logged-out even though Supabase recorded the sign-in.
   https://bluemurr.com/**
   https://www.bluemurr.com/**
   ```
-  (The dead `voyza-nine` alias is dropped above but may still be listed in the
-  dashboard — remove it there too; it can only ever misdirect an OAuth return.)
+
+> 🔴 **Remove `https://voyza-nine.vercel.app/**` from this allowlist in the
+> Supabase dashboard.** It was listed here until 2026-10-23. That alias is dead
+> (see the 404 note above), which means the subdomain is unclaimed — and a
+> wildcard entry for a subdomain somebody else can register is a route for
+> handing them an OAuth token: they claim `voyza-nine.vercel.app`, send a user
+> through sign-in with `redirectTo` pointing at it, and Supabase honours the
+> redirect because the allowlist still says it is ours. Deleting it from this
+> file does not delete it from Supabase — it has to be removed in
+> **Authentication → URL Configuration**, and nothing in this repo can do it.
 
 > ⚠️ **Rule: every new environment (domain) must be added here**, or Google sign-in
 > from it bounces to prod and fails to log in. Set it in the dashboard, or via the

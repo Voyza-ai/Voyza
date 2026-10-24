@@ -45,32 +45,33 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ---
 
-## 🚧 In-flight (this branch: `feat/voyza-ai-chat`)
+## 🚧 In-flight
 
-All major work on this branch is committed and pushed. See the
-"Previously shipped" section below for the full breakdown. Branch
-currently has 4 commits, not yet merged to `claude_code_backend`:
+Nothing in flight. `feat/voyza-ai-chat` and `feat/map-redesign` are both
+merged all the way to `voyza_main`; the branch flow is now
+**feature branch → `dev` → `voyza_main`**, not `claude_code_backend`.
+See "Previously shipped" below for what landed.
 
-```
-d4007d9  polish: fixed-size transport pills + home card refinements
-984a553  feat: home anchor — origin, multi-airport, full permutations, round-trip
-1704365  feat: AI chat refreshes flowchart transport card (leg_refresh)
-0fbbd20  feat: Voyza AI chat with trip-aware prompts + constraint proposals
-```
+Of the two items this section used to list as remaining:
 
-Remaining on the branch:
-- [ ] Top-4 options per between-city leg (swap `compareLeg()` →
-  `searchLegOptions(limit: 4)` in `scoreRoute`). Home legs already
-  use searchLegOptions; this extends it to inter-city legs so every
-  Connector card has 4 alternatives out of the box.
-- [ ] Backfill UI for pre-home-anchor trips without `origin_city`
-  (old trips render without a home card — graceful but unsettable).
+- [x] **Top-4 options per between-city leg.** Done, but not the way this
+  entry proposed. Swapping `compareLeg()` for `searchLegOptions()` inside
+  `scoreRoute` would mean M legs × N permutations of option lookups, which
+  explodes API cost. Instead `optimizer.ts` has a Step 7.5 that re-fetches
+  the full options list for the WINNING route only — M extra calls, bounded,
+  reusing Duffel's per-request offer caching from the scoring pass that just
+  ran. Connector cards get their 4 alternatives either way.
+- [ ] **Backfill UI for pre-home-anchor trips without `origin_city`.** Still
+  open. `origin` is only settable during planning (`PlanningChat`,
+  `ConversationalPlanner`); there is no way to set it on a trip that is
+  already saved, so old trips render without a home card and cannot be
+  given one.
 
 ---
 
 ## 📦 Previously shipped (ordered recent → older)
 
-### Map tab rebuild (on `feat/map-redesign`, not yet merged)
+### Map tab rebuild (merged to `voyza_main`)
 
 Five phases, all landed. The organising idea is a **drill-down**: the map
 shows the level of detail the camera is at, and the panel always agrees with
@@ -223,6 +224,60 @@ Home anchor / origin model (984a553 + d4007d9)
 
 ## 📋 Backlog
 
+### Feature: Surface a price we cannot vouch for (frontend — needs design)
+
+Two hotel-price states exist in the data today and **neither is visible to the
+traveller**. The backend decides both; nothing renders either.
+
+**State 1 — distrusted (`priceSuspect`, already plumbed).** The price is out of
+line with its peers, so we demote it: `trustedFirst` in
+`backend/src/services/hotels.ts` puts it last, so it can never be the
+auto-selected hotel or reach the trip total. The flag reaches the frontend via
+`frontend/lib/hotelShape.ts` and survives the save/load round trip. But it
+appears nowhere under `frontend/components/` or `frontend/app/`, so a traveller
+who picks it from the list gets a price we do not believe, unmarked.
+`cycleHotel` steps over these, so only a deliberate pick reaches one.
+
+**State 2 — unverifiable (no flag yet).** Every price check here is a
+*comparison*: a row is suspect because it is out of line with the others in its
+search. So a search with almost nothing in it cannot be checked at all — one
+row cannot be an outlier, because the median of a one-row set is that row. No
+threshold reaches it, at any value. Measured: a Val d'Isère search returned
+exactly one hotel at **$3,377.84/night** and it went into the trip total with
+nothing having looked at it.
+
+`pickByRating` reduced how often this happens by relaxing our own 7.0
+review-score bar when a search is thin, and `searchHotels` logs
+`'Hotel search too thin to price-check — hotels[0] is unverified'` when it
+still is. But it cannot be eliminated: `Grand Turk` returns exactly **1 row**
+because the provider has nothing more to give, and `Grace Bay` returns none at
+all. Frequency before widening: 1 search in 45 returned fewer than 4 rows.
+
+**Work:**
+- [ ] Decide whether to show anything at all — doing nothing is defensible for
+      state 2, since the Val d'Isère row was most likely a *real* hotel (a
+      converted 2551m cable-car station, 9.6 from 137 reviews, peak ski week).
+      A caveat on a correct price costs trust too.
+- [ ] Design the treatment. `CLAUDE.md` applies: no glass morphism, no glows,
+      no gradient-purple AI look — derive from the existing DNA (dark `#0f0f1a`
+      surfaces, pastel city cards, dashed-route motif, blue brand). Get it
+      approved before committing.
+- [ ] One treatment may cover both states, or they may need different words:
+      "we think this price is wrong" and "we could not check this price" are
+      different claims and should not be conflated into one badge.
+- [ ] For state 2, add the flag — the backend currently only logs it. Mirror
+      the `limitedCoverage` pattern `backend/src/services/trains.ts` already
+      uses for an unpriced fare, carry it through `lib/hotelShape.ts` beside
+      `priceSuspect`, and add it to `Hotel` in `frontend/lib/types.ts`.
+- [ ] Decide what the trip total does with an unverified hotel. Trains set
+      `pricePerPerson: null` rather than inventing a figure; hotels currently
+      put the number straight in the headline.
+
+**Do not** solve this by tuning a threshold. That has been tried three times
+and each pass created a new regression — see the comment block at the top of
+the price-plausibility section in `backend/src/services/hotels.ts` for the full
+history and why deleting rows was abandoned in favour of demoting them.
+
 ### Feature: Notifications system (separate task — complex)
 - [x] `notifications` table with RLS
 - [x] GET/PATCH/DELETE endpoints
@@ -287,6 +342,75 @@ Decisions needed before building:
 
 Separately, and not map-specific: the navbar overlaps itself at 375px —
 "BlueMurr" collides with "Flowchart", and "Schedule" collides with "Log in".
+
+### Feature: Points & miles — "your points could cover this"
+
+Tell a traveller what their existing points are worth against the trip in front
+of them: *you have 60k Amex MR, that covers the Rome leg*, *Delta is running a
+transfer bonus*, *combine these two balances and the whole outbound is free*.
+
+A real differentiator — nobody comparing cash fares does this well — but the
+phases below are ordered by **what data actually exists**, not by what sounds
+best, because the obvious version of this feature depends on data we cannot get
+today.
+
+**The blocker, stated up front.** Award availability is not in Duffel. Duffel
+sells cash fares; award inventory is a different system and the airlines do not
+expose it publicly. Delta, United and JetBlue have also moved to dynamic award
+pricing with no published award chart, so "60k gets you this seat" cannot be
+derived from a table either. Any phase that quotes a real award price needs a
+dedicated award-availability source (seats.aero is the usual answer — its API
+terms, coverage and cost all need checking before committing). Phase 1 is
+designed to be useful **without** that, so this is not blocked on it.
+
+**Do NOT store loyalty credentials.** Phase 1 takes balances the user types in.
+Scraping or storing airline/card logins to read balances is a serious liability
+and is somebody else's business model (AwardWallet, MaxRewards) — if automatic
+balances are wanted, integrate one of them rather than holding the credentials.
+
+#### Phase 1 — manual balances + what they're worth (no new provider needed)
+- [ ] `user_profiles.preferences` (or a `loyalty_balances` table) holds
+      `{ program, balance, updated_at }` rows the user enters by hand
+- [ ] Program list with transfer partners and ratios — the flexible currencies
+      are the valuable part (Amex MR, Chase UR, Citi TYP, Capital One, Bilt),
+      since one balance reaches many airlines
+- [ ] Cents-per-point valuation table, **editable and visible**, not hidden in
+      code. This is subjective and travellers disagree about it; showing the
+      assumption is the difference between a useful estimate and a number
+      nobody trusts
+- [ ] Surface on the results page: "your 60k Amex MR ≈ $720 toward this trip"
+      against the cash total we already compute
+- [ ] Decide what "cheapest" means once points exist. The optimizer ranks on
+      cash today; 60k points + $50 versus $400 cash is not a comparison it can
+      make without a valuation, and the answer differs per traveller. Likely
+      answer: keep ranking on cash and show points as an overlay, rather than
+      letting a subjective rate reorder the route
+
+#### Phase 2 — real award prices (needs the availability source)
+- [ ] Pick and integrate an award-availability provider; confirm coverage for
+      the European corridors this product actually plans
+- [ ] Per-leg award option beside the cash option in the Connector card, same
+      shape as the existing flight/train comparison
+- [ ] Combine balances across programs for one itinerary — the "combine with
+      your other miles" case — including transfer ratios and transfer time
+      (some transfers take days, which matters for a trip booked next week)
+- [ ] Show the cash-plus-fees side of an award booking; "free" flights carry
+      taxes and carrier surcharges, and on some routes those are substantial
+
+#### Phase 3 — deals and transfer bonuses
+- [ ] Transfer bonuses and award sales are published as promotions, not APIs.
+      Decide curated-and-dated entries versus scraping the usual blogs —
+      curation is more work per week but cannot silently go stale or wrong
+- [ ] Alert only when it is actionable: the traveller holds the source
+      currency AND the bonus helps a trip they are actually planning. A generic
+      "Delta bonus!" banner is noise and trains people to ignore the feature
+- [ ] Expiry handling — a stale promotion is worse than none, so every entry
+      needs an end date and must disappear on its own
+
+**Open questions to settle in Phase 1:** whether points are a planning input
+(filter: "show me where my points can take me") or only an output ("here's what
+they're worth on this trip"). The first is a much bigger feature and a
+different product, so decide deliberately rather than drifting into it.
 
 ### Feature: Taste-based recommendations (map suggestions → personalized)
 
@@ -549,7 +673,7 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 - [ ] Activity duration clipping: 4h activities render as 2h blocks because morning slot caps at 12:00 (full duration in notes only)
 - [ ] Intent picker animation timing on rapid interactions (currently fixed via StrictMode refs, watch for regressions)
 - [ ] Canvas → Back → Flights gone — partially fixed by DB persistence work (pending full verification)
-- [ ] Canvas save silently drops transports — FIXED in feat/db-persistence
+- [x] ~~Canvas save silently drops transports~~ — FIXED in feat/db-persistence
 - [ ] Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice). No back button, no edit-previous-message. Partial workaround exists via city picker's "+ another city" but it's awkward. Full fix = task 4 (planning-phase conversational revision).
 - [ ] Origin-location lookup misses non-city inputs (states, regions, neighborhoods). User typing "from New Jersey" / "Newark" / "Long Island" / "Connecticut" → AI returns the literal string → `getOriginAirports()` lookup misses → empty `originAirports` → home flight search never runs → schedule view shows no transport blocks for day 1. Already partially fixed for "<City> City" suffix variants (commit `0f24996`). Need: state-name aliases (NJ → EWR or NYC metro, CT → BDL, etc.), region aliases (Long Island → JFK/LGA, Bay Area is already in), and a smarter normalization layer at the AI-parse step that resolves vague locations to canonical metro keys before the lookup table is queried. Affects both `frontend/lib/originAirports.ts` and `backend/src/data/originAirports.ts`.
 - [x] ~~AI chat: "are there more flights?" returns an answer-only response instead of showing options~~ — FIXED in 1704365 (leg_refresh + `show_transport_options` tool + clarifying "which leg?" routing).
@@ -557,12 +681,33 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 
 ## 🏗️ Infrastructure / ops
 
+- [ ] 🔴 **No database backups exist.** Not "the runbook isn't written" — there
+      is nothing configured to restore from. There is ONE Supabase project
+      (`vzptwvrgiaqveckrdmke`) and it holds the real trips; `dev` writes to it
+      too (see `ENVIRONMENTS.md`), so a bad migration or a bad delete run from
+      a dev branch is unrecoverable. Enable Point-in-Time Recovery or scheduled
+      backups in the Supabase dashboard — this is a dashboard change, nothing
+      in this repo can do it. Listed first here because it is the only item on
+      this page where the cost of being wrong is permanent.
+- [ ] `backend/src/tests/transportCoverage.test.ts` **does not run in CI.** It
+      is gated on `DUFFEL_ACCESS_TOKEN`, which CI does not set, so the suite
+      skips in full — and it is the only one that exercises live provider
+      responses. Everything else mocks the provider. So "all tests pass" means
+      the mocked contract holds, not that the real API still answers the way we
+      expect. Either give CI a token (a sandbox one is enough; sandbox is what
+      Duffel returns today anyway) or run it on a schedule and alert on
+      failure, so a provider changing its response shape is not discovered by a
+      traveller.
 - [ ] Rate limiting middleware (per-IP + per-user) on all `/api` routes
-- [ ] Error monitoring (Sentry or Datadog)
+- [ ] Error monitoring (Sentry or Datadog) — note `logger.error` currently goes
+      to stderr and nothing else, so an error log pages nobody
 - [ ] Structured logging with request IDs
-- [ ] Staging environment / preview deploys
+- [ ] Staging environment / preview deploys — `dev` currently shares the
+      production backend AND database, so backend changes cannot be tested
+      anywhere but production (`ENVIRONMENTS.md:13`)
 - [ ] Automated E2E tests in CI (Playwright)
-- [ ] Backup & restore runbook
+- [ ] Backup & restore runbook (the process; see the first item for the fact
+      that there is currently nothing to restore from)
 - [ ] Data retention policies documented
 
 ---

@@ -275,9 +275,11 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
     // inventing a dollar figure. Relabelling the raw amount 'USD' would
     // instead let it win the cheapest comparison.
     const { convertToUsd } = await import('./currency');
-    return await Promise.all(
+    const priced = await Promise.all(
       mapped.map(async (t) => {
-        if (t.pricePerPerson == null || !t.currency || t.currency === 'USD') return t;
+        // No USD short-circuit: convertToUsd decides, and returns null for a
+        // blank or malformed code rather than trusting the number.
+        if (t.pricePerPerson == null) return t;
         const usd = await convertToUsd(t.pricePerPerson, t.currency);
         if (usd === null) {
           logger.warn('Train fare unpriced — no USD rate for its currency', {
@@ -287,9 +289,39 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
           });
           return { ...t, pricePerPerson: null, limitedCoverage: true };
         }
+
+        // Conversion rounds to cents, so a small amount in a weak currency can
+        // come out as exactly 0 — and a $0 fare is not a free train, it is an
+        // unknown one. This path already has the right way to say that.
+        if (!Number.isFinite(usd) || usd <= 0) {
+          logger.warn('Train fare unpriced — converted price rounded to zero', {
+            raw: t.pricePerPerson,
+            currency: t.currency,
+            usd,
+            origin,
+            destination,
+          });
+          return { ...t, pricePerPerson: null, limitedCoverage: true };
+        }
+
         return { ...t, pricePerPerson: usd, currency: 'USD' };
       }),
     );
+
+    // Trains do not drop an unconvertible fare, they null it — so the failure
+    // shows up as a route where every option is "limited coverage" rather than
+    // as an empty list, which is quieter still. Say it once for the route.
+    const unpriced = priced.filter((t) => t.pricePerPerson == null).length;
+    if (unpriced > 0 && unpriced === priced.length) {
+      logger.warn('Every train fare on this route is unpriced', {
+        origin,
+        destination,
+        offers: priced.length,
+        currencies: [...new Set(mapped.map((t) => t.currency || '(blank)'))],
+      });
+    }
+
+    return priced;
   } catch (err: any) {
     logger.warn('DB train search failed (non-fatal)', { message: err?.message, origin, destination });
     return [];

@@ -1,5 +1,9 @@
 # Application Drafts — Kiwi, Travelpayouts, Direct Ferries
 
+> **Renamed.** This product was called Voyza; it is now **BlueMurr**, live at
+> https://bluemurr.com. The old `voyza-nine.vercel.app` alias 404s, so never
+> send it to a provider. The GitHub org and repo are still `Voyza-ai/Voyza`.
+
 _Copy-paste answers for the signups in [SIGNUP_GUIDE.md](SIGNUP_GUIDE.md).
 Trainline's draft lives separately in [TRAINLINE_APPLICATION.md](TRAINLINE_APPLICATION.md)._
 

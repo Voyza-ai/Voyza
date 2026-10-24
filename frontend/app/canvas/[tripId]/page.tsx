@@ -33,6 +33,7 @@ import {
   updateTrip,
   Destination,
 } from '@/lib/api';
+import { hotelFromResult } from '@/lib/hotelShape';
 import TripNameEditor from '@/components/shared/TripNameEditor';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
@@ -450,13 +451,7 @@ function CanvasPageInner() {
         adults: localState?.trip?.travelers ?? 1,
       });
       if (results.length === 0) return;
-      const hotels = results.map((r) => ({
-        name: r.name,
-        rating: r.rating,
-        pricePerNight: r.pricePerNight,
-        area: '',
-        bookingUrl: r.bookingUrl,
-      }));
+      const hotels = results.map(hotelFromResult);
       setLocalState((prev: any) => {
         if (!prev?.cities) return prev;
         let merged = false;
