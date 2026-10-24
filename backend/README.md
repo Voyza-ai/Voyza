@@ -1,6 +1,6 @@
-# Voyza Backend
+# BlueMurr Backend
 
-Express + TypeScript API server for Voyza. Handles everything the frontend shouldn't touch directly — secret API keys, external provider calls (Duffel, Kiwi, Stripe), Supabase admin operations, and Claude-powered planning logic.
+Express + TypeScript API server for BlueMurr. Handles everything the frontend shouldn't touch directly — secret API keys, external provider calls (Duffel, Kiwi, Stripe), Supabase admin operations, and Claude-powered planning logic.
 
 ## Stack
 
@@ -106,13 +106,13 @@ export default router;
 
 ## Wiring the Next.js frontend
 
-In the frontend (`voyza/`), add:
+In the frontend (`frontend/`), add:
 
 ```
-# voyza/.env.local
+# frontend/.env.local
 NEXT_PUBLIC_API_URL=http://localhost:4000
 ```
 
 Then call backend routes from Next.js code via `fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/...`)`.
 
-Keep `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, and any provider tokens out of `voyza/.env.local` — they belong only in `backend/.env`.
+Keep `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, and any provider tokens out of `frontend/.env.local` — they belong only in `backend/.env`.

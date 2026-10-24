@@ -1,4 +1,4 @@
-# Voyza Auth — Implementation Summary
+# BlueMurr Auth — Implementation Summary
 
 ## What was built
 

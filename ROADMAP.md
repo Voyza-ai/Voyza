@@ -1,4 +1,4 @@
-# Voyza Roadmap & Feature Checklist
+# BlueMurr Roadmap & Feature Checklist
 
 Living checklist of everything we want to build, organized by feature.
 Update as we go — tick boxes, move items between sections, add new ideas.
@@ -156,9 +156,9 @@ Known remaining:
       style request before anything else.
 
 
-### Voyza AI chat + home anchor (on `feat/voyza-ai-chat`, not yet merged)
+### BlueMurr AI chat + home anchor (on `feat/voyza-ai-chat`, not yet merged)
 
-Voyza AI chat v1 — constraint proposals (0fbbd20)
+BlueMurr AI chat v1 — constraint proposals (0fbbd20)
 - [x] Schema: `trips.constraints` jsonb
 - [x] `POST /api/plan/chat` with Claude tool-use (answer_only, pin_city_dates, set_min_days, set_transport_window)
 - [x] `POST /api/plan/chat-suggestions` — trip-specific dynamic prompts
@@ -533,7 +533,7 @@ before the final "Find my trip" click.
 - [ ] Inline editable: clicking a fact lets user revise (deferred —
   the AI chat can already revise; UI affordance later)
 
-### Feature: Voyza AI — edits beyond current scope
+### Feature: BlueMurr AI — edits beyond current scope
 Tasks deferred from the current chat work:
 
 - [ ] **Planning-phase conversational revision** (task 4): during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
@@ -722,7 +722,7 @@ Two-tier:
 ### Trip permissions model
 Three flags on each trip (set by owner):
 - `allow_clones` (default TRUE) — whether other users can make a personal copy
-- `allow_recommendations` (default TRUE) — whether Voyza can use this trip's patterns to train the recommender
+- `allow_recommendations` (default TRUE) — whether BlueMurr can use this trip's patterns to train the recommender
 - `is_public` (default FALSE) — whether the trip shows up in `/explore` and is cloneable by anyone with the URL
 
 ### Why we preserve trip data after anonymization

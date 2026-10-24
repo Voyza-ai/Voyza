@@ -126,16 +126,20 @@ Use the same free-text blurb as Rail Europe, swapping the last ask:
 Reply to the confirmation email if one exists; otherwise resubmit a short note via
 https://tps.thetrainline.com/get-in-touch/ referencing the earlier inquiry.
 
-> **Subject:** Following up — BlueMurr partner inquiry (submitted [date])
+_This is the one draft that keeps the old name: the original inquiry was filed as
+**Voyza**, so lead with the rename or Trainline won't find the thread._
+
+> **Subject:** Following up — BlueMurr (formerly Voyza) partner inquiry (submitted [date])
 >
 > Hi Trainline Partner Solutions,
 >
-> Following up on the partner inquiry we submitted on [date] for BlueMurr, an AI
-> trip planner optimizing multi-city European itineraries across flights and
-> trains. We're keen on Global API search/pricing access — but if the right
-> first step for a company at our stage is the affiliate programme, we'd happily
-> start there while we grow into API access. Is there any update on our inquiry,
-> or someone we should speak to directly?
+> Following up on the partner inquiry we submitted on [date] under our former
+> name, Voyza. We're now BlueMurr (https://bluemurr.com) — same team, same
+> product: an AI trip planner optimizing multi-city European itineraries across
+> flights and trains. We're keen on Global API search/pricing access — but if
+> the right first step for a company at our stage is the affiliate programme,
+> we'd happily start there while we grow into API access. Is there any update on
+> our inquiry, or someone we should speak to directly?
 >
 > Thanks,
 > [name] — BlueMurr
