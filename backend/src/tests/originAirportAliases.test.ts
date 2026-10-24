@@ -172,16 +172,66 @@ describe('getOriginAirports: normalization', () => {
     expect(getOriginAirports('N.J.')).toEqual(['EWR', 'JFK', 'LGA']);
   });
 
-  it('KNOWN LIMITATION: "City, Qualifier" strings still miss', () => {
-    // Commas are stripped, not split, so "Newark, NJ" normalizes to the
-    // single key "newark nj" and misses. Splitting on the comma was
-    // considered and deliberately left out: trying segments in either
-    // order creates wrong-airport hits that cannot happen today
-    // ("Vancouver, WA" -> YVR in Canada if the city segment wins;
-    // "Paris, Texas" -> CDG if the qualifier segment loses). Documented
-    // in the PR as a follow-up rather than guessed at here.
-    expect(getOriginAirports('Newark, NJ')).toEqual([]);
-    expect(getOriginAirports('Vancouver, WA')).toEqual([]);
+  it('resolves "<City>, <State>" via the comma qualifier', () => {
+    expect(getOriginAirports('Newark, NJ')).toEqual(['EWR', 'JFK', 'LGA']);
+    expect(getOriginAirports('Jersey City, NJ')).toEqual(['EWR', 'JFK', 'LGA']);
+    expect(getOriginAirports('Brooklyn, NY')).toEqual(['JFK', 'LGA', 'EWR']);
+    expect(getOriginAirports('Hartford, CT')).toEqual(['BDL']);
+    expect(getOriginAirports('Portland, Oregon')).toEqual(['PDX']);
+  });
+
+  it('trusts the qualifier over the city name', () => {
+    // The segment after the comma is the disambiguator the user supplied,
+    // so it wins. "Vancouver, WA" is Washington state, not Canada — the
+    // bare key 'vancouver' would have given YVR.
+    expect(getOriginAirports('Vancouver')).toEqual(['YVR']);
+    expect(getOriginAirports('Vancouver, WA')).toEqual(['SEA']);
+  });
+
+  it('walks multiple comma segments right to left', () => {
+    expect(getOriginAirports('Brooklyn, New York, USA')).toEqual(['JFK', 'LGA', 'EWR']);
+  });
+
+  it('never trusts the city segment, only a known qualifier', () => {
+    // Each of these resolved to a WRONG airport under a rule that falls
+    // back to the first segment: the unmapped states are exactly the ones
+    // left out of the table on purpose, so "<WorldCity>, <that state>" is
+    // a common pairing, not a rare one.
+    expect(getOriginAirports('Paris, Texas')).toEqual([]);
+    expect(getOriginAirports('Dublin, Ohio')).toEqual([]);
+    expect(getOriginAirports('Dublin, California')).toEqual([]);
+    expect(getOriginAirports('Vienna, Virginia')).toEqual([]);
+    expect(getOriginAirports('Moscow, Idaho')).toEqual([]);
+    expect(getOriginAirports('Berlin, New Hampshire')).toEqual([]);
+    expect(getOriginAirports('Lima, Ohio')).toEqual([]);
+  });
+
+  it('rejects qualifiers that collide with ISO country codes', () => {
+    // These abbreviations are table keys, but must not act as qualifiers:
+    // DE Germany, IL Israel, MA Morocco, CO Colombia, AZ Azerbaijan.
+    expect(getOriginAirports('Berlin, DE')).toEqual([]);
+    expect(getOriginAirports('Tel Aviv, IL')).toEqual([]);
+    expect(getOriginAirports('Casablanca, MA')).toEqual([]);
+    expect(getOriginAirports('Bogota, CO')).toEqual([]);
+    expect(getOriginAirports('Baku, AZ')).toEqual([]);
+    // 'georgia' is the country here, not the US state.
+    expect(getOriginAirports('Tbilisi, Georgia')).toEqual([]);
+    // 'la' is Los Angeles, so Louisiana must not qualify.
+    expect(getOriginAirports('Baton Rouge, LA')).toEqual([]);
+  });
+
+  it('ACCEPTED LOSS: "<City>, <Country>" still misses', () => {
+    // Resolving these needs a country whitelist, since the qualifier is
+    // not a state. Left out rather than guessed: it is the same [] these
+    // returned before, not a regression.
+    expect(getOriginAirports('Paris, France')).toEqual([]);
+    expect(getOriginAirports('Mexico City, Mexico')).toEqual([]);
+  });
+
+  it('keeps "Washington, DC" working through the whole-string key', () => {
+    // Comma stripping (not splitting) is what makes this a direct hit, so
+    // the new segment walk must not shadow it.
+    expect(getOriginAirports('Washington, DC')).toEqual(['IAD', 'DCA', 'BWI']);
   });
 
   it('trims surrounding whitespace', () => {

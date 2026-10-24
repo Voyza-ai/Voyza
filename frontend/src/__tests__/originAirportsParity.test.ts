@@ -113,6 +113,50 @@ describe('originAirports: backend/frontend parity', () => {
     }
   });
 
+  it('maps every state alias to the same list as its dominant metro', () => {
+    // A state alias must inherit its metro's FULL list, not a subset:
+    // mapping Illinois to ORD alone would silently drop Midway for anyone
+    // who types the state instead of the city.
+    const table = tableOf(backendSrc);
+    const STATE_TO_METRO: Array<[string, string]> = [
+      ['illinois', 'chicago'], ['il', 'chicago'],
+      ['new york state', 'new york'], ['ny', 'new york'],
+      ['connecticut', 'hartford'], ['ct', 'hartford'],
+      ['rhode island', 'providence'], ['ri', 'providence'],
+      ['massachusetts', 'boston'], ['ma', 'boston'],
+      ['delaware', 'philadelphia'], ['de', 'philadelphia'],
+      ['maryland', 'baltimore'], ['md', 'baltimore'],
+      ['georgia', 'atlanta'], ['ga', 'atlanta'],
+      ['arizona', 'phoenix'], ['az', 'phoenix'],
+      ['nevada', 'las vegas'], ['nv', 'las vegas'],
+      ['utah', 'salt lake city'], ['ut', 'salt lake city'],
+      ['colorado', 'denver'], ['co', 'denver'],
+      ['minnesota', 'minneapolis'], ['mn', 'minneapolis'],
+      ['michigan', 'detroit'], ['mi', 'detroit'],
+      ['hawaii', 'honolulu'],
+      ['washington state', 'seattle'], ['wa', 'seattle'],
+    ];
+    for (const [state, metro] of STATE_TO_METRO) {
+      expect(table[state]).toBeDefined();
+      expect(table[metro]).toBeDefined();
+      expect([...table[state]].sort()).toEqual([...table[metro]].sort());
+    }
+  });
+
+  it('keys New Jersey to the NYC metro with Newark first', () => {
+    // Same set as 'new york', reordered so the traveller's own state
+    // airport is the primary.
+    const table = tableOf(backendSrc);
+    expect(table['new jersey']).toEqual(['EWR', 'JFK', 'LGA']);
+    expect([...table['new jersey']].sort()).toEqual([...table['new york']].sort());
+  });
+
+  it('never lets Washington the state collapse onto Washington DC', () => {
+    const table = tableOf(backendSrc);
+    expect(table['washington']).toEqual(['IAD', 'DCA', 'BWI']);
+    expect(table['washington state']).toEqual(['SEA']);
+  });
+
   it('keeps every airport list within the documented cap of 3', () => {
     for (const [city, codes] of Object.entries(tableOf(backendSrc))) {
       expect(codes.length).toBeGreaterThan(0);

@@ -207,6 +207,69 @@ const MULTI_AIRPORT_CITIES: Record<string, string[]> = {
 };
 
 /**
+ * Keys that may be trusted as the QUALIFIER after a comma ("Newark, NJ").
+ *
+ * Only state-level keys appear here, and the city segment before the comma
+ * is never trusted. Both restrictions are load-bearing — a looser rule was
+ * measured against this table and produced 14 wrong airports out of 20
+ * probes:
+ *
+ *   - Trusting the city segment maps any "<WorldCity>, <unmapped US state>"
+ *     onto the foreign city: "Dublin, Ohio" -> DUB, "Vienna, Virginia" ->
+ *     VIE, "Moscow, Idaho" -> SVO, "Berlin, New Hampshire" -> BER, "Lima,
+ *     Ohio" -> LIM, "Paris, Texas" -> CDG. That pairing is common rather
+ *     than rare, because the unmapped states are exactly the ones left out
+ *     of this table on purpose.
+ *   - Accepting any key as a qualifier trips over 'la' (Los Angeles, so
+ *     "Baton Rouge, LA" -> LAX) and over the state abbreviations that are
+ *     also ISO 3166-1 country codes.
+ *
+ * So these abbreviations are deliberately ABSENT below even though they are
+ * keys in the table above: DE (Germany), IL (Israel), MA (Morocco), CO
+ * (Colombia), AZ (Azerbaijan), MD (Moldova), GA (Gabon), MN (Mongolia).
+ * Without that, "Berlin, DE" prices from Philadelphia and "Bogota, CO" from
+ * Denver. 'georgia' is out for the same reason — the country, so "Tbilisi,
+ * Georgia" must not resolve to ATL.
+ *
+ * The bare keys are kept, because a lone "CO" in an origin field is a US
+ * state far more often than Colombia, and the full state name always works.
+ * After a comma the odds invert, which is the whole reason for this set.
+ */
+const COMMA_QUALIFIER_KEYS = new Set<string>([
+  'new jersey',
+  'nj',
+  // Both readings of a trailing "New York" — the state, or the city for
+  // "Brooklyn, New York" — resolve to the same metro, so it is safe here.
+  'new york',
+  'new york state',
+  'ny',
+  'connecticut',
+  'ct',
+  'rhode island',
+  'ri',
+  'massachusetts',
+  'new england',
+  'delaware',
+  'maryland',
+  'illinois',
+  'arizona',
+  'nevada',
+  'nv',
+  'utah',
+  'ut',
+  'colorado',
+  'minnesota',
+  'michigan',
+  'mi',
+  'hawaii',
+  'oregon',
+  'vermont',
+  'vt',
+  'washington state',
+  'wa',
+]);
+
+/**
  * Normalize a city name for lookup. Strips punctuation, lowercases,
  * trims whitespace. Leaves accents intact since the keys use them.
  * Stripping '.' also means "N.J." normalizes onto the 'nj' key.
@@ -241,6 +304,26 @@ export function getOriginAirports(cityName: string, max: number = 3): string[] {
     const stripped = normalized.slice(0, -' city'.length);
     const list = MULTI_AIRPORT_CITIES[stripped];
     if (list) return list.slice(0, max);
+  }
+  // Fallback: "<City>, <State>" is the shape the AI most often produces for
+  // a US origin ("Newark, NJ", "Vancouver, WA"). normalize() strips the
+  // comma rather than splitting on it, so the whole string becomes the one
+  // dead key "newark nj" and misses.
+  //
+  // Walk the comma segments right to left and accept ONLY a
+  // COMMA_QUALIFIER_KEYS hit. Right-to-left matters: the part after the
+  // comma is the disambiguator the user deliberately supplied, so it should
+  // beat the city name ("Vancouver, WA" is Washington state, not Canada).
+  // Restricting to qualifiers is what makes it safe — a city key can never
+  // act as a qualifier, so "Paris, Texas" and "Dublin, Ohio" miss cleanly
+  // instead of resolving to CDG and DUB. See COMMA_QUALIFIER_KEYS.
+  if (cityName.includes(',')) {
+    const segments = cityName.split(',').map(normalize).filter(Boolean);
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (!COMMA_QUALIFIER_KEYS.has(segments[i])) continue;
+      const list = MULTI_AIRPORT_CITIES[segments[i]];
+      if (list) return list.slice(0, max);
+    }
   }
   return [];
 }
