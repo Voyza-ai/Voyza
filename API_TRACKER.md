@@ -20,10 +20,11 @@ dates (2026-07-20), never "last week"._
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
 | Duffel live token | 🔲 not started | — |
-| Kiwi Tequila | 🔁 follow-up sent | 2026-07-27 |
+| Kiwi Tequila | 🔁 follow-up sent (3rd contact) | 2026-10-24 |
 | Booking.com affiliate | 🔲 not started | — |
 | Travelpayouts | 📝 draft ready | — |
-| Direct Ferries | 📝 draft ready | — |
+| Distribusion | 📤 sent, awaiting reply | 2026-10-24 |
+| Direct Ferries | 📤 sent, awaiting reply | 2026-10-24 |
 
 ---
 
@@ -78,6 +79,19 @@ dates (2026-07-20), never "last week"._
   small; the value is one-app multi-leg booking.
 - **Note:** best odds of the bunch — developer-first company, public docs.
   First provider breakthrough; prioritize this thread.
+
+### Distribusion  📤
+- **For:** bus, rail, ferry AND airport transfers in one Retailer API —
+  ~2,000 carriers across ~70 markets. Closes three gaps at once.
+- **Sent:** 2026-10-24 — emailed partner@distribusion.com (Satwik). Asked
+  for a demo API key and an inventory overview, which is the route their
+  docs point to; onboarding runs through a Partnership Manager.
+- **Note:** retail partners already include Booking.com, Google, Expedia,
+  Omio and Trainline, so this integration is well trodden.
+- **Watch for:** accreditation and carrier-access terms are NOT on the
+  public intro page. Company registration may surface at contract stage,
+  same as All Aboard — i.e. the EIN again.
+- **Docs:** docs.distribusion.com/dt/api/getting-started/intro
 
 ### Omio  🔁
 - **For:** rail + bus search, 1,000+ operators. Multimodal hedge.
@@ -145,6 +159,10 @@ dates (2026-07-20), never "last week"._
   longer offers open self-serve signup (login is magic-link only; the page
   directs new affiliates to that address).
 - **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
+- **2026-10-24:** third contact sent by Satwik from peelasatwik5@gmail.com.
+  A new email, not the old thread — that one lives in Gohil's mailbox and
+  isn't visible from Satwik's. Asked again for Tequila affiliate or
+  metasearch access, naming the Ryanair/Wizz gap.
 - **Next:** wait. When the key arrives → Claude integrates it as the second
   flight source (plan step F3). If silent past ~2026-08-10, fall back to
   Travelpayouts for LCC coverage.
@@ -158,9 +176,13 @@ dates (2026-07-20), never "last week"._
 - **Next:** register —
   [answers](APPLICATION_DRAFTS.md#2-travelpayouts-hotels-via-bookingcom--flights)
 
-### Direct Ferries  📝
+### Direct Ferries  📤
 - **For:** ferries (islands) — affiliate now, Connect API later.
-- **Next:** sign up —
+- **Sent:** 2026-10-24 — emailed partnerships@directferries.com (Satwik).
+  First contact; they had never been approached before. Asked whether
+  Connect API or the affiliate programme is the right entry point.
+- **Next:** the follow-up routine chases this automatically (see log).
+  Field answers ready if they send a form back:
   [answers](APPLICATION_DRAFTS.md#3-direct-ferries-ferries--islands)
 
 ---
@@ -181,6 +203,28 @@ dates (2026-07-20), never "last week"._
 ## Response log
 
 _Append a line whenever anything happens, newest first._
+
+- 2026-10-24 — **Automated follow-up routine live**
+  (`trig_01EBCw2fjwpuMxZjfEMLzfr5`, claude.ai/code/routines). Fires daily at
+  07:47 UTC but only sends when the last message in a thread is 4+ days
+  old, so the effective cadence is every 4 days. It stops for a provider
+  the moment they reply, and stops permanently after 3 follow-ups. Tone
+  escalates down, not up: nudge, then the smallest single question they
+  can answer in a line, then a zero-pressure close. First follow-up lands
+  2026-10-29, not the 28th: the originals went at 20:44 UTC, so the 4 day
+  mark falls just after that morning's run. The test run on 2026-10-24
+  correctly sent nothing (0 days elapsed). It cannot write to this repo, so
+  follow-ups will NOT appear here on their own — read the run log at that link.
+
+- 2026-10-24 — **Three outreach emails sent** (Satwik, from
+  peelasatwik5@gmail.com). All three went as new emails, not thread
+  replies, because the original provider threads live in Gohil's mailbox:
+  **Distribusion** (partner@distribusion.com — demo Retailer API key for
+  bus + ferry), **Direct Ferries** (partnerships@directferries.com —
+  Connect API vs affiliate programme), **Kiwi** (affiliates@kiwi.com —
+  Tequila affiliate or metasearch for LCCs). All confirmed in Sent at
+  20:44 UTC. All Aboard (Carl) and Junction (Hervé) deliberately left to
+  Gohil, who owns those threads and can reply in them.
 
 - 2026-09-03 — **Carl (All Aboard) replied** on the stray booking link: their API
   returns no link at the search or offer stage, so the booking link BlueMurr was
