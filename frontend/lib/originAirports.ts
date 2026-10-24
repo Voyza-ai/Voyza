@@ -4,12 +4,47 @@
  * so the backend doesn't have to re-lookup and the UI can show which
  * airports will be searched.
  *
- * Keep in sync with the backend list. If they drift, the backend still
- * works (it has its own lookup) — frontend will just miss an airport
- * in the pre-fill, not break.
+ * Keep in sync with the backend list. The MULTI_AIRPORT_CITIES table and
+ * the exported functions here are intentionally byte-identical to the
+ * backend copy; `originAirportsParity.test.ts` in both packages parses
+ * the two files off disk and fails if they drift. If you edit one, edit
+ * the other.
+ *
+ * Alias coverage (states, regions, metro aliases)
+ * ------------------------------------------------
+ * Someone typing "from New Jersey" / "Newark" / "Long Island" used to get
+ * NO home flight at all and no error: the lookup missed, `originAirports`
+ * came back empty, and the home-flight search was skipped silently.
+ *
+ * A WRONG airport is worse than none — the traveller gets priced from the
+ * wrong place — so entries are added under two rules:
+ *
+ *   1. SAME-METRO SECONDARIES ONLY. Extra airports are added only when
+ *      they sit in the same metropolitan area as the primary (the existing
+ *      'new york', 'bay area' and 'dc' entries set this precedent), never
+ *      merely "within driving distance". That's why 'connecticut' is BDL
+ *      alone and not BDL+BOS, and 'rhode island' is PVD alone.
+ *   2. ONE DOMINANT REFERENT. A name is only keyed when its plain reading
+ *      overwhelmingly means one place.
+ *
+ * Deliberately NOT keyed, because no single airport is right:
+ *   - States with two or more competing hubs: California (LAX/SFO),
+ *     Texas (DFW/IAH/AUS), Florida (MIA/MCO/TPA), Pennsylvania (PHL/PIT),
+ *     Ohio (CLE/CMH/CVG), North Carolina (CLT/RDU), Virginia (IAD/RIC/ORF),
+ *     Tennessee (BNA/MEM), Missouri (STL/MCI), Wisconsin (MKE/ORD),
+ *     Maine and New Hampshire (PWM/MHT vs BOS).
+ *   - Names that denote two far-apart cities: "Portland" (OR ~2.5M vs ME
+ *     ~0.55M — not dominant enough), "San Jose" (CA vs Costa Rica),
+ *     "Arlington" (VA vs TX), "Alexandria" (VA vs Egypt).
+ *   - Fuzzy regions: "Southern California" (LAX/SAN/SNA),
+ *     "Northern California" (SFO/SMF), "Tri-State", "DMV".
+ *   - Abbreviations that are common English words, where a mis-hit would
+ *     return a wrong airport: IN, OR, HI, ME. ('LA' is already keyed to
+ *     Los Angeles, so Louisiana is not keyed either.)
  */
 
 const MULTI_AIRPORT_CITIES: Record<string, string[]> = {
+  // ── North America
   'new york': ['JFK', 'LGA', 'EWR'],
   nyc: ['JFK', 'LGA', 'EWR'],
   'los angeles': ['LAX', 'BUR', 'LGB'],
@@ -17,9 +52,9 @@ const MULTI_AIRPORT_CITIES: Record<string, string[]> = {
   'san francisco': ['SFO', 'OAK', 'SJC'],
   'bay area': ['SFO', 'OAK', 'SJC'],
   chicago: ['ORD', 'MDW'],
-  washington: ['IAD', 'DCA', 'BWI'],
+  'washington': ['IAD', 'DCA', 'BWI'],
   'washington dc': ['IAD', 'DCA', 'BWI'],
-  dc: ['IAD', 'DCA', 'BWI'],
+  'dc': ['IAD', 'DCA', 'BWI'],
   miami: ['MIA', 'FLL'],
   houston: ['IAH', 'HOU'],
   dallas: ['DFW', 'DAL'],
@@ -31,6 +66,85 @@ const MULTI_AIRPORT_CITIES: Record<string, string[]> = {
   montreal: ['YUL'],
   vancouver: ['YVR'],
   'mexico city': ['MEX', 'NLU'],
+
+  // ── North America: additional US metros. These were missing entirely,
+  // so "from Philadelphia" fell through to the Duffel/getIataCode path
+  // (a network call + an airport_codes DB write) instead of resolving
+  // here. They also back the state aliases below.
+  philadelphia: ['PHL'],
+  baltimore: ['BWI'],
+  phoenix: ['PHX'],
+  'las vegas': ['LAS'],
+  'salt lake city': ['SLC'],
+  minneapolis: ['MSP'],
+  'twin cities': ['MSP'],
+  detroit: ['DTW'],
+  honolulu: ['HNL'],
+  providence: ['PVD'],
+  hartford: ['BDL'],
+
+  // ── US metro aliases: places that ARE a known metro, just under a
+  // different name. Only included where the name has one dominant
+  // referent (see the "deliberately excluded" note in the header).
+  newark: ['EWR', 'JFK', 'LGA'],
+  'jersey city': ['EWR', 'JFK', 'LGA'],
+  hoboken: ['EWR', 'JFK', 'LGA'],
+  'staten island': ['EWR', 'JFK', 'LGA'],
+  brooklyn: ['JFK', 'LGA', 'EWR'],
+  queens: ['JFK', 'LGA', 'EWR'],
+  manhattan: ['JFK', 'LGA', 'EWR'],
+  bronx: ['JFK', 'LGA', 'EWR'],
+  'the bronx': ['JFK', 'LGA', 'EWR'],
+  'long island': ['JFK', 'LGA'],
+  oakland: ['OAK', 'SFO', 'SJC'],
+  'silicon valley': ['SJC', 'SFO', 'OAK'],
+  'fort worth': ['DFW', 'DAL'],
+  'ft worth': ['DFW', 'DAL'],
+  'fort lauderdale': ['FLL', 'MIA'],
+
+  // ── US states + USPS abbreviations. Only states with ONE dominant
+  // airport/metro are here; see the header for the ones left out and why.
+  // NOTE: 'washington' above is Washington DC and must stay that way —
+  // the state is keyed 'washington state' / 'wa'.
+  'new jersey': ['EWR', 'JFK', 'LGA'],
+  nj: ['EWR', 'JFK', 'LGA'],
+  'new york state': ['JFK', 'LGA', 'EWR'],
+  ny: ['JFK', 'LGA', 'EWR'],
+  connecticut: ['BDL'],
+  ct: ['BDL'],
+  'rhode island': ['PVD'],
+  ri: ['PVD'],
+  massachusetts: ['BOS'],
+  ma: ['BOS'],
+  'new england': ['BOS'],
+  delaware: ['PHL'],
+  de: ['PHL'],
+  maryland: ['BWI'],
+  md: ['BWI'],
+  illinois: ['ORD', 'MDW'],
+  il: ['ORD', 'MDW'],
+  georgia: ['ATL'],
+  ga: ['ATL'],
+  arizona: ['PHX'],
+  az: ['PHX'],
+  nevada: ['LAS'],
+  nv: ['LAS'],
+  utah: ['SLC'],
+  ut: ['SLC'],
+  colorado: ['DEN'],
+  co: ['DEN'],
+  minnesota: ['MSP'],
+  mn: ['MSP'],
+  michigan: ['DTW'],
+  mi: ['DTW'],
+  hawaii: ['HNL'],
+  oregon: ['PDX'],
+  vermont: ['BTV'],
+  vt: ['BTV'],
+  'washington state': ['SEA'],
+  wa: ['SEA'],
+
+  // ── Europe
   london: ['LHR', 'LGW', 'STN'],
   paris: ['CDG', 'ORY'],
   moscow: ['SVO', 'DME', 'VKO'],
@@ -48,6 +162,8 @@ const MULTI_AIRPORT_CITIES: Record<string, string[]> = {
   dublin: ['DUB'],
   lisbon: ['LIS'],
   stockholm: ['ARN', 'BMA'],
+
+  // ── Asia
   tokyo: ['HND', 'NRT'],
   osaka: ['KIX', 'ITM'],
   seoul: ['ICN', 'GMP'],
@@ -62,6 +178,8 @@ const MULTI_AIRPORT_CITIES: Record<string, string[]> = {
   manila: ['MNL'],
   delhi: ['DEL'],
   mumbai: ['BOM'],
+
+  // ── Oceania / Middle East / Africa
   sydney: ['SYD'],
   melbourne: ['MEL'],
   dubai: ['DXB', 'DWC'],
@@ -70,6 +188,8 @@ const MULTI_AIRPORT_CITIES: Record<string, string[]> = {
   johannesburg: ['JNB'],
   'cape town': ['CPT'],
   cairo: ['CAI'],
+
+  // ── South America
   'são paulo': ['GRU', 'CGH'],
   'sao paulo': ['GRU', 'CGH'],
   'rio de janeiro': ['GIG', 'SDU'],
@@ -81,27 +201,50 @@ const MULTI_AIRPORT_CITIES: Record<string, string[]> = {
   bogota: ['BOG'],
 };
 
+/**
+ * Normalize a city name for lookup. Strips punctuation, lowercases,
+ * trims whitespace. Leaves accents intact since the keys use them.
+ * Stripping '.' also means "N.J." normalizes onto the 'nj' key.
+ */
 function normalize(name: string): string {
-  return name.toLowerCase().replace(/[,.]/g, '').trim();
+  return name
+    .toLowerCase()
+    .replace(/[,.]/g, '')
+    .trim();
 }
 
+/**
+ * Get up to N airports for a city. Returns an empty array if the city
+ * isn't in the multi-airport map — callers should fall back to
+ * getIataCode() for single-airport cities.
+ */
 export function getOriginAirports(cityName: string, max: number = 3): string[] {
   if (!cityName) return [];
-  const key = normalize(cityName);
-  // Direct hit first. Cities like "mexico city" / "new york city" key
-  // differently — "mexico city" lives in the table, "new york city"
-  // doesn't (it's keyed as "new york").
-  const direct = MULTI_AIRPORT_CITIES[key];
+  const normalized = normalize(cityName);
+  const direct = MULTI_AIRPORT_CITIES[normalized];
   if (direct) return direct.slice(0, max);
   // Fallback: AI parsers commonly produce "<City> City" (e.g. New York
   // → "New York City", Quezon → "Quezon City"). When the bare suffix
   // didn't match, retry without the trailing " city" so the canonical
-  // short form ("new york") gets a hit. Direct lookup always runs first
-  // so "mexico city" is unaffected.
-  if (key.endsWith(' city')) {
-    const stripped = key.slice(0, -' city'.length);
+  // short form gets a hit. Direct lookup runs first so "mexico city",
+  // "salt lake city" and "jersey city" are unaffected (they're keys).
+  //
+  // There is deliberately NO equivalent " state" strip: "washington
+  // state" would strip to "washington", which is Washington DC here and
+  // would price a Seattle traveller out of Dulles. It's keyed directly.
+  if (normalized.endsWith(' city')) {
+    const stripped = normalized.slice(0, -' city'.length);
     const list = MULTI_AIRPORT_CITIES[stripped];
     if (list) return list.slice(0, max);
   }
   return [];
+}
+
+/**
+ * True if the city has multiple known airports (i.e. comparing across
+ * them is worthwhile). Small cities with only 1 airport return false
+ * and we skip the multi-origin search path.
+ */
+export function isMultiAirportCity(cityName: string): boolean {
+  return getOriginAirports(cityName).length > 1;
 }
