@@ -236,6 +236,75 @@ export function buildDayTransportContext(
   return { events, windowStart, windowEnd };
 }
 
+/** Minutes of breathing room left between two consecutive events. */
+export const SLOT_BUFFER_MIN = 15;
+
+/** Shortest block worth putting on the calendar. */
+export const MIN_PLACEABLE_MIN = 30;
+
+/**
+ * Place one event inside its preferred slot without overlapping the
+ * previous event. Returns the event and the new day cursor, or null when
+ * the slot has no usable room left.
+ *
+ * Lifted out of the slot scheduler in `PlanningChat` so the duration
+ * handling is unit-testable on its own; that component now calls this.
+ *
+ * Duration handling — the point of this helper
+ * --------------------------------------------
+ * The slot bounds the rendered block: an event may not run past
+ * `slotEnd`. That part is unchanged. What changed is that the requested
+ * duration is no longer thrown away when it doesn't fit.
+ *
+ * A 4-hour activity in the 10:00-12:00 morning slot still renders
+ * 10:00-12:00, but the event now carries `plannedDurationMin: 240` and
+ * `durationClipped: true`, so callers can tell it apart from a real
+ * 2-hour activity. Before, the 4 hours were lost at this line and were
+ * recoverable from nowhere — not even the notes, which carry the AI's
+ * prose `reason` and need not mention a duration at all.
+ *
+ * What this helper deliberately does NOT do: decide how a clipped event
+ * should look or whether a long activity should overflow into the next
+ * slot. Those are design decisions and need sign-off.
+ */
+export function placeInSlot(params: {
+  /** Current end-of-day position, in minutes since midnight. 0 = nothing placed yet. */
+  cursor: number;
+  /** Earliest minute this event may start. */
+  slotStart: number;
+  /** Latest minute this event may end. */
+  slotEnd: number;
+  /** Duration the event actually wants, in minutes. */
+  desiredDurMin: number;
+  /** Builds the event once the slot maths has settled on a start/end. */
+  make: (startMin: number, endMin: number) => ScheduledEvent;
+}): { event: ScheduledEvent; cursor: number } | null {
+  const { cursor, slotStart, slotEnd, desiredDurMin, make } = params;
+
+  const start = Math.max(
+    slotStart,
+    cursor === 0 ? slotStart : cursor + SLOT_BUFFER_MIN,
+  );
+  if (start >= slotEnd) return null;
+  if (slotEnd - start < MIN_PLACEABLE_MIN) return null;
+
+  // A sub-30-minute or missing duration is treated as 30 minutes, which
+  // is then the honest requested length for clipping purposes too.
+  const requested = Math.max(
+    MIN_PLACEABLE_MIN,
+    Number.isFinite(desiredDurMin) ? desiredDurMin : MIN_PLACEABLE_MIN,
+  );
+  const end = Math.min(slotEnd, start + requested);
+
+  const event: ScheduledEvent = {
+    ...make(start, end),
+    plannedDurationMin: requested,
+  };
+  if (end - start < requested) event.durationClipped = true;
+
+  return { event, cursor: end };
+}
+
 /**
  * Lazy-build path: produce a complete day schedule (transport + spread
  * activities + lunch/dinner restaurants) from the city's curated lists.
