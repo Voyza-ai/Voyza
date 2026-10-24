@@ -219,7 +219,7 @@ silently changes. Sort key: annual passengers descending, then distance. Tested.
 
 | Index | Shape | For |
 |---|---|---|
-| `exact` | `Map<key, PlaceId[]>` | the common path |
+| `exact` | `Map<key, KeyMatch[]>` | the common path — the match carries its provenance |
 | `qualifier` | `Map<key, PlaceId[]>` | country/state names and codes |
 | `iata` | `Map<code, PlaceId>` | `LAX` typed directly — a real input today |
 | `fuzzy` | **trigram inverted index** | typos, only on an exact miss |
@@ -230,6 +230,48 @@ now and a wrong-continent bug later.
 
 **`iata` is not optional.** `LAX` is accepted as an origin today. Without this
 index it falls to fuzzy and matches **Lae, Papua New Guinea** at distance 1.
+
+### A key carries its provenance, and that decides contests
+
+**This is the largest correction integration produced, and nothing in the
+fixture could have found it.** `Place.aliases` mixed two things that are not
+comparable:
+
+- hand-written entries from `curated.ts` — `nyc`, `la`, `the bay area`. These
+  are **decisions** about what travellers mean.
+- GeoNames alternate names — crowd-sourced, and dirty enough to matter.
+
+Measured on the 36,009-place artifact, with the old flat list:
+
+| Input | Answer | Why |
+|---|---|---|
+| `Venice` | **Dayton, Ohio** | GeoNames gives Dayton an alternate name folding to `venice`, and Dayton outranks both real Venices |
+| `Rome` | offered **Lomé, Togo** | Lomé carries the literal alternate name `rome`; prominence gap to Rome, Italy **0.001** |
+| `Washington` | offered Reisterstown MD, South River NJ, Piqua OH, Macomb IL | four towns whose only claim is an alternate name |
+| `la` | offered **Laos**, **Lautém, Timor-Leste** | the curated decision tied with three official codes |
+| `Rome` + trip `Florence, Venice` | **Rome, New York** | the centroid of Florence IT and *Dayton* is 53.0°N 38.4°W, mid-Atlantic |
+
+So every key is indexed with a tier, and a contest keeps only the best tier
+present:
+
+| Tier | Source | Beats |
+|---|---|---|
+| `curated` | `curated.ts`, by hand | everything |
+| `canonical` | the place's own name, or its official ISO/USPS code | aliases |
+| `alias` | a dataset alternate name | nothing |
+
+One narrowing fixed all five rows above with **no per-city exceptions**. It also
+removed 2,937 keys and 0.8 MiB from the trigram index.
+
+The cost is real and worth stating plainly: a place reachable **only** by a
+dataset alias now loses to any place matching the same string canonically. That
+is the same direction as the qualifier guard — it fails toward a question
+rather than toward Togo. Lomé still resolves from `Lome`; it just stops winning
+`Rome`.
+
+**A tier narrows; it never decides.** `Venice` still asks (Italy vs Florida,
+both canonical) and `Paris` still asks. Provenance removes claims that were
+never real; it does not pick winners among real ones.
 
 ### Normalisation is one-to-many
 
@@ -245,6 +287,25 @@ side emits a key set too and unions the hits.
 
 Whitespace collapses to a **single space**, not to nothing: collapsing to
 nothing makes `"New Ark" == "Newark"` and `"Port Land" == "Portland"`.
+
+**A key must come out fully ASCII, and the filter runs per word.** "Has a Latin
+letter somewhere" is the obvious test and it indexed **3,522 mixed-script keys**
+from the real artifact — GeoNames alternate names in scripts the table does not
+cover. They are unreachable from the keyboard that produced the query, so they
+could only cost memory and invent fuzzy neighbours; one of them sits a single
+edit from `shanghai`.
+
+Dropping every mixed string is too blunt, though, so the rule is about **where**
+the foreign script sits. Interleaved inside a word it is failed
+transliteration; in a word of its own it is the same name written twice:
+
+- `東京 Tokyo` → `tokyo` — the word a traveller actually types survives
+- `Ulaanbaatar Хот` → `ulaanbaatar`
+- `shaniግhayi` → nothing
+- `chېngdۇ shەһyr` → nothing
+
+When a real place loses a spelling travellers type, the fix is a new entry in
+the transliteration table, not indexing a form nobody can enter.
 
 ### Fuzzy: trigram, decided by measurement
 
@@ -479,6 +540,73 @@ back with examples.
   assert them. The lists in this document were derived from memory.
 - Performance assertions against the budgets.
 
+## Settled during integration
+
+The resolver and the pipeline were built in parallel against `types.ts`. Where
+they met, five things in this document turned out to be wrong or unreachable.
+Each is recorded with what replaced it, so the next reader does not re-derive
+them — or re-add the one that was removed.
+
+**There is no `'fuzzy'` resolution reason.** Fuzzy *proposes*; it never
+resolves. A near-miss comes back as `unknown.suggestions` and is never applied
+on the traveller's behalf, so the reason was dead code in the contract and is
+gone. `pariss` returns `unknown` with Paris as the first suggestion at edit
+distance 1 — a question the caller can offer in one tap, not a silent
+substitution.
+
+**A bare `LA` is settled by curation, not prominence.** See Abbreviations
+above; the measured gap is 0.016 and the old wording was wrong.
+
+**Non-Latin input is a stated limit, not a silent failure.** The artifact
+carries no native-script keys, so `東京`, `서울` and `القاهرة` cannot hit
+`exact`, and the script guard stops fuzzy proposing a Latin lookalike — without
+it, `東京` proposes "Ba, Ho, Li". The outcome is `unknown` with **no**
+suggestions, which the UI turns into a question. Native-script input is a real
+gap and a phase of its own: it needs the generator to read GeoNames
+`alternateNames` with language filtering, and it is not pretended to work
+today.
+
+**The rule that was tried and removed: no state-beats-city preference.** A
+bare `Delaware` answering with a town of 41,302 in Ohio looks like a bug, and
+an "administrative unit wins" rule was written to fix it. The measurement
+killed it:
+
+| Input | Gap to the state | Outcome |
+|---|---|---|
+| `Delaware` | 0.033 | asks |
+| `Washington` | 0.041 | asks |
+| `NY` | 0.350 | **already resolves** to the state |
+
+`NY` never needed the rule — prominence resolves it outright, with Buffalo and
+Albany in the airport list exactly as the owner asked. And no margin can
+resolve `Delaware` while still asking about `Washington`, where DC and
+Washington State are both real destinations. The two cases are the same shape
+numerically, so preferring the state means answering `Washington` with the
+state, which is wrong. **Delaware asks. That is consistent, not a gap.** It is
+the same finding as `Paris` having the widest prominence gap in the ambiguous
+set: a scalar cannot separate these, and a rule that looks principled is a
+special case in disguise.
+
+**Candidate distance is a number, not text in the label.** `distanceKm` was
+added to `Candidate`; it previously rode inside `label` only because the
+contract was being built in parallel and could not be changed mid-flight.
+
+### The structural fix: test against the real artifact
+
+Every one of the bugs above survived 130 fixture tests, and that is the
+transferable lesson. A fixture holds the collisions someone thought of; 36,009
+real places hold the ones nobody would — that GeoNames writes `venice` on
+Dayton, Ohio, and `rome` on Lomé.
+
+So `locationResolveArtifact.test.ts` runs the pipeline over the **generated
+artifact**, with a must-never list in which every entry is a measured
+regression rather than an imagined one. It costs about a second to build the
+index. Verified by mutation: disabling the provenance narrowing fails six of
+its cases.
+
+Both suites are kept. The fixture stays the place to write a case for a *rule*;
+the artifact suite is the place a case about *data* belongs.
+
 ## Abbreviations
 
 **31 of the 56 US state and territory codes are also ISO country codes** — `CA`
@@ -487,9 +615,24 @@ Massachusetts/Morocco, `LA` three ways between Los Angeles, Louisiana and Laos.
 Only 25 are clean, including `NJ`.
 
 No special-case list. Position (a comma makes the qualifier reading dominate),
-prominence (a bare `LA` means Los Angeles because LAX dwarfs the alternatives as
-an origin) and context carry it. The collision list is not 31 forced questions;
-it is 31 cases where scoring must earn its answer.
+**provenance**, prominence and context carry it. The collision list is not 31
+forced questions; it is 31 cases where scoring must earn its answer.
+
+**Corrected after measurement.** This section used to say prominence settles a
+bare `LA`. It does not, and the resolver agent was right to flag the
+contradiction with rule 4. Measured on the real artifact, `la` reaches ten
+places and prominence puts Los Angeles 0.364 against Louisiana 0.349 — a gap of
+0.016, well inside the 0.10 near-tie margin, with Laos and Lautém, Timor-Leste
+also in the list. Prominence cannot carry it and rule 4 would have asked, since
+the candidates span four countries.
+
+What carries it is that **`la` → Los Angeles is a curated decision**, so the
+curated tier narrows the field to one before the decision ladder runs at all.
+`via` is `curated-alias`, not `prominence`. The same mechanism settles `nyc`,
+which otherwise tied with Manhattan at a 0.037 gap.
+
+Where no curated decision exists, the ladder still applies and `DE`, `IN` and
+`MA` still ask — which is correct, because nobody has decided what those mean.
 
 ## Phases
 

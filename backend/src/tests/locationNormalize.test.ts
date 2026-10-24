@@ -88,8 +88,23 @@ describe('normalizeKeys — the script rule', () => {
     expect(normalizeKeys('Ørsta')).toContain('orsta');
   });
 
-  it('keeps the Latin part of a mixed-script string', () => {
-    expect(normalizeKeys('東京 Tokyo')).toEqual(['東京 tokyo']);
+  it('keeps the Latin WORD of a bilingual name and drops the other script', () => {
+    // The key a traveller can actually type. Indexing "東京 tokyo" — which is
+    // what this used to do — is a key no keyboard reaches by either route.
+    expect(normalizeKeys('東京 Tokyo')).toEqual(['tokyo']);
+    expect(normalizeKeys('Ulaanbaatar Хот')).toEqual(['ulaanbaatar']);
+  });
+
+  it('produces no key when the foreign script is INSIDE the word', () => {
+    // Failed transliteration, not a bilingual name. All three are real
+    // GeoNames alternate names from the generated artifact, and 3,522 of
+    // their kind used to be indexed. The first sits one edit from `shanghai`,
+    // so indexing it does not merely waste memory — it invents a fuzzy
+    // neighbour for a city 24 million people live in.
+    for (const junk of ['shaniጓhayi', 'ch۫ngdۇ shةںyr', 'beȝcinȝ', 'guaнҷu']) {
+      expect(normalizeKeys(junk)).toEqual([]);
+      expect(hasLatinForm(junk)).toBe(false);
+    }
   });
 
   it('is empty, never null, for nothing at all', () => {

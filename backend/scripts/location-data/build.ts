@@ -30,8 +30,13 @@ import { parseAdmin1, parseCountryInfo, type Admin1Row, type CountryRow } from '
 import { Grid, haversineKm, roundCoord, roundKm } from './geo';
 import { fold, hasLatin, parseCsv, parseTsv } from './text';
 
-/** Bumped when the emitted shape changes. */
-export const SCHEMA_VERSION = 1;
+/**
+ * Bumped when the emitted shape changes.
+ *
+ * 2: `Place.curatedAliases` — the hand-written subset of `aliases`, so the
+ *    resolver can trust a curated decision over a GeoNames alternate name.
+ */
+export const SCHEMA_VERSION = 2;
 
 // ─── ASSIGNMENT ──────────────────────────────────────────────────────────────
 //
@@ -739,7 +744,8 @@ export function build(inputs: BuildInputs): BuildResult {
     }
     const ordered = orderAirports(attachments, curatedOrder, MAX_AIRPORTS_CITY);
     if (curatedOrder.length) pinned[id] = [...curatedOrder];
-    const aliases = [...pickAliases(city), ...(extraAliasesByCity.get(city.geonameId) ?? [])];
+    const curatedExtras = extraAliasesByCity.get(city.geonameId) ?? [];
+    const aliases = [...pickAliases(city), ...curatedExtras];
     const deduped: string[] = [];
     const seenAlias = new Set<string>([fold(city.name)]);
     for (const alias of aliases) {
@@ -748,10 +754,21 @@ export function build(inputs: BuildInputs): BuildResult {
       seenAlias.add(key);
       deduped.push(alias);
     }
+    // PROVENANCE, MATCHED BY FOLD KEY AND NOT BY STRING.
+    //
+    // `curatedAliases` must be a subset of `aliases`, and the dedupe above
+    // keeps whichever spelling it saw FIRST — which is the GeoNames one when
+    // both layers carry the same name. Measured: the curated "new york" and
+    // "the big apple" both lose to GeoNames' "New York" and "The Big Apple",
+    // and curated "la" loses to "L.A.". Filtering the deduped list by fold key
+    // marks the spelling that actually survived, so the subset invariant holds
+    // and the curated decision is not silently demoted to a dataset alias.
+    const curatedKeys = new Set(curatedExtras.map(fold));
     places.push({
       id,
       name: city.name,
       aliases: deduped,
+      curatedAliases: deduped.filter((alias) => curatedKeys.has(fold(alias))),
       kind: 'city',
       country: city.country,
       admin: city.admin1 || null,
@@ -775,6 +792,8 @@ export function build(inputs: BuildInputs): BuildResult {
       id: `ap:${airport.iata}`,
       name: syntheticName(airport),
       aliases: [],
+      // Derived from the airport's own municipality, never hand-written.
+      curatedAliases: [],
       kind: 'city',
       country: airport.country,
       admin: airport.isoRegion.includes('-') ? airport.isoRegion.split('-')[1] : null,
@@ -808,7 +827,10 @@ export function build(inputs: BuildInputs): BuildResult {
     places.push({
       id: `cur:${curated.slug}`,
       name: curated.name,
-      aliases: curated.aliases,
+      aliases: [...curated.aliases],
+      // A curated place exists ONLY because it is hand-written: every one of
+      // its aliases is a decision from curated.ts, so the two lists are equal.
+      curatedAliases: [...curated.aliases],
       kind: curated.kind,
       country: curated.country,
       admin: curated.admin,
@@ -894,6 +916,10 @@ export function build(inputs: BuildInputs): BuildResult {
       id: `adm:${code}`,
       name: row.name,
       aliases,
+      // The ascii name and the admin1 code, both from the dump. "LA" reaches
+      // Louisiana through its official code, not through a curated decision —
+      // which is exactly the distinction this field exists to record.
+      curatedAliases: [],
       kind: row.country === 'US' ? 'state' : 'region',
       country: row.country,
       admin: row.admin1,
@@ -943,6 +969,9 @@ export function build(inputs: BuildInputs): BuildResult {
       id: `cty:${country.iso2}`,
       name: country.name,
       aliases: [country.iso2, country.iso3],
+      // ISO 3166-1 alpha-2 and alpha-3, from source. Laos carries "LA"
+      // because that is its country code, not because anyone decided it.
+      curatedAliases: [],
       kind: 'country',
       country: country.iso2,
       admin: null,

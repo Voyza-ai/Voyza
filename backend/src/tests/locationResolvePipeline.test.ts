@@ -332,10 +332,27 @@ describe('the ambiguous list is grouped, capped and distanced', () => {
     ]);
   });
 
-  it('includes the distance in the label when there is something to measure from', () => {
+  it('carries the distance as a number, and keeps the label a clean name', () => {
     const result = run('Paris', { userLatLon: POINTS.newYork });
     if (result.status !== 'ambiguous') throw new Error('expected a question');
-    expect(result.candidates[0].label).toMatch(/Paris, Île-de-France, France · \d+ km away/);
+    const [first] = result.candidates;
+    // The label is a distinguisher, not a sentence: formatting "2,057 km away"
+    // is the UI's job in the UI's locale, and a question is easier to answer
+    // sorted by distance than by prominence.
+    expect(first.label).toBe('Paris, Île-de-France, France');
+    expect(first.distanceKm).toBeGreaterThan(5_000);
+    expect(first.distanceKm).toBeLessThan(6_500);
+    for (const candidate of result.candidates) {
+      expect(typeof candidate.distanceKm).toBe('number');
+    }
+  });
+
+  it('omits the distance when there is nothing to measure from', () => {
+    const result = run('Paris');
+    if (result.status !== 'ambiguous') throw new Error('expected a question');
+    for (const candidate of result.candidates) {
+      expect(candidate.distanceKm).toBeUndefined();
+    }
   });
 
   it('carries the airports on every candidate, in the artifact order', () => {
@@ -378,5 +395,86 @@ describe('input handling', () => {
     run('Zzzz');
     expect(JSON.stringify(FIXTURE_ARTIFACT.places.slice(0, 20))).toBe(before);
     expect([index.exact.size, index.qualifier.size, index.iata.size]).toEqual(sizes);
+  });
+});
+
+/**
+ * Key provenance — the narrowing that `KeyTier` exists for.
+ *
+ * Every fixture row these cases touch was added because the REAL artifact
+ * behaves this way, so the fixture and `locationResolveArtifact.test.ts` test
+ * the same rule from both ends: readable cases here, 36,009 real places there.
+ *
+ * Negative control: every case in this suite fails if `narrowToBestTier` stops
+ * filtering (verified by mutation — it takes six tests across the two suites
+ * down with it).
+ */
+describe('key provenance — a name outranks another place’s alternate name', () => {
+  it('does not offer Lomé as a Rome', () => {
+    // 'Rome' is a dataset alias on Lomé and its own name on three cities. In
+    // the real artifact the prominence gap between Lomé and Rome, Italy is
+    // 0.001, so nothing but provenance could ever have separated them.
+    const result = run('Rome');
+    expect(ids(result)).not.toContain('p-lome-tg');
+    expect(ids(result)).toContain('p-rome-it');
+  });
+
+  it('still finds Lomé by its own name', () => {
+    // The narrowing must not cost the place its own identity: it loses the
+    // contest for `Rome`, it does not disappear.
+    expect(resolvedIds(run('Lome'))).toEqual(['p-lome-tg']);
+    expect(resolvedIds(run('Lomé'))).toEqual(['p-lome-tg']);
+  });
+
+  it('does not answer Venice with the more prominent Dayton', () => {
+    // Dayton outranks both real Venices on prominence, so before provenance
+    // existed it won outright — and poisoned any trip centroid built from it.
+    const result = run('Venice');
+    expect(ids(result)).not.toContain('p-dayton-oh');
+    expect(ids(result)).toEqual(expect.arrayContaining(['p-venice-it', 'p-venice-fl']));
+  });
+
+  it('reads a trip through Florence and Venice as the Italian one', () => {
+    const result = run('Rome', { tripDestinationNames: ['Florence', 'Venice'] });
+    expect(resolvedIds(result)).toEqual(['p-rome-it']);
+    if (result.status === 'resolved') expect(result.via).toBe('trip-context');
+  });
+
+  it('lets a curated alias beat an official code on the same letters', () => {
+    // `LA` is Los Angeles by decision, Louisiana and Laos by ISO/USPS code.
+    // A code is canonical and still loses, because curation is a choice
+    // someone made about what travellers mean.
+    const result = run('la');
+    expect(resolvedIds(result)).toEqual(['p-losangeles']);
+    if (result.status === 'resolved') expect(result.via).toBe('curated-alias');
+  });
+
+  it('does not let a curated alias leak into the qualifier pass', () => {
+    // The guard that makes `Baton Rouge, LA` Louisiana is about KIND, not
+    // tier, and curation must not create a back door into it.
+    expect(resolvedIds(run('Baton Rouge, LA'))).toEqual(['p-batonrouge']);
+  });
+
+  it('narrows the field without deciding it', () => {
+    // The point of the narrowing is to remove places that never had a claim,
+    // not to pick a winner. Dayton goes; the two real Venices both own the
+    // name, so the question survives and the traveller still chooses.
+    const result = run('Venice');
+    expect(result.status).toBe('ambiguous');
+    if (result.status === 'ambiguous') expect(result.reason).toBe('multi-country');
+  });
+
+  it('leaves a same-name contest to prominence when both names are the places’ own', () => {
+    // Delaware the state against Delaware, Ohio: both canonical, so provenance
+    // has nothing to say and the near-tie margin decides. Here the state wins
+    // outright because the fixture's gap is wide.
+    //
+    // In the REAL artifact that gap is 0.033 and this same input ASKS, which
+    // `locationResolveArtifact.test.ts` asserts. Both outcomes are correct for
+    // their data, and that is the distinction worth keeping visible: this rule
+    // is a measurement about two places, not a rule about states and cities.
+    const result = run('Delaware');
+    expect(resolvedIds(result)).toEqual(['s-us-de']);
+    if (result.status === 'resolved') expect(result.via).toBe('prominence');
   });
 });

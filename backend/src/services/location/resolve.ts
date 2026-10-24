@@ -25,12 +25,14 @@
 
 import type {
   Candidate,
+  KeyMatch,
+  KeyTier,
   Place,
   ResolveContext,
   Resolution,
   ResolutionReason,
 } from './types';
-import type { BuiltIndex } from './buildIndex';
+import { keyTierRank, type BuiltIndex } from './buildIndex';
 import { DEFAULT_OPTIONS, fuzzyDistanceFor, type ResolverOptions } from './options';
 import { keysForQuery, splitSegments } from './normalize';
 import { centroidOf, haversineKm, type LatLon } from './geo';
@@ -142,21 +144,73 @@ function prune(candidates: Place[], options: ResolverOptions): Place[] {
   return kept.length > 0 ? kept : candidates;
 }
 
-function placesForKeys(keys: string[], index: BuiltIndex): Place[] {
-  const out: Place[] = [];
-  const seen = new Set<string>();
+/**
+ * Keep only the best-attested matches, and report which tier won.
+ *
+ * This is the single most valuable narrowing in the file after the qualifier
+ * guard, and it is a correction to measured behaviour rather than a
+ * refinement. Against the real artifact, before it existed:
+ *
+ *   Venice     -> Dayton, Ohio          (top candidate!)
+ *   Rome       -> offered Lomé, Togo
+ *   Washington -> offered Reisterstown MD, South River NJ, Piqua OH, Macomb IL
+ *   la         -> offered Laos and Lautém, Timor-Leste
+ *
+ * Every one of those is a GeoNames alternate name competing on equal footing
+ * with a city's own name. They are not equal: a place's own name is a fact
+ * about the place, an alternate name is a crowd-sourced annotation, and the
+ * crowd has written "venice" on Dayton. Keeping only the best tier present
+ * removed all four without a single per-city exception.
+ *
+ * The cost is real and worth stating: a place reachable ONLY by a dataset
+ * alias now loses to any place matching the same string canonically. That is
+ * the intended trade — it is the same direction as the qualifier guard, and it
+ * fails toward a question rather than toward Togo.
+ */
+function narrowToBestTier(matches: KeyMatch[]): { matches: KeyMatch[]; tier: KeyTier | null } {
+  if (matches.length === 0) return { matches, tier: null };
+  let best = matches[0].tier;
+  for (const match of matches) {
+    if (keyTierRank(match.tier) > keyTierRank(best)) best = match.tier;
+  }
+  return { matches: matches.filter((m) => m.tier === best), tier: best };
+}
+
+function matchesForKeys(keys: string[], index: BuiltIndex): KeyMatch[] {
+  const out: KeyMatch[] = [];
+  const seen = new Map<string, KeyMatch>();
   for (const key of keys) {
-    for (const id of index.exact.get(key) ?? []) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const place = index.byId.get(id);
-      if (place) out.push(place);
+    for (const match of index.exact.get(key) ?? []) {
+      const held = seen.get(match.id);
+      if (!held) {
+        const copy = { id: match.id, tier: match.tier };
+        seen.set(match.id, copy);
+        out.push(copy);
+        continue;
+      }
+      // The same place reached under two keys of the query keeps its better
+      // reading: `Köln` yields both `koln` and `koeln` and only one of them
+      // need be the canonical spelling.
+      if (keyTierRank(match.tier) > keyTierRank(held.tier)) held.tier = match.tier;
     }
   }
   return out;
 }
 
-function label(place: Place, index: BuiltIndex, reference: LatLon | null): string {
+function placesOf(matches: KeyMatch[], index: BuiltIndex): Place[] {
+  const out: Place[] = [];
+  for (const match of matches) {
+    const place = index.byId.get(match.id);
+    if (place) out.push(place);
+  }
+  return out;
+}
+
+function placesForKeys(keys: string[], index: BuiltIndex): Place[] {
+  return placesOf(narrowToBestTier(matchesForKeys(keys, index)).matches, index);
+}
+
+function label(place: Place, index: BuiltIndex): string {
   const parts: string[] = [place.name];
   // A part that repeats the name adds nothing: the state of Georgia should
   // read "Georgia, United States", not "Georgia, Georgia, United States", and
@@ -172,12 +226,7 @@ function label(place: Place, index: BuiltIndex, reference: LatLon | null): strin
   }
   push(index.countryNames.get(place.country.toUpperCase()) ?? place.country);
 
-  let text = parts.join(', ');
-  // `Candidate` has no distance field, so the distance the doc asks us to show
-  // rides in the label. Flagged for the owner rather than changing the shared
-  // contract, which a parallel agent is building against.
-  if (reference) text += ` · ${Math.round(haversineKm(reference, place))} km away`;
-  return text;
+  return parts.join(', ');
 }
 
 function candidateOf(
@@ -188,9 +237,13 @@ function candidateOf(
 ): Candidate {
   const candidate: Candidate = {
     place,
-    label: label(place, index, reference),
+    label: label(place, index),
     airports: place.airports,
   };
+  // Distance is a number on the candidate, not text inside its label: the UI
+  // formats and sorts by it. Earlier this rode in `label` only because the
+  // contract was being built in parallel and could not be changed.
+  if (reference) candidate.distanceKm = Math.round(haversineKm(reference, place));
   if (editDistance !== undefined) candidate.editDistance = editDistance;
   return candidate;
 }
@@ -351,10 +404,16 @@ function decide(
   options: ResolverOptions,
   qualified: boolean,
   depth: number,
+  matchTier: KeyTier | null,
 ): Resolution {
   const reference = context.userLatLon ?? null;
   if (candidates.length === 1) {
-    return answer(candidates[0], qualified ? 'qualifier-pinned' : 'exact-unique', index, reference);
+    const via: ResolutionReason = qualified
+      ? 'qualifier-pinned'
+      : matchTier === 'curated'
+        ? 'curated-alias'
+        : 'exact-unique';
+    return answer(candidates[0], via, index, reference);
   }
 
   if (context.userLatLon) {
@@ -419,7 +478,10 @@ function suggest(
   const hits = new Map<string, number>(); // place id -> best edit distance
   for (const key of headKeys) {
     for (const hit of index.fuzzy.search(key, fuzzyDistanceFor(key.length), options.maxSuggestions * 4)) {
-      for (const id of index.exact.get(hit.key) ?? []) {
+      // Narrowed per key, so the alias-only junk hanging off one near-miss
+      // cannot crowd out the canonical places found under it. Without this,
+      // a typo for `venice` still offers Dayton, Ohio.
+      for (const { id } of narrowToBestTier(index.exact.get(hit.key) ?? []).matches) {
         const best = hits.get(id);
         if (best === undefined || hit.distance < best) hits.set(id, hit.distance);
       }
@@ -481,7 +543,10 @@ function resolveAt(
   // `Ord` is Ord, Nebraska. Mixed case falls through to `exact` first.
   if (iataAllowed && head === head.toUpperCase()) return answer(iataHit, 'iata-code', index, reference);
 
-  const exactHits = placesForKeys(headKeys, index);
+  const { matches: bestMatches, tier: matchTier } = narrowToBestTier(
+    matchesForKeys(headKeys, index),
+  );
+  const exactHits = placesOf(bestMatches, index);
   if (exactHits.length === 0) {
     if (iataAllowed) return answer(iataHit, 'iata-code', index, reference);
     return suggest(headKeys, qualifiers, index, reference, options);
@@ -501,7 +566,7 @@ function resolveAt(
   }
 
   const pruned = prune(narrowed, options);
-  return decide(pruned, context, index, options, qualifiers.length > 0, depth);
+  return decide(pruned, context, index, options, qualifiers.length > 0, depth, matchTier);
 }
 
 /**

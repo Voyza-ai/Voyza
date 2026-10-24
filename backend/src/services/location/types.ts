@@ -43,6 +43,17 @@ export type Place = {
    * "the bay area", "silicon valley", "nyc" — which no open dataset covers.
    */
   aliases: string[];
+  /**
+   * The subset of `aliases` that was HAND-WRITTEN in
+   * scripts/location-data/curated.ts rather than taken from a dataset.
+   *
+   * A curated alias is a decision ("nyc" IS New York City); a dataset
+   * alternate name is an observation, and GeoNames' observations are dirty
+   * enough to matter — Lomé, Togo carries the literal alternate name "rome".
+   * The resolver trusts the two differently, so the provenance has to survive
+   * into the artifact. Empty for the overwhelming majority of places.
+   */
+  curatedAliases: string[];
   kind: PlaceKind;
   country: CountryCode;
   /** State / province / admin1 code, where the place has one. */
@@ -113,21 +124,38 @@ export type ResolveContext = {
   tripDestinationNames?: string[];
 };
 
-/** Why a resolution came out the way it did. Logged, and shown in tests. */
+/**
+ * Why a resolution came out the way it did. Logged, and shown in tests.
+ *
+ * There is deliberately no `'fuzzy'` reason. Fuzzy matching never resolves —
+ * a near-miss comes back as `unknown.suggestions` for the caller to offer, and
+ * is never applied on the traveller's behalf. Silently turning `pariss` into a
+ * city is exactly the confident-wrong this design refuses.
+ */
 export type ResolutionReason =
   | 'exact-unique'
   | 'qualifier-pinned'
+  | 'curated-alias'
   | 'user-location'
   | 'trip-context'
   | 'prominence'
-  | 'iata-code'
-  | 'fuzzy';
+  | 'iata-code';
 
 export type Candidate = {
   place: Place;
   /** Human-readable distinguisher: "Paris, Île-de-France, France". */
   label: string;
   airports: PlaceAirport[];
+  /**
+   * Great-circle km from whatever the resolver measured against — the
+   * traveller's position if it had one, otherwise the trip centroid.
+   *
+   * A structured field rather than text inside `label`, because the caller
+   * needs to sort and format it: "2,057 km away" belongs to the UI's locale,
+   * and a question ordered by distance is easier to answer than one ordered by
+   * prominence. Absent when there was nothing to measure from.
+   */
+  distanceKm?: number;
   /** Populated on the fuzzy path so a caller can show "did you mean". */
   editDistance?: number;
 };
@@ -163,10 +191,45 @@ export type Resolution =
       suggestions: Candidate[];
     };
 
+/**
+ * Where a key came from, and therefore how far it is trusted.
+ *
+ * Measured on the real artifact, not imagined: Lomé, Togo carries the literal
+ * GeoNames alternate name "rome", which put Togo in the candidate list for
+ * every `Rome` query. GeoNames alternate names are user-contributed and dirty
+ * at that level, so a key that matches one place's OWN NAME and another's
+ * alternate name is not a tie, and treating it as one is how a traveller gets
+ * offered Togo.
+ *
+ * Ordered weakest-last; `KEY_TIER_RANK` in buildIndex.ts is the comparable
+ * form. The resolver keeps only the best tier present for a key.
+ */
+export type KeyTier =
+  /**
+   * Hand-written in scripts/location-data/curated.ts. A decision, not an
+   * observation: "nyc" IS New York City, and no amount of dataset evidence
+   * about Manhattan's alternate names outvotes that.
+   */
+  | 'curated'
+  /** The place's own display name, or its official code (ISO 3166-1, USPS). */
+  | 'canonical'
+  /** A dataset alternate name. Useful, and the least trustworthy of the three. */
+  | 'alias';
+
+/** One place found under a key, with the provenance of the match. */
+export type KeyMatch = {
+  id: string;
+  tier: KeyTier;
+};
+
 /** Lookup indexes, built once per process from the artifact. */
 export type LocationIndex = {
-  /** Normalised key -> place ids. One place yields MANY keys. */
-  exact: Map<string, string[]>;
+  /**
+   * Normalised key -> the places found under it, with provenance. One place
+   * yields MANY keys, and the same key can reach different places with very
+   * different authority — see `KeyTier`.
+   */
+  exact: Map<string, KeyMatch[]>;
   /**
    * Country / state / region names and codes. MULTI-VALUED: a single-valued
    * map cannot hold both Georgia-the-state and Georgia-the-country.

@@ -43,6 +43,13 @@ type Row = {
   rank?: number | null;
   metro?: string | null;
   aliases?: string[];
+  /**
+   * The hand-written subset of `aliases`. Listed separately here for the same
+   * reason the artifact carries it separately: a curated alias is a decision
+   * and outranks a dataset alternate name. Entries must also appear in
+   * `aliases`, which `place()` enforces.
+   */
+  curated?: string[];
   airports?: AirportSpec[];
 };
 
@@ -52,10 +59,20 @@ function place(row: Row): Place {
     km,
     servesPlace: serves ?? true,
   }));
+  const aliases = row.aliases ?? [];
+  const curated = row.curated ?? [];
+  // A fixture that drifts from the contract is worse than no fixture, and this
+  // is the one invariant a typo can break silently.
+  for (const entry of curated) {
+    if (!aliases.includes(entry)) {
+      throw new Error(`fixture ${row.id}: curated alias ${entry} is missing from aliases`);
+    }
+  }
   return {
     id: row.id,
     name: row.name,
-    aliases: row.aliases ?? [],
+    aliases,
+    curatedAliases: curated,
     kind: row.kind,
     country: row.country,
     admin: row.admin ?? null,
@@ -138,7 +155,7 @@ const CITIES: Row[] = [
   { id: 'p-telaviv', name: 'Tel Aviv', kind: 'city', country: 'IL', admin: 'TA', lat: 32.0853, lon: 34.7818, pop: 460_613, rank: 24_800_000, metro: 'TLV', aliases: ['Tel Aviv-Yafo', 'Tel-Aviv'], airports: [['TLV', 15], ['SDV', 3, false]] },
   { id: 'p-casablanca', name: 'Casablanca', kind: 'city', country: 'MA', admin: 'CAS', lat: 33.5731, lon: -7.5898, pop: 3_359_818, rank: 10_300_000, aliases: ['Dar el Beida'], airports: [['CMN', 30]] },
   { id: 'p-batonrouge', name: 'Baton Rouge', kind: 'city', country: 'US', admin: 'LA', lat: 30.4515, lon: -91.1871, pop: 227_470, rank: 780_000, airports: [['BTR', 11], ['MSY', 125, false]] },
-  { id: 'p-losangeles', name: 'Los Angeles', kind: 'city', country: 'US', admin: 'CA', lat: 34.0522, lon: -118.2437, pop: 3_898_747, rank: 88_000_000, metro: 'LAX', aliases: ['LA', 'L.A.', 'Los Ángeles'], airports: [['LAX', 27], ['BUR', 19], ['LGB', 32], ['SNA', 58, false], ['ONT', 61, false]] },
+  { id: 'p-losangeles', name: 'Los Angeles', kind: 'city', country: 'US', admin: 'CA', lat: 34.0522, lon: -118.2437, pop: 3_898_747, rank: 88_000_000, metro: 'LAX', aliases: ['LA', 'L.A.', 'Los Ángeles'], curated: ['LA', 'L.A.'], airports: [['LAX', 27], ['BUR', 19], ['LGB', 32], ['SNA', 58, false], ['ONT', 61, false]] },
   { id: 'p-burbank', name: 'Burbank', kind: 'city', country: 'US', admin: 'CA', lat: 34.1808, lon: -118.309, pop: 107_337, rank: 4_600_000, airports: [['BUR', 5], ['LAX', 30, false]] },
   { id: 'p-vancouver-bc', name: 'Vancouver', kind: 'city', country: 'CA', admin: 'BC', lat: 49.2827, lon: -123.1207, pop: 662_248, rank: 26_000_000, metro: 'YVR', airports: [['YVR', 12], ['BLI', 90, false], ['YYJ', 70, false]] },
   { id: 'p-vancouver-wa', name: 'Vancouver', kind: 'city', country: 'US', admin: 'WA', lat: 45.6387, lon: -122.6615, pop: 190_915, rank: 1_400_000, airports: [['PDX', 15, false], ['SEA', 220, false]] },
@@ -164,7 +181,29 @@ const CITIES: Row[] = [
   { id: 'p-providence-ut', name: 'Providence', kind: 'city', country: 'US', admin: 'UT', lat: 41.7055, lon: -111.8172, pop: 7_652 },
   { id: 'p-sanjose-ca', name: 'San Jose', kind: 'city', country: 'US', admin: 'CA', lat: 37.3382, lon: -121.8863, pop: 1_013_240, rank: 12_300_000, aliases: ['San José'], airports: [['SJC', 7], ['SFO', 50, false], ['OAK', 55, false]] },
   { id: 'p-sanjose-cr', name: 'San José', kind: 'city', country: 'CR', admin: 'SJ', lat: 9.9281, lon: -84.0907, pop: 342_188, rank: 4_800_000, aliases: ['San Jose'], airports: [['SJO', 20]] },
-  { id: 'p-washington-dc', name: 'Washington', kind: 'city', country: 'US', admin: 'DC', lat: 38.9072, lon: -77.0369, pop: 712_816, rank: 24_000_000, metro: 'WAS', aliases: ['Washington, D.C.', 'Washington DC', 'DC'], airports: [['DCA', 7], ['IAD', 42], ['BWI', 50, false]] },
+  { id: 'p-washington-dc', name: 'Washington', kind: 'city', country: 'US', admin: 'DC', lat: 38.9072, lon: -77.0369, pop: 712_816, rank: 24_000_000, metro: 'WAS', aliases: ['Washington, D.C.', 'Washington DC', 'DC'], curated: ['DC'], airports: [['DCA', 7], ['IAD', 42], ['BWI', 50, false]] },
+
+  // ─── Rows that reproduce what the REAL artifact does ─────────────────────
+  //
+  // Everything below is copied from behaviour measured against the generated
+  // artifact, not invented. Before key provenance existed, each of these beat
+  // or tied the place a traveller actually meant.
+
+  // A town two states away from the state that shares its name. `Delaware`
+  // used to come back as a near-tie question between this and the state.
+  { id: 'p-delaware-oh', name: 'Delaware', kind: 'city', country: 'US', admin: 'OH', lat: 40.2987, lon: -83.0680, pop: 41_302, airports: [['CMH', 40]] },
+
+  // THE DAYTON CASE. GeoNames gives Dayton, Ohio a literal alternate name that
+  // folds to `venice`, and Dayton is the more prominent place, so `Venice`
+  // resolved to Dayton — and a trip of "Florence, Venice" put its centroid in
+  // the middle of the Atlantic at 53.0N 38.4W.
+  { id: 'p-dayton-oh', name: 'Dayton', kind: 'city', country: 'US', admin: 'OH', lat: 39.7589, lon: -84.1916, pop: 137_644, rank: 2_900_000, aliases: ['Venice'], airports: [['DAY', 15]] },
+  { id: 'p-venice-it', name: 'Venice', kind: 'city', country: 'IT', admin: 'VEN', lat: 45.4408, lon: 12.3155, pop: 258_685, rank: 11_600_000, aliases: ['Venezia'], airports: [['VCE', 13], ['TSF', 31, false]] },
+  { id: 'p-venice-fl', name: 'Venice', kind: 'city', country: 'US', admin: 'FL', lat: 27.0998, lon: -82.4543, pop: 25_463, airports: [['SRQ', 35]] },
+
+  // THE LOMÉ CASE. A dataset alias that is another city's whole name, on a
+  // different continent. It was offered as a candidate for every `Rome`.
+  { id: 'p-lome-tg', name: 'Lomé', kind: 'city', country: 'TG', admin: 'MA', lat: 6.1319, lon: 1.2228, pop: 837_437, rank: 1_400_000, aliases: ['Lome', 'Rome'], airports: [['LFW', 6]] },
 
   // ─── Trip-context destinations, both genuinely ambiguous ───
   { id: 'p-rome-it', name: 'Rome', kind: 'city', country: 'IT', admin: 'LAZ', lat: 41.9028, lon: 12.4964, pop: 2_872_800, rank: 48_000_000, metro: 'ROM', aliases: ['Roma'], airports: [['FCO', 27], ['CIA', 15]] },
@@ -193,9 +232,9 @@ const CITIES: Row[] = [
   { id: 'p-ord-ne', name: 'Ord', kind: 'city', country: 'US', admin: 'NE', lat: 41.6033, lon: -98.9342, pop: 2_037, airports: [['GRI', 95, false]] },
 
   // ─── Metro and curated alias layer ───
-  { id: 'm-nyc', name: 'New York', kind: 'city', country: 'US', admin: 'NY', lat: 40.7128, lon: -74.006, pop: 8_335_897, rank: 110_000_000, metro: 'NYC', aliases: ['New York City', 'NYC', 'the big apple'], airports: [['JFK', 21], ['EWR', 17], ['LGA', 13]] },
+  { id: 'm-nyc', name: 'New York', kind: 'city', country: 'US', admin: 'NY', lat: 40.7128, lon: -74.006, pop: 8_335_897, rank: 110_000_000, metro: 'NYC', aliases: ['New York City', 'NYC', 'the big apple'], curated: ['NYC', 'the big apple'], airports: [['JFK', 21], ['EWR', 17], ['LGA', 13]] },
   { id: 'p-newark', name: 'Newark', kind: 'city', country: 'US', admin: 'NJ', lat: 40.7357, lon: -74.1724, pop: 311_549, rank: 46_300_000, airports: [['EWR', 5], ['LGA', 25, false], ['JFK', 30, false]] },
-  { id: 'm-bayarea', name: 'San Francisco Bay Area', kind: 'metro', country: 'US', admin: 'CA', lat: 37.7749, lon: -122.4194, pop: 7_750_000, rank: 57_000_000, metro: 'QSF', aliases: ['the bay area', 'bay area', 'silicon valley'], airports: [['SFO', 20], ['OAK', 18], ['SJC', 55]] },
+  { id: 'm-bayarea', name: 'San Francisco Bay Area', kind: 'metro', country: 'US', admin: 'CA', lat: 37.7749, lon: -122.4194, pop: 7_750_000, rank: 57_000_000, metro: 'QSF', aliases: ['the bay area', 'bay area', 'silicon valley'], curated: ['the bay area', 'bay area', 'silicon valley'], airports: [['SFO', 20], ['OAK', 18], ['SJC', 55]] },
 ];
 
 export const FIXTURE_ARTIFACT: LocationArtifact = {

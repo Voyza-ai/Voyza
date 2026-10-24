@@ -1,6 +1,6 @@
 {
- "schemaVersion": 1,
- "generatedAt": "2026-10-24T18:56:57.406Z",
+ "schemaVersion": 2,
+ "generatedAt": "2026-10-24T19:18:07.597Z",
  "basis": "ourairports-type-ordinal",
  "ranks": {
   "AAA": 2,

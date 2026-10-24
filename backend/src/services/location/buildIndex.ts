@@ -17,8 +17,16 @@
  * map is a wrong-continent bug waiting for a rebuild to reorder the input.
  */
 
-import type { IataCode, LocationArtifact, LocationIndex, Place, PlaceKind } from './types';
-import { keysFor, normalizeKeys } from './normalize';
+import type {
+  IataCode,
+  KeyMatch,
+  KeyTier,
+  LocationArtifact,
+  LocationIndex,
+  Place,
+  PlaceKind,
+} from './types';
+import { normalizeKeys, tieredKeysFor } from './normalize';
 import { buildTrigramIndex } from './trigram';
 import { prominenceOf } from './prominence';
 
@@ -86,8 +94,38 @@ function pushUnique(map: Map<string, string[]>, key: string, id: string): void {
   if (!existing.includes(id)) existing.push(id);
 }
 
+/** Comparable form of `KeyTier`. Higher is more trusted. */
+const KEY_TIER_RANK: Record<KeyTier, number> = {
+  curated: 3,
+  canonical: 2,
+  alias: 1,
+};
+
+export function keyTierRank(tier: KeyTier): number {
+  return KEY_TIER_RANK[tier];
+}
+
+/**
+ * Add a (key, place) match, keeping the BEST provenance when the same place
+ * reaches the same key twice — a string that is both the curated alias and a
+ * dataset alternate name is a curated match.
+ */
+function pushMatch(map: Map<string, KeyMatch[]>, key: string, id: string, tier: KeyTier): void {
+  const existing = map.get(key);
+  if (!existing) {
+    map.set(key, [{ id, tier }]);
+    return;
+  }
+  const held = existing.find((m) => m.id === id);
+  if (!held) {
+    existing.push({ id, tier });
+    return;
+  }
+  if (KEY_TIER_RANK[tier] > KEY_TIER_RANK[held.tier]) held.tier = tier;
+}
+
 export function buildIndex(artifact: LocationArtifact): BuiltIndex {
-  const exact = new Map<string, string[]>();
+  const exact = new Map<string, KeyMatch[]>();
   const qualifier = new Map<string, string[]>();
   const iata = new Map<IataCode, string>();
   const byId = new Map<string, Place>();
@@ -112,7 +150,7 @@ export function buildIndex(artifact: LocationArtifact): BuiltIndex {
       adminNames.set(`${place.country.toUpperCase()}:${place.admin.toUpperCase()}`, place.name);
     }
 
-    const keys = keysFor(place);
+    const keys = tieredKeysFor(place);
     // Codes come from the TYPED fields, not from `aliases`.
     //
     // `Berlin, DE` has to work, and the only way to know that `DE` means
@@ -121,13 +159,21 @@ export function buildIndex(artifact: LocationArtifact): BuiltIndex {
     // contract guarantees those fields; it says nothing about aliases
     // containing codes. A numeric admin code (GeoNames emits some) normalises
     // to no key at all and is dropped, which is the correct outcome.
-    if (place.kind === 'country') keys.push(...normalizeKeys(place.country));
+    //
+    // An official code is CANONICAL: `LA` means Louisiana as surely as
+    // "Louisiana" does. It still loses to a curated alias, which is what makes
+    // `la` resolve to Los Angeles rather than offering the traveller Laos.
+    const codeTexts: string[] = [];
+    if (place.kind === 'country') codeTexts.push(place.country);
     if (place.kind === 'state' || place.kind === 'region') {
-      keys.push(...normalizeKeys(place.admin));
+      if (place.admin) codeTexts.push(place.admin);
+    }
+    for (const text of codeTexts) {
+      for (const key of normalizeKeys(text)) keys.push({ key, tier: 'canonical' });
     }
 
-    for (const key of keys) {
-      pushUnique(exact, key, place.id);
+    for (const { key, tier } of keys) {
+      pushMatch(exact, key, place.id, tier);
       if (QUALIFIER_KINDS.has(place.kind)) pushUnique(qualifier, key, place.id);
     }
 

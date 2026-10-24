@@ -29,7 +29,7 @@
  *    emit. See the note in docs: this is stricter than the doc's wording.
  */
 
-import type { Place } from './types';
+import type { KeyTier, Place } from './types';
 
 /**
  * Letters NFD cannot touch, lowercase only — `prepare()` lowercases first.
@@ -104,6 +104,39 @@ const ASCII_ONLY = /^[\x20-\x7e]*$/;
 const NEEDS_DUAL = /[äöüÄÖÜ]/;
 
 /**
+ * The part of a key a Latin keyboard could actually produce, or null.
+ *
+ * "At least one Latin letter somewhere" is the obvious test and it was wrong,
+ * measured: it indexed 3,522 mixed-script keys from the real artifact, GeoNames
+ * alternate names written in scripts our table does not cover. None of them is
+ * reachable from the keyboard that produced the query, so they could only cost
+ * memory in the trigram index and invent fuzzy neighbours for real words - one
+ * of them sits a single edit from `shanghai`.
+ *
+ * Dropping every mixed string is too blunt, though: a bilingual name like
+ * "東京 Tokyo" is genuine and its Latin half is exactly what a traveller
+ * types. What separates the two cases is WHERE the foreign script sits.
+ * Interleaved inside a word it is failed transliteration; in a word of its own
+ * it is the same name written twice. So the filter runs per word, keeping the
+ * words that survived transliteration whole and dropping the rest. A name
+ * carrying both scripts keeps its Latin word; a single corrupt word keeps
+ * nothing.
+ *
+ * When a real place loses a spelling travellers type, the fix is a new entry in
+ * `TRANSLITERATE`, not indexing a form nobody can enter.
+ */
+function latinPortion(key: string): string | null {
+  if (!key) return null;
+  if (ASCII_ONLY.test(key)) return LATIN_LETTER.test(key) ? key : null;
+  const kept = key
+    .split(' ')
+    .filter((word) => ASCII_ONLY.test(word))
+    .join(' ')
+    .trim();
+  return kept && LATIN_LETTER.test(kept) ? kept : null;
+}
+
+/**
  * Every key the given text can be found under, deduped, best-first (the plain
  * transliteration before the German dual form). Empty when the text carries no
  * Latin letter — which is how the script guard stays honest.
@@ -116,8 +149,9 @@ export function normalizeKeys(raw: string | null | undefined): string[] {
   if (ASCII_ONLY.test(base)) return LATIN_LETTER.test(base) ? [base] : [];
 
   const out: string[] = [];
-  const add = (key: string): void => {
-    if (!key || !LATIN_LETTER.test(key)) return;
+  const add = (raw: string): void => {
+    const key = latinPortion(raw);
+    if (!key) return;
     if (!out.includes(key)) out.push(key);
   };
 
@@ -133,12 +167,42 @@ export const keysForQuery = normalizeKeys;
 
 /** Every key a place is indexed under: its display name plus every alias. */
 export function keysFor(place: Place): string[] {
-  const out: string[] = [];
-  for (const text of [place.name, ...(place.aliases ?? [])]) {
-    for (const key of normalizeKeys(text)) {
-      if (!out.includes(key)) out.push(key);
+  return tieredKeysFor(place).map((k) => k.key);
+}
+
+/** A key together with where it came from. */
+export type TieredKey = { key: string; tier: KeyTier };
+
+/**
+ * Every key a place is indexed under, each carrying its provenance.
+ *
+ * Emitted best-tier-first and deduped on the key, so a string that is both a
+ * curated alias and a dataset alternate name keeps the curated reading. That
+ * ordering is the whole mechanism — see `KeyTier` for the Lomé/"rome" case it
+ * exists to settle.
+ *
+ * Official codes are NOT here. They come from the typed `country` / `admin`
+ * fields and are added by the index builder, which is the only place that
+ * knows a code is a code rather than a two-letter name.
+ */
+export function tieredKeysFor(place: Place): TieredKey[] {
+  const out: TieredKey[] = [];
+  const seen = new Set<string>();
+
+  const addAll = (texts: readonly string[], tier: KeyTier): void => {
+    for (const text of texts) {
+      for (const key of normalizeKeys(text)) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ key, tier });
+      }
     }
-  }
+  };
+
+  addAll(place.curatedAliases ?? [], 'curated');
+  addAll([place.name], 'canonical');
+  addAll(place.aliases ?? [], 'alias');
+
   return out;
 }
 

@@ -12,18 +12,26 @@
 
 import { buildIndex } from '../services/location/buildIndex';
 import { FIXTURE_ARTIFACT } from '../services/location/fixtures/artifact';
+import type { KeyTier } from '../services/location/types';
 
 const index = buildIndex(FIXTURE_ARTIFACT);
+
+/** Place ids under a key, provenance dropped. */
+const at = (key: string): string[] => (index.exact.get(key) ?? []).map((m) => m.id);
+
+/** The provenance a given place's match under a key carries. */
+const tierAt = (key: string, id: string): KeyTier | undefined =>
+  index.exact.get(key)?.find((m) => m.id === id)?.tier;
 
 describe('exact — normalised key to place ids, multi-valued', () => {
   it('holds every spelling of one place', () => {
     for (const key of ['koln', 'koeln', 'cologne']) {
-      expect(index.exact.get(key)).toEqual(['p-koln']);
+      expect(at(key)).toEqual(['p-koln']);
     }
   });
 
   it('holds every place sharing one name', () => {
-    const ids = index.exact.get('paris') ?? [];
+    const ids = at('paris');
     expect(ids).toContain('p-paris-fr');
     expect(ids).toContain('p-paris-tx');
     expect(ids).toContain('p-paris-ky');
@@ -32,15 +40,17 @@ describe('exact — normalised key to place ids, multi-valued', () => {
   it('derives two-letter keys from the typed fields, not from aliases', () => {
     // Nothing in the fixture lists "DE" or "TX" as an alias. The index reads
     // `country` on a country place and `admin` on a state.
-    expect(index.exact.get('de')).toEqual(expect.arrayContaining(['c-de', 's-us-de']));
-    expect(index.exact.get('tx')).toEqual(['s-us-tx']);
-    expect(index.exact.get('ny')).toEqual(['s-us-ny']);
+    expect(at('de')).toEqual(expect.arrayContaining(['c-de', 's-us-de']));
+    expect(at('tx')).toEqual(['s-us-tx']);
+    expect(at('ny')).toEqual(['s-us-ny']);
+    // And a code is CANONICAL, so it is not outranked by another place's
+    // alternate name for the same letters — only by a curated decision.
+    expect(tierAt('de', 'c-de')).toBe('canonical');
+    expect(tierAt('de', 's-us-de')).toBe('canonical');
   });
 
   it('indexes a bare state so it can offer every airport that serves it', () => {
-    expect(index.exact.get('new york')).toEqual(
-      expect.arrayContaining(['s-us-ny', 'm-nyc']),
-    );
+    expect(at('new york')).toEqual(expect.arrayContaining(['s-us-ny', 'm-nyc']));
   });
 });
 

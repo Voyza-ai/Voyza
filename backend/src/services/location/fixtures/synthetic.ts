@@ -69,6 +69,9 @@ export function syntheticArtifact(count: number, seed = 20_260_101): LocationArt
       id: `syn-${i}`,
       name: name[0].toUpperCase() + name.slice(1),
       aliases: random() < 0.3 ? [`${name} city`] : [],
+      // Synthetic places are all dataset-grade: curation is hand work and the
+      // real artifact has a couple of dozen entries, not 50,000.
+      curatedAliases: [],
       kind: 'city',
       country,
       admin: `A${Math.floor(random() * 50)}`,

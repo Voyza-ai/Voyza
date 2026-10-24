@@ -202,6 +202,9 @@ describe('location artifact: shape and scale', () => {
       if (typeof place.id !== 'string' || !place.id) problems.push(`bad id: ${place.id}`);
       if (typeof place.name !== 'string' || !place.name) problems.push(`${place.id}: bad name`);
       if (!Array.isArray(place.aliases)) problems.push(`${place.id}: aliases not an array`);
+      if (!Array.isArray(place.curatedAliases)) {
+        problems.push(`${place.id}: curatedAliases not an array (${place.curatedAliases})`);
+      }
       if (!kinds.includes(place.kind)) problems.push(`${place.id}: bad kind ${place.kind}`);
       if (!/^[A-Z]{2}$/.test(place.country)) problems.push(`${place.id}: bad country ${place.country}`);
       if (place.admin !== null && typeof place.admin !== 'string') {
@@ -428,6 +431,108 @@ describe('location artifact: golden set', () => {
     const longIsland = findPlaces({ name: 'long island' });
     expect(longIsland.map((p) => p.country).sort()).toEqual(['BS', 'US']);
     expect(iatas(expectPlace({ name: 'long island', country: 'US' }))[0]).toBe('JFK');
+  });
+});
+
+// ─── Alias provenance ────────────────────────────────────────────────────────
+
+describe('location artifact: curated aliases are marked as such', () => {
+  // `aliases` mixes two things the resolver has to trust differently: a
+  // hand-written decision from `scripts/location-data/curated.ts` ("nyc" IS
+  // New York City) and a GeoNames alternate name, which is user-contributed
+  // and measurably dirty. `curatedAliases` is the marker subset, and it exists
+  // because of the Lomé case asserted below.
+
+  it('is a subset of aliases on every place, and empty on almost all of them', () => {
+    const problems: string[] = [];
+    let nonEmpty = 0;
+    for (const place of places) {
+      if (!Array.isArray(place.curatedAliases)) {
+        problems.push(`${place.id}: curatedAliases is not an array`);
+        continue;
+      }
+      if (place.curatedAliases.length) nonEmpty++;
+      for (const alias of place.curatedAliases) {
+        // The invariant the resolver relies on: a marked alias is always
+        // present in `aliases` too, so nothing that reads `aliases` changes
+        // meaning and the marker can be applied by lookup.
+        if (!place.aliases.includes(alias)) {
+          problems.push(`${place.id} ${place.name}: curated "${alias}" is not in aliases`);
+        }
+      }
+      if (problems.length > 20) break;
+    }
+    expect(problems).toEqual([]);
+    // Non-vacuous in both directions: the invariant has to be exercised, and a
+    // generator that marked everything curated would pass the subset check.
+    expect(nonEmpty).toBeGreaterThan(10);
+    expect(nonEmpty).toBeLessThan(100);
+    expect(places.reduce((n, p) => n + p.curatedAliases.length, 0)).toBeGreaterThan(20);
+  });
+
+  it('marks the colloquial names that were decided by hand', () => {
+    // Qualified by kind where the bare name is also a state: "dc" is curated
+    // on Washington the CITY, while the District reaches it through its own
+    // admin1 code — the same distinction as Louisiana below.
+    for (const [query, alias] of [
+      [{ name: 'San Francisco Bay Area' }, 'the bay area'],
+      [{ name: 'Silicon Valley' }, 'silicon valley'],
+      [{ name: 'New York City', country: 'US', kind: 'city' }, 'nyc'],
+      [{ name: 'Los Angeles', country: 'US', kind: 'city' }, 'la'],
+      [{ name: 'Washington', country: 'US', kind: 'city' }, 'dc'],
+      [{ name: 'San Francisco', country: 'US', kind: 'city' }, 'sf'],
+    ] as Array<[Query, string]>) {
+      const place = expectPlace(query);
+      expect(place.curatedAliases).toContain(alias);
+      expect(place.aliases).toContain(alias);
+    }
+    // And the District of Columbia, which answers "dc" too, does NOT claim it.
+    expect(expectPlace({ name: 'dc', country: 'US', kind: 'state' }).curatedAliases).toEqual([]);
+  });
+
+  it('does NOT mark a dataset alternate name — the Lomé "rome" case', () => {
+    // Lomé, Togo literally carries the GeoNames alternate name "rome", which
+    // puts Togo in the candidate list for every `Rome` query. The data is NOT
+    // cleaned here: the alias stays, and the provenance is what lets the
+    // resolver outrank it.
+    const lome = expectPlace({ name: 'Lomé', country: 'TG' });
+    expect(lome.aliases).toContain('rome');
+    expect(lome.curatedAliases).not.toContain('rome');
+    expect(lome.curatedAliases).toEqual([]);
+
+    // Rome itself is unaffected, and reaches "rome" by its own name.
+    const rome = expectPlace({ name: 'Rome', country: 'IT', kind: 'city' });
+    expect(iatas(rome)[0]).toBe('FCO');
+  });
+
+  it('does NOT mark an official code — "LA" is Louisiana and Laos by code', () => {
+    // Both match "la" through ISO 3166-1 / the admin1 code, not through a
+    // curated decision, so neither may claim the curated tier that makes "la"
+    // mean Los Angeles.
+    const louisiana = expectPlace({ name: 'Louisiana', country: 'US', kind: 'state' });
+    expect(louisiana.aliases).toContain('LA');
+    expect(louisiana.curatedAliases).toEqual([]);
+
+    const laos = places.find((p) => p.id === 'cty:LA');
+    expect(laos).toBeDefined();
+    expect(laos!.aliases).toContain('LA');
+    expect(laos!.curatedAliases).toEqual([]);
+
+    expect(expectPlace({ name: 'la', country: 'US' }).name).toBe('Los Angeles');
+  });
+
+  it('marks nothing on a plain GeoNames city', () => {
+    for (const [name, country] of [
+      ['Paros', 'GR'],
+      ['Buffalo', 'US'],
+      ['Florence', 'IT'],
+      ['Campbeltown', 'GB'],
+    ] as const) {
+      const place = expectPlace({ name, country });
+      expect(place.curatedAliases).toEqual([]);
+      // ...while still carrying dataset aliases, so this is not an empty read.
+      if (name === 'Florence') expect(place.aliases).toContain('Firenze');
+    }
   });
 });
 
