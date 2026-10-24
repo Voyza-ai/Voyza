@@ -3,8 +3,8 @@ import { getIataCode, searchFlights } from './flights';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
-import { originAirports as resolveOrigin } from './location/shadow';
-import type { OriginCandidate } from './location/originAirports';
+import { originAirports as resolveOrigin, compare as compareOriginAirports } from './location/shadow';
+import { resolveOriginAirports, type OriginCandidate } from './location/originAirports';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
 
 type CityInput = {
@@ -110,6 +110,48 @@ export type HomeLeg = {
    */
   alternatives?: Omit<HomeLeg, 'alternatives'>[];
 };
+
+/**
+ * Log how the resolver would have answered an origin the caller supplied
+ * airports for. Serves nothing, decides nothing, never throws.
+ *
+ * Exists because `optimize` honours a non-empty `originAirports` verbatim and
+ * never looks anything up — which is correct, and which also means the
+ * frontend's own lookup, not `LOCATION_RESOLVER_MODE`, decides what gets
+ * priced. Without this call the shadow log would be blind to the path real
+ * trips take.
+ */
+function observeSuppliedOrigin(
+  origin: string,
+  supplied: string[],
+  cities: Array<{ name: string }>,
+): void {
+  try {
+    const resolution = resolveOriginAirports(
+      origin,
+      { tripDestinationNames: cities.map((c) => c.name) },
+      supplied.length,
+    );
+    const diff = compareOriginAirports(supplied, resolution.airports);
+    if (!diff && !resolution.needsClarification) return;
+    logger.info('location-shadow supplied-origin', {
+      input: origin,
+      served: 'caller',
+      supplied,
+      resolver: resolution.airports,
+      kind: diff?.kind,
+      placeId: resolution.placeId,
+      needsClarification: resolution.needsClarification?.reason,
+    });
+  } catch (err) {
+    // Observation must never cost a planning run. A resolver fault here is a
+    // missing log line, not a failed trip.
+    logger.warn('location-shadow observation failed', {
+      input: origin,
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 /**
  * An origin name that had more than one real reading, carried out on the
@@ -844,7 +886,18 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   let originClarification: OriginClarification | undefined;
   if (hasOrigin) {
     if (originAirports && originAirports.length > 0) {
+      // The caller already decided, and we serve that decision verbatim —
+      // but we still COMPARE, because otherwise shadow mode learns nothing
+      // from the path almost every real trip takes.
+      //
+      // The frontend pre-fills `originAirports` from its own lookup, so this
+      // branch is the normal case and the `else` below is the exception. A
+      // shadow log that only fills from the exception would say the resolver
+      // agrees with the table on traffic that never exercised either of them,
+      // and the flip to `live` would rest on that. There is one Supabase
+      // project and it holds real trips.
       resolvedOriginAirports = originAirports;
+      observeSuppliedOrigin(origin!, originAirports, cities);
     } else {
       const resolution = resolveOrigin(origin!, {
         // The destinations are the strongest context available here and cost

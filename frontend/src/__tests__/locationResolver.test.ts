@@ -20,10 +20,12 @@
 import {
   DEFAULT_MAX_AIRPORTS,
   hotSetInfo,
+  originAirportsForCity,
   originAirportsLocally,
   resolveLocally,
   resolveLocation,
 } from '@/lib/locationResolver';
+import { MULTI_AIRPORT_CITY_KEYS, getOriginAirports } from '@/lib/originAirports';
 
 describe('answers the common inputs without a round trip', () => {
   it.each([
@@ -228,5 +230,80 @@ describe('the shipped hot set', () => {
     expect(hotSetInfo.artifact.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(hotSetInfo.keys).toBeGreaterThan(3_000);
     expect(hotSetInfo.places).toBeGreaterThan(300);
+  });
+});
+
+/**
+ * The rollout composition, and the two regressions that found it.
+ *
+ * Both were found by rendering the real planner and driving the origin step,
+ * not by a unit test — which is why they are pinned here now that the throwaway
+ * probe that found them is gone.
+ *
+ * Negative control: both cases fail if `originAirportsForCity` stops leading
+ * with the table and calls `originAirportsLocally` directly.
+ */
+describe('originAirportsForCity — the table leads, the resolver fills gaps', () => {
+  const realFetch = global.fetch;
+  beforeEach(() => {
+    // No network at all. The point of leading with the table is that these
+    // answers do not depend on a round trip, so a test that allowed one would
+    // not be testing the thing that broke.
+    global.fetch = jest.fn(() => {
+      throw new Error('originAirportsForCity must not touch the network');
+    }) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  it('answers a comma-qualified city offline, which is what regressed', () => {
+    // `Newark, NJ` came back with NO airports through the planner: the hot set
+    // carries no `newark nj` key, so it needed the server, and without it the
+    // traveller got nothing. The table has always answered this offline.
+    expect(originAirportsForCity('Newark, NJ')).toEqual(getOriginAirports('Newark, NJ'));
+    expect(originAirportsForCity('Newark, NJ').length).toBeGreaterThan(0);
+    expect(originAirportsForCity('Newark, NJ')[0]).toBe('EWR');
+
+    for (const input of ['Jersey City, NJ', 'Brooklyn, NY', 'Hartford, CT', 'Portland, Oregon']) {
+      expect(originAirportsForCity(input)).toEqual(getOriginAirports(input));
+      expect(originAirportsForCity(input).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps the table’s reading where the two disagree', () => {
+    // `Washington` is the one key of 132 where the resolver and the table
+    // genuinely disagree about WHICH PLACE is meant: the table chose DC, the
+    // resolver asks and leads with Washington state. Until the flip is
+    // justified by the shadow log, the table's answer is the one served —
+    // the frontend's value wins, because optimizer.ts uses it verbatim.
+    expect(originAirportsForCity('Washington')).toEqual(getOriginAirports('Washington'));
+    expect(originAirportsForCity('Washington')[0]).toBe('IAD');
+    // And the resolver alone would have said otherwise, which is what makes
+    // this assertion worth having rather than a tautology.
+    expect(originAirportsLocally('Washington')[0]).not.toBe('IAD');
+  });
+
+  it('falls through to the resolver only where the table is silent', () => {
+    // The whole value of the change: inputs the table never answered.
+    for (const input of ['Paris, Texas', 'Baton Rouge, LA', 'Tbilisi, Georgia']) {
+      expect(getOriginAirports(input)).toEqual([]);
+    }
+    // These need the server, which is blocked here, so the sync path is empty
+    // — the honest offline outcome. `resolveLocation` is what reaches them.
+    expect(originAirportsForCity('Paris, Texas')).toEqual([]);
+  });
+
+  it('agrees with the table on every key the table answers', () => {
+    // The phase-5 gate, from the browser's side: the composition can never be
+    // worse than the table it leads with.
+    let compared = 0;
+    for (const key of MULTI_AIRPORT_CITY_KEYS) {
+      const table = getOriginAirports(key);
+      if (table.length === 0) continue;
+      expect(originAirportsForCity(key)).toEqual(table);
+      compared++;
+    }
+    expect(compared).toBeGreaterThanOrEqual(130);
   });
 });

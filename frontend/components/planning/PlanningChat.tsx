@@ -15,8 +15,12 @@ import { parseLocal, toIso } from '@/lib/dateHelpers';
 import { buildDayTransportContext, placeInSlot } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { vibesFromAnswer } from '@/lib/vibeMap';
-// Type-only, so it is erased at compile time — the resolver itself still
-// arrives through the `await import()` at each call site below.
+// `originAirportsForCity` is a VALUE import, so the 60 KB hot set lands in
+// this chunk. That is deliberate and it is what a hot set is for: the planner
+// is exactly the screen that has to answer an origin while someone types, and
+// a round trip per keystroke would be slower than the table this replaces.
+// The async `resolveLocation` still arrives through the `await import()` at
+// each call site below, so the long-tail path stays lazy.
 import { originAirportsForCity, type LocationAnswer } from '@/lib/locationResolver';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
