@@ -100,6 +100,27 @@ export type ScheduledEvent = {
   category?: 'activity' | 'restaurant' | 'transport' | 'free' | 'custom';
   /** Optional notes */
   notes?: string;
+  /**
+   * How long this event actually needs, in minutes, independent of the
+   * block `startTime`/`endTime` describe.
+   *
+   * The slot scheduler bounds an event by its time slot, so a 4-hour
+   * activity dropped into the 10:00-12:00 morning slot renders as a
+   * 2-hour block. The requested length used to be discarded at that
+   * point and survived nowhere, so nothing downstream could tell a
+   * genuine 2-hour activity from a clipped 4-hour one.
+   *
+   * Set by `placeInSlot`. Rendering still follows startTime/endTime —
+   * how a clipped event should LOOK is a design decision and is not
+   * made here.
+   */
+  plannedDurationMin?: number;
+  /**
+   * True when the slot cut the event short, i.e. `plannedDurationMin` is
+   * longer than `endTime - startTime`. Derivable from the two, but kept
+   * explicit so consumers don't have to re-parse the times.
+   */
+  durationClipped?: boolean;
 };
 
 export type Vibe =

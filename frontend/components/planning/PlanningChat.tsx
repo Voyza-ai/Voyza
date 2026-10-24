@@ -12,7 +12,7 @@ import { hotelFromResult } from '@/lib/hotelShape';
 import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput } from '@/lib/parseDate';
 import { parseLocal, toIso } from '@/lib/dateHelpers';
-import { buildDayTransportContext } from '@/lib/dayScheduleDefaults';
+import { buildDayTransportContext, placeInSlot } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { vibesFromAnswer } from '@/lib/vibeMap';
 import IntentPicker from './IntentPicker';
@@ -1180,10 +1180,16 @@ export default function PlanningChat() {
      * previous event. Returns the event (and the new cursor) or null if
      * there's no room left in the slot.
      *
+     * Thin wrapper over `placeInSlot` (lib/dayScheduleDefaults), which
+     * owns the slot maths and records the requested duration on the
+     * event instead of discarding it. Kept as a local wrapper so the
+     * positional call sites below read unchanged.
+     *
      * - `cursor`        current end-of-day position in minutes since midnight
      * - `slotStartMin`  earliest minute this event should start
      * - `slotEndMin`    latest minute this event may end
-     * - `desiredDurMin` AI-provided duration; clamped to fit the slot
+     * - `desiredDurMin` AI-provided duration; bounds the block to the slot,
+     *                   and is preserved as `plannedDurationMin`
      */
     const tryPlace = (
       cursor: number,
@@ -1191,16 +1197,14 @@ export default function PlanningChat() {
       slotEndMin: number,
       desiredDurMin: number,
       make: (startMin: number, endMin: number) => ScheduledEvent,
-    ): { event: ScheduledEvent; cursor: number } | null => {
-      // Leave a 15-minute buffer between events so the day doesn't feel packed.
-      const BUFFER = 15;
-      const start = Math.max(slotStartMin, cursor === 0 ? slotStartMin : cursor + BUFFER);
-      if (start >= slotEndMin) return null;
-      // Need at least 30 minutes of room to justify scheduling anything.
-      if (slotEndMin - start < 30) return null;
-      const end = Math.min(slotEndMin, start + Math.max(30, desiredDurMin));
-      return { event: make(start, end), cursor: end };
-    };
+    ): { event: ScheduledEvent; cursor: number } | null =>
+      placeInSlot({
+        cursor,
+        slotStart: slotStartMin,
+        slotEnd: slotEndMin,
+        desiredDurMin,
+        make,
+      });
 
     const makeActivityEvent =
       (s: ActivitySuggestion) =>
@@ -1224,10 +1228,17 @@ export default function PlanningChat() {
         notes: `${r.priceRange} · ${r.reason}`,
       });
 
-    // Time slots in minutes-since-midnight. Activities get capped to fit,
-    // which means a 4-hour "Great Wall hike" in the morning slot renders as
-    // a 2-hour block (10:00 → 12:00) — the full duration stays in the event
-    // notes for the user to see.
+    // Time slots in minutes-since-midnight. A slot still bounds the
+    // rendered block, so a 4-hour "Great Wall hike" in the morning slot
+    // renders 10:00 → 12:00 as before — but the event now carries
+    // plannedDurationMin: 240 and durationClipped: true, so the real
+    // length is no longer lost. (The previous note here claimed the
+    // duration survived in the event notes; it did not — notes carry the
+    // AI's prose `reason`, which need not mention hours at all.)
+    //
+    // Whether a long activity should overflow into the afternoon, or
+    // render truncated with a label, is a DESIGN decision and is still
+    // open — see the PR. Nothing here changes how the day looks.
     const SLOT = {
       breakfast: [8 * 60, 9 * 60 + 30] as [number, number],          // 08:00–09:30
       morning:   [10 * 60, 12 * 60] as [number, number],             // 10:00–12:00
