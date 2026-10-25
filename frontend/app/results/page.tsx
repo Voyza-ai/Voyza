@@ -468,13 +468,11 @@ function ResultsPageInner() {
             <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
           )}
           {currentTrip.originClarification && currentTrip.origin && (
-            <div className="px-1 pb-2">
-              <OriginClarification
-                clarification={currentTrip.originClarification}
-                pricedFrom={currentTrip.origin.airports ?? []}
-                onChoose={chooseOrigin}
-              />
-            </div>
+            <OriginClarification
+              clarification={currentTrip.originClarification}
+              pricedFrom={currentTrip.origin.airports ?? []}
+              onChoose={chooseOrigin}
+            />
           )}
 
           {/* Full-height cards area */}

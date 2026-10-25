@@ -13,7 +13,8 @@ import type { Trip } from '@/lib/types';
  * by the time the origin matters and cannot stop to ask. That is the right
  * trade, but it leaves a trip whose every flight and every price is for a city
  * the traveller may not have meant, with nothing on screen saying a choice was
- * made. This is that line.
+ * made — the home card just reads "Portland · PDX", which looks correct unless
+ * you happen to know PDX is Oregon. This is that line.
  *
  * It SHOWS, it does not block: the trip is already priced and visible, and
  * this sits underneath it. Picking another reading re-prices rather than
@@ -24,17 +25,17 @@ import type { Trip } from '@/lib/types';
  * 36,009 places. `Portland`, `Springfield`, `Melbourne` and `Venice` are the
  * shape of it.
  *
- * Palette is the home card's own (Flowchart.tsx `HOME_COLOR`), because this is
- * about the home leg and should read as part of it rather than as a system
- * notice. No new colour, no glow, no gradient.
+ * Styled as a sibling of BudgetOverBanner and VibeTierUpBanner, which share
+ * this slot: a 10% accent wash, a 30% accent border, a round icon chip at 18%,
+ * and body copy in grey rather than the accent. The accent is --accent /
+ * --flight (#2e6bc4) — already this app's flight colour, and deliberately not
+ * the banners' amber, because amber here means something is wrong and this is
+ * just a fact about what was priced.
  */
 
-/** Same values as `HOME_COLOR` in Flowchart.tsx — this belongs to the home card. */
-const HOME = {
-  bg: '#FDE2E2',
-  text: '#7C1A1A',
-  border: '#F0B8B8',
-};
+/** --accent in globals.css, which is also --flight. */
+const ACCENT = '46,107,196';
+const ACCENT_HEX = '#2e6bc4';
 
 export type OriginChoice = {
   placeId: string;
@@ -68,25 +69,30 @@ export default function OriginClarification({
   const lead = pricedFrom[0] ?? chosen.airports[0] ?? '';
 
   return (
-    <div
-      className="rounded-2xl border px-4 py-3"
-      style={{ background: HOME.bg, borderColor: HOME.border }}
-    >
-      <div className="flex items-start gap-2.5">
-        <MapPin size={15} className="mt-0.5 flex-shrink-0" style={{ color: HOME.text }} />
+    <div className="mx-8 mt-4 mb-1">
+      <div
+        className="flex items-start gap-3 px-4 py-3 rounded-xl border"
+        style={{
+          background: `linear-gradient(90deg, rgba(${ACCENT},0.10) 0%, rgba(${ACCENT},0.04) 100%)`,
+          borderColor: `rgba(${ACCENT},0.30)`,
+        }}
+      >
+        <div
+          className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5"
+          style={{ background: `rgba(${ACCENT},0.18)` }}
+        >
+          <MapPin size={14} style={{ color: ACCENT_HEX }} />
+        </div>
 
-        <div className="flex-1 min-w-0">
-          <div className="text-[13px] leading-snug" style={{ color: HOME.text }}>
-            Flying from <span className="font-semibold">{chosen.label}</span>
-            {lead && (
-              <span className="font-mono text-[11px] tracking-wider" style={{ color: `${HOME.text}99` }}>
-                {' '}
-                ({lead})
-              </span>
-            )}
-          </div>
+        <div className="flex-1 min-w-0 text-[13px] leading-relaxed">
+          <span className="text-gray-700">
+            Flying from <strong className="text-gray-900">{chosen.label}</strong>
+          </span>
+          {lead && (
+            <span className="text-gray-400 font-mono text-[11px] tracking-wider"> ({lead})</span>
+          )}
 
-          <div className="text-[12px] mt-0.5" style={{ color: `${HOME.text}cc` }}>
+          <div className="text-gray-500 mt-1">
             {/* The traveller's own words, so it is obvious why we had to pick. */}
             You typed &ldquo;{clarification.input}&rdquo;, which matches{' '}
             {clarification.candidates.length} places.{' '}
@@ -94,16 +100,24 @@ export default function OriginClarification({
               type="button"
               onClick={() => setOpen((v) => !v)}
               className="underline underline-offset-2 font-medium"
-              style={{ color: HOME.text }}
+              style={{ color: ACCENT_HEX }}
             >
               {open ? 'Hide' : alternatives.length === 1 ? 'See the other' : 'See the others'}
             </button>
           </div>
 
           {open && (
-            <ul className="mt-2.5 flex flex-col gap-1.5">
+            /* Across the row, not stacked. This banner is the full width of
+               the cards area and the alternatives are one line each, so
+               stacking them left most of that width empty. `flex-1` with a
+               floor shares the row between however many there are, and wraps
+               once they stop fitting. */
+            <ul className="mt-2.5 flex flex-wrap gap-2">
               {alternatives.map((candidate) => (
-                <li key={candidate.placeId}>
+                /* The cap only bites when there is a single alternative,
+                   which would otherwise stretch one short row across the
+                   whole banner. Two or more never reach it. */
+                <li key={candidate.placeId} className="flex-1 min-w-[220px] max-w-[520px]">
                   <button
                     type="button"
                     disabled={!onChoose}
@@ -114,27 +128,24 @@ export default function OriginClarification({
                         airports: candidate.airports,
                       })
                     }
-                    className="w-full text-left rounded-xl px-3 py-2 border transition-colors disabled:cursor-default"
-                    style={{
-                      borderColor: HOME.border,
-                      background: 'rgba(255,255,255,0.55)',
-                      color: HOME.text,
-                    }}
+                    className="w-full h-full text-left rounded-lg px-3 py-2 border bg-white transition-colors enabled:hover:border-gray-300 disabled:cursor-default"
+                    style={{ borderColor: '#e5e7eb' }}
                   >
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-[12px] font-medium truncate">{candidate.label}</span>
-                      <span
-                        className="text-[10px] font-mono uppercase tracking-wider flex-shrink-0"
-                        style={{ color: `${HOME.text}99` }}
-                      >
-                        {candidate.airports.slice(0, 3).join(' · ')}
+                      <span className="text-[12px] font-medium text-gray-900 truncate">
+                        {candidate.label}
+                      </span>
+                      <span className="flex items-baseline gap-2 flex-shrink-0 text-[10px]">
+                        <span className="font-mono uppercase tracking-wider text-gray-500">
+                          {candidate.airports.slice(0, 3).join(' · ')}
+                        </span>
+                        {candidate.distanceKm !== undefined && (
+                          <span className="text-gray-400">
+                            {candidate.distanceKm.toLocaleString()} km away
+                          </span>
+                        )}
                       </span>
                     </div>
-                    {candidate.distanceKm !== undefined && (
-                      <div className="text-[10px] mt-0.5" style={{ color: `${HOME.text}88` }}>
-                        {candidate.distanceKm.toLocaleString()} km away
-                      </div>
-                    )}
                   </button>
                 </li>
               ))}
