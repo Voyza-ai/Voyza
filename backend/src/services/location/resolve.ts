@@ -186,16 +186,48 @@ function spacedQualifierSplit(
   head: string,
   index: BuiltIndex,
 ): { head: string; qualifiers: QualifierSegment[] } | null {
-  const words = head.split(' ').filter((w) => w.length > 0);
+  let words = head.split(' ').filter((w) => w.length > 0);
   if (words.length < 2) return null;
 
-  for (let i = 1; i < words.length; i += 1) {
-    const raw = words.slice(i).join(' ');
-    const places = qualifierPlaces(raw, index);
-    if (places.length === 0) continue;
-    return { head: words.slice(0, i).join(' '), qualifiers: [{ raw, places }] };
+  // Peel REPEATEDLY, which is what makes this a mirror of the comma pass
+  // rather than an approximation of it. `splitHead` consumes qualifier
+  // segments until one is not a qualifier; a single peel here could only ever
+  // handle one.
+  //
+  // Measured, a single peel left `brooklyn new york usa` and
+  // `shanghai shanghai china` unresolved while their comma forms resolved
+  // fine — so the browser hot set, which keys answers by the comma-free form,
+  // stored an answer the server would not give.
+  const qualifiers: QualifierSegment[] = [];
+  let peeled = true;
+  while (peeled && words.length > 1) {
+    // STOP as soon as what is left is a name we recognise. This is the same
+    // guard that lets the pass run at all — it only fires after `exact`
+    // missed on the WHOLE head — applied again after every peel.
+    //
+    // Without it, repeated peeling walks straight through real names:
+    // `new jersey nj` peels `nj`, leaving `new jersey`, and then peels
+    // `jersey` (a country) to leave "New". Measured; it broke `new delhi
+    // delhi` and `new jersey us` the same way.
+    if (qualifiers.length > 0 && matchesForKeys(keysForQuery(words.join(' ')), index).length > 0) {
+      break;
+    }
+    peeled = false;
+    // Longest first: `new jersey` beats `jersey`, and the head keeps its own
+    // words. See the note above on `baton rouge la`.
+    for (let i = 1; i < words.length; i += 1) {
+      const raw = words.slice(i).join(' ');
+      const places = qualifierPlaces(raw, index);
+      if (places.length === 0) continue;
+      qualifiers.unshift({ raw, places });
+      words = words.slice(0, i);
+      peeled = true;
+      break;
+    }
   }
-  return null;
+
+  if (qualifiers.length === 0) return null;
+  return { head: words.join(' '), qualifiers };
 }
 
 /**
@@ -692,8 +724,20 @@ function resolveAt(
     const spaced = spacedQualifierSplit(head, index);
     if (spaced) {
       const combined = [...spaced.qualifiers, ...qualifiers];
-      const { matches, tier } = narrowToBestTier(matchesForKeys(keysForQuery(spaced.head), index));
-      const retry = prune(narrow(placesOf(matches, index), combined), options);
+      // QUALIFIER BEFORE PROVENANCE here too, for the same reason as the main
+      // path above and found the same way: `washington ut` resolved to
+      // nothing, because the curated `washington` reading is Washington DC
+      // and narrowing to it first left the `ut` qualifier with nothing to
+      // match. The comma form `Washington, Utah` worked, so the two
+      // disagreed — and the browser hot set, which keys answers by their
+      // normalised comma-free form, stored one and the server gave the other.
+      const spacedMatches = matchesForKeys(keysForQuery(spaced.head), index);
+      const spacedQualified = narrow(placesOf(spacedMatches, index), combined);
+      const keepIds = new Set(spacedQualified.map((place) => place.id));
+      const { matches, tier } = narrowToBestTier(
+        spacedMatches.filter((match) => keepIds.has(match.id)),
+      );
+      const retry = prune(placesOf(matches, index), options);
       if (retry.length > 0) return decide(retry, context, index, options, true, depth, tier);
     }
 

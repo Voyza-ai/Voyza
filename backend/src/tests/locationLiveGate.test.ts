@@ -1,34 +1,38 @@
 /**
- * The gate for flipping `LOCATION_RESOLVER_MODE` to `live`.
+ * The resolver against every answer the retired hand-written table gave.
  *
- * There is one Supabase project and it holds real trips, so "the tests pass"
- * is not enough evidence to change which airport someone flies from. This
- * suite is the evidence, and it is runnable on demand rather than a week of
- * waiting: the table being replaced ships with its own test suite, which is a
- * census of 132 real inputs with answers a human chose.
+ * This was the gate for flipping `LOCATION_RESOLVER_MODE` to `live`. That
+ * flip is made and the table is deleted, so the suite's job has changed from
+ * evidence to PERMANENT REGRESSION NET — and it is the only independent one
+ * there is. Every other location suite checks the resolver against the same
+ * artifact the resolver reads; these 146 inputs are decisions a human made
+ * about which airports a traveller flies from, frozen in
+ * `src/data/generated/retiredOriginAirports.json` the day the table went.
  *
- * Two assertions are hard requirements and fail the build:
+ * Two assertions are hard requirements:
  *
- *  1. the resolver never returns NOTHING for an input the table answers. A
- *     regression here means a traveller who could name their origin yesterday
+ *  1. the resolver never returns NOTHING for an input the table answered. A
+ *     regression here means someone who could name their origin yesterday
  *     cannot today. It caught `Washington State` and `New York State`.
- *  2. the leading airport matches on every key where the two agree enough to
- *     compare — see `ACCEPTED_LEAD_CHANGES`.
+ *  2. the leading airport matches on every input, unless the change is in the
+ *     reviewed ledger below.
  *
- * The third part is a LEDGER, not a threshold. Every key where the leading
- * airport differs is listed below with the reason it is acceptable. The list
- * is committed so the diff shows movement in either direction: a new entry
- * means the resolver started disagreeing somewhere new and somebody has to
- * look, and a disappearing entry means it stopped. "It seems fine" is not a
- * gate; this is.
+ * That ledger is a list, not a threshold. Every differing input is named with
+ * the reason it is acceptable, and it is committed so the diff shows movement
+ * both ways: a new entry means the resolver started disagreeing somewhere new
+ * and somebody has to look at it; a vanished entry means it stopped. "It
+ * seems fine" is not a gate; this is. Adding a row to make a red suite green,
+ * without deciding the new answer is right, is the one move this file exists
+ * to prevent.
  *
  * `airports[0]` is the right thing to compare because it is the airport
- * `estimateHomeLegCost` ranks route permutations from. Extra fallbacks after
- * it are a gain, not a difference — `buildHomeLeg` prices every survivor of
- * the `MAX_HOME_AIRPORTS` cap and takes the cheapest.
+ * `estimateHomeLegCost` ranks route permutations from, and it decides which
+ * codes survive the `MAX_HOME_AIRPORTS` cap. Extra fallbacks after it are a
+ * gain, not a difference — `buildHomeLeg` prices every survivor and takes the
+ * cheapest.
  */
 
-import { getOriginAirports, MULTI_AIRPORT_CITY_KEYS } from '../data/originAirports';
+import { retiredAnswer, retiredInputs, RETIRED_ORIGIN_AIRPORTS } from '../data/retiredOriginAirports';
 import { resolveOriginAirports } from '../services/location/originAirports';
 
 /**
@@ -45,6 +49,16 @@ import { resolveOriginAirports } from '../services/location/originAirports';
  * once somebody has decided the new lead is right.
  */
 const ACCEPTED_LEAD_CHANGES: Record<string, { to: string; why: string; asks?: boolean }> = {
+  'Washington, Utah': {
+    to: 'SGU',
+    why:
+      'The resolver CORRECTS the table. Washington, Utah is 11 km from St ' +
+      'George Regional; the table answered SLC, 427 km away in Salt Lake ' +
+      'City, because it had no entry for the town and fell back to the ' +
+      '`utah` qualifier, which gives the STATE\'s airport. Accepted because ' +
+      'SGU is right. Found only once the gate was widened past the table\'s ' +
+      'key list to the qualified shapes its comma walk also answered.',
+  },
   'Vancouver, WA': {
     to: 'PDX',
     why:
@@ -57,32 +71,6 @@ const ACCEPTED_LEAD_CHANGES: Record<string, { to: string; why: string; asks?: bo
   },
 };
 
-/**
- * Qualified input shapes, drawn from the table's own test suite.
- *
- * `MULTI_AIRPORT_CITY_KEYS` is only the table's KEYS, and the table answers
- * far more than its keys: `Newark, NJ` and `Vancouver, WA` are handled by its
- * comma-walking fallback, not by a key. Gating on the key list alone was
- * blind to that whole class, and it hid a real difference — `Vancouver, WA`,
- * where the resolver corrects the table rather than matching it.
- *
- * These are the comma and space forms from `originAirportAliases.test.ts`,
- * which is the closest thing to a record of what real input looks like.
- */
-const QUALIFIED_INPUTS = [
-  'Newark, NJ',
-  'Jersey City, NJ',
-  'Brooklyn, NY',
-  'Hartford, CT',
-  'Portland, Oregon',
-  'Vancouver, WA',
-  'Washington, DC',
-  'Brooklyn, New York, USA',
-  'New York State',
-  'Washington State',
-  'Oregon State',
-];
-
 type LeadDiff = { key: string; legacy: string; resolver: string };
 
 function leadDiffs(): { empties: string[]; diffs: LeadDiff[]; compared: number } {
@@ -90,8 +78,8 @@ function leadDiffs(): { empties: string[]; diffs: LeadDiff[]; compared: number }
   const diffs: LeadDiff[] = [];
   let compared = 0;
 
-  for (const key of [...MULTI_AIRPORT_CITY_KEYS, ...QUALIFIED_INPUTS]) {
-    const legacy = getOriginAirports(key);
+  for (const key of retiredInputs()) {
+    const legacy = retiredAnswer(key);
     if (legacy.length === 0) continue; // the table refuses it; nothing to compare
     const resolved = resolveOriginAirports(key);
 
@@ -114,9 +102,10 @@ describe('gate 1 — the resolver never answers nothing where the table answered
     // `Washington State` and `New York State` were here, and they are the
     // reason the resolver has an admin-suffix path.
     expect(empties).toEqual([]);
-    // Non-vacuity: if the table stopped answering anything, `empties` would
-    // be empty for the wrong reason and this suite would assert nothing.
+    // Non-vacuity: if the snapshot were empty, `empties` would be empty for
+    // the wrong reason and this suite would assert nothing at all.
     expect(compared).toBeGreaterThan(100);
+    expect(RETIRED_ORIGIN_AIRPORTS.entries).toBeGreaterThan(140);
   });
 });
 

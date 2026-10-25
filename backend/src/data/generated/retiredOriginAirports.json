@@ -1,0 +1,545 @@
+{
+ "frozenAt": "2026-10-25",
+ "source": "backend/src/data/originAirports.ts @ feat/location-resolver, deleted in the same commit",
+ "entries": 146,
+ "answers": {
+  "new york": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "nyc": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "los angeles": [
+   "LAX",
+   "BUR",
+   "LGB"
+  ],
+  "la": [
+   "LAX",
+   "BUR",
+   "LGB"
+  ],
+  "san francisco": [
+   "SFO",
+   "OAK",
+   "SJC"
+  ],
+  "bay area": [
+   "SFO",
+   "OAK",
+   "SJC"
+  ],
+  "chicago": [
+   "ORD",
+   "MDW"
+  ],
+  "washington": [
+   "IAD",
+   "DCA",
+   "BWI"
+  ],
+  "washington dc": [
+   "IAD",
+   "DCA",
+   "BWI"
+  ],
+  "dc": [
+   "IAD",
+   "DCA",
+   "BWI"
+  ],
+  "miami": [
+   "MIA",
+   "FLL"
+  ],
+  "houston": [
+   "IAH",
+   "HOU"
+  ],
+  "dallas": [
+   "DFW",
+   "DAL"
+  ],
+  "seattle": [
+   "SEA"
+  ],
+  "boston": [
+   "BOS"
+  ],
+  "denver": [
+   "DEN"
+  ],
+  "atlanta": [
+   "ATL"
+  ],
+  "toronto": [
+   "YYZ",
+   "YTZ"
+  ],
+  "montreal": [
+   "YUL"
+  ],
+  "vancouver": [
+   "YVR"
+  ],
+  "mexico city": [
+   "MEX",
+   "NLU"
+  ],
+  "philadelphia": [
+   "PHL"
+  ],
+  "baltimore": [
+   "BWI"
+  ],
+  "phoenix": [
+   "PHX"
+  ],
+  "las vegas": [
+   "LAS"
+  ],
+  "salt lake city": [
+   "SLC"
+  ],
+  "minneapolis": [
+   "MSP"
+  ],
+  "twin cities": [
+   "MSP"
+  ],
+  "detroit": [
+   "DTW"
+  ],
+  "honolulu": [
+   "HNL"
+  ],
+  "providence": [
+   "PVD"
+  ],
+  "hartford": [
+   "BDL"
+  ],
+  "newark": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "jersey city": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "hoboken": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "staten island": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "brooklyn": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "queens": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "manhattan": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "bronx": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "the bronx": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "long island": [
+   "JFK",
+   "LGA"
+  ],
+  "oakland": [
+   "OAK",
+   "SFO",
+   "SJC"
+  ],
+  "silicon valley": [
+   "SJC",
+   "SFO",
+   "OAK"
+  ],
+  "fort worth": [
+   "DFW",
+   "DAL"
+  ],
+  "ft worth": [
+   "DFW",
+   "DAL"
+  ],
+  "fort lauderdale": [
+   "FLL",
+   "MIA"
+  ],
+  "new jersey": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "nj": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "new york state": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "ny": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "connecticut": [
+   "BDL"
+  ],
+  "ct": [
+   "BDL"
+  ],
+  "rhode island": [
+   "PVD"
+  ],
+  "ri": [
+   "PVD"
+  ],
+  "massachusetts": [
+   "BOS"
+  ],
+  "ma": [
+   "BOS"
+  ],
+  "new england": [
+   "BOS"
+  ],
+  "delaware": [
+   "PHL"
+  ],
+  "de": [
+   "PHL"
+  ],
+  "maryland": [
+   "BWI"
+  ],
+  "md": [
+   "BWI"
+  ],
+  "illinois": [
+   "ORD",
+   "MDW"
+  ],
+  "il": [
+   "ORD",
+   "MDW"
+  ],
+  "georgia": [
+   "ATL"
+  ],
+  "ga": [
+   "ATL"
+  ],
+  "arizona": [
+   "PHX"
+  ],
+  "az": [
+   "PHX"
+  ],
+  "nevada": [
+   "LAS"
+  ],
+  "nv": [
+   "LAS"
+  ],
+  "utah": [
+   "SLC"
+  ],
+  "ut": [
+   "SLC"
+  ],
+  "colorado": [
+   "DEN"
+  ],
+  "co": [
+   "DEN"
+  ],
+  "minnesota": [
+   "MSP"
+  ],
+  "mn": [
+   "MSP"
+  ],
+  "michigan": [
+   "DTW"
+  ],
+  "mi": [
+   "DTW"
+  ],
+  "hawaii": [
+   "HNL"
+  ],
+  "oregon": [
+   "PDX"
+  ],
+  "vermont": [
+   "BTV"
+  ],
+  "vt": [
+   "BTV"
+  ],
+  "washington state": [
+   "SEA"
+  ],
+  "wa": [
+   "SEA"
+  ],
+  "london": [
+   "LHR",
+   "LGW",
+   "STN"
+  ],
+  "paris": [
+   "CDG",
+   "ORY"
+  ],
+  "moscow": [
+   "SVO",
+   "DME",
+   "VKO"
+  ],
+  "istanbul": [
+   "IST",
+   "SAW"
+  ],
+  "milan": [
+   "MXP",
+   "LIN"
+  ],
+  "rome": [
+   "FCO",
+   "CIA"
+  ],
+  "berlin": [
+   "BER"
+  ],
+  "madrid": [
+   "MAD"
+  ],
+  "barcelona": [
+   "BCN"
+  ],
+  "amsterdam": [
+   "AMS"
+  ],
+  "frankfurt": [
+   "FRA"
+  ],
+  "munich": [
+   "MUC"
+  ],
+  "zurich": [
+   "ZRH"
+  ],
+  "vienna": [
+   "VIE"
+  ],
+  "dublin": [
+   "DUB"
+  ],
+  "lisbon": [
+   "LIS"
+  ],
+  "stockholm": [
+   "ARN",
+   "BMA"
+  ],
+  "tokyo": [
+   "HND",
+   "NRT"
+  ],
+  "osaka": [
+   "KIX",
+   "ITM"
+  ],
+  "seoul": [
+   "ICN",
+   "GMP"
+  ],
+  "beijing": [
+   "PEK",
+   "PKX"
+  ],
+  "shanghai": [
+   "PVG",
+   "SHA"
+  ],
+  "hong kong": [
+   "HKG"
+  ],
+  "taipei": [
+   "TPE",
+   "TSA"
+  ],
+  "singapore": [
+   "SIN"
+  ],
+  "bangkok": [
+   "BKK",
+   "DMK"
+  ],
+  "kuala lumpur": [
+   "KUL"
+  ],
+  "jakarta": [
+   "CGK",
+   "HLP"
+  ],
+  "manila": [
+   "MNL"
+  ],
+  "delhi": [
+   "DEL"
+  ],
+  "mumbai": [
+   "BOM"
+  ],
+  "sydney": [
+   "SYD"
+  ],
+  "melbourne": [
+   "MEL"
+  ],
+  "dubai": [
+   "DXB",
+   "DWC"
+  ],
+  "abu dhabi": [
+   "AUH"
+  ],
+  "doha": [
+   "DOH"
+  ],
+  "johannesburg": [
+   "JNB"
+  ],
+  "cape town": [
+   "CPT"
+  ],
+  "cairo": [
+   "CAI"
+  ],
+  "são paulo": [
+   "GRU",
+   "CGH"
+  ],
+  "sao paulo": [
+   "GRU",
+   "CGH"
+  ],
+  "rio de janeiro": [
+   "GIG",
+   "SDU"
+  ],
+  "rio": [
+   "GIG",
+   "SDU"
+  ],
+  "buenos aires": [
+   "EZE",
+   "AEP"
+  ],
+  "santiago": [
+   "SCL"
+  ],
+  "lima": [
+   "LIM"
+  ],
+  "bogotá": [
+   "BOG"
+  ],
+  "bogota": [
+   "BOG"
+  ],
+  "Newark, NJ": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "Jersey City, NJ": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "Brooklyn, NY": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "Hartford, CT": [
+   "BDL"
+  ],
+  "Portland, Oregon": [
+   "PDX"
+  ],
+  "Vancouver, WA": [
+   "SEA"
+  ],
+  "Washington, DC": [
+   "IAD",
+   "DCA",
+   "BWI"
+  ],
+  "Brooklyn, New York, USA": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "New York State": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "Washington State": [
+   "SEA"
+  ],
+  "Washington, Utah": [
+   "SLC"
+  ],
+  "N.J.": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "NEW JERSEY": [
+   "EWR",
+   "JFK",
+   "LGA"
+  ],
+  "  Long Island  ": [
+   "JFK",
+   "LGA"
+  ]
+ }
+}

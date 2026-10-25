@@ -760,23 +760,38 @@ export const REGION_AIRPORT_OVERRIDES: RegionAirportOverride[] = [
   { admin1: 'LK.36', airports: ['CMB'], why: 'Western Province, Sri Lanka: RML 10.5 led CMB 29.4. Ratmalana is domestic; Bandaranaike is the gateway. Matches the Colombo city override.' },
   { admin1: 'BR.27', airports: ['GRU'], why: 'São Paulo state: VCP 6.5 led GRU 79.8 — the centroid lands by Viracopos in Campinas. Guarulhos is the gateway. Matches the sao-paulo group.' },
   { admin1: 'AR.07', airports: ['EZE'], why: 'Buenos Aires F.D.: AEP 6.9 led EZE 27.4. Aeroparque is the domestic airport; Ezeiza is the gateway. Matches the buenos-aires group.' },
-  { admin1: 'US.CA', airports: ['LAX'], why: 'California: BUR 146.9 led LAX 169.5, with FAT and LGB also rank 3 — the named Burbank failure, one level up from the city. Matches the los-angeles group.' },
+  {
+    admin1: 'US.CA',
+    airports: ['LAX', 'SFO', 'SAN'],
+    why:
+      'California has three distinct major metros and the derived order ' +
+      'reaches none of them properly: the state centroid sits near ' +
+      'Bakersfield, so distance led BUR 146.9 (the named Burbank failure, one ' +
+      'level up from the city) and filled the rest with FAT and LGB. Only ' +
+      'THREE airports survive the MAX_HOME_AIRPORTS cap, so a single pin ' +
+      'spent all three slots inside Greater Los Angeles and a traveller in ' +
+      'San Francisco typing `California` was priced from LA. Pinned to cover ' +
+      'Los Angeles, the Bay Area and San Diego instead \u2014 all rank 3 and all ' +
+      'attached. originAirports.ts deliberately keys no California entry, ' +
+      'calling it ambiguous, so this is an authored judgement rather than a ' +
+      'migration: change the list if you want different metros.',
+  },
   { admin1: 'US.IL', airports: ['ORD'], why: 'Illinois: MDW 41.5 led ORD 49.1, both rank 3. originAirports.ts keys `illinois` to ORD then MDW. Matches the chicago group.' },
   { admin1: 'US.NY', airports: ['JFK'], why: 'New York state: EWR 30.1 and LGA 33.4 both led JFK 49.5. originAirports.ts keys `new york state` and `ny` to JFK, LGA, EWR.' },
   {
     admin1: 'US.TX',
-    airports: ['DFW'],
+    airports: ['DFW', 'IAH', 'AUS'],
     why:
-      'Texas: the derived order led AUS 93, with DAL 212, DFW 213 and IAH 238 ' +
-      'all rank 3 — the centroid sits by Austin, which carries limited ' +
-      'long-haul. DFW is the largest gateway in the state and one of the ' +
-      'busiest airports in the world. CORRECTED: an earlier version pinned ' +
-      'IAH on the stated grounds that originAirports.ts keys Texas to it. It ' +
-      'does not key Texas at all — it lists DFW/IAH/AUS under its ' +
-      '"deliberately NOT keyed" set as competing hubs, so there was no ' +
-      'authored answer to reproduce and the premise was wrong. This is ' +
-      'therefore a fresh claim and the weakest entry in this block: a bare ' +
-      '`Texas` is genuinely contested between Dallas and Houston. DFW over ' +
-      'IAH on size alone. Delete the entry if AUS-by-centroid is preferred.',
+      'Same shape as California, and it is why the earlier single pin was ' +
+      'wrong twice over. The centroid sits by Killeen, so distance led AUS ' +
+      '93 with DAL 212, DFW 213, IAH 238 and HOU 264 all rank 3 behind it. ' +
+      'Pinning DFW alone made the priced three DFW, AUS, SAT and pushed ' +
+      'HOUSTON \u2014 the largest metro in the state \u2014 outside the cap; pinning ' +
+      'IAH alone did the same to Dallas. No single choice fits both. Pinned ' +
+      'to Dallas, Houston and Austin. CORRECTED TWICE: an earlier version ' +
+      'pinned IAH on the stated grounds that originAirports.ts keys Texas to ' +
+      'it. It does not key Texas at all \u2014 it lists DFW/IAH/AUS under its ' +
+      '"deliberately NOT keyed" set as competing hubs, which is exactly the ' +
+      'three pinned here.',
   },
 ];

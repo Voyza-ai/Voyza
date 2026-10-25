@@ -1,6 +1,6 @@
 {
  "schemaVersion": 5,
- "generatedAt": "2026-10-25T00:31:12.718Z",
+ "generatedAt": "2026-10-25T00:55:03.751Z",
  "basis": "ourairports-type-ordinal",
  "ranks": {
   "AAA": 2,
@@ -4083,7 +4083,9 @@
    "TPE"
   ],
   "adm:US.CA": [
-   "LAX"
+   "LAX",
+   "SFO",
+   "SAN"
   ],
   "adm:US.DC": [
    "IAD",
@@ -4100,7 +4102,9 @@
    "JFK"
   ],
   "adm:US.TX": [
-   "DFW"
+   "DFW",
+   "IAH",
+   "AUS"
   ],
   "ap:AAA": [
    "AAA"

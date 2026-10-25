@@ -51,7 +51,7 @@ import { gzipSync } from 'node:zlib';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { MULTI_AIRPORT_CITY_KEYS } from '../src/data/originAirports';
+import { retiredInputs } from '../src/data/retiredOriginAirports';
 import { LOCATION_DATA_ATTRIBUTION, type DataAttribution } from '../src/data/attribution';
 import { locationArtifact } from '../src/data/locationArtifact';
 import { buildIndex } from '../src/services/location/buildIndex';
@@ -223,18 +223,27 @@ function hotPlace(place: Place): HotPlace {
  * origin it defers to the server and resolves there.
  */
 function rankedPlaces(): Place[] {
-  // MUST-HAVE, ahead of everything: every place the hand-written table can
-  // answer. The hot set cannot replace that table until it answers the same
-  // inputs without a round trip, so those places are seeded whatever their
-  // prominence, and `locationHotSet.test.ts` asserts the coverage rather than
-  // trusting it. This is also what fixes the US metros the table was built
-  // for — `providence`, `hartford`, `fort worth`, `twin cities` — none of
-  // which a global prominence ranking would ever reach.
+  // MUST-HAVE, ahead of everything: every place the retired hand-written
+  // table could answer. Those inputs are the one independent record of which
+  // airports a traveller flies from, so the 60 KB budget may never be spent
+  // somewhere that leaves one of them unanswerable offline.
+  // `locationHotSet.test.ts` asserts that coverage rather than trusting it.
+  // It is also what reaches the US metros the table was built for —
+  // `providence`, `hartford`, `fort worth`, `twin cities` — none of which a
+  // global prominence ranking gets near.
   const mustHave = new Set<string>();
-  for (const key of MULTI_AIRPORT_CITY_KEYS) {
-    const answer = answerByKey.get(key);
-    if (!answer) continue;
-    for (const id of answer.ids) mustHave.add(id);
+  for (const input of retiredInputs()) {
+    // RESOLVED, not looked up. The retired list holds inputs as a person
+    // wrote them — `Newark, NJ`, `Portland, Oregon`, `  Long Island  ` —
+    // and a normalised lookup into `answerByKey` misses every qualified one,
+    // because comma forms are not index keys. Measured: it silently failed
+    // to seed Portland, Oregon at all, so `portland` was not even a hot-set
+    // key and the browser answered nothing for an input the table answered.
+    const truth = resolve(input, {}, index);
+    if (truth.status === 'resolved') mustHave.add(truth.place.id);
+    else if (truth.status === 'ambiguous') {
+      for (const candidate of truth.candidates) mustHave.add(candidate.place.id);
+    }
   }
 
   const required: Place[] = [];
@@ -393,6 +402,20 @@ function build(limit: number): LocationHotSet {
       index.countryNames.get(country),
     ];
 
+    // `City, State, Country` as well as `City, State`. Three segments is a
+    // real shape — `Brooklyn, New York, USA` is in the retired table's own
+    // tests as the form its AI parser produced — and the resolver handles it
+    // by walking the commas right to left. One extra form per place, not a
+    // combinatorial expansion.
+    const adminName = place.admin
+      ? index.adminNames.get(`${country}:${place.admin.toUpperCase()}`)
+      : null;
+    const countryName = index.countryNames.get(country);
+    if (adminName && countryName) {
+      qualifiers.push(`${adminName}, ${countryName}`);
+      qualifiers.push(`${adminName}, ${country}`);
+    }
+
     for (const qualifier of qualifiers) {
       if (!qualifier) continue;
       // Only a qualifier the INDEX recognises. GeoNames admin1 codes are
@@ -403,7 +426,13 @@ function build(limit: number): LocationHotSet {
       // `Paris, 75001, France` is still Paris), but the stored key has no
       // comma, so `shanghai 23` arrives as one long head and misses. The hot
       // set would then have claimed an answer the server does not give.
-      if (!normalizeKeys(qualifier).some((key) => index.qualifier.has(key))) continue;
+      // Tested on each comma segment of the qualifier, so a two-part
+      // `Oregon, United States` passes on `oregon` rather than being
+      // rejected because the joined string is not a qualifier key.
+      const segments = qualifier.split(',').map((part) => part.trim());
+      if (!segments.every((part) => normalizeKeys(part).some((key) => index.qualifier.has(key)))) {
+        continue;
+      }
       const typed = `${place.name}, ${qualifier}`;
       const [key] = keysForQuery(typed);
       if (!key || exact[key]) continue;
@@ -411,6 +440,28 @@ function build(limit: number): LocationHotSet {
       if (truth.status !== 'resolved' || truth.place.id !== id) continue;
       exact[key] = { s: 'ok', ids: [id], v: truth.via };
     }
+  }
+
+  // THE COVERAGE GUARANTEE, by construction rather than by hoping the
+  // generated forms happen to line up.
+  //
+  // Everything above generates forms from the artifact's own spellings, which
+  // misses the ones a person actually typed: the retired table answered
+  // `Brooklyn, New York, USA`, and "USA" is an ALIAS of the United States,
+  // not its display name, so the generated form came out as
+  // `Brooklyn, New York, United States` and keyed something else.
+  //
+  // So the retired inputs get a pass of their own: resolve each one, store
+  // its normalised key, and the hot set cannot fail to answer offline
+  // anything the table it replaced could answer. 146 keys at most, and
+  // `locationHotSet.test.ts` asserts the property independently.
+  for (const input of retiredInputs()) {
+    const truth = resolve(input, {}, index);
+    if (truth.status !== 'resolved') continue;
+    const [key] = keysForQuery(input);
+    if (!key || exact[key]) continue;
+    exact[key] = { s: 'ok', ids: [truth.place.id], v: truth.via };
+    needed.add(truth.place.id);
   }
 
   const places: LocationHotSet['places'] = {};

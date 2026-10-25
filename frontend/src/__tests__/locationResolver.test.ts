@@ -25,7 +25,26 @@ import {
   resolveLocally,
   resolveLocation,
 } from '@/lib/locationResolver';
-import { MULTI_AIRPORT_CITY_KEYS, getOriginAirports } from '@/lib/originAirports';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * The answers the retired hand-written table gave, frozen the day it was
+ * deleted. Read off disk rather than imported: it lives in the backend
+ * package, outside Next's bundler scope, and it is test data — the same
+ * approach `originAirportsParity.test.ts` used for the two table copies it
+ * guarded.
+ *
+ * This is the only independent check the browser has. Every other assertion
+ * here compares the resolver to the artifact the resolver reads.
+ */
+const RETIRED: { answers: Record<string, string[]> } = JSON.parse(
+  fs.readFileSync(
+    path.resolve(__dirname, '../../../backend/src/data/generated/retiredOriginAirports.json'),
+    'utf8',
+  ),
+);
+const retiredAnswer = (input: string): string[] => RETIRED.answers[input] ?? [];
 
 describe('answers the common inputs without a round trip', () => {
   it.each([
@@ -235,7 +254,7 @@ describe('resolveLocation always answers', () => {
   });
 });
 
-describe('originAirportsLocally — the drop-in for getOriginAirports', () => {
+describe('originAirportsLocally — what the retired table used to do', () => {
   it('returns IATA codes, best-first', () => {
     expect(originAirportsLocally('nj')[0]).toBe('EWR');
     expect(originAirportsLocally('nyc')[0]).toBe('JFK');
@@ -278,12 +297,12 @@ describe('the shipped hot set', () => {
  * Negative control: both cases fail if `originAirportsForCity` stops leading
  * with the table and calls `originAirportsLocally` directly.
  */
-describe('originAirportsForCity — the resolver leads, the table is the net', () => {
+describe('originAirportsForCity — the resolver, now that the table is gone', () => {
   const realFetch = global.fetch;
   beforeEach(() => {
-    // No network at all. The point of this function is that it answers
-    // synchronously, so a test that allowed a round trip would not be testing
-    // the thing the synchronous call sites depend on.
+    // No network at all. The synchronous call sites have no fallback left —
+    // the hand-written table is deleted — so this is the only thing standing
+    // between them and an empty answer.
     global.fetch = jest.fn(() => {
       throw new Error('originAirportsForCity must not touch the network');
     }) as unknown as typeof fetch;
@@ -308,7 +327,7 @@ describe('originAirportsForCity — the resolver leads, the table is the net', (
       'Portland, Oregon',
     ]) {
       expect(originAirportsForCity(input).length).toBeGreaterThan(0);
-      expect(originAirportsForCity(input)[0]).toBe(getOriginAirports(input)[0]);
+      expect(originAirportsForCity(input)[0]).toBe(retiredAnswer(input)[0]);
     }
     expect(originAirportsForCity('Newark, NJ')[0]).toBe('EWR');
   });
@@ -323,7 +342,9 @@ describe('originAirportsForCity — the resolver leads, the table is the net', (
     // Asserted on the resolver ALONE, so the table cannot be what makes this
     // pass. That is the difference between this test and a tautology.
     expect(originAirportsLocally('Washington')[0]).toBe('IAD');
-    expect(getOriginAirports('Washington')[0]).toBe('IAD');
+    // Lowercase: the retired table's keys were normalised, so the snapshot
+    // holds `washington`, not `Washington`.
+    expect(retiredAnswer('washington')[0]).toBe('IAD');
   });
 
   it('still reaches the state, and lets a qualifier beat the decision', () => {
@@ -332,18 +353,17 @@ describe('originAirportsForCity — the resolver leads, the table is the net', (
     // because provenance was being narrowed before the qualifier.
     expect(originAirportsForCity('Washington State')[0]).toBe('SEA');
     expect(originAirportsForCity('WA')[0]).toBe('SEA');
-    // Through the composition, not the resolver alone: Washington, Utah is
-    // not one of the 410 places the 60 KB hot set ships, so the browser
-    // cannot answer it offline and the table net catches it. That is the
-    // fallback earning its place rather than being ceremony.
-    expect(originAirportsForCity('Washington, Utah').length).toBeGreaterThan(0);
-    expect(originAirportsLocally('Washington, Utah')).toEqual([]);
+    // Answered OFFLINE now. It was not, until the hot set was reseeded from
+    // the retired table's frozen inputs — which include the qualified shapes
+    // its comma walk handled, so Washington, Utah ships and St George comes
+    // with it. 11 km, where the table answered Salt Lake City at 427.
+    expect(originAirportsForCity('Washington, Utah')[0]).toBe('SGU');
   });
 
   it('falls through to the resolver where the table is silent', () => {
     // The whole value of the change: inputs the table never answered.
     for (const input of ['Paris, Texas', 'Baton Rouge, LA', 'Tbilisi, Georgia']) {
-      expect(getOriginAirports(input)).toEqual([]);
+      expect(retiredAnswer(input)).toEqual([]);
     }
 
     // And the comma-qualified ones are now answered OFFLINE. This assertion
@@ -397,16 +417,43 @@ describe('originAirportsForCity — the resolver leads, the table is the net', (
     // `boston` gains PVD and BED), which widens the search rather than
     // changing it. `buildHomeLeg` prices every survivor of the
     // MAX_HOME_AIRPORTS cap and takes the cheapest.
+    // The two accepted corrections, mirroring the ledger in
+    // `backend/src/tests/locationLiveGate.test.ts`. In both the resolver is
+    // RIGHT and the retired table was crude:
+    //
+    //   Vancouver, WA     PDX is 7 km away; the table said Seattle at 250 km,
+    //                     reading `WA` as "the Washington metro" rather than
+    //                     as the state the city is in.
+    //   Washington, Utah  St George is 11 km away; the table said Salt Lake
+    //                     City at 427 km, having no entry for the town and
+    //                     falling back to the state's airport.
+    //
+    // Named rather than tolerated: a new entry here means the browser started
+    // disagreeing somewhere nobody has looked at.
+    const ACCEPTED: Record<string, string> = {
+      'Vancouver, WA': 'PDX',
+      'Washington, Utah': 'SGU',
+    };
+
     const differing: string[] = [];
     let compared = 0;
-    for (const key of MULTI_AIRPORT_CITY_KEYS) {
-      const table = getOriginAirports(key);
+    for (const key of Object.keys(RETIRED.answers)) {
+      const table = retiredAnswer(key);
       if (table.length === 0) continue;
       const got = originAirportsForCity(key);
-      if (got[0] !== table[0]) differing.push(`${key}: ${table[0]} -> ${got[0]}`);
+      if (got[0] !== table[0] && ACCEPTED[key] !== got[0]) {
+        differing.push(`${key}: ${table[0]} -> ${got[0]}`);
+      }
       compared++;
     }
     expect(differing).toEqual([]);
-    expect(compared).toBeGreaterThanOrEqual(130);
+    expect(compared).toBeGreaterThanOrEqual(140);
+
+    // Non-vacuity: the accepted ones really do still differ, so the ledger is
+    // live rather than a list of things that silently stopped happening.
+    for (const [key, to] of Object.entries(ACCEPTED)) {
+      expect(originAirportsForCity(key)[0]).toBe(to);
+      expect(retiredAnswer(key)[0]).not.toBe(to);
+    }
   });
 });

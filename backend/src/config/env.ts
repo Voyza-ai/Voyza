@@ -23,28 +23,6 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
 
-  /**
-   * Which location resolver answers origin-airport lookups.
-   *
-   *   off     the hand-written table in data/originAirports.ts, alone
-   *   shadow  both run, the TABLE is served, disagreements are logged
-   *   live    both run, the RESOLVER is served, disagreements are logged
-   *
-   * Defaults to `live`, on the owner's decision, against this evidence: over
-   * the 132 inputs the hand-written table answers, the resolver reproduces
-   * the leading airport on ALL of them and returns nothing on none of them.
-   * One answer changes and it is a correction — `Vancouver, WA` moves from
-   * SEA, about 250 km away in Seattle, to PDX, 7 km away. On top of that it
-   * answers 19 inputs in the table's own test corpus that the table refuses
-   * outright, `Paris, Texas` and `Berlin, DE` among them.
-   *
-   * `locationLiveGate.test.ts` is that evidence as a runnable suite, with
-   * every lead change in a reviewed ledger; it fails if a new one appears.
-   *
-   * Setting this back to `shadow` is the rollback and needs no deploy. `off`
-   * removes the resolver from the path entirely.
-   */
-  LOCATION_RESOLVER_MODE: z.enum(['off', 'shadow', 'live']).default('live'),
 
   // Supabase (server-side only — service role has full DB access)
   SUPABASE_URL: z.string().url(),

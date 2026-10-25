@@ -67,44 +67,30 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
   are answered offline now, and the browser settles an ambiguous name from the
   traveller's own coordinates without sending them anywhere — which is what
   stopped "use my location" in Washington DC from saving Seattle's airports.
-- [ ] **Phase 5: retire the old tables — two of five, not five.** Checked
-  against the code rather than assumed. `cityAirports.ts` DOES exist (an
-  earlier note here said it did not): 94 lines, destination-side, read by
-  `getIataCode` in flights.ts, and holder of the Kyoto-to-Accra fix. The
-  resolver matches 156 of its 169 entries; the other 13 are metro-code vs
-  specific-airport calls that need deciding one at a time.
-  `originAirports.ts` ×2 cannot go until the flip, because it IS the shadow
-  comparison baseline.
-  `nearestAirport.ts` answers coords to nearest airport
-  city for "use my location", and retiring it is NOT the easy win it looked
-  like -- measured over 14 real coordinates, a hot-set reverse lookup offers
-  Pullman to a Spokane traveller and Berlin to a Gdansk one, because neither
-  city fits the 60 KB budget. Doing it properly means either the full
-  artifact server-side (which costs the coordinates-never-leave-the-device
-  promise) or a bigger hot set (which costs page weight on every visit).
-  Both are decisions; the measured table is in the architecture doc.
-  And `airportNames.ts` should probably **stay**: `PlaceAirport` has
-  no name field, it has no backend twin so it is not part of the duplication
-  problem, and putting ~267 airport names in the hot set costs budget it does
-  not have.
-- [x] **Flipped to `live` — the resolver now answers.** Over the 132 inputs
-  the hand-written table answers, the resolver reproduces the leading airport
-  on **all 132** and returns nothing on none; the single changed answer is a
-  correction (`Vancouver, WA` moves from Seattle 250 km away to Portland
-  7 km away). It also answers 19 inputs the table refuses. Both sides were
-  flipped: `LOCATION_RESOLVER_MODE` now defaults to `live`, and
-  `originAirportsForCity` is resolver-first — the frontend's lookup is what
-  actually decides, because `optimizer.ts` uses the request body verbatim.
-  `shadow` is the rollback and `off` removes the resolver entirely; both are
-  an env change, not a deploy. `locationLiveGate.test.ts` is the evidence as
-  a runnable suite and fails if a new disagreement appears.
-- [x] **A bare `Washington` is now a curated decision: the capital.** It was
-  the one input of 132 where the resolver was worse — prominence put the
-  state first, 3,700 km from anyone who typed it meaning DC, and every "use
-  my location" tap in the DC metro produces that exact string. Making it
-  curated took the flip from 131/132 to 132/132 with no regression. The state
-  is still reachable as `Washington State` or `WA`, and a named qualifier
-  still beats the decision (`Washington, Utah` → SGU).
+- [x] **Phase 5 done — both origin tables deleted.** 691 lines of
+  hand-maintained lookup across two packages, their parity guard, their own
+  test suites, `shadow.ts` and `LOCATION_RESOLVER_MODE` are all gone. The
+  env-var rollback went with them, which was the honest cost: `shadow` only
+  meant something while there was a table to serve instead. Reverting is one
+  commit now.
+  - The table's KNOWLEDGE survives as `retiredOriginAirports.json` — all 146
+    answers, frozen, marked do-not-regenerate. It is the only independent
+    check the resolver has, and it both drives the regression gate and seeds
+    the browser hot set.
+  - Taking the fallback away exposed four real bugs that the table had been
+    hiding: the hot-set seeder was looking up comma forms as index keys (so
+    `Portland, Oregon` seeded nothing), and the space-separated qualifier pass
+    narrowed provenance too early, peeled only one qualifier, then peeled too
+    far. All fixed.
+  - NOT deleted, with reasons in the architecture doc: `nearestAirport.ts`
+    (a hot-set reverse lookup is measurably worse), `airportNames.ts` (nothing
+    to replace it, no twin), `cityAirports.ts` (destination-side; 156 of 169
+    entries reproduced, 13 need individual decisions).
+- [x] **California and Texas pins widened to cover their real metros.** Only
+  three airports survive the `MAX_HOME_AIRPORTS` cap, so a single pin spent
+  all three inside one metro — California priced a San Francisco traveller
+  from Los Angeles, and Texas pushed Houston, the state's largest metro,
+  outside the cap. Now `LAX, SFO, SAN` and `DFW, IAH, AUS`.
 - [ ] **GeoNames attribution needs a credits surface — the rest is done.**
   CC BY 4.0 requires credit, a licence link and an indication of changes, and
   the condition is now live: the frontend falls through to the resolver

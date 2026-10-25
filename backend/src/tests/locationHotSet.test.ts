@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { locationArtifact } from '../data/locationArtifact';
-import { MULTI_AIRPORT_CITY_KEYS } from '../data/originAirports';
+import { retiredInputs } from '../data/retiredOriginAirports';
 import { buildIndex } from '../services/location/buildIndex';
 import { keysForQuery } from '../services/location/normalize';
 import { DEFAULT_OPTIONS } from '../services/location/options';
@@ -175,13 +175,17 @@ describe('the browser builds the same label the server builds', () => {
 });
 
 describe('coverage of the table it replaces', () => {
-  it('answers every key the hand-written table answers, offline', () => {
-    const missing = MULTI_AIRPORT_CITY_KEYS.filter(
-      (key) => !keysForQuery(key).some((normalised) => set.exact[normalised]),
+  it('answers every input the retired table answered, offline', () => {
+    // The 60 KB budget may never be spent somewhere that leaves a
+    // historically-answerable input needing a round trip. These are the
+    // frozen answers of the hand-written table this replaced.
+    const inputs = retiredInputs();
+    const missing = inputs.filter(
+      (input) => !keysForQuery(input).some((normalised) => set.exact[normalised]),
     );
     expect(missing).toEqual([]);
-    // Non-vacuity: the table really does have keys to cover.
-    expect(MULTI_AIRPORT_CITY_KEYS.length).toBeGreaterThan(100);
+    // Non-vacuity: the snapshot really does have inputs to cover.
+    expect(inputs.length).toBeGreaterThan(140);
   });
 
   it('carries the curated inputs no dataset covers', () => {

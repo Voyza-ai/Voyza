@@ -129,19 +129,27 @@ describe('optimize — origin resolved from a state/region name', () => {
     expect(expected).toContain(result.outboundLeg!.originAirport);
   }, 30000);
 
-  it('still falls back to getIataCode for a name left out on purpose', async () => {
-    // "Texas" is deliberately unmapped (DFW/IAH/AUS all plausible), so the
-    // old single-code path must still be reachable rather than returning
-    // nothing. This proves the fix narrowed the gap without closing the door.
+  it('still falls back to getIataCode for a name the resolver cannot answer', async () => {
+    // Was "Texas", on the grounds that the retired table deliberately left it
+    // unmapped. Texas now resolves (pinned to Dallas, Houston and Austin), so
+    // that input no longer reaches this path at all.
+    //
+    // `Kyiv` does, and for a reason worth recording: Ukrainian airports carry
+    // `scheduled_service=no` upstream, so the pipeline's filter drops them and
+    // the city ships with no airports — which `answer()` refuses. 2,470 of
+    // 36,009 places are airport-less this way, 300 of them Ukrainian.
+    //
+    // So the single-code path must stay reachable rather than the run
+    // returning nothing. That is what this proves.
     await optimize({
       cities: [{ name: 'Rome' }],
       startDate: '2030-09-01',
       travelers: 1,
-      origin: 'Texas',
+      origin: 'Kyiv',
       returnToHome: false,
     });
 
-    expect(mockedGetIataCode.mock.calls.map((c: any[]) => c[0])).toContain('Texas');
-    expect(originsSearched()).toContain('TEX');
+    expect(mockedGetIataCode.mock.calls.map((c: any[]) => c[0])).toContain('Kyiv');
+    expect(originsSearched()).toContain('KYI');
   }, 30000);
 });

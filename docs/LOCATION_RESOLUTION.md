@@ -856,6 +856,72 @@ because both spend something:
 So the hand-written table stays for now, and this is written down so the
 replacement is not re-proposed as an obvious win.
 
+## Phase 5: the tables are gone
+
+Deleted, and this is the whole list:
+
+| | |
+|---|---|
+| `backend/src/data/originAirports.ts` | 348 lines |
+| `frontend/lib/originAirports.ts` | 343 lines, its hand-maintained twin |
+| `originAirportsParity.test.ts` ×2 | the guard that existed only because the two copies did |
+| `originAirportAliases.test.ts` ×2 | the table's own suites |
+| `services/location/shadow.ts` + its suite | existed only to compare the two |
+| `LOCATION_RESOLVER_MODE` | nothing left to fall back to |
+
+**The env-var rollback is gone with them.** That was the honest cost: `shadow`
+and `off` only meant something while there was a table to serve instead.
+Reverting now is one commit, not one variable.
+
+### The table's knowledge survives as data
+
+`src/data/generated/retiredOriginAirports.json` holds all 146 answers the
+table gave, frozen the day it was deleted, with a loader that says **do not
+regenerate this**. It is the only independent check the resolver has — every
+other suite compares it against the same artifact it reads — and two things
+consume it:
+
+- `locationLiveGate.test.ts`, now a permanent regression net rather than a
+  flip gate. It fails if the resolver stops reproducing a leading airport, and
+  every accepted difference carries a written reason.
+- `build-location-hotset.ts`, which seeds the hot set from those inputs so the
+  60 KB budget can never be spent somewhere that leaves a
+  historically-answerable input needing a round trip. Asserted, not hoped.
+
+### Four bugs the deletion exposed
+
+Taking the fallback away turned every silent gap into a failure, which is the
+argument for doing it rather than leaving a table in place forever.
+
+1. **The seeder was looking up the wrong thing.** It normalised each retired
+   input to a comma-free key and looked it up in the index — but comma forms
+   are not index keys, so every qualified input missed. `Portland, Oregon`
+   seeded nothing, and `portland` was not even a hot-set key. It resolves the
+   input now.
+2. **The spaced qualifier pass narrowed provenance before the qualifier**, the
+   same bug as the main path and found the same way: `washington ut` resolved
+   to nothing, because the curated `washington` reading is the capital and the
+   `ut` qualifier was left with nothing to match. The comma form worked, so
+   the two disagreed — and the hot set, which keys answers by the comma-free
+   form, stored one while the server gave the other.
+3. **It peeled only one qualifier run.** `brooklyn new york usa` and
+   `shanghai shanghai china` resolved as comma forms and not as keys. It peels
+   repeatedly now, like `splitHead` always did.
+4. **Then it peeled too far.** `new jersey nj` became "New" in Jersey, the
+   country. It stops as soon as what is left is a name the index knows — the
+   same guard that lets the pass run at all, applied after every peel.
+
+### What was NOT deleted, and why
+
+- `nearestAirport.ts` — a hot-set reverse lookup is measurably worse; see the
+  negative result above.
+- `airportNames.ts` — IATA → display name, which `PlaceAirport` has no field
+  for. No backend twin, so it was never part of the duplication problem.
+- `cityAirports.ts` — destination-side, and the resolver reproduces 156 of its
+  169 entries. The other 13 are metro-code vs specific-airport calls
+  (`seoul` SEL or ICN, `kyoto` OSA or KIX) that need deciding one at a time,
+  plus `kyiv`, which does not resolve at all.
+
 ## Observability
 
 The original bug was silent, so: **log every `unknown` and `ambiguous` with the

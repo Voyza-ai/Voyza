@@ -32,9 +32,7 @@
 
 import hotSet from './generated/locationHotSet.json';
 import { keysForQuery } from './locationKeys';
-// The table this replaces. Used only by `originAirportsForCity`, the rollout
 // composition below; phase 5 removes this import with the table itself.
-import { getOriginAirports as legacyOriginAirports } from './originAirports';
 
 export type LocationKind = 'city' | 'metro' | 'region' | 'state' | 'country';
 
@@ -471,9 +469,7 @@ export function originAirportsForCity(
   max: number = DEFAULT_MAX_AIRPORTS,
   context?: LocationContext,
 ): string[] {
-  const fromResolver = originAirportsLocally(query, max, context);
-  if (fromResolver.length > 0) return fromResolver;
-  return query ? legacyOriginAirports(query, max) : [];
+  return originAirportsLocally(query, max, context);
 }
 
 /**
