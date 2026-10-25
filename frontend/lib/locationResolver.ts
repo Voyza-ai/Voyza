@@ -433,41 +433,47 @@ export function originAirportsLocally(
 }
 
 /**
- * The ROLLOUT composition: the hand-written table first, the hot set second.
+ * Origin airports for a city name: RESOLVER FIRST, table as a safety net.
  *
- * This is what the synchronous call sites use, and it is deliberately not a
- * switch to the resolver. The reason is that the frontend's answer WINS:
- * `optimizer.ts` takes `originAirports` straight from the request body when it
- * is non-empty and never looks anything up. So calling `originAirportsLocally`
- * directly from a call site serves resolver answers to every trip no matter
- * what `LOCATION_RESOLVER_MODE` says, which bypasses the shadow log that is
- * supposed to justify the change. There is one Supabase project and it holds
- * real trips.
+ * This was table-first through the shadow period, for a reason still worth
+ * understanding: the frontend's answer WINS. `optimizer.ts` takes
+ * `originAirports` straight from the request body when it is non-empty and
+ * never looks anything up, so THIS FUNCTION — not
+ * `LOCATION_RESOLVER_MODE` — decides what real trips are priced from.
+ * Serving resolver answers from here while the backend was still in `shadow`
+ * would have bypassed the very log meant to justify the change. There is one
+ * Supabase project and it holds real trips.
  *
- * Measured, that bypass is not theoretical. Across the table's own 132 keys
- * the two disagree on the leading airport for 9 of them, and before the
- * curated pins were seeded those included `doha` (table DOH, artifact DIA —
- * the OLD Doha International) and `kuala lumpur` (table KUL, artifact SZB —
- * the secondary field). Shipping those silently is the kind of regression
- * shadow mode exists to catch.
+ * The order is reversed now because that evidence came in. Over the 132
+ * inputs the table answers, the resolver reproduces the LEADING airport on
+ * all 132 and returns nothing on none of them. One answer changes and it is
+ * a correction: `Vancouver, WA` moves from SEA, about 250 km away in
+ * Seattle, to PDX, 7 km away. It also answers 19 inputs in the table's own
+ * test corpus that the table refuses outright — `Paris, Texas`,
+ * `Baton Rouge, LA`, `Berlin, DE`, `Tbilisi, Georgia` among them.
  *
- * So this is additive by construction: every input the table answers keeps the
- * table's answer, byte for byte. The only behaviour that changes is inputs the
- * table answered with NOTHING — `Paris, Texas`, `Baton Rouge, LA`,
- * `Berlin, DE`, `Tbilisi, Georgia`, 18 of them in the table's own corpus —
- * which previously fell through to a single-airport guess or a logged warning.
+ * Earlier in the rollout the two disagreed on 9 of those 132, including
+ * `doha` (table DOH, artifact DIA — the OLD Doha International) and
+ * `kuala lumpur` (table KUL, artifact SZB — the secondary field). Those are
+ * fixed in the data, by authored pins, not papered over here. Keeping the
+ * shadow order until they were is what made them findable.
  *
- * Phase 5 deletes the first line of the body. Until the flip is justified, it
- * can only add coverage.
+ * The table stays as the FALLBACK rather than being deleted, and that is not
+ * ceremony: the hot set is bounded at 60 KB, so the resolver answers nothing
+ * offline for a place that did not fit. Falling back means this can only add
+ * coverage, never remove it. `locationLiveGate.test.ts` holds that claim to
+ * all 132 inputs and fails if a new disagreement appears.
+ *
+ * Phase 5 deletes the last line of the body.
  */
 export function originAirportsForCity(
   query: string | null | undefined,
   max: number = DEFAULT_MAX_AIRPORTS,
   context?: LocationContext,
 ): string[] {
-  const fromTable = query ? legacyOriginAirports(query, max) : [];
-  if (fromTable.length > 0) return fromTable;
-  return originAirportsLocally(query, max, context);
+  const fromResolver = originAirportsLocally(query, max, context);
+  if (fromResolver.length > 0) return fromResolver;
+  return query ? legacyOriginAirports(query, max) : [];
 }
 
 /**

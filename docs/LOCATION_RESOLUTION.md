@@ -545,18 +545,47 @@ across rebuilds" buys nothing.
 so every trip takes the single-airport Duffel path with no multi-airport
 comparison. Worth fixing on its own.
 
-## Rollout: shadow mode
+## Rollout: shadow, then live — DONE, the resolver now answers
 
-Phase 1 ships **dark**. Both the old table and the new resolver run on every
-real backend request; the **old** answer is served; every disagreement is logged
-with the raw input. Both are in-process, so the cost is negligible.
+The plan was: run both, serve the old answer, log every disagreement, and flip
+on the evidence. That is what happened, and the flip is made.
 
-After a week there is a golden set drawn from production rather than from
-imagination. Then flip with a runtime flag, not a deploy — which is also the
-rollback.
+`LOCATION_RESOLVER_MODE` defaults to **`live`**. `shadow` is the rollback and
+`off` removes the resolver from the path entirely; both are an env change, not
+a deploy.
 
-Given there is one Supabase project holding real trips, this is the only
-responsible way to find out whether the resolver is worse than what it replaces.
+**The evidence it was flipped on.** Over the 132 inputs the hand-written table
+answers:
+
+| | |
+|---|---|
+| leading airport identical | **132 of 132** |
+| resolver returns nothing | **0** |
+| answers the table refuses (its own 109-case corpus) | **19** |
+
+One answer changes, and it is a correction: `Vancouver, WA` moves from SEA —
+about 250 km away in Seattle — to **PDX, 7 km away**. The table's fallback
+reads the `WA` qualifier as "the Washington metro" rather than as the state
+the city is in.
+
+**Two sides had to flip, and only one of them is this flag.**
+`optimizer.ts` takes `originAirports` straight from the request body when it
+is non-empty and never looks anything up, so the FRONTEND's lookup decides
+what real trips are priced from. `originAirportsForCity` was table-first for
+exactly that reason during the shadow period — serving resolver answers from
+there while the backend was still shadowing would have bypassed the log meant
+to justify the change. It is resolver-first now, with the table kept as a
+fallback because the hot set is bounded at 60 KB and answers nothing offline
+for a place that did not fit.
+
+**What the shadow period actually caught**, which is the argument for having
+run it: the two disagreed on 9 of the 132 before the curated pins were
+authored, including `doha` (table DOH, artifact DIA — the *old* Doha
+International) and `kuala lumpur` (table KUL, artifact SZB — the turboprop
+field). Those are fixed in the data, not papered over in the composition.
+
+`locationLiveGate.test.ts` is the evidence as a runnable suite: it fails if a
+new lead change appears, and every accepted one carries a written reason.
 
 ## As built: phases 2 and 3
 

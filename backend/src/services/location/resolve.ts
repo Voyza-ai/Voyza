@@ -620,8 +620,32 @@ function resolveAt(
   // `Ord` is Ord, Nebraska. Mixed case falls through to `exact` first.
   if (iataAllowed && head === head.toUpperCase()) return answer(iataHit, 'iata-code', index, reference);
 
+  // QUALIFIER BEFORE PROVENANCE. The order of these two narrowings is
+  // load-bearing and getting it wrong cost a working input.
+  //
+  // A curated alias is the top key tier, so narrowing by tier first reduces
+  // `washington` to the single curated reading — Washington DC — and a
+  // following qualifier then has nothing to match. Measured:
+  // `Washington, Utah` went from SGU to UNKNOWN the moment `washington` was
+  // curated onto the capital, and `Washington, England` with it.
+  //
+  // So when the traveller named a qualifier, that is the stronger signal and
+  // it is applied to the WHOLE match set; provenance then decides among
+  // whatever survives. Same precedent as the admin-suffix path below, where
+  // the kind filter runs before the tier narrowing for exactly this reason:
+  // an explicit statement about which place is meant outranks how we happen
+  // to know the name.
+  //
+  // Falls back to the unqualified set when the qualifier matches nothing, so
+  // a qualifier that is real but wrong still produces the "found it, but not
+  // where you said" question rather than an empty answer.
+  const allMatches = matchesForKeys(headKeys, index);
+  const allPlaces = placesOf(allMatches, index);
+  const qualifierPool = qualifiers.length > 0 ? narrow(allPlaces, qualifiers) : allPlaces;
+  const pool = qualifierPool.length > 0 ? qualifierPool : allPlaces;
+  const poolIds = new Set(pool.map((place) => place.id));
   const { matches: bestMatches, tier: matchTier } = narrowToBestTier(
-    matchesForKeys(headKeys, index),
+    allMatches.filter((match) => poolIds.has(match.id)),
   );
   const exactHits = placesOf(bestMatches, index);
   if (exactHits.length === 0) {

@@ -845,19 +845,36 @@ export function build(inputs: BuildInputs): BuildResult {
     }
     // PROVENANCE, MATCHED BY FOLD KEY AND NOT BY STRING.
     //
-    // `curatedAliases` must be a subset of `aliases`, and the dedupe above
-    // keeps whichever spelling it saw FIRST — which is the GeoNames one when
-    // both layers carry the same name. Measured: the curated "new york" and
-    // "the big apple" both lose to GeoNames' "New York" and "The Big Apple",
-    // and curated "la" loses to "L.A.". Filtering the deduped list by fold key
-    // marks the spelling that actually survived, so the subset invariant holds
-    // and the curated decision is not silently demoted to a dataset alias.
+    // The dedupe above keeps whichever spelling it saw FIRST — the GeoNames
+    // one when both layers carry the same name. Measured: the curated
+    // "new york" and "the big apple" both lose to GeoNames' "New York" and
+    // "The Big Apple", and curated "la" loses to "L.A.". Filtering the
+    // deduped list by fold key marks the spelling that actually survived, so
+    // the curated decision is not silently demoted to a dataset alias.
+    //
+    // A curated alias that folds to the place's OWN NAME is kept too, and it
+    // is why this is a filter plus a union rather than just a filter. The
+    // dedupe drops such a string from `aliases` entirely — nothing to mark —
+    // so a filter alone made the entry a silent no-op. Measured: `washington`
+    // targeted at Washington DC did nothing at all, because the city is
+    // already called Washington, and so the key stayed CANONICAL and tied
+    // with Washington State instead of winning. The same trap had already
+    // swallowed `the bronx` and `hoi an`.
+    //
+    // So `curatedAliases` means "the hand-written strings that key this
+    // place", not "a subset of aliases". The resolver reads it as the top key
+    // tier, and a place's own name can legitimately be a curated decision:
+    // deciding that a bare `Washington` is the capital is exactly that.
     const curatedKeys = new Set(curatedExtras.map(fold));
+    const curatedForPlace = [
+      ...deduped.filter((alias) => curatedKeys.has(fold(alias))),
+      ...(curatedKeys.has(fold(city.name)) ? [city.name] : []),
+    ];
     places.push({
       id,
       name: city.name,
       aliases: deduped,
-      curatedAliases: deduped.filter((alias) => curatedKeys.has(fold(alias))),
+      curatedAliases: curatedForPlace,
       kind: 'city',
       country: city.country,
       admin: city.admin1 || null,

@@ -44,14 +44,25 @@ export type Place = {
    */
   aliases: string[];
   /**
-   * The subset of `aliases` that was HAND-WRITTEN in
+   * The HAND-WRITTEN strings that key this place, from
    * scripts/location-data/curated.ts rather than taken from a dataset.
    *
    * A curated alias is a decision ("nyc" IS New York City); a dataset
    * alternate name is an observation, and GeoNames' observations are dirty
    * enough to matter — Lomé, Togo carries the literal alternate name "rome".
    * The resolver trusts the two differently, so the provenance has to survive
-   * into the artifact. Empty for the overwhelming majority of places.
+   * into the artifact.
+   *
+   * NOT strictly a subset of `aliases`, and that is deliberate. A curated
+   * string that folds to the place's own NAME is dropped from `aliases` by
+   * the build's dedupe, so there is nothing there to mark — and a subset rule
+   * therefore made such an entry a silent no-op. Measured: `washington`
+   * targeted at Washington DC did nothing at all, because the city is already
+   * called Washington, so the key stayed canonical and tied with Washington
+   * State. A place's own name CAN be a curated decision; deciding that a bare
+   * `Washington` is the capital is exactly that.
+   *
+   * Empty for the overwhelming majority of places.
    */
   curatedAliases: string[];
   kind: PlaceKind;

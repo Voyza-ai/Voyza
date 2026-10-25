@@ -134,7 +134,10 @@ describe('the must-never list, every entry of it a measured regression', () => {
   });
 
   it('never offers a town whose only claim to Washington is an alternate name', () => {
-    const names = offered(run('Washington'));
+    // `Washington` itself is now a curated decision — the capital, matching
+    // the table it replaces — so the junk is checked on the form that still
+    // produces a list: the state, which four towns used to crowd into.
+    const names = offered(run('Washington State'));
     for (const junk of [
       'Reisterstown/MD/US',
       'South River/NJ/US',
@@ -143,12 +146,20 @@ describe('the must-never list, every entry of it a measured regression', () => {
     ]) {
       expect(names).not.toContain(junk);
     }
-    // The two real readings survive, and it stays a question: the prominence
-    // gap between them is 0.041, against 0.033 for Delaware/Delaware OH, so
-    // no margin can resolve one and ask the other.
-    expect(names).toContain('Washington/WA/US');
-    expect(names).toContain('Washington/DC/US');
-    expect(run('Washington').status).toBe('ambiguous');
+    // And a bare `Washington` resolves to the capital, by decision rather
+    // than by prominence — which would have put the state first, 3,700 km
+    // from anyone who typed it meaning DC.
+    const bare = run('Washington');
+    expect(bare.status).toBe('resolved');
+    if (bare.status !== 'resolved') return;
+    expect(bare.place.admin).toBe('DC');
+    expect(bare.via).toBe('curated-alias');
+    expect(bare.airports[0].iata).toBe('IAD');
+
+    // The state is still reachable, and the qualifier still outranks the
+    // curated decision when someone names one.
+    expect(offered(run('Washington State'))[0]).toBe('Washington/WA/US');
+    expect(offered(run('Washington, Utah'))[0]).toBe('Washington/UT/US');
   });
 
   it('asks about Delaware, for the same reason it asks about Washington', () => {
@@ -213,11 +224,20 @@ describe('context, on real coordinates', () => {
   });
 
   it('lets the traveller’s own position settle a same-country pair', () => {
-    const result = run('Washington', { userLatLon: POINTS.seattle });
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') return;
-    expect(result.place.admin).toBe('WA');
-    expect(result.via).toBe('user-location');
+    // Was `Washington` from Seattle, which is now settled earlier by a
+    // curated decision and so no longer exercises the position rule at all.
+    // `Portland` is the same shape and still contested: Oregon and Maine,
+    // one country, 4,000 km apart.
+    expect(run('Portland').status).toBe('ambiguous');
+
+    const oregon = run('Portland', { userLatLon: { lat: 45.5152, lon: -122.6784 } });
+    expect(oregon.status).toBe('resolved');
+    if (oregon.status !== 'resolved') return;
+    expect(oregon.place.admin).toBe('OR');
+    expect(oregon.via).toBe('user-location');
+
+    const maine = run('Portland', { userLatLon: { lat: 43.6591, lon: -70.2568 } });
+    expect(maine.status === 'resolved' && maine.place.admin).toBe('ME');
   });
 
   it('does not let a far-away position decide anything', () => {

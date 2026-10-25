@@ -492,6 +492,25 @@ export const CURATED_ALIASES: CuratedAlias[] = [
   { alias: 'the big apple', target: { name: 'New York City', country: 'US', admin: 'NY' } },
   { alias: 'la', target: { name: 'Los Angeles', country: 'US', admin: 'CA' } },
   { alias: 'l a', target: { name: 'Los Angeles', country: 'US', admin: 'CA' } },
+  // A bare `washington` is the capital, not the state.
+  //
+  // This is the one input where the resolver and the hand-written table it
+  // replaces disagreed about WHICH PLACE is meant, and the table is right for
+  // an origin field: `originAirports.ts` keys `washington` to IAD, DCA, BWI,
+  // and `nearestAirport.ts` names its DC row exactly `Washington`, so every
+  // "use my location" tap in the DC metro produces this string.
+  //
+  // Without it, prominence puts Washington State first (0.370 against 0.329)
+  // and a caller that cannot stop to ask — which is all of them today — gets
+  // Seattle for someone in DC. A curated alias is a decision, which is what
+  // this layer is for, and it makes the flip to `live` reproduce all 132 of
+  // the table's answers instead of 131.
+  //
+  // It does NOT swallow the state: `Washington State` goes through the
+  // admin-suffix path, which filters to state and region kinds, and
+  // `Vancouver, Washington` still qualifies through the state, because a city
+  // key may never act as a qualifier.
+  { alias: 'washington', target: { name: 'Washington', country: 'US', admin: 'DC' } },
   { alias: 'dc', target: { name: 'Washington', country: 'US', admin: 'DC' } },
   { alias: 'washington dc', target: { name: 'Washington', country: 'US', admin: 'DC' } },
   { alias: 'd c', target: { name: 'Washington', country: 'US', admin: 'DC' } },

@@ -443,7 +443,7 @@ describe('location artifact: curated aliases are marked as such', () => {
   // and measurably dirty. `curatedAliases` is the marker subset, and it exists
   // because of the Lomé case asserted below.
 
-  it('is a subset of aliases on every place, and empty on almost all of them', () => {
+  it('keys a real place on every entry, and is empty on almost all of them', () => {
     const problems: string[] = [];
     let nonEmpty = 0;
     for (const place of places) {
@@ -453,11 +453,20 @@ describe('location artifact: curated aliases are marked as such', () => {
       }
       if (place.curatedAliases.length) nonEmpty++;
       for (const alias of place.curatedAliases) {
-        // The invariant the resolver relies on: a marked alias is always
-        // present in `aliases` too, so nothing that reads `aliases` changes
-        // meaning and the marker can be applied by lookup.
-        if (!place.aliases.includes(alias)) {
-          problems.push(`${place.id} ${place.name}: curated "${alias}" is not in aliases`);
+        // Each entry must be a string that really keys this place: either one
+        // of its aliases, or its own NAME.
+        //
+        // The name case is why this is no longer a strict subset check. A
+        // curated string that folds to the place's own name is dropped from
+        // `aliases` by the build's dedupe, so there is nothing to mark — and
+        // a subset rule made such an entry a silent no-op. Measured:
+        // `washington` targeted at Washington DC did nothing at all, because
+        // the city is already called Washington, so the key stayed canonical
+        // and tied with Washington State instead of winning.
+        if (!place.aliases.includes(alias) && alias !== place.name) {
+          problems.push(
+            `${place.id} ${place.name}: curated "${alias}" is neither an alias nor the name`,
+          );
         }
       }
       if (problems.length > 20) break;

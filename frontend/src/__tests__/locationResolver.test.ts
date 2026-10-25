@@ -68,7 +68,9 @@ describe('answers the common inputs without a round trip', () => {
   });
 
   it('asks rather than guessing when a name has two real readings', () => {
-    const answer = resolveLocally('Washington');
+    // `Melbourne`, not `Washington`: the latter is now a curated decision
+    // (the capital), so it no longer exercises the asking path at all.
+    const answer = resolveLocally('Melbourne');
     expect(answer?.status).toBe('ambiguous');
     if (answer?.status !== 'ambiguous') return;
     expect(answer.candidates.length).toBeGreaterThan(1);
@@ -82,7 +84,7 @@ describe('answers the common inputs without a round trip', () => {
   });
 
   it('builds a label that distinguishes without repeating itself', () => {
-    const answer = resolveLocally('Washington');
+    const answer = resolveLocally('Melbourne');
     if (answer?.status !== 'ambiguous') throw new Error('expected a question');
     const labels = answer.candidates.map((c) => c.label);
     expect(new Set(labels).size).toBe(labels.length);
@@ -138,28 +140,22 @@ describe('defers to the server exactly when it must', () => {
     //
     // That the answers match the server's is asserted where both are
     // importable: `backend/src/tests/locationHotSet.test.ts`.
-    expect(resolveLocally('Washington')?.status).toBe('ambiguous');
+    expect(resolveLocally('Melbourne')?.status).toBe('ambiguous');
 
-    const seattle = resolveLocally('Washington', { userLatLon: { lat: 47.6, lon: -122.3 } });
-    expect(seattle?.status).toBe('resolved');
-    expect(seattle?.status === 'resolved' && seattle.place.admin).toBe('WA');
-    expect(seattle?.status === 'resolved' && seattle.via).toBe('user-location');
+    const australia = resolveLocally('Melbourne', { userLatLon: { lat: -37.8136, lon: 144.9631 } });
+    expect(australia?.status).toBe('resolved');
+    expect(australia?.status === 'resolved' && australia.place.country).toBe('AU');
+    expect(australia?.status === 'resolved' && australia.via).toBe('user-location');
 
-    // The case it exists for: the AIRPORT_CITIES row for Washington DC is
-    // named exactly `Washington`, so every "use my location" tap in the DC
-    // metro produces that string — and the more prominent reading is the
-    // state, 3,700 km away on the other coast.
-    const dc = resolveLocally('Washington', { userLatLon: { lat: 38.9072, lon: -77.0369 } });
-    expect(dc?.status).toBe('resolved');
-    expect(dc?.status === 'resolved' && dc.place.admin).toBe('DC');
-    expect(dc?.status === 'resolved' && dc.airports[0].iata).toBe('IAD');
+    const florida = resolveLocally('Melbourne', { userLatLon: { lat: 28.0836, lon: -80.6081 } });
+    expect(florida?.status === 'resolved' && florida.place.admin).toBe('FL');
   });
 
   it('still defers when the only context is a trip', () => {
     // The one signal that cannot be reproduced offline: the server resolves
     // each destination name to a centroid, which is a second resolution pass
     // this module deliberately does not do.
-    expect(resolveLocally('Washington', { tripDestinationNames: ['Rome'] })).toBeNull();
+    expect(resolveLocally('Melbourne', { tripDestinationNames: ['Sydney'] })).toBeNull();
   });
 
   it('does not let a far-away position decide', () => {
@@ -282,12 +278,12 @@ describe('the shipped hot set', () => {
  * Negative control: both cases fail if `originAirportsForCity` stops leading
  * with the table and calls `originAirportsLocally` directly.
  */
-describe('originAirportsForCity — the table leads, the resolver fills gaps', () => {
+describe('originAirportsForCity — the resolver leads, the table is the net', () => {
   const realFetch = global.fetch;
   beforeEach(() => {
-    // No network at all. The point of leading with the table is that these
-    // answers do not depend on a round trip, so a test that allowed one would
-    // not be testing the thing that broke.
+    // No network at all. The point of this function is that it answers
+    // synchronously, so a test that allowed a round trip would not be testing
+    // the thing the synchronous call sites depend on.
     global.fetch = jest.fn(() => {
       throw new Error('originAirportsForCity must not touch the network');
     }) as unknown as typeof fetch;
@@ -299,28 +295,49 @@ describe('originAirportsForCity — the table leads, the resolver fills gaps', (
   it('answers a comma-qualified city offline, which is what regressed', () => {
     // `Newark, NJ` came back with NO airports through the planner: the hot set
     // carries no `newark nj` key, so it needed the server, and without it the
-    // traveller got nothing. The table has always answered this offline.
-    expect(originAirportsForCity('Newark, NJ')).toEqual(getOriginAirports('Newark, NJ'));
-    expect(originAirportsForCity('Newark, NJ').length).toBeGreaterThan(0);
-    expect(originAirportsForCity('Newark, NJ')[0]).toBe('EWR');
-
-    for (const input of ['Jersey City, NJ', 'Brooklyn, NY', 'Hartford, CT', 'Portland, Oregon']) {
-      expect(originAirportsForCity(input)).toEqual(getOriginAirports(input));
+    // traveller got nothing. Both sides answer it offline now.
+    //
+    // Compared on the LEADING airport rather than the whole array: the
+    // resolver leads now, and it knows about fallback airports the table
+    // never listed. `airports[0]` is the slot that decides anything.
+    for (const input of [
+      'Newark, NJ',
+      'Jersey City, NJ',
+      'Brooklyn, NY',
+      'Hartford, CT',
+      'Portland, Oregon',
+    ]) {
       expect(originAirportsForCity(input).length).toBeGreaterThan(0);
+      expect(originAirportsForCity(input)[0]).toBe(getOriginAirports(input)[0]);
     }
+    expect(originAirportsForCity('Newark, NJ')[0]).toBe('EWR');
   });
 
-  it('keeps the table’s reading where the two disagree', () => {
-    // `Washington` is the one key of 132 where the resolver and the table
-    // genuinely disagree about WHICH PLACE is meant: the table chose DC, the
-    // resolver asks and leads with Washington state. Until the flip is
-    // justified by the shadow log, the table's answer is the one served —
-    // the frontend's value wins, because optimizer.ts uses it verbatim.
-    expect(originAirportsForCity('Washington')).toEqual(getOriginAirports('Washington'));
+  it('agrees with the table on the one input where it used to disagree', () => {
+    // `Washington` was the single input of 132 where the two differed about
+    // WHICH PLACE is meant. The table chose DC; the resolver read it as
+    // ambiguous and led with Washington State, 3,700 km away on the other
+    // coast. It is now a curated decision — the capital — so the flip to
+    // resolver-first carries no regression at all.
     expect(originAirportsForCity('Washington')[0]).toBe('IAD');
-    // And the resolver alone would have said otherwise, which is what makes
-    // this assertion worth having rather than a tautology.
-    expect(originAirportsLocally('Washington')[0]).not.toBe('IAD');
+    // Asserted on the resolver ALONE, so the table cannot be what makes this
+    // pass. That is the difference between this test and a tautology.
+    expect(originAirportsLocally('Washington')[0]).toBe('IAD');
+    expect(getOriginAirports('Washington')[0]).toBe('IAD');
+  });
+
+  it('still reaches the state, and lets a qualifier beat the decision', () => {
+    // The curated decision must not swallow the other readings: a traveller
+    // who names one gets it. `Washington, Utah` returned NOTHING for a while
+    // because provenance was being narrowed before the qualifier.
+    expect(originAirportsForCity('Washington State')[0]).toBe('SEA');
+    expect(originAirportsForCity('WA')[0]).toBe('SEA');
+    // Through the composition, not the resolver alone: Washington, Utah is
+    // not one of the 410 places the 60 KB hot set ships, so the browser
+    // cannot answer it offline and the table net catches it. That is the
+    // fallback earning its place rather than being ceremony.
+    expect(originAirportsForCity('Washington, Utah').length).toBeGreaterThan(0);
+    expect(originAirportsLocally('Washington, Utah')).toEqual([]);
   });
 
   it('falls through to the resolver where the table is silent', () => {
@@ -370,16 +387,26 @@ describe('originAirportsForCity — the table leads, the resolver fills gaps', (
     expect(originAirportsForCity('new york')[0]).toBe('JFK');
   });
 
-  it('agrees with the table on every key the table answers', () => {
-    // The phase-5 gate, from the browser's side: the composition can never be
-    // worse than the table it leads with.
+  it('leads with the same airport as the table on every key it answers', () => {
+    // The flip's safety property, from the browser's side: the resolver now
+    // answers first, so it must not change WHICH airport a trip is priced
+    // from on anything the table knew.
+    //
+    // Compared on the lead, not the whole array: the resolver knows about
+    // fallback airports the table never listed (`chicago` gains GYY,
+    // `boston` gains PVD and BED), which widens the search rather than
+    // changing it. `buildHomeLeg` prices every survivor of the
+    // MAX_HOME_AIRPORTS cap and takes the cheapest.
+    const differing: string[] = [];
     let compared = 0;
     for (const key of MULTI_AIRPORT_CITY_KEYS) {
       const table = getOriginAirports(key);
       if (table.length === 0) continue;
-      expect(originAirportsForCity(key)).toEqual(table);
+      const got = originAirportsForCity(key);
+      if (got[0] !== table[0]) differing.push(`${key}: ${table[0]} -> ${got[0]}`);
       compared++;
     }
+    expect(differing).toEqual([]);
     expect(compared).toBeGreaterThanOrEqual(130);
   });
 });

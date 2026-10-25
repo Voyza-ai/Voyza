@@ -1,6 +1,6 @@
 {
  "schemaVersion": 5,
- "generatedAt": "2026-10-24T20:29:23.809Z",
+ "generatedAt": "2026-10-25T00:31:12.718Z",
  "sources": {
   "iso3166Alpha2": "https://download.geonames.org/export/dump/countryInfo.txt (GeoNames, CC BY 4.0)",
   "uspsStateCodes": "https://www2.census.gov/geo/docs/reference/state.txt (US Census Bureau, public domain)"

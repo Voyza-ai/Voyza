@@ -35,6 +35,11 @@ import { resolveOriginAirports } from '../services/location/originAirports';
  * Keys where the resolver leads with a different airport than the table, and
  * why that is acceptable. Anything not listed here must match.
  *
+ * One entry, and it is the resolver CORRECTING the table. `washington` used
+ * to be here too, as the single input where the resolver was worse; it is
+ * now a curated decision that reproduces the table's answer, so the gate is
+ * 132 of 132 with no regression.
+ *
  * To find what belongs here, run this suite: the failure names every
  * unaccounted key as `key: table XXX -> resolver YYY`. A row is only added
  * once somebody has decided the new lead is right.
@@ -49,19 +54,6 @@ const ACCEPTED_LEAD_CHANGES: Record<string, { to: string; why: string; asks?: bo
       'Washington metro" rather than as the state the city is in. Accepted ' +
       'because PDX is right, and recorded rather than silently absorbed ' +
       'because it is a behaviour change a traveller would notice.',
-  },
-  washington: {
-    to: 'SEA',
-    asks: true,
-    why:
-      'The table decided a bare `washington` means Washington DC and returned ' +
-      'IAD, silently. The resolver will not: Washington State and Washington ' +
-      'DC are both real destinations and their prominence gap is 0.041, so it ' +
-      'returns a QUESTION with both readings and `needsClarification` set. ' +
-      'SEA is only the best-effort lead a caller gets if it ignores that, ' +
-      'which `optimizer.ts` does because it cannot stop mid-run to ask. ' +
-      'Accepted because asking is the better behaviour, not because SEA beats ' +
-      'IAD — the whole point is that neither does.',
   },
 };
 
@@ -143,10 +135,10 @@ describe('gate 2 — the leading airport matches, or the change is accepted', ()
   });
 
   it('is really asking, wherever an acceptance claims it asks', () => {
-    // Keeps the ledger honest. The `washington` row is accepted BECAUSE the
-    // resolver turns it into a question rather than a different guess, so if
-    // it ever stops asking, the reason on that row has become fiction and
-    // the acceptance has to be revisited.
+    // Keeps the ledger honest: a row justified by "it asks instead of
+    // guessing" is fiction the moment it stops asking. No row claims that
+    // today — `washington` used to, and is now a curated decision that
+    // matches the table — so this guards the next one.
     for (const [key, accepted] of Object.entries(ACCEPTED_LEAD_CHANGES)) {
       if (!accepted.asks) continue;
       const resolved = resolveOriginAirports(key);

@@ -87,12 +87,24 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
   no name field, it has no backend twin so it is not part of the duplication
   problem, and putting ~267 airport names in the hot set costs budget it does
   not have.
-- [ ] **Flip `LOCATION_RESOLVER_MODE` to `live`.** Defaults to `shadow`:
-  both resolvers run, the old table is served, disagreements are logged with
-  the raw input. The flip is an env change, not a deploy, and so is the
-  rollback. The gate is written down in the architecture doc: the resolver
-  must reproduce the LEADING airport on all 132 keys the table answers, no
-  price-changing disagreement may be left unexplained, and the owner says so.
+- [x] **Flipped to `live` — the resolver now answers.** Over the 132 inputs
+  the hand-written table answers, the resolver reproduces the leading airport
+  on **all 132** and returns nothing on none; the single changed answer is a
+  correction (`Vancouver, WA` moves from Seattle 250 km away to Portland
+  7 km away). It also answers 19 inputs the table refuses. Both sides were
+  flipped: `LOCATION_RESOLVER_MODE` now defaults to `live`, and
+  `originAirportsForCity` is resolver-first — the frontend's lookup is what
+  actually decides, because `optimizer.ts` uses the request body verbatim.
+  `shadow` is the rollback and `off` removes the resolver entirely; both are
+  an env change, not a deploy. `locationLiveGate.test.ts` is the evidence as
+  a runnable suite and fails if a new disagreement appears.
+- [x] **A bare `Washington` is now a curated decision: the capital.** It was
+  the one input of 132 where the resolver was worse — prominence put the
+  state first, 3,700 km from anyone who typed it meaning DC, and every "use
+  my location" tap in the DC metro produces that exact string. Making it
+  curated took the flip from 131/132 to 132/132 with no regression. The state
+  is still reachable as `Washington State` or `WA`, and a named qualifier
+  still beats the decision (`Washington, Utah` → SGU).
 - [ ] **GeoNames attribution needs a credits surface — the rest is done.**
   CC BY 4.0 requires credit, a licence link and an indication of changes, and
   the condition is now live: the frontend falls through to the resolver
