@@ -840,34 +840,47 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   let resolvedOriginAirports: string[] = [];
   let originClarification: OriginClarification | undefined;
   if (hasOrigin) {
+    // Resolve the NAME unconditionally, even when the caller supplied its own
+    // airports. Whether the name was ambiguous is a fact about what the
+    // traveller typed, not about which airports we ended up pricing, and the
+    // caller cannot report it: the frontend's lookup returns a confident list
+    // or nothing, with no way to say "this matched four places".
+    //
+    // This used to sit inside the `else` below, which made the feature almost
+    // dead. The frontend answers `Portland` with ["PDX","SLE"] and `Melbourne`
+    // with ["MEL","AVV","MEB"] from its own copy of the artifact, so the
+    // branch never ran and the two clearest ambiguous origins never produced a
+    // clarification. Only names the frontend's hot set MISSED could ever ask.
+    //
+    // Free to do here: an in-memory artifact lookup, no network, no Duffel.
+    const resolution = resolveOriginAirports(origin!, {
+      // The destinations are the strongest context available here and cost
+      // nothing: a trip through Florence and Venice says which Rome is home.
+      tripDestinationNames: cities.map((c) => c.name),
+    });
+    if (resolution.needsClarification) {
+      originClarification = {
+        input: origin!,
+        reason: resolution.needsClarification.reason,
+        candidates: resolution.needsClarification.candidates,
+      };
+    }
+
     if (originAirports && originAirports.length > 0) {
-      // The caller already decided, and we serve that decision verbatim.
-      // Nothing to second-guess: the frontend fills this from the same
-      // generated artifact this function would read, which is the point of
-      // having retired the two hand-written tables.
+      // The caller already decided, and we serve that decision verbatim for
+      // PRICING. Nothing to second-guess: the frontend fills this from the
+      // same generated artifact this function would read, which is the point
+      // of having retired the two hand-written tables. The clarification
+      // above is informational and does not override it.
       resolvedOriginAirports = originAirports;
+    } else if (resolution.airports.length > 0) {
+      resolvedOriginAirports = resolution.airports;
     } else {
-      const resolution = resolveOriginAirports(origin!, {
-        // The destinations are the strongest context available here and cost
-        // nothing: a trip through Florence and Venice says which Rome is home.
-        tripDestinationNames: cities.map((c) => c.name),
-      });
-      if (resolution.needsClarification) {
-        originClarification = {
-          input: origin!,
-          reason: resolution.needsClarification.reason,
-          candidates: resolution.needsClarification.candidates,
-        };
-      }
-      if (resolution.airports.length > 0) {
-        resolvedOriginAirports = resolution.airports;
-      } else {
-        try {
-          const single = await getIataCode(origin!);
-          resolvedOriginAirports = [single];
-        } catch {
-          logger.warn('Could not resolve origin IATA', { origin });
-        }
+      try {
+        const single = await getIataCode(origin!);
+        resolvedOriginAirports = [single];
+      } catch {
+        logger.warn('Could not resolve origin IATA', { origin });
       }
     }
   }
