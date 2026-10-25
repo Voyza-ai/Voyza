@@ -15,7 +15,7 @@ dates (2026-07-20), never "last week"._
 |---|---|---|
 | All Aboard | 🔑 **INTEGRATED** — live in searchTrains (test env) | 2026-07-29 |
 | Omio | 🔁 follow-up sent | 2026-07-27 |
-| Junction | ⏸️ went quiet mid-scheduling — final note ~08-07, then park | 2026-07-31 |
+| Junction | ⏸️ stalled — his 07-29 call offer went unanswered; with Gohil | 2026-07-31 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
@@ -108,18 +108,22 @@ dates (2026-07-20), never "last week"._
 - **2026-07-27: Hervé Gilg (hg@junctionconnect.com) replied within minutes** —
   wants a call, offered Wed 2026-07-29 12:15 pm ET.
 - **2026-07-28:** we rescheduled (co-founder conflict) — asked for Thu same
-  time or Fri flexible. **No reply since; he'd replied in minutes before
-  the reschedule.**
+  time or Fri flexible. **He answered the same day**, offering 12:15 pm ET
+  on Wed 2026-07-29. That offer is the last message in the thread and was
+  never answered from our side. (This entry previously said "no reply
+  since", which the thread contradicts — corrected 2026-10-24.)
 - **2026-07-31 (3:50 am, his morning):** nudge sent — next week, preferably
   Mon or Fri, flexible; mentioned first rail integration shipped. Silent.
-- **2026-08-03:** two unanswered emails in a row → deliberately waiting,
-  no third ping this week. Note: August = Europe holiday season; and with
+- **2026-08-03:** one genuinely unanswered nudge (07-31) → deliberately
+  waiting, no further ping this week. Note: August = Europe holiday season; and with
   All Aboard integrated, Junction is now a nice-to-have second provider,
   not critical path.
-- **Next:** if still silent by 2026-08-07, ONE final zero-pressure note
-  (scheduled ~9:45 am his time): no scheduling ask, "no rush, door open
-  whenever your calendar opens up." Then park. Warm welcome if he ever
-  revives the thread; call prep notes preserved below.
+- **Next (as of 2026-10-24):** the ~08-07 note was planned but there is no
+  record it was ever sent, and nothing has been checked since. The thread
+  lives in Gohil's mailbox and he owns it. Two things for him: confirm
+  whether the 08-07 note went out, and note that the thing to apologise
+  for is the ignored 07-29 call offer, not general slowness. Warm welcome
+  if he ever revives the thread; call prep notes preserved below.
 - Prep (if call happens): volume story (~200 bookings, study-abroad
   students), service-fee model (post-Carl), All Aboard integration story,
   what we need (sandbox, EU rail coverage), their pricing/terms.
@@ -163,9 +167,12 @@ dates (2026-07-20), never "last week"._
   A new email, not the old thread — that one lives in Gohil's mailbox and
   isn't visible from Satwik's. Asked again for Tequila affiliate or
   metasearch access, naming the Ryanair/Wizz gap.
-- **Next:** wait. When the key arrives → Claude integrates it as the second
-  flight source (plan step F3). If silent past ~2026-08-10, fall back to
-  Travelpayouts for LCC coverage.
+- **Next:** the 2026-10-24 contact is chased automatically (see the routine
+  note in the log), so no manual nudge is needed. When a key arrives →
+  integrate as the second flight source (plan step F3). The ~2026-08-10
+  fallback deadline passed with no decision taken; Travelpayouts is still
+  the LCC fallback, and Amadeus Self-Service is now the stronger one,
+  since its published production path needs no EIN.
 
 ### Booking.com affiliate  🔲
 - **For:** commission on the hotel links we already show. Biggest easy revenue.
@@ -235,10 +242,15 @@ _Append a line whenever anything happens, newest first._
   He offered to trace the stray link if we send him the link or session id.
   **Still unanswered as of 2026-10-23.**
 
-- 2026-08-03 — Junction: still silent after the 07-28 reschedule and the
-  07-31 nudge (two unanswered). Decision: no third ping this week; one
-  final zero-pressure note ~08-07 if nothing, then park. August holidays
-  likely a factor; All Aboard integration lowers the stakes.
+- 2026-08-03 — Junction: silent since the 07-31 nudge. Decision: no third
+  ping this week; one final zero-pressure note ~08-07 if nothing, then
+  park. August holidays likely a factor; All Aboard integration lowers
+  the stakes.
+  **Corrected 2026-10-24:** this read "still silent after the 07-28
+  reschedule and the 07-31 nudge (two unanswered)". That is wrong. Hervé
+  answered the reschedule the same day with 12:15 pm ET on Wed 07-29, and
+  it was we who left that offer unanswered. Only the 07-31 nudge is
+  genuinely unanswered by him.
 
 - 2026-07-29 — **ALL ABOARD SANDBOX GRANTED** (Carl): account live at
   allaboard.eu/agent (email OTP), test-scoped API keys from Dashboard, docs
