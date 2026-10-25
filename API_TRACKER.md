@@ -61,9 +61,18 @@ dates (2026-07-20), never "last week"._
   `backend/.env`; `services/allaboard.ts` registered as a train provider.
   Live-verified: Eurostar Paris→Amsterdam $39.89, Trenitalia Rome→Florence
   from $14.70. First real rail data for FR/IT/ES/Benelux/UK.
-- **Next:** exercise it through real trip plans, then book Carl's
-  integration call (his link) to review + ask about offer-pricing latency
-  (cold getJourneyOffer can exceed 30s; their cache warms after).
+- **2026-09-03: Carl replied on the stray booking link** — their API returns no
+  link at the search or offer stage, so the booking link we were showing was not
+  theirs. Booking runs through the API: `createBooking` → `createOrder` → either
+  finalise against the wallet balance or `createPayment`, the only call that
+  returns a URL (a hosted payment page). Docs:
+  docs.allaboard.eu/tickets/book-tickets · docs.allaboard.eu/payments. He offered
+  to trace the stray link if we send him the link or session id.
+- **Next:** reply to Carl's 2026-09-03 mail — **unanswered as of 2026-10-23**:
+  send him the stray link / session id to trace, and move our booking path onto
+  `createBooking` → `createOrder` → `createPayment`. Then book his integration
+  call (his link) to review + ask about offer-pricing latency (cold
+  getJourneyOffer can exceed 30s; their cache warms after).
 - **Model note for pricing later:** displayed rail prices will sit slightly
   above operator sites (their 1% + €2 + our service fee). Keep our fee
   small; the value is one-app multi-leg booking.
@@ -172,6 +181,15 @@ dates (2026-07-20), never "last week"._
 ## Response log
 
 _Append a line whenever anything happens, newest first._
+
+- 2026-09-03 — **Carl (All Aboard) replied** on the stray booking link: their API
+  returns no link at the search or offer stage, so the booking link BlueMurr was
+  showing was not theirs. Booking happens in the API — `createBooking`, then
+  `createOrder`, then either finalise against the wallet balance or
+  `createPayment`, which is the only call that returns a URL (a hosted payment
+  page). Docs: docs.allaboard.eu/tickets/book-tickets · docs.allaboard.eu/payments.
+  He offered to trace the stray link if we send him the link or session id.
+  **Still unanswered as of 2026-10-23.**
 
 - 2026-08-03 — Junction: still silent after the 07-28 reschedule and the
   07-31 nudge (two unanswered). Decision: no third ping this week; one

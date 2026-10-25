@@ -36,7 +36,7 @@ turns every hotel click into commission. Travelpayouts is faster to get approved
 than Booking direct, and bundles flights too.
 
 1. Go to **travelpayouts.com** → sign up as a partner/affiliate.
-2. Add Voyza as your "website/project" (URL + short description: "AI multi-modal
+2. Add BlueMurr as your "website/project" (URL + short description: "AI multi-modal
    trip planner"). Approval is usually quick.
 3. In the dashboard, activate the **Booking.com** program (and **Hotellook**).
    Also activate a **flights** program (Aviasales / WayAway) while you're there.
