@@ -1171,6 +1171,12 @@ export default function PlanningChat() {
       dateShiftSuggestion: result.dateShiftSuggestion,
       origin,
       returnToHome: answers.returnToHome ?? true,
+      // Carried through so the results page can say which reading of an
+      // ambiguous origin the prices are for. The backend sets this only when
+      // the name really was ambiguous, so it is absent on almost every trip.
+      ...(result.originClarification
+        ? { originClarification: result.originClarification }
+        : {}),
     };
   };
 

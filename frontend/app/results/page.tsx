@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, Suspense } from 'react';
 import Navbar from '@/components/shared/Navbar';
 import ResultsHeader from '@/components/results/ResultsHeader';
+import OriginClarification, { type OriginChoice } from '@/components/results/OriginClarification';
 import Flowchart from '@/components/results/Flowchart';
 import CalendarView from '@/components/results/CalendarView';
 import ScheduleView from '@/components/results/ScheduleView';
@@ -260,6 +261,43 @@ function ResultsPageInner() {
   const homeLegsFetchedRef = useRef<string | null>(null);
   const [homeLegSearch, setHomeLegSearch] = useState({ outbound: false, return: false });
 
+  /**
+   * The traveller picked a different reading of an ambiguous origin.
+   *
+   * Clears the home legs and the once-per-trip guard so the backfill effect
+   * below re-runs and re-prices them from the chosen airports. That is the
+   * part the origin actually determines, and the part that was wrong.
+   *
+   * It does NOT re-run the optimizer, so the CITY ORDER still reflects the
+   * reading we guessed. The order is chosen by testing permutations against
+   * the home legs, so in principle a different origin could reorder the
+   * trip. Left alone deliberately: re-optimising from here needs the
+   * planner's own inputs, and the alternative — leaving the flights priced
+   * from a city the traveller did not mean — is worse than an order that is
+   * merely not re-optimised.
+   */
+  const chooseOrigin = (choice: OriginChoice) => {
+    const trip = useTripStore.getState().currentTrip;
+    if (!trip?.origin) return;
+    // The label is "Portland, Maine, United States"; the home card wants
+    // "Portland". Labels are built name-first, so the leading segment is it.
+    const shortName = choice.label.split(',')[0]?.trim() || trip.origin.city;
+    homeLegsFetchedRef.current = null;
+    setTrip({
+      ...trip,
+      origin: {
+        ...trip.origin,
+        city: shortName,
+        airports: choice.airports,
+        returnAirports: choice.airports,
+        outboundLeg: null,
+        returnLeg: null,
+      },
+      // The choice has been made; stop asking.
+      originClarification: undefined,
+    });
+  };
+
   useEffect(() => {
     const trip = currentTrip;
     if (!trip?.origin?.city || trip.cities.length === 0) return;
@@ -360,7 +398,17 @@ function ResultsPageInner() {
         }).catch(() => {});
       });
     }
-  }, [currentTrip?.id, currentTrip?.origin?.city]); // eslint-disable-line react-hooks/exhaustive-deps
+    // The AIRPORTS belong in here, not just the city name. This effect prices
+    // legs from `origin.airports`, and the ambiguous-origin case changes the
+    // airports while leaving the city string identical — Portland, Oregon and
+    // Portland, Maine are both "Portland". Keyed on the name alone, picking
+    // the other reading silently kept the Oregon fares. Airports only change
+    // on load and on that choice, so this adds no extra searches.
+  }, [
+    currentTrip?.id,
+    currentTrip?.origin?.city,
+    currentTrip?.origin?.airports?.join(','),
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -418,6 +466,15 @@ function ResultsPageInner() {
           )}
           {currentTrip.vibeTierUp && (
             <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
+          )}
+          {currentTrip.originClarification && currentTrip.origin && (
+            <div className="px-1 pb-2">
+              <OriginClarification
+                clarification={currentTrip.originClarification}
+                pricedFrom={currentTrip.origin.airports ?? []}
+                onChoose={chooseOrigin}
+              />
+            </div>
           )}
 
           {/* Full-height cards area */}
