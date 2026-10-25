@@ -98,13 +98,53 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
   The endpoint returns the notice, the hot set carries it, and a test holds
   the wording to `ATTRIBUTION.md` word for word. What is missing is a page to
   render it on, which is a visible change and so yours to approve.
-- [ ] **OurAirports marks some closed airports as in service.** It has DIA
-  (the old Doha International) as `scheduled_service=yes`, type
-  `large_airport` — the same class it gives Hamad. It also types Burbank the
-  same as LAX, which is why the artifact's rank term cannot pick a metro's
-  main airport on its own. The curated pin layer covers the cities we know
-  about; an origin that is a closed field would return zero flights, so it is
-  worth a pass over the pinned set at some point.
+- [x] **Pass over the pinned set done — it is clean, and now guarded.** All 93
+  airports the curated layer pins are present in the committed artifact, so
+  every one is listed upstream with scheduled service and a usable type. No
+  pin is closed, none has lost its service flag, and no pinned code is shared
+  by two airport rows (the DIA/DOH shape). `curatedPinsInService.test.ts`
+  holds this on every change, rather than only when someone regenerates.
+  - The sweep also settled what the check can mean. Measured over the 9,054
+    IATA-coded rows: 4,921 fail `scheduled_service`, 125 more are a heliport
+    or seaplane base. NO `closed` row carries an IATA code at all — upstream
+    retires the code when it marks a field closed. So the build's `closed`
+    type filter never fires, and the service flag is the whole defence.
+- [ ] **The DIA class is still undetectable offline, by construction.** An
+  airport closed in the world that upstream still lists in service keeps its
+  code precisely because upstream has not marked it closed. Compared field by
+  field, DIA and Hamad are indistinguishable: same `large_airport`, same
+  `scheduled_service=yes`, same municipality — only a missing `home_link`,
+  which thousands of live airports also lack. DIA is in the artifact and sits
+  4.5 km from the centre against Hamad's 7.9, so distance alone leads with the
+  closed field; the curated pin is the only thing holding Doha on DOH, and a
+  test now holds the pin. Finding the NEXT one needs a source we do not have.
+  - A same-municipality proximity scan (two scheduled airports under 15 km
+    apart) surfaces the shape: 11 pairs worldwide, DIA/DOH among them. The
+    other ten are legitimate — Boeing Field vs SEA, Wilson vs Nairobi, Santos
+    Dumont vs Galeão — so it is a review prompt, not a rule. Every one of the
+    eleven already resolves to the correct lead airport.
+  - OurAirports also types Burbank the same as LAX, which is why the rank term
+    cannot pick a metro's main airport on its own.
+- [ ] **Lead airport can be much farther than a usable nearer one.** Found
+  during the sweep, not previously recorded. 585 cities have `airports[0]`
+  more than 60 km farther AND over 3× the distance of a later entry: Weifang
+  (9.4M) leads TAO at 96 km over its own WEF at 7 km; Diyarbakır leads GNY at
+  131 km over DIY at 7 km; San Juan, Argentina leads Mendoza at 145 km over
+  UAQ at 9.7 km. 23 of the 585 have populations over 500k.
+  - NOT obviously a bug: type-then-distance is deliberate and measured, and
+    for Pietermaritzburg leading with Durban at 70 km over a 4 km airstrip is
+    the right answer. The question is where the trade stops being right.
+  - Bounded impact: `airports[0]` drives permutation RANKING in
+    `estimateHomeLegCost`; `buildHomeLeg` prices every survivor of the
+    `MAX_HOME_AIRPORTS` cap and takes the cheapest. So a wrong lead costs
+    ranking quality and cap membership, not the quoted fare.
+- [ ] **`San Juan` resolves to Argentina, not Puerto Rico.** Also found during
+  the sweep. Eight places share the name; prominence picks San Juan, AR
+  (pop 518,624) over San Juan, PR (418,140) on raw city population, though PR
+  is far the larger travel origin once its metro is counted. Compounding it,
+  the AR entry leads with Mendoza's MDZ at 145 km rather than its own UAQ at
+  9.7 km, so a traveller meaning Puerto Rico is priced from the wrong
+  hemisphere. Needs a curated decision, like the Portland and Melbourne cases.
 
 Everything else is merged. `feat/voyza-ai-chat` and `feat/map-redesign` are
 both merged all the way to `voyza_main`; the branch flow is now
