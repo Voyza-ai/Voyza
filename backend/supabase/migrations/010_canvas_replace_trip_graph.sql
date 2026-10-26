@@ -29,8 +29,13 @@
 -- /rest/v1/rpc/ by a signed-in user. (Same hardening the SECURITY TODO in
 -- SCHEMA_SNAPSHOT.sql calls for on the existing functions.)
 --
--- Until this is applied the route falls back to an ordered, non-atomic
--- insert-then-delete and logs a warning naming this file.
+-- APPLIED. Recorded in the migration ledger as
+-- 20261001025911 canvas_replace_trip_graph, and the function
+-- canvas_replace_trip_graph() was confirmed present on 2026-10-26.
+-- The route therefore always takes the atomic path now; its PGRST202
+-- fallback (an ordered, non-atomic insert-then-delete that logs a warning
+-- naming this file) is unreachable dead code. Left in place on purpose —
+-- removing it is a code change, not a migration.
 --
 -- Run in the Supabase SQL editor (same as 001–005), or:
 --   supabase db push

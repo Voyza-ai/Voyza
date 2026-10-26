@@ -52,6 +52,12 @@
 -- client (backend/src/services/supabase.ts), which bypasses RLS entirely
 -- and is skipped by the trigger's role guard below.
 --
+-- APPLIED. Recorded in the migration ledger as
+-- 20260913023944 trips_owner_column_guard. Confirmed on 2026-10-26: the live
+-- trips_group_edit carries the WITH CHECK below, and trips carries the
+-- trips_owner_columns_guard trigger. The note that follows is kept for anyone
+-- re-running this on another database.
+--
 -- BEFORE RUNNING: this drops and recreates trips_group_edit by name. The
 -- text below is the live definition as of ../SCHEMA_SNAPSHOT.sql
 -- (generated 2026-06-16 from prod). Confirm prod still matches, and that no
@@ -215,6 +221,7 @@ revoke execute on function public.guard_trip_owner_columns() from public;
 --   update public.trips set user_id = '<EDITOR_ID>' where id = '<TRIP_ID>';
 -- rollback;
 --
--- After applying, ../SCHEMA_SNAPSHOT.sql is out of date for trips (it still
--- shows trips_group_edit without a WITH CHECK and no triggers on trips).
--- Refresh it, or note the drift, so the snapshot keeps describing the live DB.
+-- This has been applied, so ../SCHEMA_SNAPSHOT.sql IS out of date for trips:
+-- it still shows trips_group_edit without a WITH CHECK and no triggers on
+-- trips, while the live DB has both (verified 2026-10-26). The snapshot's
+-- header records the drift; refresh it when it is next regenerated.

@@ -1,4 +1,11 @@
 -- Row Level Security policies for all Voyza tables
+--
+-- APPLIED. RLS is enabled on these tables live (confirmed 2026-10-26). It
+-- predates the migration ledger, so supabase_migrations.schema_migrations has
+-- no row for it. Several policies here have since been REPLACED on the live
+-- DB — trips_group_edit by 008, group_members_owner_all by 011 — so this file
+-- no longer describes the live policy set. See ../SCHEMA_SNAPSHOT.sql, 008
+-- and 011.
 
 -- ─── Enable RLS ──────────────────────────────────────────────
 alter table trips enable row level security;

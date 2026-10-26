@@ -1,4 +1,12 @@
 -- Voyza core schema — mirrors frontend/lib/types.ts
+--
+-- APPLIED. These tables are live (confirmed 2026-10-26). It predates the
+-- migration ledger, so supabase_migrations.schema_migrations has no row for
+-- it. Note that the live tables have since drifted well beyond this file —
+-- columns, constraints and defaults added by later migrations, several of
+-- which have no file in this repo. ../SCHEMA_SNAPSHOT.sql is the record of
+-- what is actually deployed; this file is only the original shape.
+--
 -- Run via: supabase db push or supabase migration up
 
 -- ─── Trips ───────────────────────────────────────────────────

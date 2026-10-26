@@ -1,5 +1,10 @@
 -- Key the leg price cache on the party size.
 --
+-- APPLIED. Recorded in the migration ledger as 20261001025852
+-- leg_cache_travelers. Confirmed on 2026-10-26: leg_price_cache.travelers
+-- exists, idx_leg_cache_lookup_travelers exists, and the old
+-- idx_leg_cache_lookup is gone.
+--
 -- Every price in this table is a PARTY TOTAL: Duffel quotes the whole
 -- passenger set, and services/trains.ts now scales rail fares to match. But
 -- the lookup in services/compareLeg.ts matched only on

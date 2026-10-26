@@ -1,5 +1,9 @@
 -- 004: trip-level share link for the canvas
 --
+-- APPLIED. Recorded in the migration ledger as 20260709030520
+-- canvas_share_link. Confirmed on 2026-10-26: canvas_sessions.share_mode and
+-- .share_token both exist, as does canvas_sessions_share_token_idx.
+--
 -- One share link per trip (backed by its canvas session), with an
 -- owner-selected access mode. Joining via the link auto-creates a
 -- group_members row at the mode's role:

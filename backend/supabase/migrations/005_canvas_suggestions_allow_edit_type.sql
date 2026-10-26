@@ -1,5 +1,9 @@
 -- Allow 'edit' as a canvas_suggestions.type.
 --
+-- APPLIED. Recorded in the migration ledger as 20260718014820
+-- canvas_suggestions_allow_edit_type. Confirmed on 2026-10-26: the live
+-- canvas_suggestions_type_check allows add_city, comment, reaction and edit.
+--
 -- The app submits suggestions of type 'edit' for the "owner confirms edits"
 -- flow (see backend/src/routes/canvas.ts — the suggestion schema accepts
 -- add_city | comment | reaction | edit), but the original check constraint
