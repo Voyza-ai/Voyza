@@ -7,6 +7,36 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ---
 
+## 🚨 Must ship before the app is public
+
+Not dev blockers — none of these stop work today, and they were deliberately
+deferred. They are the things that must not reach real users unfinished.
+Check this section before any public release.
+
+- [ ] **GeoNames attribution needs a user-reachable surface.** CC BY 4.0
+  obliges credit, a licence link and an indication of changes. The wording is
+  settled and machine-held: it lives once in `backend/src/data/attribution.ts`,
+  `locationAttribution.test.ts` compares it to `ATTRIBUTION.md` word for word,
+  every `POST /api/locations/resolve` response carries it, and the browser hot
+  set re-exports it as `LOCATION_DATA_ATTRIBUTION`. What is missing is a page
+  that RENDERS it. Importing the constant is not compliance.
+  - The obligation is already live. The frontend answers origins from the
+    resolver, so GeoNames-derived airports are on screen today.
+  - Placement is unresolved and is the owner's call. Measured constraint:
+    `/plan` and `/results` are NOT auth-protected (only `/history` and
+    `/explore` are), while the Navbar dropdown that would naturally host a
+    link only renders when signed in. So a dropdown-only link leaves exactly
+    the anonymous visitors who can see the data with no route to the credit.
+    There is no footer and no about/settings route anywhere in `frontend/app`.
+  - Options as costed: a `/credits` route plus a small Navbar link visible in
+    both auth states; the same route linked only from the dropdown; or the
+    notice inline under the airport lists, which `ATTRIBUTION.md` argues
+    against in favour of a link.
+  - Full detail, including the other two sources and the licences
+    deliberately avoided, is in `ATTRIBUTION.md`.
+
+---
+
 ## ✅ Done (shipped to `claude_code_backend`)
 
 ### Planning flow & AI
@@ -92,6 +122,8 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
   from Los Angeles, and Texas pushed Houston, the state's largest metro,
   outside the cap. Now `LAX, SFO, SAN` and `DFW, IAH, AUS`.
 - [ ] **GeoNames attribution needs a credits surface — the rest is done.**
+  **Deferred by the owner to pre-release; tracked in "Must ship before the app
+  is public" at the top of this file.**
   CC BY 4.0 requires credit, a licence link and an indication of changes, and
   the condition is now live: the frontend falls through to the resolver
   wherever the old table is silent, so GeoNames-derived answers are on screen.
