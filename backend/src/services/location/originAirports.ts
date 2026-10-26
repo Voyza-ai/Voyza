@@ -105,6 +105,39 @@ function candidateOf(candidate: Candidate, max: number): OriginCandidate {
 }
 
 /**
+ * One card per READING, not one per GeoNames row.
+ *
+ * `San Juan` returned eight candidates of which four were doubles — "San Juan,
+ * Argentina" twice and "San Juan, Puerto Rico" twice — because the upstream
+ * dump carries the same city as two rows. 110 city groups share a
+ * name+country+admin that way, 114 rows in all; the clear ones are identical
+ * down to the population (San Juan PR is 418,140 on both).
+ *
+ * Collapsing on the LABEL rather than on place identity is deliberate. The
+ * label is the entire basis on which a traveller chooses, so two candidates
+ * printing the same string are the same choice to them whether or not the rows
+ * are truly one place — offering both is asking a question with two identical
+ * answers. Keeping the FIRST is what makes it safe: candidates arrive ranked,
+ * so the survivor is the more prominent row, and where the rows differ it is
+ * the better-attached one (San Juan PR's leading row carries eight airports
+ * against the other's six).
+ *
+ * Deliberately not fixed in the pipeline: deduping there would need a rule for
+ * which row wins, and two cities CAN legitimately share a name inside one
+ * admin region with different populations (Changzhi, CN: 1,214,940 and
+ * 699,514). Here the ranking has already made that call.
+ */
+function dedupeByLabel(candidates: OriginCandidate[]): OriginCandidate[] {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const key = candidate.label.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
  * Collapse a `Resolution` into the non-asking contract.
  *
  * Exported so the shadow comparison measures exactly what a caller would be
@@ -129,7 +162,7 @@ export function fromResolution(result: Resolution, max = DEFAULT_MAX_AIRPORTS): 
       placeId: best.place.id,
       needsClarification: {
         reason: result.reason,
-        candidates: result.candidates.map((candidate) => candidateOf(candidate, max)),
+        candidates: dedupeByLabel(result.candidates.map((candidate) => candidateOf(candidate, max))),
       },
     };
   }
@@ -143,7 +176,7 @@ export function fromResolution(result: Resolution, max = DEFAULT_MAX_AIRPORTS): 
     placeId: null,
     needsClarification: {
       reason: 'not-found',
-      candidates: result.suggestions.map((candidate) => candidateOf(candidate, max)),
+      candidates: dedupeByLabel(result.suggestions.map((candidate) => candidateOf(candidate, max))),
     },
   };
 }
