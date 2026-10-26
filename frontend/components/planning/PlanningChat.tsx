@@ -1917,12 +1917,32 @@ export default function PlanningChat() {
       return;
     }
 
-    // Pre-intent — typing here switches into open chat mode
+    // Pre-intent — typing here opens the AI conversation, seeded with the
+    // sentence. It has to hand off through `chatSeedRef` (the same path the
+    // landing hero uses at :249): `setIntent('chat')` swaps this component's
+    // chat UI out for ConversationalPlanner, so handleChatSubmit's bubble
+    // landed in `messages` that is no longer rendered and the sentence was
+    // dropped without ever reaching /api/plan/converse.
+    //
+    // Dropping the `setChatMode(true)` that used to be here is load-bearing,
+    // not tidying. `onSwitchToGuided` sets intent to 'place' and never resets
+    // chatMode, so leaving it true suppressed the step widgets (:2267) and
+    // the skip button (:2536) and kept the bar routed at handleChatSubmit
+    // (:1915) — the "continue with guided questions instead" fallback came
+    // back question-only, with no pickers.
+    //
+    // CONSEQUENCE, recorded because it is not obvious: `setChatMode(true)`
+    // now appears nowhere in the codebase, so `chatMode` is permanently
+    // false. That makes the branch directly above dead, along with
+    // `handleChatSubmit` itself and the chat-mode placeholder at :1888.
+    // Deliberately left in place here rather than widening a bug fix into a
+    // 127-line deletion; it is tracked in ROADMAP.md.
     if (!intent) {
       setShowIntent(false);
+      chatSeedRef.current = value;
+      setTextInput('');
+      setAnswer('planningMode', 'destination');
       setIntent('chat');
-      setChatMode(true);
-      handleChatSubmit();
       return;
     }
 
