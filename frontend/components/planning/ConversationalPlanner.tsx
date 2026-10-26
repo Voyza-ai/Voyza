@@ -163,9 +163,13 @@ export default function ConversationalPlanner({
       // EWR list is not stale data to preserve, it is wrong data to replace.
       // An unresolvable origin correctly yields an empty list — the same
       // fallback as before, rather than airports for the previous city.
+      // Resolved through `locationResolver`, which replaced the hand-written
+      // `originAirports` table this branch was written against — that module
+      // no longer exists. Same call the geolocation branch below already
+      // makes, so the two origin paths in this file now agree on a source.
       if (isSet(u.origin)) {
-        const { getOriginAirports } = await import('@/lib/originAirports');
-        setAnswer('originAirports', getOriginAirports(u.origin));
+        const { originAirportsForCity } = await import('@/lib/locationResolver');
+        setAnswer('originAirports', originAirportsForCity(u.origin));
       }
     },
     [setAnswer],
