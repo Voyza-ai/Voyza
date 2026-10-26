@@ -567,6 +567,14 @@ function orderAirports(
   attachments: Attachment[],
   curatedOrder: string[],
   cap: number,
+  /**
+   * Cities only. A region's or country's airports are ordered against its
+   * CENTROID, where "nearest" means nearest to an arbitrary interior point
+   * rather than to any traveller, so a doorstep rule has nothing to attach
+   * to — it reordered 13 regions, Saarland and Jiangsu among them, on a
+   * distance nobody stands at.
+   */
+  promoteDoorstep = false,
 ): PlaceAirport[] {
   const rank = new Map<string, number>();
   curatedOrder.forEach((iata, i) => rank.set(iata, i));
@@ -601,7 +609,63 @@ function orderAirports(
     if (a.km !== b.km) return a.km - b.km;
     return a.iata < b.iata ? -1 : 1;
   });
+  if (promoteDoorstep) promoteDoorstepAirport(unique, curatedOrder.length > 0);
   return unique.slice(0, cap).map((a) => ({ iata: a.iata, km: a.km, servesPlace: a.servesPlace }));
+}
+
+/**
+ * Keep the traveller's own airport inside the home fan-out.
+ *
+ * `servesPlace` above stops a distant airport LEADING a list; this stops a
+ * doorstep one being cut from it entirely. Only the first HOME_FANOUT codes
+ * reach `buildHomeLeg`, which prices every one of them and takes the cheapest,
+ * so an airport that falls to position four is never priced at all — the
+ * traveller cannot be quoted from it even when it is the obvious choice.
+ *
+ * Measured on the artifact: 501 of 24,627 multi-airport cities have their
+ * nearest airport outside the fan-out. Most are unremarkable — two airports a
+ * similar distance out, where which three get priced barely matters. The 61
+ * that meet BOTH thresholds below are not: Worcester, Massachusetts led with
+ * Boston 66 km away while Worcester Regional sat 6 km from the city at
+ * position four; Stockton led with Oakland at 86 km over its own field at 9;
+ * Heidelberg and Ludwigshafen led with Frankfurt while Mannheim, 5-15 km away,
+ * was cut. In every one of the 61 both airports have `servesPlace: true`, so
+ * the existing term cannot separate them and the type ordinal alone decides.
+ *
+ * BOTH thresholds are load-bearing, and the second is what makes this safe.
+ * Requiring the lead to be genuinely distant keeps the rule away from the
+ * multi-airport metros that `curated.ts` orders by hand: London leads with
+ * LHR at 24 km while LCY sits at 13 km and fifth, which is a deliberate
+ * decision this must not overturn, and at 24 km the lead never qualifies.
+ * Inner-London boroughs inherit the same shape and are likewise untouched.
+ *
+ * A curated order wins outright anyway — if a human has stated the order for
+ * this place, that is the answer.
+ */
+const DOORSTEP_KM = 25;
+const DISTANT_LEAD_KM = 60;
+const HOME_FANOUT = 3;
+
+function promoteDoorstepAirport(ordered: Attachment[], hasCuratedOrder: boolean): void {
+  if (hasCuratedOrder || ordered.length <= HOME_FANOUT) return;
+  const lead = ordered[0];
+  if (!lead || lead.km < DISTANT_LEAD_KM) return;
+
+  // The nearest airport that actually serves the place, wherever it sits.
+  let nearest = -1;
+  for (let i = 1; i < ordered.length; i++) {
+    const a = ordered[i];
+    if (!a.servesPlace) continue;
+    if (nearest === -1 || a.km < ordered[nearest].km) nearest = i;
+  }
+  if (nearest < HOME_FANOUT) return;
+  if (ordered[nearest].km > DOORSTEP_KM) return;
+
+  // Into the last fan-out slot, not the first: the lead still drives
+  // permutation ranking in `estimateHomeLegCost`, and the bigger airport is
+  // the better lead. This only buys the doorstep airport a price check.
+  const [doorstep] = ordered.splice(nearest, 1);
+  ordered.splice(HOME_FANOUT - 1, 0, doorstep);
 }
 
 function maxOrdinal(airports: PlaceAirport[], byIata: Map<string, Airport>): number | null {
@@ -831,7 +895,7 @@ export function build(inputs: BuildInputs): BuildResult {
         ordinal: assignment.airport.ordinal,
       });
     }
-    const ordered = orderAirports(attachments, curatedOrder, MAX_AIRPORTS_CITY);
+    const ordered = orderAirports(attachments, curatedOrder, MAX_AIRPORTS_CITY, true);
     if (curatedOrder.length) pinned[id] = [...curatedOrder];
     const curatedExtras = extraAliasesByCity.get(city.geonameId) ?? [];
     const aliases = [...pickAliases(city), ...curatedExtras];
