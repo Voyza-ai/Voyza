@@ -157,19 +157,41 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
     eleven already resolves to the correct lead airport.
   - OurAirports also types Burbank the same as LAX, which is why the rank term
     cannot pick a metro's main airport on its own.
-- [ ] **Lead airport can be much farther than a usable nearer one.** Found
-  during the sweep, not previously recorded. 585 cities have `airports[0]`
-  more than 60 km farther AND over 3× the distance of a later entry: Weifang
-  (9.4M) leads TAO at 96 km over its own WEF at 7 km; Diyarbakır leads GNY at
-  131 km over DIY at 7 km; San Juan, Argentina leads Mendoza at 145 km over
-  UAQ at 9.7 km. 23 of the 585 have populations over 500k.
-  - NOT obviously a bug: type-then-distance is deliberate and measured, and
-    for Pietermaritzburg leading with Durban at 70 km over a 4 km airstrip is
-    the right answer. The question is where the trade stops being right.
-  - Bounded impact: `airports[0]` drives permutation RANKING in
-    `estimateHomeLegCost`; `buildHomeLeg` prices every survivor of the
-    `MAX_HOME_AIRPORTS` cap and takes the cheapest. So a wrong lead costs
-    ranking quality and cap membership, not the quoted fare.
+- [x] **Lead airport can be much farther than a usable nearer one — answered,
+  and it was far narrower than 585.** The number was alarming and mostly
+  harmless. Of the 585 cities whose lead is 60 km farther and 3× the distance
+  of a later entry, 561 still carry the nearer airport INSIDE the three-code
+  fan-out, so `buildHomeLeg` prices it anyway and takes the cheapest — the
+  wrong lead costs permutation ranking, not the quoted fare. Only 24 lost it
+  entirely.
+  - The ordering rule itself is right and stays. Type-then-distance is
+    deliberate and measured, and leading Pietermaritzburg with Durban at 70 km
+    over a 4 km airstrip is the correct answer.
+  - What was actually wrong is narrower: an airport on the traveller's
+    doorstep being cut from the fan-out, so it is never priced at all.
+    Worcester, Massachusetts led with Boston at 66 km while Worcester Regional
+    sat 6 km out and fourth; Stockton led with Oakland at 86 km over its own
+    field at 9; Heidelberg and Ludwigshafen led with Frankfurt while Mannheim
+    at 5–15 km was cut. In all 61 qualifying cases both airports have
+    `servesPlace: true`, so the existing guard could not separate them.
+  - Fixed by `promoteDoorstepAirport` in the pipeline: a city's own airport
+    (≤25 km, serving) is lifted into the last fan-out slot when the lead is
+    ≥60 km away. The lead is unchanged, so ranking still uses the better
+    airport; the doorstep one just gets a price check. 63 cities reordered of
+    36,009 places.
+  - The lead-distance threshold is what makes it safe, not incidental. LCY is
+    13 km from central London against Heathrow's 24, so a naive "nearest wins"
+    rule would promote it — and `curated.ts` exists because measurement put
+    LCY ahead of LHR and a human decided otherwise. At 24 km the lead never
+    qualifies, so London and its boroughs are untouched. A test holds that.
+  - Gated to cities. Applied to regions it reordered 13 of them, Saarland and
+    Jiangsu among them, on a distance from a centroid nobody stands at.
+- [ ] **Still open from the same sweep: the ordering question at the extreme.**
+  The doorstep fix guarantees a nearby airport is PRICED; it does not change
+  which airport LEADS. Weifang still leads with Qingdao at 96 km over its own
+  WEF at 7 km, and Diyarbakır with GNY at 131 km over DIY at 7 km — both now
+  price the local field, but rank permutations from the distant one. Whether
+  the type ordinal should still win at 90+ km is a judgement nobody has made.
 - [ ] **`San Juan` resolves to Argentina, not Puerto Rico.** Also found during
   the sweep. Eight places share the name; prominence picks San Juan, AR
   (pop 518,624) over San Juan, PR (418,140) on raw city population, though PR

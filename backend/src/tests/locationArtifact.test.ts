@@ -653,7 +653,38 @@ describe('location artifact: airports[0] for multi-airport metros', () => {
       // Everything strictly after the prefix has to obey the derived key.
       const survived = prefix.filter((iata) => iatas(place).includes(iata)).length;
       const from = Math.max(1, survived + 1);
+
+      // The one deliberate exception to the derived key: `promoteDoorstepAirport`
+      // lifts a city's own airport into the last fan-out slot when the lead is
+      // far away, because only the first three codes are ever priced and it
+      // would otherwise never be quoted at all. That slot is index 2, so the
+      // pairs either side of it are hand-made rather than derived.
+      //
+      // Rather than skip them blind, the promotion is re-checked against its
+      // own conditions — a doorstep airport that does not meet them is a bug
+      // the skip would hide.
+      const promoted = (() => {
+        if (prefix.length > 0 || place.kind !== 'city') return -1;
+        const slot = place.airports[2];
+        const lead = place.airports[0];
+        if (!slot || !lead || place.airports.length <= 3) return -1;
+        if (!slot.servesPlace || slot.km > 25 || lead.km < 60) return -1;
+        // It only counts as promoted if it is nearer than everything after it;
+        // otherwise index 2 is just where the derived sort put it.
+        const nearerLater = place.airports.slice(3).some((a) => a.servesPlace && a.km < slot.km);
+        return nearerLater ? -1 : 2;
+      })();
+      if (promoted === 2) {
+        const slot = place.airports[2];
+        // The conditions the rule claims for itself.
+        expect(slot.servesPlace).toBe(true);
+        expect(slot.km).toBeLessThanOrEqual(25);
+        expect(place.airports[0].km).toBeGreaterThanOrEqual(60);
+      }
+
       for (let i = from; i < place.airports.length; i++) {
+        // Pairs touching the promoted slot are the exception above.
+        if (promoted === 2 && (i === 2 || i === 3)) continue;
         const previous = place.airports[i - 1];
         const current = place.airports[i];
         const previousRank = locationAirportRanks.ranks[previous.iata];
