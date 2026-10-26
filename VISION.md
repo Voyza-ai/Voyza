@@ -1,7 +1,11 @@
-# VOYZA Vision Document
+# BlueMurr Vision Document
 
 Saved from voyza_v3.docx for reference throughout development.
 See the original document for full details.
+
+_Written pre-rename, when the product was called **Voyza** — the vision is
+unchanged, only the name. Product references below say BlueMurr; the source
+filename is left as it is on disk._
 
 ## Core Identity
 - **Tagline:** "The smartest way to travel. Less money, less searching, more vibes."
@@ -14,12 +18,12 @@ See the original document for full details.
 3. **Group workspace** — real-time shared trip planning, viral growth engine
 
 ## Three Ways to Start a Trip
-1. **Destination-first** — user names cities, Voyza optimizes routing
-2. **Budget-first** — user sets budget, Voyza suggests reachable destinations
-3. **Vibe-first** — user describes a feeling, Voyza matches destinations
+1. **Destination-first** — user names cities, BlueMurr optimizes routing
+2. **Budget-first** — user sets budget, BlueMurr suggests reachable destinations
+3. **Vibe-first** — user describes a feeling, BlueMurr matches destinations
 
 ## Screen Flow
-1. Welcome screen (dark, plane animation, VOYZA logo, single input)
+1. Welcome screen (dark, plane animation, BlueMurr logo, single input)
 2. Planning flow (conversational step-by-step OR open chat input)
 3. Flowchart results page (city cards L→R, connectors, AI chat panel on right)
 4. City detail tab (day-by-day view, activities, restaurants, bookable transport)

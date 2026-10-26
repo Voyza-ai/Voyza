@@ -3,6 +3,11 @@ dist/
 *.log
 .DS_Store
 
+# Upstream download cache for scripts/build-location-data.ts. ~33 MB of
+# OurAirports and GeoNames dumps; the generated artifact in
+# src/data/generated/ IS committed, this cache is not.
+.location-data-cache/
+
 # Env files — real secrets live only on local machines and deploy envs
 .env
 .env.local

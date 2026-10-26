@@ -9,6 +9,7 @@ import canvas from './canvas';
 import trips from './trips';
 import users from './users';
 import notifications from './notifications';
+import locations from './locations';
 import email from './email';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireAuth } from '../middleware/auth';
@@ -33,6 +34,10 @@ router.use('/canvas', requireAuth, canvas);
 router.use('/trips', requireAuth, trips);
 router.use('/users', requireAuth, users);
 router.use('/notifications', requireAuth, notifications);
+// No requireAuth: resolving a place name is the first thing the planner does,
+// before anyone has signed in, and the answer is derived from a checked-in
+// public dataset. Nothing user-scoped is readable through it.
+router.use('/locations', locations);
 // No requireAuth: unsubscribe links arrive from emails (no session), and
 // run-jobs authenticates schedulers via the CRON_SECRET header itself.
 router.use('/email', email);

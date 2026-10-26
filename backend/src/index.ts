@@ -6,7 +6,7 @@ import { env } from './config/env';
 import { logger } from './utils/logger';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/error';
-import { apiLimiter, expensiveLimiter } from './middleware/rateLimit';
+import { apiLimiter, expensiveLimiter, locationLimiter } from './middleware/rateLimit';
 
 const app = express();
 
@@ -34,6 +34,9 @@ app.use(
   ['/api/optimize', '/api/plan', '/api/search', '/api/flights', '/api/hotels', '/api/trains'],
   expensiveLimiter,
 );
+// Its own budget, excluded from the general one above — see rateLimit.ts for
+// why a typeahead sharing the planner's allowance 429s the planner.
+app.use('/api/locations', locationLimiter);
 
 // ─── Routes ───────────────────────────────────────────────────
 app.get('/', (_req, res) => {

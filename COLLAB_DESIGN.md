@@ -18,7 +18,7 @@ access + one-click "apply to existing members".
 
 ## Share link
 
-- One link per trip: `voyza.app/canvas/{tripId}?share={token}`.
+- One link per trip: `bluemurr.com/canvas/{tripId}?share={token}`.
 - Backed by `share_token` + `share_mode` columns on `canvas_sessions`
   (migration 004). Owner can **rotate** the token (kills old links) and
   change the mode at any time from the Share dialog.

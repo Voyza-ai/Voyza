@@ -3,8 +3,13 @@
 _Submit at: https://tps.thetrainline.com/get-in-touch/_
 _Drafted 2026-06-15. Fields below map 1:1 to Trainline's live inquiry form._
 
+_This went in once already, as **Voyza** (date unknown — ask friend), so for a
+chase use the follow-up draft in
+[RAIL_API_APPLICATIONS.md](RAIL_API_APPLICATIONS.md#5-trainline--follow-up-on-the-existing-application),
+which leads with the rename. The answers below are for a fresh submission._
+
 > **Reality check first.** Trainline's form is built for established travel
-> agencies / TMCs with existing rail spend. Voyza is an early-stage consumer
+> agencies / TMCs with existing rail spend. BlueMurr is an early-stage consumer
 > product, pre-revenue. That's fine — "Booking Technology Provider" /
 > "Online Travel Agency" + an honest growth pitch is a legitimate inquiry — but
 > set expectations: they may route us to an **affiliate** programme first rather
@@ -19,8 +24,8 @@ _Drafted 2026-06-15. Fields below map 1:1 to Trainline's live inquiry form._
 | Form field | What to enter |
 |---|---|
 | **Name** * | _[your name]_ |
-| **Email** * | _[your email — use a domain address if you have one, e.g. you@voyza.app; personal Gmail reads as less serious to enterprise sales]_ |
-| **Company** * | Voyza |
+| **Email** * | _[your email — use a domain address if you have one, e.g. you@bluemurr.com; personal Gmail reads as less serious to enterprise sales]_ |
+| **Company** * | BlueMurr _(if resubmitting: add "formerly Voyza" — the original inquiry is on file under the old name)_ |
 | **Industry sector** * | **Online Travel Agency** _(closest fit; alternative: "Booking Technology Provider")_ |
 | **Job Title** | _[Founder / your title]_ |
 | **Ideal customer profile** | Small Enterprises _(this field assumes B2B; we're B2C — clarify in Additional info that our end users are individual travelers)_ |
@@ -40,7 +45,7 @@ _Drafted 2026-06-15. Fields below map 1:1 to Trainline's live inquiry form._
 
 ## "Additional information" — paste this
 
-> Voyza is an AI-powered, multi-modal trip planner (web app) that finds travelers
+> BlueMurr is an AI-powered, multi-modal trip planner (web app) that finds travelers
 > the cheapest way to take a trip by optimizing routes across **flights and
 > trains simultaneously** — comparing door-to-door time and price on every leg of
 > a multi-city itinerary.

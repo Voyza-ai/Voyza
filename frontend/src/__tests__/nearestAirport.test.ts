@@ -48,11 +48,13 @@ describe('nearestAirport', () => {
   });
 
   test('multi-airport metros in the dataset align with the airports lookup', () => {
-    // These cities must resolve to airports so the optimizer gets IATA
-    // codes pre-filled after a location detection.
-    const { getOriginAirports } = require('@/lib/originAirports');
+    // These cities must resolve to airports so the optimizer gets IATA codes
+    // pre-filled after a location detection. Checked against the resolver
+    // now that the hand-written table is retired.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { originAirportsForCity } = require('@/lib/locationResolver');
     for (const city of ['New York', 'Los Angeles', 'London', 'Tokyo', 'Paris']) {
-      expect(getOriginAirports(city).length).toBeGreaterThan(0);
+      expect(originAirportsForCity(city).length).toBeGreaterThan(0);
     }
   });
 
