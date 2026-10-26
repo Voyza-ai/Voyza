@@ -192,6 +192,26 @@ Of the two items this section used to list as remaining:
   the full options list for the WINNING route only — M extra calls, bounded,
   reusing Duffel's per-request offer caching from the scoring pass that just
   ran. Connector cards get their 4 alternatives either way.
+- [ ] **`chatMode` is permanently false, so ~127 lines are dead.** Fixing the
+  pre-intent sentence drop removed the only `setChatMode(true)` in the
+  codebase — grep finds just two `setChatMode(false)` calls now. The flag had
+  to go: `onSwitchToGuided` sets intent to 'place' without resetting it, so
+  leaving it true suppressed the step widgets and the skip button and kept the
+  bar routed at `handleChatSubmit`, making the "continue with guided questions
+  instead" fallback come back question-only.
+  - Now unreachable in `PlanningChat.tsx`: `handleChatSubmit` itself
+    (~127 lines, including its `warnIfMock` call), the chat-mode placeholder
+    (:1888), the `if (chatMode)` branch of the bar submit (:1915), and both
+    `!chatMode` conditions (:2267, :2536) which are now always true.
+  - Deliberately not deleted in the bug fix, to keep that diff reviewable.
+    Worth doing as its own mechanical change before someone reads
+    `handleChatSubmit` and believes it runs.
+  - One real behaviour goes with it whenever it is removed: `handleChatSubmit`
+    called `/api/plan/interpret`, which has a keyword mock, where
+    `/api/plan/converse` returns 503 `assistant_unavailable`. So on a dev box
+    with no `ANTHROPIC_API_KEY` the opening sentence no longer parses offline.
+    Not a production concern — 503-with-Retry is the documented design, and
+    every later message in the conversation already behaved this way.
 - [ ] **Backfill UI for pre-home-anchor trips without `origin_city`.** Still
   open. `origin` is only settable during planning (`PlanningChat`,
   `ConversationalPlanner`); there is no way to set it on a trip that is
