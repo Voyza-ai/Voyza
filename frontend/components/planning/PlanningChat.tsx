@@ -154,7 +154,6 @@ export default function PlanningChat() {
   const [textInput, setTextInput] = useState('');
   const [isComplete, setIsComplete] = useState(false);
   const [showIntent, setShowIntent] = useState(false);
-  const [chatMode, setChatMode] = useState(false); // open chat mode
   const [vibe, setVibe] = useState<string | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editingMsgValue, setEditingMsgValue] = useState('');
@@ -281,7 +280,7 @@ export default function PlanningChat() {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }, 80);
     return () => window.clearTimeout(id);
-  }, [messages, isComplete, showIntent, currentStepIndex, intent, chatMode]);
+  }, [messages, isComplete, showIntent, currentStepIndex, intent]);
 
   // Auto-resize the chat textarea as the user types. Grows from 1 line up to
   // MAX_INPUT_HEIGHT (~4 lines), then scrolls internally. Runs whenever
@@ -686,134 +685,6 @@ export default function PlanningChat() {
   // Open chat submit — user types everything at once. Calls AI interpret
   // immediately, then asks only for whatever's missing (budget, vibe, etc.)
   // before going to Find my trip.
-  const handleChatSubmit = async () => {
-    if (!textInput.trim()) return;
-    // Defensive guard: if isComplete is already true, the user has finished
-    // the guided flow and the input bar should be hidden. We saw a case in
-    // production where this handler fired anyway and re-emitted "Got it..."
-    // + the first remaining step (looked like a duplicate "Where are you
-    // starting from?" after "Perfect — I've got everything I need."). The
-    // warn lets us catch the trigger source next time it happens.
-    if (isComplete) {
-      console.warn('[PlanningChat] handleChatSubmit called after completion', {
-        intent, chatMode, currentStepIndex, stepsLen: steps.length,
-      });
-      return;
-    }
-    const userMessage = textInput.trim();
-
-    setMessages((prev) => [
-      ...prev,
-      { id: nextId(), role: 'user', content: userMessage },
-    ]);
-    setAnswer('rawInput', userMessage);
-    setTextInput('');
-
-    try {
-      const parsed = await interpretPlan({ rawInput: userMessage });
-      warnIfMock(parsed);
-
-      // Store whatever the AI extracted
-      if (parsed.vibe && !answers.vibe) setAnswer('vibe', parsed.vibe);
-      if (parsed.travelers && !answers.travelers) setAnswer('travelers', parsed.travelers);
-      if (parsed.budget && !answers.budget) setAnswer('budget', parsed.budget);
-      if (typeof parsed.budgetPerPerson === 'boolean' && answers.budgetPerPerson === undefined) {
-        setAnswer('budgetPerPerson', parsed.budgetPerPerson);
-      }
-      // Home anchor: AI can extract origin ("starting from NYC") and
-      // returnToHome ("round-trip") from the same one-shot sentence, so
-      // users don't need to go through separate guided steps when they
-      // typed everything at once. We also pre-fill the airports from the
-      // lookup table so the optimizer gets multi-airport search
-      // automatically for NYC/London/Tokyo/etc.
-      if (parsed.origin && !answers.origin) {
-        setAnswer('origin', parsed.origin);
-        const { resolveLocation } = await import('@/lib/locationResolver');
-        const answer = await resolveLocation(parsed.origin, {
-          tripDestinationNames: parsed.destinations ?? answers.destinations,
-        });
-        // TODO(location-phase-4): on `ambiguous` ask which reading they mean —
-        // `answer.candidates` carries the `label` to show and the `placeId` to
-        // persist. Taking the best reading until that UI is approved.
-        setAnswer('originAirports', originAirportsForOrigin(parsed.origin, answer));
-      }
-      if (typeof parsed.returnToHome === 'boolean' && answers.returnToHome === undefined) {
-        setAnswer('returnToHome', parsed.returnToHome);
-      }
-      // Dates: AI's absolute value first, then fall back to parsing the raw
-      // chat text for relative phrases ("next week") so we don't re-ask.
-      if (!answers.dateRange) {
-        if (parsed.dates?.start) {
-          setAnswer('dateRange', { start: parsed.dates.start, end: parsed.dates.end ?? parsed.dates.start });
-        } else if (/\b(tomorrow|today|next|month|week|year|summer|winter|spring|fall|autumn|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2})\b/i.test(userMessage)) {
-          const fallback = parseDateInput(userMessage);
-          setAnswer('dateRange', { start: fallback, end: fallback });
-        }
-      }
-
-      // Country detected → show picker inline
-      if (parsed.needsCitySelection && parsed.countries?.length > 0) {
-        const directCities: string[] = parsed.destinations?.filter(
-          (d: string) => !parsed.countries.some((c: any) => c.cities.includes(d)),
-        ) ?? [];
-        const defaultSelections: Record<string, string[]> = {};
-        for (const c of parsed.countries) {
-          defaultSelections[c.country] = [c.cities[0]];
-        }
-        if (directCities.length > 0) defaultSelections['_direct'] = directCities;
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: nextId(),
-            role: 'assistant',
-            content: `I see you want to visit ${parsed.countries.map((c: any) => c.country).join(' and ')}! Which cities?`,
-          },
-        ]);
-
-        setCitySelectionData({
-          countries: parsed.countries,
-          selectedCities: defaultSelections,
-          parsedData: parsed,
-        });
-        return;
-      }
-
-      if (parsed.destinations?.length > 0) {
-        setAnswer('destinations', parsed.destinations);
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        { id: nextId(), role: 'assistant', content: "Got it — I have a good picture of what you're after." },
-      ]);
-
-      // Ask follow-up questions as chat bubbles for anything the user
-      // didn't mention (dates, travelers, budget, vibe).
-      const remaining = buildRemainingSteps(parsed);
-      if (remaining.length === 0) {
-        setIsComplete(true);
-        setMessages((prev) => [
-          ...prev,
-          { id: nextId(), role: 'assistant', content: 'Ready when you are.' },
-        ]);
-      } else {
-        setChatMode(false);
-        setSteps(remaining);
-        setCurrentStepIndex(0);
-        setMessages((prev) => [
-          ...prev,
-          { id: nextId(), role: 'assistant', content: remaining[0].question, stepId: remaining[0].id },
-        ]);
-      }
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        { id: nextId(), role: 'assistant', content: "I had trouble understanding that. Could you try again with a city or country?" },
-      ]);
-    }
-  };
-
   const handleVibeSelect = (selectedVibe: string) => {
     setVibe(selectedVibe);
     setAnswer('vibe', selectedVibe);
@@ -1405,7 +1276,6 @@ export default function PlanningChat() {
     // Switch into guided follow-up mode: use the existing step system so
     // questions render as chat bubbles and the matching picker widget (dates,
     // travelers, etc.) appears inline.
-    setChatMode(false);
     if (!intent) setIntent('chat');
     setSteps(remaining);
     setCurrentStepIndex(0);
@@ -1885,7 +1755,6 @@ export default function PlanningChat() {
   // Placeholder + submit handler swap based on the current step so that the
   // user can always type a free-form answer for whatever question is showing.
   const barPlaceholder = (() => {
-    if (chatMode) return 'Tell me everything — where, when, who, budget...';
     if (!intent) return 'Or just tell me everything at once...';
     if (!currentStep) return 'Type a message...';
     switch (currentStep.type) {
@@ -1911,12 +1780,6 @@ export default function PlanningChat() {
     // stale event fires after completion.
     if (isComplete) return;
 
-    // Open chat mode — capture as a single big message
-    if (chatMode) {
-      handleChatSubmit();
-      return;
-    }
-
     // Pre-intent — typing here opens the AI conversation, seeded with the
     // sentence. It has to hand off through `chatSeedRef` (the same path the
     // landing hero uses at :249): `setIntent('chat')` swaps this component's
@@ -1924,19 +1787,14 @@ export default function PlanningChat() {
     // landed in `messages` that is no longer rendered and the sentence was
     // dropped without ever reaching /api/plan/converse.
     //
-    // Dropping the `setChatMode(true)` that used to be here is load-bearing,
-    // not tidying. `onSwitchToGuided` sets intent to 'place' and never resets
-    // chatMode, so leaving it true suppressed the step widgets (:2267) and
-    // the skip button (:2536) and kept the bar routed at handleChatSubmit
-    // (:1915) — the "continue with guided questions instead" fallback came
-    // back question-only, with no pickers.
-    //
-    // CONSEQUENCE, recorded because it is not obvious: `setChatMode(true)`
-    // now appears nowhere in the codebase, so `chatMode` is permanently
-    // false. That makes the branch directly above dead, along with
-    // `handleChatSubmit` itself and the chat-mode placeholder at :1888.
-    // Deliberately left in place here rather than widening a bug fix into a
-    // 127-line deletion; it is tracked in ROADMAP.md.
+    // This replaced an "open chat mode" that set a `chatMode` flag and called
+    // a `handleChatSubmit` writing into `messages`. Both are gone: with the
+    // only `setChatMode(true)` removed the flag could never be true again, so
+    // the handler, the chat-mode placeholder and two always-true guards were
+    // unreachable and were deleted. If you are reinstating anything like it,
+    // the trap that made the flag unworkable is that `onSwitchToGuided` sets
+    // intent to 'place' and resets nothing else, so a mode flag left standing
+    // suppresses the guided step widgets and the skip button.
     if (!intent) {
       setShowIntent(false);
       chatSeedRef.current = value;
@@ -2276,7 +2134,7 @@ export default function PlanningChat() {
           {/* Interactive input area for guided steps — only render once the
               assistant question for this step has actually appeared in the
               chat, so the widget never shows up before its question. */}
-          {!isComplete && !chatMode && intent && currentStep &&
+          {!isComplete && intent && currentStep &&
             messages.some((m) => m.stepId === currentStep.id) && (
             <motion.div
               key={`input-${currentStepIndex}`}
@@ -2545,7 +2403,7 @@ export default function PlanningChat() {
       )}
 
       {/* Skip button for non-text skippable steps */}
-      {!isComplete && !chatMode && intent && currentStep && currentStep.skippable && currentStep.type !== 'text' && currentStep.type !== 'dates' && currentStep.type !== 'budget' && (
+      {!isComplete && intent && currentStep && currentStep.skippable && currentStep.type !== 'text' && currentStep.type !== 'dates' && currentStep.type !== 'budget' && (
         <motion.div
           className="relative z-10 flex justify-center pb-5"
           initial={{ opacity: 0 }}
