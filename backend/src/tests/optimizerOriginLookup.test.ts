@@ -129,19 +129,74 @@ describe('optimize — origin resolved from a state/region name', () => {
     expect(expected).toContain(result.outboundLeg!.originAirport);
   }, 30000);
 
-  it('still falls back to getIataCode for a name left out on purpose', async () => {
-    // "Texas" is deliberately unmapped (DFW/IAH/AUS all plausible), so the
-    // old single-code path must still be reachable rather than returning
-    // nothing. This proves the fix narrowed the gap without closing the door.
+  it('flags an ambiguous origin EVEN WHEN the caller supplied airports', async () => {
+    // The bug this pins: the clarification used to be computed only in the
+    // branch taken when `originAirports` was absent. The frontend answers
+    // "Portland" from its own copy of the artifact with ["PDX","SLE"], so the
+    // branch never ran in the real flow and the results page had nothing to
+    // show. The two clearest ambiguous origins — Portland and Melbourne —
+    // could therefore never produce the question, while a name the hot set
+    // happened to MISS could. Exactly backwards.
+    const result = await optimize({
+      cities: [{ name: 'Rome' }],
+      startDate: '2030-10-01',
+      travelers: 1,
+      origin: 'Portland',
+      originAirports: ['PDX', 'SLE'], // what the frontend really sends
+      returnToHome: false,
+    });
+
+    expect(result.originClarification).toBeDefined();
+    expect(result.originClarification!.input).toBe('Portland');
+    const labels = result.originClarification!.candidates.map((c) => c.label);
+    expect(labels.length).toBeGreaterThan(1);
+    expect(labels.some((l) => /Oregon/i.test(l))).toBe(true);
+    expect(labels.some((l) => /Maine/i.test(l))).toBe(true);
+
+    // ...and the caller's airports still decide what was actually PRICED.
+    // The clarification must not quietly re-point the trip.
+    expect(originsSearched()).toEqual(expect.arrayContaining(['PDX']));
+    expect(originsSearched()).not.toContain('PWM');
+  }, 30000);
+
+  it('stays quiet for an origin with only one real reading', async () => {
+    // Negative control: if this ever starts returning a clarification, the
+    // rule has gone too broad and every trip grows a question it does not
+    // need. Venice resolves cleanly despite Dayton, Ohio carrying "venice"
+    // as a crowd-sourced alias.
+    const result = await optimize({
+      cities: [{ name: 'Rome' }],
+      startDate: '2030-10-02',
+      travelers: 1,
+      origin: 'Venice',
+      originAirports: ['VCE', 'TSF'],
+      returnToHome: false,
+    });
+
+    expect(result.originClarification).toBeUndefined();
+  }, 30000);
+
+  it('still falls back to getIataCode for a name the resolver cannot answer', async () => {
+    // Was "Texas", on the grounds that the retired table deliberately left it
+    // unmapped. Texas now resolves (pinned to Dallas, Houston and Austin), so
+    // that input no longer reaches this path at all.
+    //
+    // `Kyiv` does, and for a reason worth recording: Ukrainian airports carry
+    // `scheduled_service=no` upstream, so the pipeline's filter drops them and
+    // the city ships with no airports — which `answer()` refuses. 2,470 of
+    // 36,009 places are airport-less this way, 300 of them Ukrainian.
+    //
+    // So the single-code path must stay reachable rather than the run
+    // returning nothing. That is what this proves.
     await optimize({
       cities: [{ name: 'Rome' }],
       startDate: '2030-09-01',
       travelers: 1,
-      origin: 'Texas',
+      origin: 'Kyiv',
       returnToHome: false,
     });
 
-    expect(mockedGetIataCode.mock.calls.map((c: any[]) => c[0])).toContain('Texas');
-    expect(originsSearched()).toContain('TEX');
+    expect(mockedGetIataCode.mock.calls.map((c: any[]) => c[0])).toContain('Kyiv');
+    expect(originsSearched()).toContain('KYI');
   }, 30000);
 });

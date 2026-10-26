@@ -43,7 +43,7 @@ import {
   type CanvasIntent,
 } from '@/lib/canvasHandoff';
 import { detectNearestAirportCity } from '@/lib/nearestAirport';
-import { getOriginAirports } from '@/lib/originAirports';
+import { originAirportsForCity } from '@/lib/locationResolver';
 import { getUseLocationPref, setUseLocationPref } from '@/lib/locationPref';
 
 const VIBES: Array<{ key: Vibe; label: string }> = [
@@ -174,7 +174,20 @@ export default function BrowsePage() {
         city: result.city.city,
         // Empty for single-airport cities — the backend resolves the IATA
         // code from the city name, same as a typed planner answer.
-        airports: getOriginAirports(result.city.city),
+        //
+        // The real geolocation reading is passed as `userLatLon`, and it
+        // matters: this table's DC row is named exactly `Washington`, which
+        // is ambiguous between the District and Washington State, and the
+        // more prominent reading is the STATE. Without the coordinates, every
+        // "use my location" tap in the DC metro saved Seattle's airports.
+        //
+        // Still synchronous and still offline — `resolveLocally` applies the
+        // position rule against the hot set, which carries coordinates for
+        // every place it ships. Nothing is sent anywhere, which is the
+        // promise `nearestAirport.ts` makes about these coordinates.
+        airports: originAirportsForCity(result.city.city, 3, {
+          userLatLon: result.coords,
+        }),
       };
       setDetectedOrigin(origin);
       return origin;

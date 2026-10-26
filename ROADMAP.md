@@ -7,6 +7,36 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ---
 
+## 🚨 Must ship before the app is public
+
+Not dev blockers — none of these stop work today, and they were deliberately
+deferred. They are the things that must not reach real users unfinished.
+Check this section before any public release.
+
+- [ ] **GeoNames attribution needs a user-reachable surface.** CC BY 4.0
+  obliges credit, a licence link and an indication of changes. The wording is
+  settled and machine-held: it lives once in `backend/src/data/attribution.ts`,
+  `locationAttribution.test.ts` compares it to `ATTRIBUTION.md` word for word,
+  every `POST /api/locations/resolve` response carries it, and the browser hot
+  set re-exports it as `LOCATION_DATA_ATTRIBUTION`. What is missing is a page
+  that RENDERS it. Importing the constant is not compliance.
+  - The obligation is already live. The frontend answers origins from the
+    resolver, so GeoNames-derived airports are on screen today.
+  - Placement is unresolved and is the owner's call. Measured constraint:
+    `/plan` and `/results` are NOT auth-protected (only `/history` and
+    `/explore` are), while the Navbar dropdown that would naturally host a
+    link only renders when signed in. So a dropdown-only link leaves exactly
+    the anonymous visitors who can see the data with no route to the credit.
+    There is no footer and no about/settings route anywhere in `frontend/app`.
+  - Options as costed: a `/credits` route plus a small Navbar link visible in
+    both auth states; the same route linked only from the dropdown; or the
+    notice inline under the airport lists, which `ATTRIBUTION.md` argues
+    against in favour of a link.
+  - Full detail, including the other two sources and the licences
+    deliberately avoided, is in `ATTRIBUTION.md`.
+
+---
+
 ## ✅ Done (shipped to `claude_code_backend`)
 
 ### Planning flow & AI
@@ -47,8 +77,109 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ## 🚧 In-flight
 
-Nothing in flight. `feat/voyza-ai-chat` and `feat/map-redesign` are both
-merged all the way to `voyza_main`; the branch flow is now
+### Location resolution rebuild (`feat/location-resolver`, not merged)
+
+Replaces five hand-maintained lookup tables with one generated artifact and a
+real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
+
+- [x] **Phase 0–3 done.** Pipeline, 36,009-place artifact, resolver, shadow
+  mode on `optimizer.ts`, `POST /api/locations/resolve`, and a 60 KB browser
+  hot set generated into both packages so nothing is hand-maintained twice.
+  Costs 88 MiB of backend heap, built lazily once per process — over the
+  50 MB originally budgeted; measured and recorded in the doc.
+- [ ] **Phase 4: the clarification question. NEEDS DESIGN APPROVAL.** All the
+  data is plumbed through to the frontend and nothing renders it. Four
+  decisions are the owner's — block or flag, how `not-found` differs from
+  `ambiguous` on screen, whether to show distance, and whether to persist
+  `origin_place_id` (a migration against the live project). Spelled out in
+  the "Phase 4" section of the architecture doc.
+- [x] **Two phase-5 blockers cleared.** Comma-qualified inputs (`Newark, NJ`)
+  are answered offline now, and the browser settles an ambiguous name from the
+  traveller's own coordinates without sending them anywhere — which is what
+  stopped "use my location" in Washington DC from saving Seattle's airports.
+- [x] **Phase 5 done — both origin tables deleted.** 691 lines of
+  hand-maintained lookup across two packages, their parity guard, their own
+  test suites, `shadow.ts` and `LOCATION_RESOLVER_MODE` are all gone. The
+  env-var rollback went with them, which was the honest cost: `shadow` only
+  meant something while there was a table to serve instead. Reverting is one
+  commit now.
+  - The table's KNOWLEDGE survives as `retiredOriginAirports.json` — all 146
+    answers, frozen, marked do-not-regenerate. It is the only independent
+    check the resolver has, and it both drives the regression gate and seeds
+    the browser hot set.
+  - Taking the fallback away exposed four real bugs that the table had been
+    hiding: the hot-set seeder was looking up comma forms as index keys (so
+    `Portland, Oregon` seeded nothing), and the space-separated qualifier pass
+    narrowed provenance too early, peeled only one qualifier, then peeled too
+    far. All fixed.
+  - NOT deleted, with reasons in the architecture doc: `nearestAirport.ts`
+    (a hot-set reverse lookup is measurably worse), `airportNames.ts` (nothing
+    to replace it, no twin), `cityAirports.ts` (destination-side; 156 of 169
+    entries reproduced, 13 need individual decisions).
+- [x] **California and Texas pins widened to cover their real metros.** Only
+  three airports survive the `MAX_HOME_AIRPORTS` cap, so a single pin spent
+  all three inside one metro — California priced a San Francisco traveller
+  from Los Angeles, and Texas pushed Houston, the state's largest metro,
+  outside the cap. Now `LAX, SFO, SAN` and `DFW, IAH, AUS`.
+- [ ] **GeoNames attribution needs a credits surface — the rest is done.**
+  **Deferred by the owner to pre-release; tracked in "Must ship before the app
+  is public" at the top of this file.**
+  CC BY 4.0 requires credit, a licence link and an indication of changes, and
+  the condition is now live: the frontend falls through to the resolver
+  wherever the old table is silent, so GeoNames-derived answers are on screen.
+  The endpoint returns the notice, the hot set carries it, and a test holds
+  the wording to `ATTRIBUTION.md` word for word. What is missing is a page to
+  render it on, which is a visible change and so yours to approve.
+- [x] **Pass over the pinned set done — it is clean, and now guarded.** All 93
+  airports the curated layer pins are present in the committed artifact, so
+  every one is listed upstream with scheduled service and a usable type. No
+  pin is closed, none has lost its service flag, and no pinned code is shared
+  by two airport rows (the DIA/DOH shape). `curatedPinsInService.test.ts`
+  holds this on every change, rather than only when someone regenerates.
+  - The sweep also settled what the check can mean. Measured over the 9,054
+    IATA-coded rows: 4,921 fail `scheduled_service`, 125 more are a heliport
+    or seaplane base. NO `closed` row carries an IATA code at all — upstream
+    retires the code when it marks a field closed. So the build's `closed`
+    type filter never fires, and the service flag is the whole defence.
+- [ ] **The DIA class is still undetectable offline, by construction.** An
+  airport closed in the world that upstream still lists in service keeps its
+  code precisely because upstream has not marked it closed. Compared field by
+  field, DIA and Hamad are indistinguishable: same `large_airport`, same
+  `scheduled_service=yes`, same municipality — only a missing `home_link`,
+  which thousands of live airports also lack. DIA is in the artifact and sits
+  4.5 km from the centre against Hamad's 7.9, so distance alone leads with the
+  closed field; the curated pin is the only thing holding Doha on DOH, and a
+  test now holds the pin. Finding the NEXT one needs a source we do not have.
+  - A same-municipality proximity scan (two scheduled airports under 15 km
+    apart) surfaces the shape: 11 pairs worldwide, DIA/DOH among them. The
+    other ten are legitimate — Boeing Field vs SEA, Wilson vs Nairobi, Santos
+    Dumont vs Galeão — so it is a review prompt, not a rule. Every one of the
+    eleven already resolves to the correct lead airport.
+  - OurAirports also types Burbank the same as LAX, which is why the rank term
+    cannot pick a metro's main airport on its own.
+- [ ] **Lead airport can be much farther than a usable nearer one.** Found
+  during the sweep, not previously recorded. 585 cities have `airports[0]`
+  more than 60 km farther AND over 3× the distance of a later entry: Weifang
+  (9.4M) leads TAO at 96 km over its own WEF at 7 km; Diyarbakır leads GNY at
+  131 km over DIY at 7 km; San Juan, Argentina leads Mendoza at 145 km over
+  UAQ at 9.7 km. 23 of the 585 have populations over 500k.
+  - NOT obviously a bug: type-then-distance is deliberate and measured, and
+    for Pietermaritzburg leading with Durban at 70 km over a 4 km airstrip is
+    the right answer. The question is where the trade stops being right.
+  - Bounded impact: `airports[0]` drives permutation RANKING in
+    `estimateHomeLegCost`; `buildHomeLeg` prices every survivor of the
+    `MAX_HOME_AIRPORTS` cap and takes the cheapest. So a wrong lead costs
+    ranking quality and cap membership, not the quoted fare.
+- [ ] **`San Juan` resolves to Argentina, not Puerto Rico.** Also found during
+  the sweep. Eight places share the name; prominence picks San Juan, AR
+  (pop 518,624) over San Juan, PR (418,140) on raw city population, though PR
+  is far the larger travel origin once its metro is counted. Compounding it,
+  the AR entry leads with Mendoza's MDZ at 145 km rather than its own UAQ at
+  9.7 km, so a traveller meaning Puerto Rico is priced from the wrong
+  hemisphere. Needs a curated decision, like the Portland and Melbourne cases.
+
+Everything else is merged. `feat/voyza-ai-chat` and `feat/map-redesign` are
+both merged all the way to `voyza_main`; the branch flow is now
 **feature branch → `dev` → `voyza_main`**, not `claude_code_backend`.
 See "Previously shipped" below for what landed.
 

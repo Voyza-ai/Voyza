@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Home, Plane, Plus } from 'lucide-react';
-import { getOriginAirports } from '@/lib/originAirports';
+import { originAirportsForCity } from '@/lib/locationResolver';
 import { getAirportName } from '@/lib/airportNames';
 
 type HomeEditModalProps = {
@@ -45,7 +45,16 @@ export default function HomeEditModal({
     }
   }, [isOpen, city, airports.join(',')]);
 
-  const suggested = getOriginAirports(cityInput);
+  // Synchronous by necessity — this runs in the render body on every
+  // keystroke, so it reads the bundled hot set and never awaits. A miss and
+  // an unresolvable name both give `[]`, exactly as the table did, and the
+  // chips below already handle an empty list.
+  //
+  // TODO(location-phase-4): `originAirportsLocally` throws away the question —
+  // for an ambiguous name it takes the leading reading. Asking here means
+  // `resolveLocally` instead, rendering `candidates[].label` as a picker and
+  // keeping the chosen `placeId`. Needs the approved clarification UI.
+  const suggested = originAirportsForCity(cityInput);
 
   // When the user types a new city we recognize, auto-select its airports —
   // unless they've manually toggled chips already.

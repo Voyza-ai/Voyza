@@ -28,7 +28,19 @@
  */
 
 import 'dotenv/config';
-import { compareLeg } from '../services/compareLeg';
+
+/**
+ * `compareLeg` is required LAZILY, below, after the credentials guard.
+ *
+ * A top-level import of it pulls in flights -> duffel -> config/env, and the
+ * real env module validates its whole schema at import time. That happens
+ * before any guard inside the describe can run, so on a machine with no
+ * Duffel token this file could not even load: it took out a Jest worker in
+ * parallel mode and killed the entire run under `--runInBand`, hiding the
+ * result of every other suite. The guard was always here; the import defeated
+ * it.
+ */
+type CompareLegFn = typeof import('../services/compareLeg').compareLeg;
 
 // Six months out so dates are always in Duffel's bookable window.
 const futureDate = (() => {
@@ -141,6 +153,11 @@ describe('transport coverage — live API probe', () => {
     test.skip('skipping live probes — DUFFEL_ACCESS_TOKEN not set', () => {});
     return;
   }
+
+  // Past the guard, so loading the real env module is safe and wanted: this
+  // suite deliberately uses live credentials rather than mocks.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { compareLeg } = require('../services/compareLeg') as { compareLeg: CompareLegFn };
 
   for (const route of routes) {
     test(route.label, async () => {

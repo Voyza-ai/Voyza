@@ -225,6 +225,35 @@ export type Trip = {
     returnAirports?: string[];
   };
   returnToHome?: boolean;
+  /**
+   * Set when the origin NAME the traveller typed had more than one real
+   * reading and the trip was priced from the most likely one.
+   *
+   * Someone typing "Portland" gets Oregon, because it is the more prominent
+   * reading. If they meant Maine, every flight and every price on this trip
+   * is for the wrong city and nothing else on screen would say so. The
+   * results page renders a line from this so the choice is visible and
+   * changeable.
+   *
+   * SESSION-SCOPED. It rides the optimize response into the store and is NOT
+   * persisted: `trips` has `origin_city` and `origin_airports` as real
+   * columns and no place id, so keeping it across a reload needs a migration
+   * against the live project. Absent on a trip loaded from the database,
+   * which is why the line is a prompt rather than a warning the user must
+   * clear.
+   */
+  originClarification?: {
+    /** The string the traveller typed, exactly. */
+    input: string;
+    reason: 'multi-country' | 'near-tie' | 'not-found';
+    candidates: Array<{
+      placeId: string;
+      /** "Portland, Oregon, United States" */
+      label: string;
+      airports: string[];
+      distanceKm?: number;
+    }>;
+  };
 };
 
 /**

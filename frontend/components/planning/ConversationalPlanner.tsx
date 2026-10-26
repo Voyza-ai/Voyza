@@ -270,9 +270,38 @@ export default function ConversationalPlanner({
       }
 
       const cityName = result.city.city;
-      const { getOriginAirports } = await import('@/lib/originAirports');
+      // Awaited, so this reaches the server for anything the bundled hot set
+      // does not carry, and passes the trip's destinations as context.
+      const { resolveLocation, originAirportsForCity } = await import('@/lib/locationResolver');
+      const answer = await resolveLocation(cityName, {
+        tripDestinationNames: answers.destinations,
+      });
+      // TODO(location-phase-4): on `ambiguous` ask which reading they mean —
+      // `answer.candidates` carries the `label` to show and the `placeId` to
+      // persist. Taking the best reading until that UI is approved, which is
+      // what the table it replaces could express.
       setAnswer('origin', cityName);
-      setAnswer('originAirports', getOriginAirports(cityName));
+      // The hand-written table leads, the resolver's answer is the fallback.
+      // Driving the real UI found why: `Newark, NJ` resolved to NOTHING here,
+      // because the hot set has no comma-qualified key and the round trip can
+      // fail, while the table answers it offline. And the frontend's answer
+      // WINS — `optimizer.ts` uses `originAirports` from the body verbatim —
+      // so serving the resolver here would bypass `LOCATION_RESOLVER_MODE`
+      // and the shadow log meant to justify the switch.
+      //
+      // `answer` is still computed: its candidates are what the phase-4
+      // question gets built from.
+      const fromTable = originAirportsForCity(cityName);
+      setAnswer(
+        'originAirports',
+        fromTable.length > 0
+          ? fromTable
+          : answer.status === 'resolved'
+            ? answer.airports.map((a) => a.iata)
+            : answer.status === 'ambiguous'
+              ? (answer.candidates[0]?.airports.map((a) => a.iata) ?? [])
+              : [],
+      );
       await send(`I'm starting from ${cityName} (detected from my location)`);
     } finally {
       setLocating(false);
