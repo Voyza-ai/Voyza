@@ -43,6 +43,7 @@ erDiagram
     auth_users ||--o{ trips : owns
     auth_users ||--|| user_profiles : has
     auth_users ||--o{ group_members : "is"
+    auth_users ||--o{ notifications : receives
     trips ||--o{ cities : contains
     trips ||--o{ transports : contains
     trips ||--o{ group_members : "shared with"
@@ -100,8 +101,8 @@ erDiagram
         uuid id PK
         uuid trip_id FK "cascade"
         uuid last_saved_by FK
-        text share_mode "004"
-        text share_token "004"
+        text share_mode "004, view|suggest|edit"
+        uuid share_token "004, not null, gen_random_uuid()"
     }
     canvas_suggestions {
         uuid id PK
@@ -112,36 +113,62 @@ erDiagram
     }
     notifications {
         uuid id PK "012, hand-applied"
+        uuid user_id FK "auth.users, cascade"
+        text type "5 allowed values, see 012"
+        text title
     }
     preset_trips {
         text slug PK
         jsonb data
-        text status "draft|published"
+        text_array vibes "filtered, NOT indexed"
         text region
-        text duration_bucket
-        text budget_tier
+        text duration_bucket "weekend|one-week|two-weeks|month"
+        text budget_tier "$|$$|$$$|$$$$"
+        text origin_region "default us-east"
         int nights
         numeric est_cost
         text_array categories "GIN indexed"
-        text_array vibes "NOT indexed"
+        text hero_image_url
+        bool staff_pick "default false"
+        text status "draft|published"
+        text source "curated|generated"
+        text refresh_status "fresh|refreshing|failed"
+        timestamptz refreshed_at
+        int clone_count
+        int impression_count
+        int view_count
+        timestamptz created_at
     }
     preset_events {
         bigint id PK "generated always as identity"
         text preset_slug FK "preset_trips, cascade"
         text kind "impression|view|use"
+        timestamptz created_at
     }
     airport_codes {
-        text iata PK
+        text city_name PK
+        text iata_code
+        text country
     }
     booking_locations {
-        text id PK
+        text city_name PK
+        text dest_id
+        text dest_type
     }
     db_stops {
-        text id PK
+        text city_name PK
+        text stop_id
+        timestamptz cached_at
     }
     leg_price_cache {
         uuid id PK
+        text origin
+        text destination
+        date travel_date
+        text mode
         int travelers "006, part of the cache key"
+        numeric price
+        timestamptz expires_at
     }
 ```
 
@@ -150,6 +177,35 @@ erDiagram
 `airport_codes`, `booking_locations`, `db_stops`, `leg_price_cache` are
 service-role-only caches and lookups. Each has an RLS policy of
 `using (false)`, so no client reaches them at all.
+
+Note that the first three are keyed on **`city_name`**, not on the code they
+cache — `airport_codes.city_name → iata_code`, `db_stops.city_name → stop_id`,
+`booking_locations.city_name → dest_id`. They are city→code lookups, so a
+second code for the same city cannot be stored.
+
+`notifications` is NOT standalone despite having no trip relationship: it
+carries `user_id → auth.users(id) on delete cascade`.
+
+## Database observations — recorded, not acted on
+
+Found while checking this file against the migrations. Each needs its own
+care, because dev and production share one database holding real trips.
+
+- **A redundant index on `leg_price_cache`.** `idx_leg_cache_lookup_travelers`
+  (006) covers the same five columns as the unique
+  `leg_price_cache_leg_mode_key` (007), so every write maintains two copies of
+  one index. A drop candidate, but verify the column order and that no query
+  plan depends on the non-unique one first.
+- **`preset_trips.vibes` is filtered with `&&` like `categories` but has no
+  index.** `013` records this deliberately rather than correcting it.
+- **`transports.from_city_id` / `to_city_id` carry no `ON DELETE`.** Deleting a
+  single referenced city therefore errors. Deleting a whole trip is fine —
+  both rows cascade via `trip_id` — so this only bites on per-city deletes.
+- **The migration ledger records neither `003`, `012` nor `013`.** All three
+  were applied by hand. Reconciling is a `supabase migration repair` decision,
+  not something a migration file should do.
+- **`security_fixes.sql` sits beside `migrations/`, not inside it.** A database
+  rebuilt from `migrations/` alone will not carry its `EXECUTE` revokes.
 
 ## Row Level Security
 
