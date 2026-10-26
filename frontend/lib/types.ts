@@ -101,26 +101,42 @@ export type ScheduledEvent = {
   /** Optional notes */
   notes?: string;
   /**
-   * How long this event actually needs, in minutes, independent of the
-   * block `startTime`/`endTime` describe.
+   * How long this event needs, in minutes.
    *
-   * The slot scheduler bounds an event by its time slot, so a 4-hour
-   * activity dropped into the 10:00-12:00 morning slot renders as a
-   * 2-hour block. The requested length used to be discarded at that
-   * point and survived nowhere, so nothing downstream could tell a
-   * genuine 2-hour activity from a clipped 4-hour one.
+   * For anything the day planner placed this is an INVARIANT, not extra
+   * information: it always equals `endTime - startTime`. That equality is
+   * the whole point — the planner places an item at its real length or
+   * not at all, so the block the user reads can never understate it. A
+   * 4-hour activity occupies four hours of calendar.
    *
-   * Set by `placeInSlot`. Rendering still follows startTime/endTime —
-   * how a clipped event should LOOK is a design decision and is not
-   * made here.
+   * (It previously existed to record the length a fixed time slot had
+   * thrown away, alongside a `durationClipped` flag. Nothing clips any
+   * more, so the flag is gone; this field stays because it saves every
+   * consumer parsing two "HH:mm" strings, and because asserting the
+   * invariant is how the tests pin the guarantee down.)
+   *
+   * Absent on events the user created or dragged by hand, and on
+   * transport blocks, whose length comes from the carrier.
    */
   plannedDurationMin?: number;
-  /**
-   * True when the slot cut the event short, i.e. `plannedDurationMin` is
-   * longer than `endTime - startTime`. Derivable from the two, but kept
-   * explicit so consumers don't have to re-parse the times.
-   */
-  durationClipped?: boolean;
+};
+
+/**
+ * Something the planner could not fit into a stay at its real length.
+ *
+ * The day planner never shortens an item to make it fit; when a day has
+ * no room it turns the item away whole and it is recorded here, so the
+ * loss is in the data rather than hidden in a block that reads shorter
+ * than the thing it names.
+ */
+export type UnscheduledItem = {
+  /** The activity or restaurant name, as the suggestion gave it. */
+  title: string;
+  kind: 'activity' | 'restaurant';
+  /** Minutes it needed. */
+  durationMin: number;
+  /** The last day it was tried on. */
+  date: string | null;
 };
 
 export type Vibe =
@@ -154,6 +170,15 @@ export type City = {
   restaurants: Restaurant[];
   /** Per-day schedule — keyed by ISO date (YYYY-MM-DD). Built when user opens day planner. */
   schedule?: Record<string, ScheduledEvent[]>;
+  /**
+   * Activities and meals this stay could not hold at their real length.
+   *
+   * In memory only for now: `backend/src/routes/trips.ts` maps city
+   * columns explicitly, so this does not round-trip through the DB. It
+   * exists so the loss is representable rather than silent — showing it
+   * to the user is a separate, design-approved change.
+   */
+  unscheduled?: UnscheduledItem[];
   vibes?: Vibe[]; // primary vibes for this city — drives the accent gradient
   colorIndex?: number; // 0–6, user can override, defaults to city position
 };
