@@ -134,7 +134,7 @@ export default function ConversationalPlanner({
     typeof v === 'string' && v.trim().length > 0;
 
   const applyUpdates = useCallback(
-    (u: ConverseResponse['updates']) => {
+    async (u: ConverseResponse['updates']) => {
       if (u.destinations) setAnswer('destinations', u.destinations);
       if (isSet(u.origin)) setAnswer('origin', u.origin);
       if (u.dates) setAnswer('dateRange', u.dates);
@@ -147,6 +147,30 @@ export default function ConversationalPlanner({
         setAnswer('returnToHome', u.returnToHome);
       if (isSet(u.notes)) setAnswer('extraNotes', u.notes);
       setAnswer('planningMode', 'destination');
+
+      // Airports last, because it is the one answer that needs an await.
+      //
+      // This path set `origin` and never `originAirports`, and it is the MAIN
+      // conversational route — `PlanningChat` fills them in three places, this
+      // component only in the geolocation branch. So a trip planned by talking
+      // reached the optimizer with an empty airport list, took the
+      // single-airport `getIataCode` fallback, and silently lost the
+      // multi-airport price comparison that makes NYC, London and Tokyo
+      // origins worth anything.
+      //
+      // Recomputed on every origin update rather than filled once: if the
+      // traveller moves their origin from New York to Boston, the old JFK/LGA/
+      // EWR list is not stale data to preserve, it is wrong data to replace.
+      // An unresolvable origin correctly yields an empty list — the same
+      // fallback as before, rather than airports for the previous city.
+      // Resolved through `locationResolver`, which replaced the hand-written
+      // `originAirports` table this branch was written against — that module
+      // no longer exists. Same call the geolocation branch below already
+      // makes, so the two origin paths in this file now agree on a source.
+      if (isSet(u.origin)) {
+        const { originAirportsForCity } = await import('@/lib/locationResolver');
+        setAnswer('originAirports', originAirportsForCity(u.origin));
+      }
     },
     [setAnswer],
   );
@@ -193,7 +217,7 @@ export default function ConversationalPlanner({
           known: knownState(),
         });
 
-        applyUpdates(result.updates);
+        await applyUpdates(result.updates);
         setFailCount(0);
 
         const withReply = [

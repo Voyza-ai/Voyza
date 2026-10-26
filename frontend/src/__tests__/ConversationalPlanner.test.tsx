@@ -325,3 +325,89 @@ describe('ConversationalPlanner', () => {
     });
   });
 });
+
+/**
+ * This component set `origin` and never `originAirports`, and it is the MAIN
+ * conversational route — PlanningChat fills them in three places, this one only
+ * in its geolocation branch. So a trip planned by talking reached the optimizer
+ * with an empty airport list, took the single-airport `getIataCode` fallback,
+ * and silently lost the multi-airport price comparison that makes a New York,
+ * London or Tokyo origin worth anything.
+ */
+describe('origin airports are filled on the conversational path', () => {
+  const answers = () => useTripStore.getState().answers;
+
+  it('fills the airports when the AI reports an origin', async () => {
+    mockedConverse.mockResolvedValue({
+      reply: 'Got it.',
+      updates: { origin: 'New York' },
+      action: 'ask',
+    } as any);
+
+    render(<ConversationalPlanner {...baseProps} />);
+    await sendText('flying from new york');
+
+    await waitFor(() => expect(answers().origin).toBe('New York'));
+    await waitFor(() => expect(answers().originAirports).toEqual(['JFK', 'LGA', 'EWR']));
+  });
+
+  it('replaces the airports when the origin changes', async () => {
+    // Stale airports are not data to preserve. If the traveller moves their
+    // origin from New York to Boston, JFK/LGA/EWR is wrong, not merely old.
+    mockedConverse.mockResolvedValue({
+      reply: 'Got it.',
+      updates: { origin: 'New York' },
+      action: 'ask',
+    } as any);
+    render(<ConversationalPlanner {...baseProps} />);
+    await sendText('from new york');
+    await waitFor(() => expect(answers().originAirports).toEqual(['JFK', 'LGA', 'EWR']));
+
+    mockedConverse.mockResolvedValue({
+      reply: 'Changed.',
+      updates: { origin: 'Boston' },
+      action: 'ask',
+    } as any);
+    await sendText('actually from boston');
+
+    await waitFor(() => expect(answers().origin).toBe('Boston'));
+    await waitFor(() => expect(answers().originAirports).not.toContain('JFK'));
+  });
+
+  it('leaves the airports alone on a turn that does not touch the origin', async () => {
+    mockedConverse.mockResolvedValue({
+      reply: 'Got it.',
+      updates: { origin: 'New York' },
+      action: 'ask',
+    } as any);
+    render(<ConversationalPlanner {...baseProps} />);
+    await sendText('from new york');
+    await waitFor(() => expect(answers().originAirports).toEqual(['JFK', 'LGA', 'EWR']));
+
+    mockedConverse.mockResolvedValue({
+      reply: 'Noted.',
+      updates: { budget: 2500 },
+      action: 'ask',
+    } as any);
+    await sendText('budget 2500');
+
+    await waitFor(() => expect(answers().budget).toBe(2500));
+    expect(answers().originAirports).toEqual(['JFK', 'LGA', 'EWR']);
+  });
+
+  it('yields an empty list for an origin the table cannot resolve', async () => {
+    // Honest: the same single-airport fallback as before, rather than the
+    // previous city's airports silently attached to a new origin.
+    mockedConverse.mockResolvedValue({
+      reply: 'Got it.',
+      updates: { origin: 'Qwertyville' },
+      action: 'ask',
+    } as any);
+
+    render(<ConversationalPlanner {...baseProps} />);
+    await sendText('from qwertyville');
+
+    await waitFor(() => expect(answers().origin).toBe('Qwertyville'));
+    await waitFor(() => expect(answers().originAirports).toEqual([]));
+  });
+});
