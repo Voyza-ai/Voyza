@@ -107,17 +107,25 @@ export default function OriginClarification({
           </div>
 
           {open && (
-            /* Across the row, not stacked. This banner is the full width of
-               the cards area and the alternatives are one line each, so
-               stacking them left most of that width empty. `flex-1` with a
-               floor shares the row between however many there are, and wraps
-               once they stop fitting. */
-            <ul className="mt-2.5 flex flex-wrap gap-2">
+            /* ONE row, scrolled sideways — never wrapped.
+               Wrapping was fine for Portland's two alternatives but not for
+               the long tail: `Springfield` resolves to eight readings, which
+               wrapped to seven cards over two rows and pushed the city cards
+               down the page. A single row keeps the banner one height
+               whatever the name matches, and the overflow is reachable by
+               scrolling rather than by growing.
+               No keyboard trap and no tabIndex on the scroller: each card is
+               a button, so tabbing through them scrolls the focused one into
+               view on its own. `pb-1` leaves room for the 6px scrollbar in
+               globals.css so it does not sit over the card borders. */
+            <ul className="mt-2.5 flex gap-2 overflow-x-auto pb-1">
               {alternatives.map((candidate) => (
-                /* The cap only bites when there is a single alternative,
-                   which would otherwise stretch one short row across the
-                   whole banner. Two or more never reach it. */
-                <li key={candidate.placeId} className="flex-1 min-w-[220px] max-w-[520px]">
+                /* Fixed-ish rather than `flex-1`: in a scroller a card that
+                   stretches to fill makes the row look complete when it is
+                   not. The bounds let a long label like "San Juan, National
+                   Capital Region, Philippines" take more room than "Portland,
+                   Texas" without any card collapsing. */
+                <li key={candidate.placeId} className="flex-shrink-0 min-w-[240px] max-w-[480px]">
                   <button
                     type="button"
                     disabled={!onChoose}
