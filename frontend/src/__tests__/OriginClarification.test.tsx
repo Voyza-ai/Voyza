@@ -123,6 +123,37 @@ describe('OriginClarification', () => {
     expect(maine).toBeDisabled();
   });
 
+  it('keeps every alternative in ONE row, however many there are', () => {
+    // `Springfield` resolves to eight readings. Wrapped, that was seven cards
+    // over two rows, which pushed the city cards down the page — the banner's
+    // height depended on how ambiguous the name happened to be. One scrolled
+    // row makes it constant.
+    const springfield: NonNullable<Trip['originClarification']> = {
+      input: 'Springfield',
+      reason: 'near-tie',
+      candidates: Array.from({ length: 8 }, (_, i) => ({
+        placeId: `gn:${i}`,
+        label: `Springfield, State ${i}, United States`,
+        airports: ['AAA', 'BBB'],
+        distanceKm: 100 * (i + 1),
+      })),
+    };
+    render(<OriginClarification clarification={springfield} pricedFrom={['AAA']} />);
+    fireEvent.click(screen.getByRole('button', { name: /see the others/i }));
+
+    // All seven alternatives are present — scrolling hides none of them.
+    for (let i = 1; i < 8; i += 1) {
+      expect(screen.getByText(`Springfield, State ${i}, United States`)).toBeInTheDocument();
+    }
+
+    // And the list scrolls rather than wrapping. Asserted on the container
+    // because jsdom has no layout: without this, a future change back to
+    // flex-wrap would pass every other test in this file.
+    const list = screen.getByText('Springfield, State 1, United States').closest('ul');
+    expect(list).toHaveClass('overflow-x-auto');
+    expect(list).not.toHaveClass('flex-wrap');
+  });
+
   it('prefers the airports the trip was really priced from', () => {
     // `pricedFrom` comes off the trip, the candidate's list from the
     // resolver. They can differ when the caller supplied its own, and the
