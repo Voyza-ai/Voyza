@@ -359,10 +359,18 @@ describe('getIataCode', () => {
   });
 
   it('uses the curated override before Duffel for known cities', async () => {
-    // Kyoto has no airport of its own; the override maps it to Osaka's
-    // Kansai (KIX) so it never mis-resolves (it previously returned ACC).
+    // Kyoto has no airport of its own; the override maps it to the Osaka
+    // metro so it never mis-resolves (it previously returned ACC, Accra).
+    //
+    // OSA rather than KIX since the destination-side decisions in
+    // `data/cityAirports.ts` were made: one metro code searches Kansai,
+    // Itami and Kobe, and the Tokyo-Itami service is how a traveller on a
+    // multi-city Japan trip actually reaches Kyoto. The KIX pin that stops a
+    // HOME leg being priced from Itami is a separate, opposite decision and
+    // lives in `scripts/location-data/curated.ts`;
+    // `cityAirportsDecisions.test.ts` asserts both.
     const code = await getIataCode('Kyoto');
-    expect(code).toBe('KIX');
+    expect(code).toBe('OSA');
     expect(mockDuffel.suggestions.list).not.toHaveBeenCalled();
   });
 

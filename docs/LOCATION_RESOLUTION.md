@@ -917,10 +917,74 @@ argument for doing it rather than leaving a table in place forever.
   negative result above.
 - `airportNames.ts` — IATA → display name, which `PlaceAirport` has no field
   for. No backend twin, so it was never part of the duplication problem.
-- `cityAirports.ts` — destination-side, and the resolver reproduces 156 of its
-  169 entries. The other 13 are metro-code vs specific-airport calls
-  (`seoul` SEL or ICN, `kyoto` OSA or KIX) that need deciding one at a time,
-  plus `kyiv`, which does not resolve at all.
+- `cityAirports.ts` — destination-side. The 13 calls it was holding are now
+  decided; it is down to **two** entries that cannot be answered anywhere
+  else. See below.
+
+### The 13 destination-side decisions, made
+
+When the artifact was first checked against `cityAirports.ts`, the resolver
+reproduced 156 of its 169 entries via `metro ?? airports[0]` — the remaining
+13 were metro-code versus single-airport calls, and they were left for a
+person on purpose. Re-measured on the current artifact the count was 12:
+`washington` had already been closed by the curated alias added for the `live`
+flip, which is the 13th.
+
+The split, and the principle that produced it: **a destination wants one code
+that covers every airport, an origin wants the individual codes in the right
+ORDER.** Those two pull opposite ways on the same city, which is why these
+entries looked undecidable from the data.
+
+**Seven went to the resolver**, and the table now holds its answer, so
+deleting the file changes nothing for them:
+
+| key | was | is | why |
+|---|---|---|---|
+| `kyoto`, `nara` | KIX | **OSA** | the KIX pin is an ORIGIN decision — Itami is nearer and domestic-focused, so a home leg must not price from it. A KIX-only destination search cannot return the Haneda–Itami service, which is how a traveller on a multi-city Japan trip actually reaches Kyoto. |
+| `kobe` | UKB | **OSA** | Kobe's own airport is a small domestic field; nearly everyone arrives through Kansai or Itami. UKB alone was the worst of the three answers. |
+| `seoul` | ICN | **SEL** | Gimpo carries nearly all domestic service plus the Haneda and Osaka shuttles. |
+| `beijing` | PEK | **BJS** | Daxing now carries a large share of Beijing's traffic, and a PEK-only search drops all of it. |
+| `siem reap` | REP | **SAI** | REP has **no row at all** in OurAirports 2026-10-24: the old Siem Reap International closed when Siem Reap–Angkor opened. The table was pointing at an airport that does not exist. |
+| `phnom penh` | PNH | **KTI** | PNH is still filed, with `scheduled_service: "no"` — Phnom Penh International stopped taking commercial traffic when Techo International opened. |
+
+**Three went to the table**, and the curated layer now carries them, so the
+resolver reproduces those too:
+
+| key | the resolver said | why the table is right |
+|---|---|---|
+| `buenos aires` | EZE | the top candidate was the PROVINCE, which outranks the city because a region's `population` is a SUM (7,971,365 against 2,891,082) and the city is not administratively inside it. A region carries no metro code, so Aeroparque — where the flights from Montevideo, Santiago and the interior land — was dropped. A curated alias pins the city: BUE on the destination side, and EZE 27 km, AEP 7 km on the origin side, against the province's EZE 74, AEP 105, **SST 237** — a beach strip taking the third `MAX_HOME_AIRPORTS` slot. |
+| `reykjavik` | KEF | no dataset has the metro concept: OurAirports files both airports under municipality "Reykjavík" and carries REK only in `keywords`. KEF already led on rank, so a metro group changes no order — it restores the code that lets one search cover Keflavík for the flight from abroad and Reykjavík Domestic for the leg from Akureyri. |
+| `bucharest` | BBU | Băneasa (large, 7.9 km) led Henri Coandă (large, 15.5 km) on distance with the ordinal unable to separate them — the old-Doha-International shape. Băneasa is the business-aviation field. The metro group pins OTP and adds BUH, and `RO.10` is pinned to match, so an origin lookup also stops pricing Bucharest from Băneasa. |
+
+**Two are not decided, and they are why the file still exists:**
+
+- **`moscow` → MOW.** The resolver answers **SVO**, because its top candidate
+  is the Moscow federal-city REGION and a region never carries a metro code,
+  so Domodedovo and Vnukovo are invisible to a destination search. MOW is
+  plainly the right destination answer. The only mechanism the curated layer
+  offers is an alias onto the city — and measured, that alias costs the one
+  case it would be wrong about: a traveller whose coordinates are in **Moscow,
+  Idaho** resolves to PUW, 8.6 km away, today, and would get Sheremetyevo
+  instead. It would also remove a rule-4 multi-country question. It buys the
+  exact retired origin triple (SVO, DME, VKO against the region's SVO, VKO,
+  **ZIA**). That trade is the owner's, so the entry stays and
+  `cityAirportsDecisions.test.ts` asserts the Idaho rescue — adding the alias
+  fails that test rather than passing silently.
+- **`kyiv` → IEV.** Both Kyiv airports are filed `scheduled_service: "no"`,
+  so neither is in the artifact's airport universe and the resolver answers
+  `unknown` with Kyiv itself as the near miss. The curated layer cannot hold
+  it either: `addCuratedAirports` throws on an airport without scheduled
+  service, by design. The value is a deterministic stub that keeps
+  `getIataCode` off the Duffel guess that produced the Kyoto→Accra bug. When
+  service resumes the resolver answers it from the dump with no code change.
+
+**The cleaner fix for `moscow`, not taken.** `Moscow, Russia` the region and
+`Moscow, Russia` the city produce candidates with the IDENTICAL label, and
+`dedupeByLabel` keeps the FIRST, which is the region. Preferring the
+point-like place when labels collide would answer MOW, keep the Idaho
+question, and need no curated entry — but it changes which `placeId` a
+clarification card carries, so it is a resolver change for the owner rather
+than a data decision.
 
 ## Observability
 
@@ -1173,7 +1237,7 @@ against the code rather than assumed:
 | `originAirports.ts` ×2 | the shadow log | it IS the comparison baseline, and `originAirportsForCity` still leads with it. Deleting it before the flip to `live` removes the only evidence that the replacement is not worse. |
 | `nearestAirport.ts` | a new capability | it answers coords → nearest airport city, for "use my location". The resolver takes coordinates as CONTEXT to disambiguate a name; it has no reverse-geocoding entry point at all. The artifact has lat/lon on all 36,009 places, so a `nearestPlace(lat, lon)` would be both easy and better than the handful of major cities embedded today — but it is an addition, not a deletion. |
 | `airportNames.ts` | artifact data, and probably should stay | IATA → display name. `PlaceAirport` is `{iata, km, servesPlace}` with no name, so there is nothing to replace it with. It also has no backend twin, so it is not part of the duplication problem the owner asked to fix — and putting ~267 airport names in the hot set costs budget the hot set does not have. |
-| `cityAirports.ts` | 13 decisions | **It exists** — an earlier version of this table said otherwise. 94 lines, destination-side (city → one primary IATA), read by `getIataCode`, and it holds the Kyoto→Accra override. The resolver reproduces 156 of its 169 entries via `metro ?? airports[0]`; the remaining 13 are metro-vs-specific-airport choices (`seoul` SEL or ICN, `kyoto` OSA or KIX) plus `kyiv`, which does not resolve at all. |
+| `cityAirports.ts` | 2 entries, not 13 | **It exists** — an earlier version of this table said otherwise. Destination-side (city → one primary IATA), read by `getIataCode`, and it holds the Kyoto→Accra override. The 13 metro-vs-specific-airport calls are now decided — seven to the resolver, three into `curated.ts`, `washington` earlier — and the file is down to `moscow` (needs a resolver change or an alias the owner must weigh) and `kyiv` (no scheduled service anywhere in the dump). See "The 13 destination-side decisions, made". |
 
 So the honest shape of phase 5 is: flip to `live` on the evidence, add
 `nearestPlace`, then delete two files and keep `airportNames.ts`.
