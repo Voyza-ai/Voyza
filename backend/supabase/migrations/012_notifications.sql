@@ -1,10 +1,15 @@
 -- 012: In-app notifications
 --
--- ⚠️ Apply manually in the Supabase SQL editor (like 003–005). This migration
--- references objects that exist in PROD but not in this repo's earlier
--- migration files (user_profiles, anonymize_expired_deletions — see
--- SCHEMA_SNAPSHOT.sql). It will NOT run on a from-scratch local DB built
--- from 001–005 alone.
+-- APPLIED, by hand in the Supabase SQL editor (like 003–005). The
+-- notifications table, get_user_id_by_email() and anonymize_expired_deletions()
+-- were all confirmed present on 2026-10-26. Because it was run by hand it is
+-- NOT in the migration ledger (supabase_migrations.schema_migrations), so
+-- `supabase db push` has no record of it.
+--
+-- Still true for a fresh local DB: this migration references objects that exist
+-- in PROD but not in this repo's earlier migration files (user_profiles,
+-- anonymize_expired_deletions — see SCHEMA_SNAPSHOT.sql). It will NOT run on a
+-- from-scratch local DB built from 001–005 alone.
 --
 -- What this adds:
 --   1. notifications table + indexes + RLS (recipients read/update/delete

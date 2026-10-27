@@ -1,5 +1,10 @@
 -- 011 — break the trips ⇄ group_members RLS policy cycle.
 --
+-- APPLIED. Recorded in the migration ledger as 20260918003424
+-- break_trips_group_members_policy_cycle. Confirmed on 2026-10-26:
+-- is_trip_owner() exists and the live group_members_owner_all policy reads
+-- `is_trip_owner(trip_id)`, so the recursion is gone.
+--
 -- Run this in the Supabase SQL editor (Dashboard → SQL Editor → paste → Run).
 --
 -- WHY: `group_members_owner_all` decides "is the caller this trip's owner" by
