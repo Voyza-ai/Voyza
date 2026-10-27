@@ -21,6 +21,7 @@
  */
 
 import type { LocationArtifact, Place } from '../services/location/types';
+import airportNamesJson from './generated/airportNames.json';
 import airportRanksJson from './generated/airportRanks.json';
 import codesJson from './generated/codes.json';
 import placesJson from './generated/places.json';
@@ -77,6 +78,35 @@ export type GeneratedAirportRanks = {
   pinned: Record<string, string[]>;
 };
 
+/**
+ * IATA -> the airport's human name.
+ *
+ * `PlaceAirport` is `{iata, km, servesPlace}` and gains no `name` field, which
+ * was measured rather than assumed: the artifact holds 108,452 airport
+ * attachments over 4,008 distinct airports, so a name on each attachment is
+ * 1,720.0 KiB of duplicated characters against 58.1 KiB for one map — and 27
+ * copies of a string are 27 chances for one of them to be stale. A code is
+ * the natural key for a name.
+ *
+ * It is a file of its own rather than part of `places.json` because the
+ * BROWSER needs it and never receives `places.json`: the frontend gets the
+ * 60 KiB hot set, and the hot set is full. `build-location-hotset.ts` ships
+ * this file to `frontend/lib/generated/` as a separate, lazily-imported asset
+ * and prints what it costs, with the measured numbers behind that choice.
+ *
+ * Derived from the OurAirports `name` column by `deriveAirportDisplayName` in
+ * scripts/location-data/build.ts, which is where the shortening rules and
+ * their reasons live. Nothing here is hand-written and nothing is
+ * special-cased; `airportNames.test.ts` asserts both.
+ */
+export type GeneratedAirportNames = {
+  schemaVersion: number;
+  generatedAt: string;
+  basis: 'ourairports-name';
+  /** Every scheduled-IATA airport in the dump. */
+  names: Record<string, string>;
+};
+
 /** The artifact, exactly as emitted. */
 export const locationArtifact: LocationArtifact = placesJson as LocationArtifact;
 
@@ -84,6 +114,23 @@ export const locationCodeLists: GeneratedCodeLists = codesJson as GeneratedCodeL
 
 export const locationAirportRanks: GeneratedAirportRanks =
   airportRanksJson as GeneratedAirportRanks;
+
+export const locationAirportNames: GeneratedAirportNames =
+  airportNamesJson as GeneratedAirportNames;
+
+/**
+ * An airport's display name, or `null`.
+ *
+ * `null`, never a placeholder and never the code itself: a caller that wants
+ * to fall back to the bare code has the code already, and a function that
+ * invents "undefined" or "Unknown Airport" is how a missing name reaches a
+ * traveller as text. Case-insensitive, because codes arrive from the resolver
+ * uppercase and from stored trips however they were typed.
+ */
+export function airportDisplayName(iata: string): string | null {
+  if (!iata) return null;
+  return locationAirportNames.names[iata.toUpperCase()] ?? null;
+}
 
 export function allPlaces(): readonly Place[] {
   return locationArtifact.places;

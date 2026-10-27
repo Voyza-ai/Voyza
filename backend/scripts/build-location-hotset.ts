@@ -75,6 +75,54 @@ const REPO_ROOT = join(BACKEND_ROOT, '..');
 const KEYS_SOURCE = join(BACKEND_ROOT, 'src', 'services', 'location', 'keys.ts');
 const KEYS_COPY = join(REPO_ROOT, 'frontend', 'lib', 'locationKeys.ts');
 
+/**
+ * AIRPORT NAMES DO NOT FIT IN THE HOT SET. Measured, three ways.
+ *
+ * The browser shows an airport's human name above its IATA code on the home
+ * card, and used to read it from a hand-written table of ~100 codes in
+ * `frontend/lib/airportNames.ts`. The resolver can return any of 4,008, so
+ * anything outside that ~100 rendered as a bare code — which is the bug this
+ * file's comment exists to explain the fix for.
+ *
+ * The obvious fix is to put the names in the hot set. It does not fit, and
+ * not by a little. Against the 60 KiB gzipped budget, with the hot set at
+ * 59.5 KiB (60,953 bytes) and therefore 487 BYTES of headroom:
+ *
+ *   | names added                               | hot set | over budget |
+ *   |-------------------------------------------|---------|-------------|
+ *   | all 4,008 scheduled-IATA airports         | 103.2   | +43.2       |
+ *   | only the 1,167 codes its places reference |  73.8   | +13.8       |
+ *   | only the 188 codes in its `iata` index    |  61.8   |  +1.8       |
+ *
+ * Even the last row — the smallest subset that is not arbitrary — needs 4.8x
+ * the headroom, and it is also the WRONG subset: the codes a traveller sees are
+ * the ones a priced trip and an origin clarification put on screen, which
+ * come from the server and are not confined to the hot set's own places. A
+ * subset that fits would be a hot set that answers some names and not others,
+ * which is the bug again with a smaller table.
+ *
+ * So the names ship as their own asset, 105.7 KiB raw / 44.5 KiB gzipped,
+ * copied here into `frontend/lib/generated/` and imported LAZILY by
+ * `frontend/lib/airportNames.ts`. It is a deferred chunk: a visitor who never
+ * sees an airport card never downloads it, and nothing is added to the hot
+ * set, so the budget above is untouched at 59.5 KiB.
+ *
+ * Two alternatives were rejected on this measurement, not on taste:
+ *
+ *  - An endpoint. It would mean a round trip, a rate limiter, and a card that
+ *    cannot name an airport when the backend is down — for data that is
+ *    already generated, already checked in, and never changes between builds.
+ *    A static chunk is cached by content hash and costs the server nothing.
+ *  - A static import. Same bytes, but spent on every visit to any page that
+ *    pulls the module, rather than on first render of a card that needs it.
+ *
+ * The cost of lazy is honest and bounded: until the chunk lands, the card
+ * shows the bare code and then the name appears. That is the same degradation
+ * as a name the table never had, which is what shipped before.
+ */
+const NAMES_SOURCE = join(BACKEND_ROOT, 'src', 'data', 'generated', 'airportNames.json');
+const NAMES_COPY = join(REPO_ROOT, 'frontend', 'lib', 'generated', 'airportNames.json');
+
 /** Both packages get the same bytes. The parity test compares them. */
 const OUT_FILES = [
   join(BACKEND_ROOT, 'src', 'data', 'generated', 'locationHotSet.json'),
@@ -562,6 +610,10 @@ function main(): void {
   console.log(`  label names                ${Object.keys(set.countryNames).length} country, ${Object.keys(set.adminNames).length} admin`);
   console.log(`  raw                        ${(raw.length / 1024).toFixed(1)} KiB`);
   console.log(`  gzipped                    ${(gzip / 1024).toFixed(1)} KiB of ${GZIP_BUDGET_BYTES / 1024} KiB budget`);
+  console.log(
+    `  airport names (lazy chunk) ${(gzipSync(readFileSync(NAMES_SOURCE)).byteLength / 1024).toFixed(1)} KiB gzipped, ` +
+      `fetched on demand and NOT counted above`,
+  );
 
   if (dryRun) {
     console.log('\nlocation-hotset: dry run, nothing written');
@@ -591,6 +643,19 @@ function main(): void {
   mkdirSync(join(KEYS_COPY, '..'), { recursive: true });
   writeFileSync(KEYS_COPY, keysSource, 'utf8');
   console.log(`location-hotset: wrote ${KEYS_COPY}`);
+
+  // The airport names travel the same way, and for the same reason: one
+  // generated file, two packages, byte-identical, with a parity test in each.
+  // See NAMES_SOURCE above for why they are not folded into the hot set.
+  const namesSource = readFileSync(NAMES_SOURCE);
+  mkdirSync(join(NAMES_COPY, '..'), { recursive: true });
+  writeFileSync(NAMES_COPY, namesSource);
+  console.log(
+    `location-hotset: wrote ${NAMES_COPY} ` +
+      `(${(namesSource.byteLength / 1024).toFixed(1)} KiB raw, ` +
+      `${(gzipSync(namesSource).byteLength / 1024).toFixed(1)} KiB gzipped — a LAZY chunk, ` +
+      `outside the ${GZIP_BUDGET_BYTES / 1024} KiB hot-set budget)`,
+  );
 }
 
 if (require.main === module) main();

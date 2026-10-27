@@ -8,8 +8,13 @@
  *
  * Emits, into src/data/generated/:
  *
- *   places.json   a LocationArtifact (src/services/location/types.ts)
- *   codes.json    ISO 3166-1 and USPS code lists, derived from source
+ *   places.json        a LocationArtifact (src/services/location/types.ts)
+ *   codes.json         ISO 3166-1 and USPS code lists, derived from source
+ *   airportRanks.json  what `airports[]` was ordered by, so it can be asserted
+ *   airportNames.json  IATA -> display name, for anything that shows a code
+ *                      to a traveller. `build:location-hotset` copies this one
+ *                      to the frontend; see that script for why it is a file
+ *                      of its own rather than a field on every airport.
  *
  * Both are CHECKED IN. The resolver loads them at boot; nothing downloads at
  * runtime. Re-run this when upstream moves and read the diff — `generatedAt`
@@ -26,6 +31,7 @@
 
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 import type { LocationArtifact } from '../src/services/location/types';
 import { build, SCHEMA_VERSION } from './location-data/build';
@@ -109,7 +115,7 @@ async function main(): Promise<void> {
   );
 
   const generatedAt = new Date().toISOString();
-  const { artifact, ranks, stats } = build({
+  const { artifact, ranks, names, stats } = build({
     airportsCsv: airportsCsv.text,
     citiesTsv: cities.text,
     prominenceTierTsv: prominenceTier.text,
@@ -138,6 +144,18 @@ async function main(): Promise<void> {
     1,
   )}\n`;
   const ranksJson = `${JSON.stringify(ranks, null, 1)}\n`;
+  // ONE LINE PER CODE, for the same reason places.json is one line per place:
+  // pretty-printed it is four lines per airport and a renamed airport moves
+  // the whole file; on one line the diff is unreadable.
+  const nameLines = Object.entries(names.names).map(
+    ([iata, name]) => ` ${JSON.stringify(iata)}: ${JSON.stringify(name)}`,
+  );
+  const namesJson =
+    `${JSON.stringify(
+      { schemaVersion: names.schemaVersion, generatedAt: names.generatedAt, basis: names.basis },
+      null,
+      1,
+    ).replace(/\n}$/, '')},\n "names": {\n${nameLines.join(',\n')}\n }\n}\n`;
 
   console.log('');
   console.log('── sources ─────────────────────────────────────────────');
@@ -180,6 +198,12 @@ async function main(): Promise<void> {
   console.log(`  curated aliases            ${stats.curatedAliases}`);
   console.log(`  places.json                ${mib(Buffer.byteLength(placesJson))}`);
   console.log(`  codes.json                 ${mib(Buffer.byteLength(codesJson))}`);
+  console.log(
+    `  airportNames.json          ${Object.keys(names.names).length} codes, ` +
+      `${(Buffer.byteLength(namesJson) / 1024).toFixed(1)} KiB ` +
+      `(gzipped ${(gzipSync(Buffer.from(namesJson)).byteLength / 1024).toFixed(1)} KiB — ` +
+      `what the browser pays for it, see build-location-hotset.ts)`,
+  );
   console.log(`  ISO 3166-1 alpha-2         ${codeLists.iso3166Alpha2.length}`);
   console.log(
     `  USPS state codes           ${codeLists.uspsStateCodes.length} ` +
@@ -196,10 +220,16 @@ async function main(): Promise<void> {
   writeFileSync(join(OUT_DIR, 'places.json'), placesJson);
   writeFileSync(join(OUT_DIR, 'codes.json'), codesJson);
   writeFileSync(join(OUT_DIR, 'airportRanks.json'), ranksJson);
+  writeFileSync(join(OUT_DIR, 'airportNames.json'), namesJson);
   console.log('');
   console.log(`location-data: wrote ${join(OUT_DIR, 'places.json')} (${mib(statSync(join(OUT_DIR, 'places.json')).size)})`);
   console.log(`location-data: wrote ${join(OUT_DIR, 'codes.json')}`);
   console.log(`location-data: wrote ${join(OUT_DIR, 'airportRanks.json')}`);
+  console.log(`location-data: wrote ${join(OUT_DIR, 'airportNames.json')}`);
+  console.log(
+    'location-data: run `npm run build:location-hotset` next — it copies ' +
+      'airportNames.json to the frontend and re-fits the hot set.',
+  );
   console.log(`location-data: done in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }
 

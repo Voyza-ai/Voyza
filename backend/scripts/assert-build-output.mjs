@@ -29,6 +29,9 @@ const required = [
   // truncated emit, which a bare existence check would wave through.
   { path: join(dist, 'data', 'generated', 'places.json'), minBytes: 1_000_000 },
   { path: join(dist, 'data', 'generated', 'codes.json'), minBytes: 500 },
+  // ~94 KiB of IATA -> display name. A few hundred bytes would mean a
+  // truncated emit, which a bare existence check would wave through.
+  { path: join(dist, 'data', 'generated', 'airportNames.json'), minBytes: 50_000 },
 ];
 
 const problems = [];

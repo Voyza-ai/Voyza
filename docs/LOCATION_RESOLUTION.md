@@ -915,8 +915,11 @@ argument for doing it rather than leaving a table in place forever.
 
 - `nearestAirport.ts` — a hot-set reverse lookup is measurably worse; see the
   negative result above.
-- `airportNames.ts` — IATA → display name, which `PlaceAirport` has no field
-  for. No backend twin, so it was never part of the duplication problem.
+- `airportNames.ts` — the FILE is still there, but the hand-written table
+  inside it is gone; see "Airport names come from the pipeline" below. A
+  hand-written table of ~100 codes against a resolver that answers 4,008 is
+  not a harmless leftover, it is a guaranteed nameless card for every airport
+  outside the hundred.
 - `cityAirports.ts` — destination-side. The 13 calls it was holding are now
   decided; it is down to **two** entries that cannot be answered anywhere
   else. See below.
@@ -986,6 +989,105 @@ question, and need no curated entry — but it changes which `placeId` a
 clarification card carries, so it is a resolver change for the owner rather
 than a data decision.
 
+## Airport names come from the pipeline
+
+`frontend/lib/airportNames.ts` was a hand-written table of ~100 codes whose own
+header said it covered "the airports listed in `originAirports.ts`" — the file
+phase 5 deleted. The resolver answers with any of 4,008 scheduled-IATA
+airports, so the home card showed "Portland Intl." above PDX and a bare `PWM`
+above Portland, Maine. That is the second reading of an ambiguous "Portland",
+which is exactly the card the clarification banner re-points.
+
+The names were in OurAirports all along: `parseAirports` already reads the
+`name` column and throws if it is missing, and the value was then dropped.
+
+### Where the names live: one map, keyed by code
+
+`PlaceAirport` does NOT gain a `name`, and the reason is measured. The
+artifact holds **108,452 airport attachments over 4,008 distinct airports** —
+27.1 places per airport on average — so a name per attachment is **1,720.0
+KiB of name characters against 58.1 KiB for a single map**, with 27 copies to
+keep consistent instead of one.
+
+So the generator emits `src/data/generated/airportNames.json`: IATA → display
+name, every scheduled-IATA airport, code-sorted and one per line so a rebuild
+diff reads as an airport changelog. It covers all 4,008 rather than the 1,167
+the capped `airports[]` lists reach, because the resolver's `iata` index
+reaches every code and `LAX` typed into an origin field is a real input.
+
+### The names do NOT fit in the hot set, and that is the measured headline
+
+The hot set is **59.5 KB of a 60 KB gzipped budget — 487 bytes of headroom.**
+Against that:
+
+| names folded into the hot set | result | over budget by |
+|---|---|---|
+| all 4,008 | 103.2 KB | +43.2 KB |
+| only the 1,167 codes its places reference | 73.8 KB | +13.8 KB |
+| only the 188 codes in its own `iata` index | 61.8 KB | +1.8 KB |
+
+Even the last row — the smallest subset that is not arbitrary — needs 4.8x the
+headroom. It is also the wrong subset: the codes a traveller actually sees come
+from a priced trip and from `/api/locations/resolve`, neither of which is
+confined to the hot set's own places. A subset that fit would be the same bug
+with a smaller table.
+
+**So the names ship as their own asset: 105.7 KiB raw, 44.5 KiB gzipped,
+written to `frontend/lib/generated/` beside the hot set and imported LAZILY.**
+It is a deferred chunk — a visitor who never sees an airport card never
+downloads it — and the hot set is untouched at 59.5 KB. Two alternatives were
+rejected on this measurement rather than on taste: an endpoint costs a round
+trip, a rate limiter and a card that cannot name an airport when the backend is
+down, for data that is generated, checked in and static between builds; a
+static import spends the same bytes on every visit instead of on first render
+of a card that needs them.
+
+The cost of lazy, stated plainly: **until the chunk lands the card shows the
+bare code and the name appears a moment later.** That is the same degradation
+as a code the old table had never heard of, which is what shipped before, and
+`getAirportName` returns `null` rather than a placeholder in all three of the
+cases that produce it — unknown code, chunk not yet loaded, chunk failed to
+load. Every consumer renders the code and treats the name as an optional line
+above it.
+
+### One name per code, not two
+
+The old table distinguished a short `name` ("Portland Intl.") from a `full` one
+("Portland International Airport"). Checked against what renders: all three
+consumers — `Flowchart`'s `HomeCard`, `CanvasHomeCard`, and a chip tooltip in
+`HomeEditModal` — read only `name`, and `getAirportFullName` had **no callers
+at all**. Shipping both measured **+16.1 KB gzipped** for a field nothing
+reads, so only the short form is derived and the dead export is gone.
+
+The short form comes from three rules about the SHAPE of the column, never
+about a particular airport: take the part before `" / "` (OurAirports joins
+co-located facilities with it), strip trailing decoration — a parenthetical or
+a generic facility noun — until none is left, then abbreviate "International"
+to "Intl.".
+
+Two of those earned their shape by being wrong first:
+
+- **Dropping the whole "International Airport" tail reads well for JFK and
+  ruins everything else.** It turns PDX into a bare "Portland", LAX into "Los
+  Angeles" and DXB into "Dubai" — directly under a card that already says the
+  city. Abbreviating instead reproduces the hand-written table's own string
+  for PDX, LAX, SFO, EWR, DEN, MIA, SLC and PHL exactly.
+- **The decoration strip has to run to a fixed point.** The column puts the
+  parenthetical on both sides of the noun — "Antwerp International Airport
+  (Deurne)" and "Marka International (Amman Civil) Airport" — so a single pass
+  in either order leaves the other kind behind on **23 rows** and the function
+  stops being idempotent. `airportNames.test.ts` asserts
+  `derive(derive(x)) === derive(x)` over all 4,008, which also means a
+  hand-edited row in the generated file fails the suite instead of surviving as
+  data.
+
+Deliberately NOT done: a length cap. The median derived name is 13 characters
+and the 90th percentile 26, but 56 of 4,008 still exceed 40. Truncating in the
+data would bake one layout's guess into every consumer; the string is honest
+and clamping it is the renderer's business. That leaves a real open issue —
+a very long name wraps in a 200 px card — which is a layout change and so
+needs approval.
+
 ## Observability
 
 The original bug was silent, so: **log every `unknown` and `ambiguous` with the
@@ -1005,7 +1107,8 @@ so this is invisible locally. Specify a max input length.
 | Exact hit | < 0.1 ms | **0.005 ms** p50 |
 | Fuzzy path | < 5 ms | **0.19 ms** p50, 1.4 ms p95, 2.4 ms worst seen |
 | Index memory | < 50 MB | **88.2 MiB — over budget, see below** |
-| Browser hot set | < 60 KB gzipped | **59.9 KB**, asserted by the builder and a test |
+| Browser hot set | < 60 KB gzipped | **59.5 KB**, asserted by the builder and a test |
+| Airport names, browser | not in the hot set | **44.5 KB gzipped**, a separate lazy chunk — see below |
 | Index build | — | **1.1 s**, lazy, once per process |
 | AI calls | **zero** | zero |
 
@@ -1236,11 +1339,13 @@ against the code rather than assumed:
 |---|---|---|
 | `originAirports.ts` ×2 | the shadow log | it IS the comparison baseline, and `originAirportsForCity` still leads with it. Deleting it before the flip to `live` removes the only evidence that the replacement is not worse. |
 | `nearestAirport.ts` | a new capability | it answers coords → nearest airport city, for "use my location". The resolver takes coordinates as CONTEXT to disambiguate a name; it has no reverse-geocoding entry point at all. The artifact has lat/lon on all 36,009 places, so a `nearestPlace(lat, lon)` would be both easy and better than the handful of major cities embedded today — but it is an addition, not a deletion. |
-| `airportNames.ts` | artifact data, and probably should stay | IATA → display name. `PlaceAirport` is `{iata, km, servesPlace}` with no name, so there is nothing to replace it with. It also has no backend twin, so it is not part of the duplication problem the owner asked to fix — and putting ~267 airport names in the hot set costs budget the hot set does not have. |
+| `airportNames.ts` | ~~artifact data, and probably should stay~~ **DONE — the table is generated now** | The "nothing to replace it with" was true and the conclusion drawn from it was not. The names are in OurAirports' `name` column and were simply being discarded at build time; `PlaceAirport` gaining a `name` field is the wrong fix (27 copies per airport, measured) but a generated IATA → name map is the right one. The hot-set budget point was correct and is the whole reason the map ships as a separate lazy asset. See below. |
 | `cityAirports.ts` | 2 entries, not 13 | **It exists** — an earlier version of this table said otherwise. Destination-side (city → one primary IATA), read by `getIataCode`, and it holds the Kyoto→Accra override. The 13 metro-vs-specific-airport calls are now decided — seven to the resolver, three into `curated.ts`, `washington` earlier — and the file is down to `moscow` (needs a resolver change or an alias the owner must weigh) and `kyiv` (no scheduled service anywhere in the dump). See "The 13 destination-side decisions, made". |
 
 So the honest shape of phase 5 is: flip to `live` on the evidence, add
-`nearestPlace`, then delete two files and keep `airportNames.ts`.
+`nearestPlace`, then delete two files and keep `airportNames.ts` — which is
+what happened, except that keeping the FILE turned out to mean replacing its
+contents rather than leaving them alone.
 
 ### The gate for flipping to `live`
 
