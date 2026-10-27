@@ -11,6 +11,20 @@
 --   account_lifecycle_and_trip_permissions, index_cleanup_and_member_lookups,
 --   add_trip_constraints, add_trip_origin_anchor, add_trip_home_leg_details
 --
+-- → SECOND READ, 2026-10-26: preset_trips and preset_events were added to
+--   this file on that date from a fresh read of the same live production DB
+--   (pg_catalog / information_schema). They were missing here AND had no
+--   migration file, so nothing in this repo recorded them; they are now also
+--   captured as migrations/013_preset_marketplace.sql. Unlike the rest of
+--   this file, their entries below include indexes. Everything else here is
+--   still the 2026-06-16 read and has drifted since — known drift: trips
+--   gained return_city / return_airports (003), trips_group_edit gained a
+--   WITH CHECK and trips gained the trips_owner_columns_guard trigger (008),
+--   trips.allow_clones now defaults to false (009), group_members_owner_all
+--   now calls is_trip_owner() (011), and the notifications table,
+--   get_user_id_by_email() and a rewritten anonymize_expired_deletions()
+--   exist (012).
+--
 -- ⚠️  THIS FILE IS REFERENCE DOCUMENTATION — do NOT place it in migrations/
 --     and do NOT `supabase db push` it (the tables already exist).
 --     The AUTHORITATIVE reconciliation is `supabase db pull` (see notes at end),
@@ -168,6 +182,46 @@ create table public.leg_price_cache (
   expires_at timestamptz
 );
 
+-- Preset trip marketplace (read live 2026-10-26; see
+-- migrations/013_preset_marketplace.sql, which reproduces these idempotently).
+-- Column order, constraint names and defaults are verbatim from the live DB.
+create table public.preset_trips (
+  slug text primary key,
+  data jsonb not null,
+  vibes text[] not null default '{}'::text[],
+  region text not null,
+  duration_bucket text not null check (duration_bucket in ('weekend','one-week','two-weeks','month')),
+  budget_tier text not null check (budget_tier in ('$','$$','$$$','$$$$')),
+  origin_region text not null default 'us-east'::text,
+  nights integer not null,
+  est_cost numeric not null,
+  categories text[] not null default '{}'::text[],
+  hero_image_url text,
+  staff_pick boolean not null default false,
+  status text not null default 'published'::text check (status in ('draft','published')),
+  source text not null default 'curated'::text check (source in ('curated','generated')),
+  refresh_status text not null default 'fresh'::text check (refresh_status in ('fresh','refreshing','failed')),
+  refreshed_at timestamptz,
+  clone_count integer not null default 0,
+  impression_count integer not null default 0,
+  view_count integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create table public.preset_events (
+  id bigint primary key generated always as identity,
+  preset_slug text not null references public.preset_trips(slug) on delete cascade,
+  kind text not null check (kind in ('impression','view','use')),
+  created_at timestamptz not null default now()
+);
+
+-- Indexes on the two tables above (this file does NOT capture indexes for any
+-- other table — these are recorded because nothing else in the repo does):
+create index preset_trips_categories_idx on public.preset_trips using gin (categories);
+create index preset_events_recent_idx    on public.preset_events using btree (created_at desc, preset_slug);
+-- NOTE: preset_trips.vibes is filtered the same way as categories but has NO
+-- index live. Recorded as found, not corrected.
+
 -- ─── Row Level Security ──────────────────────────────────────────────────────
 alter table public.trips              enable row level security;
 alter table public.cities             enable row level security;
@@ -180,6 +234,8 @@ alter table public.airport_codes      enable row level security;
 alter table public.booking_locations  enable row level security;
 alter table public.db_stops           enable row level security;
 alter table public.leg_price_cache    enable row level security;
+alter table public.preset_trips       enable row level security;  -- 2026-10-26
+alter table public.preset_events      enable row level security;  -- 2026-10-26
 
 -- trips
 create policy trips_owner_all   on public.trips for all    using (auth.uid() = user_id);
@@ -224,6 +280,18 @@ create policy airport_codes_service_only     on public.airport_codes     for all
 create policy booking_locations_service_only on public.booking_locations for all using (false);
 create policy db_stops_service_only          on public.db_stops          for all using (false);
 create policy leg_cache_service_only         on public.leg_price_cache   for all using (false);
+
+-- preset marketplace (read live 2026-10-26)
+-- Published presets are world-readable; drafts are not. Granted to PUBLIC (no
+-- `to` clause), which is how it is defined live.
+create policy preset_trips_public_read on public.preset_trips for select using (status = 'published'::text);
+-- preset_events has RLS ENABLED and NO POLICIES live, which denies every
+-- anon/authenticated read and write. Only the service role (which bypasses
+-- RLS) reaches it. The absence is deliberate — do not "fix" it by adding a
+-- policy. Note the table-level grants suggest otherwise (anon holds
+-- INSERT/SELECT/UPDATE/DELETE), but those come from Supabase's
+-- `alter default privileges` on schema public, not from any migration, and
+-- RLS is what actually gates access.
 
 -- ─── Functions (verbatim from live DB) ──────────────────────────────────────
 -- handle_new_user: creates a user_profiles row on signup.

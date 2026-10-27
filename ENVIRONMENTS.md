@@ -1,6 +1,6 @@
 # Environments
 
-How Voyza is deployed. (Set up 2026-06-16. Minimal-cost prod + dev.)
+How BlueMurr is deployed. (Set up 2026-06-16. Minimal-cost prod + dev.)
 
 ## Repository
 - **GitHub:** `Voyza-ai/Voyza` (org repo). Local `origin` points here.

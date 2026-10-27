@@ -3,11 +3,14 @@
 -- Depends on 006_leg_cache_travelers.sql: `travelers` is part of the cache
 -- key (every cached price is a party total), so it is part of this key too.
 --
--- ⚠️  NOT APPLIED. Review before running. Steps 1 and 2 DELETE rows from
+-- APPLIED. Recorded in the migration ledger as
+--     20261001025856 leg_price_cache_unique, and the unique index
+--     leg_price_cache_leg_mode_key was confirmed present on 2026-10-26.
+--
+--     Do not re-run it casually: steps 1 and 2 DELETE rows from
 --     leg_price_cache. That table is a pure price cache — 2h TTL, service-role
 --     only (RLS policy leg_cache_service_only), rebuilt on the next search —
---     so no user data lives in it, but the delete is real and is deliberately
---     left for a human to run.
+--     so no user data lives in it, but the delete is real.
 --
 -- Why this exists: compareLeg writes leg_price_cache with `insert`, never
 -- `upsert`, because the table has no unique key to conflict on (001 only

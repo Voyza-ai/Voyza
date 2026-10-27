@@ -1,4 +1,13 @@
--- 007: allow_clones defaults to false — cloning is opt-in
+-- 009: allow_clones defaults to false — cloning is opt-in
+-- (The "007" this file used to call itself was a typo; it is 009. The
+--  backfill note at the bottom still says "applying 007" — same typo, same
+--  file.)
+--
+-- APPLIED. Recorded in the migration ledger as 20260913023946
+-- trips_allow_clones_default_false. Confirmed on 2026-10-26:
+-- trips.allow_clones has default false. The opt-in backfill at the bottom of
+-- this file was NOT run, as intended — 75 of the 87 live trips still have
+-- allow_clones = true.
 --
 -- `trips.allow_clones` was `boolean not null default true`
 -- (../SCHEMA_SNAPSHOT.sql), so every trip ever created was cloneable by any

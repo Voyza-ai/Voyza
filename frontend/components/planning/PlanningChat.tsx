@@ -7,14 +7,20 @@ import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { interpretPlan, optimizeTrip, searchHotels, searchActivities, searchRestaurants, suggestDestinations, OptimizeResult, ActivitySuggestion, RestaurantSuggestion } from '@/lib/api';
-import { Trip, City, Transport, ScheduledEvent, Restaurant, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
+import { Trip, City, Transport, Restaurant, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput } from '@/lib/parseDate';
-import { parseLocal, toIso } from '@/lib/dateHelpers';
-import { buildDayTransportContext } from '@/lib/dayScheduleDefaults';
+import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { vibesFromAnswer } from '@/lib/vibeMap';
+// `originAirportsForCity` is a VALUE import, so the 60 KB hot set lands in
+// this chunk. That is deliberate and it is what a hot set is for: the planner
+// is exactly the screen that has to answer an origin while someone types, and
+// a round trip per keystroke would be slower than the table this replaces.
+// The async `resolveLocation` still arrives through the `await import()` at
+// each call site below, so the long-tail path stays lazy.
+import { originAirportsForCity, type LocationAnswer } from '@/lib/locationResolver';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
@@ -22,6 +28,53 @@ import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
 import NightsPicker from './NightsPicker';
+
+/**
+ * The three `LocationAnswer` branches collapsed to the `string[]` that
+ * `getOriginAirports` used to return, so `originAirports` keeps exactly the
+ * shape and the meaning it had:
+ *
+ *   resolved  -> its airports
+ *   ambiguous -> the best reading's airports, which is all the old table
+ *                could ever express (it had no way to ask)
+ *   unknown   -> empty, which is what the table returned on a miss and what
+ *                the backend already treats as "look the city up yourself"
+ *
+ * Phase 4 turns the middle branch into a question instead; until that UI is
+ * designed and approved, discarding it is the no-behaviour-change option.
+ */
+function originAirportsFromAnswer(answer: LocationAnswer): string[] {
+  if (answer.status === 'resolved') return answer.airports.map((a) => a.iata);
+  if (answer.status === 'ambiguous') {
+    return answer.candidates[0]?.airports.map((a) => a.iata) ?? [];
+  }
+  return [];
+}
+
+/**
+ * The hand-written table leads; the resolver's answer is the fallback.
+ *
+ * Two reasons, and driving this very step is what found both.
+ *
+ * `Newark, NJ` came back EMPTY. The table answers it offline — it is one of
+ * its own documented cases — while the resolver needs a round trip for a
+ * comma-qualified name, because the hot set carries no `newark nj` key. Any
+ * failure of that request turned a common input shape into no airports at all.
+ *
+ * And `Washington` came back SEA where the table says IAD. The frontend's
+ * answer WINS: `optimizer.ts` takes `originAirports` from the request body
+ * verbatim when it is non-empty, so serving the resolver here bypasses
+ * `LOCATION_RESOLVER_MODE` and the shadow log that is meant to justify the
+ * change.
+ *
+ * The `answer` is still computed and still passed through, because its
+ * candidates are what the phase-4 question will be built from. This only
+ * decides which airports get used meanwhile.
+ */
+function originAirportsForOrigin(query: string, answer: LocationAnswer): string[] {
+  const fromTable = originAirportsForCity(query);
+  return fromTable.length > 0 ? fromTable : originAirportsFromAnswer(answer);
+}
 
 type StepType = 'intent' | 'text' | 'vibes' | 'dates' | 'travelers' | 'budget' | 'notes' | 'origin' | 'roundtrip' | 'nights';
 
@@ -101,7 +154,6 @@ export default function PlanningChat() {
   const [textInput, setTextInput] = useState('');
   const [isComplete, setIsComplete] = useState(false);
   const [showIntent, setShowIntent] = useState(false);
-  const [chatMode, setChatMode] = useState(false); // open chat mode
   const [vibe, setVibe] = useState<string | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editingMsgValue, setEditingMsgValue] = useState('');
@@ -228,7 +280,7 @@ export default function PlanningChat() {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }, 80);
     return () => window.clearTimeout(id);
-  }, [messages, isComplete, showIntent, currentStepIndex, intent, chatMode]);
+  }, [messages, isComplete, showIntent, currentStepIndex, intent]);
 
   // Auto-resize the chat textarea as the user types. Grows from 1 line up to
   // MAX_INPUT_HEIGHT (~4 lines), then scrolls internally. Runs whenever
@@ -481,9 +533,15 @@ export default function PlanningChat() {
           content: `Looks like your closest major airport is in ${city.city} — I'll use that as your starting point.`,
         },
       ]);
-      const { getOriginAirports } = await import('@/lib/originAirports');
+      const { resolveLocation } = await import('@/lib/locationResolver');
+      const answer = await resolveLocation(city.city, {
+        tripDestinationNames: answers.destinations,
+      });
+      // TODO(location-phase-4): on `ambiguous` ask which reading they mean —
+      // `answer.candidates` carries the `label` to show and the `placeId` to
+      // persist. Taking the best reading until that UI is approved.
       setAnswer('origin', city.city);
-      setAnswer('originAirports', getOriginAirports(city.city));
+      setAnswer('originAirports', originAirportsForOrigin(city.city, answer));
       advanceToNextStep(currentStepIndex);
     } finally {
       setLocating(false);
@@ -609,8 +667,14 @@ export default function PlanningChat() {
       // without another round-trip. When the city isn't in the lookup,
       // send empty airports — backend falls back to single-IATA via
       // getIataCode().
-      const { getOriginAirports } = await import('@/lib/originAirports');
-      const airports = getOriginAirports(value);
+      const { resolveLocation } = await import('@/lib/locationResolver');
+      const answer = await resolveLocation(value, {
+        tripDestinationNames: answers.destinations,
+      });
+      // TODO(location-phase-4): on `ambiguous` ask which reading they mean —
+      // `answer.candidates` carries the `label` to show and the `placeId` to
+      // persist. Taking the best reading until that UI is approved.
+      const airports = originAirportsForOrigin(value, answer);
       setAnswer('origin', value);
       setAnswer('originAirports', airports);
     }
@@ -621,128 +685,6 @@ export default function PlanningChat() {
   // Open chat submit — user types everything at once. Calls AI interpret
   // immediately, then asks only for whatever's missing (budget, vibe, etc.)
   // before going to Find my trip.
-  const handleChatSubmit = async () => {
-    if (!textInput.trim()) return;
-    // Defensive guard: if isComplete is already true, the user has finished
-    // the guided flow and the input bar should be hidden. We saw a case in
-    // production where this handler fired anyway and re-emitted "Got it..."
-    // + the first remaining step (looked like a duplicate "Where are you
-    // starting from?" after "Perfect — I've got everything I need."). The
-    // warn lets us catch the trigger source next time it happens.
-    if (isComplete) {
-      console.warn('[PlanningChat] handleChatSubmit called after completion', {
-        intent, chatMode, currentStepIndex, stepsLen: steps.length,
-      });
-      return;
-    }
-    const userMessage = textInput.trim();
-
-    setMessages((prev) => [
-      ...prev,
-      { id: nextId(), role: 'user', content: userMessage },
-    ]);
-    setAnswer('rawInput', userMessage);
-    setTextInput('');
-
-    try {
-      const parsed = await interpretPlan({ rawInput: userMessage });
-      warnIfMock(parsed);
-
-      // Store whatever the AI extracted
-      if (parsed.vibe && !answers.vibe) setAnswer('vibe', parsed.vibe);
-      if (parsed.travelers && !answers.travelers) setAnswer('travelers', parsed.travelers);
-      if (parsed.budget && !answers.budget) setAnswer('budget', parsed.budget);
-      if (typeof parsed.budgetPerPerson === 'boolean' && answers.budgetPerPerson === undefined) {
-        setAnswer('budgetPerPerson', parsed.budgetPerPerson);
-      }
-      // Home anchor: AI can extract origin ("starting from NYC") and
-      // returnToHome ("round-trip") from the same one-shot sentence, so
-      // users don't need to go through separate guided steps when they
-      // typed everything at once. We also pre-fill the airports from the
-      // lookup table so the optimizer gets multi-airport search
-      // automatically for NYC/London/Tokyo/etc.
-      if (parsed.origin && !answers.origin) {
-        setAnswer('origin', parsed.origin);
-        const { getOriginAirports } = await import('@/lib/originAirports');
-        setAnswer('originAirports', getOriginAirports(parsed.origin));
-      }
-      if (typeof parsed.returnToHome === 'boolean' && answers.returnToHome === undefined) {
-        setAnswer('returnToHome', parsed.returnToHome);
-      }
-      // Dates: AI's absolute value first, then fall back to parsing the raw
-      // chat text for relative phrases ("next week") so we don't re-ask.
-      if (!answers.dateRange) {
-        if (parsed.dates?.start) {
-          setAnswer('dateRange', { start: parsed.dates.start, end: parsed.dates.end ?? parsed.dates.start });
-        } else if (/\b(tomorrow|today|next|month|week|year|summer|winter|spring|fall|autumn|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2})\b/i.test(userMessage)) {
-          const fallback = parseDateInput(userMessage);
-          setAnswer('dateRange', { start: fallback, end: fallback });
-        }
-      }
-
-      // Country detected → show picker inline
-      if (parsed.needsCitySelection && parsed.countries?.length > 0) {
-        const directCities: string[] = parsed.destinations?.filter(
-          (d: string) => !parsed.countries.some((c: any) => c.cities.includes(d)),
-        ) ?? [];
-        const defaultSelections: Record<string, string[]> = {};
-        for (const c of parsed.countries) {
-          defaultSelections[c.country] = [c.cities[0]];
-        }
-        if (directCities.length > 0) defaultSelections['_direct'] = directCities;
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: nextId(),
-            role: 'assistant',
-            content: `I see you want to visit ${parsed.countries.map((c: any) => c.country).join(' and ')}! Which cities?`,
-          },
-        ]);
-
-        setCitySelectionData({
-          countries: parsed.countries,
-          selectedCities: defaultSelections,
-          parsedData: parsed,
-        });
-        return;
-      }
-
-      if (parsed.destinations?.length > 0) {
-        setAnswer('destinations', parsed.destinations);
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        { id: nextId(), role: 'assistant', content: "Got it — I have a good picture of what you're after." },
-      ]);
-
-      // Ask follow-up questions as chat bubbles for anything the user
-      // didn't mention (dates, travelers, budget, vibe).
-      const remaining = buildRemainingSteps(parsed);
-      if (remaining.length === 0) {
-        setIsComplete(true);
-        setMessages((prev) => [
-          ...prev,
-          { id: nextId(), role: 'assistant', content: 'Ready when you are.' },
-        ]);
-      } else {
-        setChatMode(false);
-        setSteps(remaining);
-        setCurrentStepIndex(0);
-        setMessages((prev) => [
-          ...prev,
-          { id: nextId(), role: 'assistant', content: remaining[0].question, stepId: remaining[0].id },
-        ]);
-      }
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        { id: nextId(), role: 'assistant', content: "I had trouble understanding that. Could you try again with a city or country?" },
-      ]);
-    }
-  };
-
   const handleVibeSelect = (selectedVibe: string) => {
     setVibe(selectedVibe);
     setAnswer('vibe', selectedVibe);
@@ -1099,6 +1041,12 @@ export default function PlanningChat() {
       dateShiftSuggestion: result.dateShiftSuggestion,
       origin,
       returnToHome: answers.returnToHome ?? true,
+      // Carried through so the results page can say which reading of an
+      // ambiguous origin the prices are for. The backend sets this only when
+      // the name really was ambiguous, so it is absent on almost every trip.
+      ...(result.originClarification
+        ? { originClarification: result.originClarification }
+        : {}),
     };
   };
 
@@ -1106,228 +1054,9 @@ export default function PlanningChat() {
   // to the trip after buildTripFromOptimize returns. Kept separate from the
   // builder to avoid threading more arguments through the flowchart mapping.
 
-  /**
-   * Spread AI-picked activities AND restaurants across the days of a city
-   * stay, assigning realistic time blocks. Each day gets:
-   *   - Breakfast (8-9 AM) if a breakfast/any restaurant is available
-   *   - Morning activity (10 AM – 12 PM)
-   *   - Lunch (12:30-1:30 PM) if a lunch/any restaurant is available
-   *   - Afternoon activity (2-5 PM)
-   *   - Dinner (7:30-9:30 PM) if a dinner/any restaurant is available
-   *   - OR evening activity if no dinner slot picked
-   *
-   * Activities and restaurants are consumed from queues as days advance,
-   * so the full list is spread across the whole stay (no duplicates, no
-   * day ends up empty until supply runs out).
-   */
-  const buildScheduleFromActivities = (
-    activities: ActivitySuggestion[],
-    restaurants: RestaurantSuggestion[],
-    city: City,
-    cityIndex: number,
-    trip: Trip,
-  ): Record<string, ScheduledEvent[]> => {
-    const schedule: Record<string, ScheduledEvent[]> = {};
-    // parseLocal avoids the UTC-vs-local-midnight off-by-one that bare
-    // `new Date('YYYY-MM-DD')` produces in west-of-UTC timezones.
-    const arrival = parseLocal(city.dates.arrival);
-    const departure = parseLocal(city.dates.departure);
-    const stayDays = Math.max(
-      1,
-      Math.ceil((departure.getTime() - arrival.getTime()) / (1000 * 60 * 60 * 24)),
-    );
-    // The fly-home day (cities[last].departure) doesn't belong to any
-    // city's stay, but the home-return transport blocks need to live
-    // somewhere — extend the loop by one day for the last city so its
-    // schedule covers that final morning.
-    const isLastCity = cityIndex === trip.cities.length - 1;
-    const dayCount = isLastCity ? stayDays + 1 : stayDays;
-
-    // Activity buckets by time-of-day
-    const actBuckets = {
-      morning: [...activities.filter((s) => s.timeOfDay === 'morning')],
-      afternoon: [...activities.filter((s) => s.timeOfDay === 'afternoon')],
-      evening: [...activities.filter((s) => s.timeOfDay === 'evening')],
-    };
-
-    // Restaurant buckets by meal
-    const restBuckets = {
-      breakfast: [...restaurants.filter((r) => r.mealType === 'breakfast')],
-      lunch: [...restaurants.filter((r) => r.mealType === 'lunch')],
-      dinner: [...restaurants.filter((r) => r.mealType === 'dinner')],
-      any: [...restaurants.filter((r) => r.mealType === 'any')],
-    };
-
-    let idCounter = 0;
-    const pad = (n: number) => String(n).padStart(2, '0');
-
-    const takeRestaurant = (
-      preferred: keyof typeof restBuckets,
-    ): RestaurantSuggestion | undefined => {
-      if (restBuckets[preferred].length > 0) return restBuckets[preferred].shift();
-      if (restBuckets.any.length > 0) return restBuckets.any.shift();
-      return undefined;
-    };
-
-    const minToTime = (total: number): string => {
-      const h = Math.floor(total / 60);
-      const m = total % 60;
-      return `${pad(h)}:${pad(m)}`;
-    };
-
-    /**
-     * Place an event within its preferred slot without overlapping the
-     * previous event. Returns the event (and the new cursor) or null if
-     * there's no room left in the slot.
-     *
-     * - `cursor`        current end-of-day position in minutes since midnight
-     * - `slotStartMin`  earliest minute this event should start
-     * - `slotEndMin`    latest minute this event may end
-     * - `desiredDurMin` AI-provided duration; clamped to fit the slot
-     */
-    const tryPlace = (
-      cursor: number,
-      slotStartMin: number,
-      slotEndMin: number,
-      desiredDurMin: number,
-      make: (startMin: number, endMin: number) => ScheduledEvent,
-    ): { event: ScheduledEvent; cursor: number } | null => {
-      // Leave a 15-minute buffer between events so the day doesn't feel packed.
-      const BUFFER = 15;
-      const start = Math.max(slotStartMin, cursor === 0 ? slotStartMin : cursor + BUFFER);
-      if (start >= slotEndMin) return null;
-      // Need at least 30 minutes of room to justify scheduling anything.
-      if (slotEndMin - start < 30) return null;
-      const end = Math.min(slotEndMin, start + Math.max(30, desiredDurMin));
-      return { event: make(start, end), cursor: end };
-    };
-
-    const makeActivityEvent =
-      (s: ActivitySuggestion) =>
-      (startMin: number, endMin: number): ScheduledEvent => ({
-        id: `sched-${++idCounter}`,
-        title: s.name,
-        startTime: minToTime(startMin),
-        endTime: minToTime(endMin),
-        category: s.category === 'food' || s.category === 'nightlife' ? 'restaurant' : 'activity',
-        notes: s.reason,
-      });
-
-    const makeMealEvent =
-      (r: RestaurantSuggestion) =>
-      (startMin: number, endMin: number): ScheduledEvent => ({
-        id: `sched-${++idCounter}`,
-        title: `${r.name} (${r.cuisine})`,
-        startTime: minToTime(startMin),
-        endTime: minToTime(endMin),
-        category: 'restaurant',
-        notes: `${r.priceRange} · ${r.reason}`,
-      });
-
-    // Time slots in minutes-since-midnight. Activities get capped to fit,
-    // which means a 4-hour "Great Wall hike" in the morning slot renders as
-    // a 2-hour block (10:00 → 12:00) — the full duration stays in the event
-    // notes for the user to see.
-    const SLOT = {
-      breakfast: [8 * 60, 9 * 60 + 30] as [number, number],          // 08:00–09:30
-      morning:   [10 * 60, 12 * 60] as [number, number],             // 10:00–12:00
-      lunch:     [12 * 60 + 30, 14 * 60] as [number, number],        // 12:30–14:00
-      afternoon: [14 * 60 + 15, 18 * 60 + 30] as [number, number],   // 14:15–18:30
-      dinner:    [19 * 60, 21 * 60 + 30] as [number, number],        // 19:00–21:30
-      lateEve:   [22 * 60, 23 * 60 + 30] as [number, number],        // 22:00–23:30 (post-dinner activity)
-    };
-
-    for (let dayIdx = 0; dayIdx < dayCount; dayIdx++) {
-      const dayDate = new Date(arrival);
-      dayDate.setDate(dayDate.getDate() + dayIdx);
-      // Local-time ISO (toIso) so the home-return day lands on the
-      // actual calendar date the user departs, regardless of timezone.
-      const dateKey = toIso(dayDate);
-
-      // Resolve transport blocks + activity window for this day before
-      // placing anything else. Transport is the hard constraint — flights
-      // can't move — so we render it first and clamp the activity slots
-      // to the window the helper returns.
-      const transportCtx = buildDayTransportContext(city, dateKey, trip, cityIndex);
-      const events: ScheduledEvent[] = [...transportCtx.events];
-      let cursor = 0;
-
-      // Clamp a slot definition to the day's activity window so e.g. a
-      // late arrival pushes the breakfast slot into oblivion (clamped
-      // start > clamped end → tryPlace returns null cleanly).
-      const clampSlot = (s: [number, number]): [number, number] => [
-        Math.max(s[0], transportCtx.windowStart),
-        Math.min(s[1], transportCtx.windowEnd),
-      ];
-
-      const push = (result: { event: ScheduledEvent; cursor: number } | null) => {
-        if (result) {
-          events.push(result.event);
-          cursor = result.cursor;
-        }
-      };
-
-      // Breakfast — 45 min
-      const bk = takeRestaurant('breakfast');
-      if (bk) {
-        const [s, e] = clampSlot(SLOT.breakfast);
-        push(tryPlace(cursor, s, e, 45, makeMealEvent(bk)));
-      }
-
-      // Morning activity — AI duration capped to 2h by the slot
-      const morningAct = actBuckets.morning.shift();
-      if (morningAct) {
-        const dur = Math.round((morningAct.durationHours ?? 2) * 60);
-        const [s, e] = clampSlot(SLOT.morning);
-        push(tryPlace(cursor, s, e, dur, makeActivityEvent(morningAct)));
-      }
-
-      // Lunch — 90 min, won't start before cursor (so a morning activity
-      // that ran long naturally bumps lunch later or skips it entirely)
-      const ln = takeRestaurant('lunch');
-      if (ln) {
-        const [s, e] = clampSlot(SLOT.lunch);
-        push(tryPlace(cursor, s, e, 90, makeMealEvent(ln)));
-      }
-
-      // Afternoon activity
-      const afternoonAct = actBuckets.afternoon.shift();
-      if (afternoonAct) {
-        const dur = Math.round((afternoonAct.durationHours ?? 3) * 60);
-        const [s, e] = clampSlot(SLOT.afternoon);
-        push(tryPlace(cursor, s, e, dur, makeActivityEvent(afternoonAct)));
-      }
-
-      // Dinner — 120 min
-      const dn = takeRestaurant('dinner');
-      if (dn) {
-        const [s, e] = clampSlot(SLOT.dinner);
-        push(tryPlace(cursor, s, e, 120, makeMealEvent(dn)));
-      }
-
-      // Evening activity. If we have a dinner, put the activity in the
-      // post-dinner slot. If no dinner, use the dinner slot for the activity.
-      const eveningAct = actBuckets.evening.shift();
-      if (eveningAct) {
-        const dur = Math.round((eveningAct.durationHours ?? 2) * 60);
-        const slot = dn ? SLOT.lateEve : SLOT.dinner;
-        const [s, e] = clampSlot(slot);
-        push(tryPlace(cursor, s, e, dur, makeActivityEvent(eveningAct)));
-      }
-
-      // Sort once at the end so transport blocks (which were prepended
-      // before activities) interleave correctly by start time.
-      events.sort((a, b) => {
-        const am = a.startTime.split(':').map(Number);
-        const bm = b.startTime.split(':').map(Number);
-        return (am[0] * 60 + am[1]) - (bm[0] * 60 + bm[1]);
-      });
-
-      if (events.length > 0) schedule[dateKey] = events;
-    }
-
-    return schedule;
-  };
+  // The day scheduler that used to live here (`buildScheduleFromActivities`)
+  // now lives in lib/dayScheduleDefaults as `buildCityScheduleFromSuggestions`.
+  // It never read component state, and as a closure it could not be tested.
 
   const [findTripLoading, setFindTripLoading] = useState(false);
   const [findTripStatus, setFindTripStatus] = useState('');
@@ -1547,7 +1276,6 @@ export default function PlanningChat() {
     // Switch into guided follow-up mode: use the existing step system so
     // questions render as chat bubbles and the matching picker widget (dates,
     // travelers, etc.) appears inline.
-    setChatMode(false);
     if (!intent) setIntent('chat');
     setSteps(remaining);
     setCurrentStepIndex(0);
@@ -1754,13 +1482,18 @@ export default function PlanningChat() {
         // return day. Without this, vibe-first single-city trips with no
         // activity suggestions had empty schedules and the flight events
         // disappeared from both the Schedule view and the modal.
-        trip.cities[idx].schedule = buildScheduleFromActivities(
+        const { schedule, unscheduled } = buildCityScheduleFromSuggestions(
           activities,
           restaurants,
           trip.cities[idx],
           idx,
           trip,
         );
+        trip.cities[idx].schedule = schedule;
+        // Whatever the stay could not hold at its real length. Kept on the
+        // city so the loss is in the data instead of being papered over by
+        // a shorter block; nothing renders it yet.
+        trip.cities[idx].unscheduled = unscheduled;
       });
 
       // Attach the user's (normalized) total-trip budget so the results
@@ -2022,7 +1755,6 @@ export default function PlanningChat() {
   // Placeholder + submit handler swap based on the current step so that the
   // user can always type a free-form answer for whatever question is showing.
   const barPlaceholder = (() => {
-    if (chatMode) return 'Tell me everything — where, when, who, budget...';
     if (!intent) return 'Or just tell me everything at once...';
     if (!currentStep) return 'Type a message...';
     switch (currentStep.type) {
@@ -2048,18 +1780,27 @@ export default function PlanningChat() {
     // stale event fires after completion.
     if (isComplete) return;
 
-    // Open chat mode — capture as a single big message
-    if (chatMode) {
-      handleChatSubmit();
-      return;
-    }
-
-    // Pre-intent — typing here switches into open chat mode
+    // Pre-intent — typing here opens the AI conversation, seeded with the
+    // sentence. It has to hand off through `chatSeedRef` (the same path the
+    // landing hero uses at :249): `setIntent('chat')` swaps this component's
+    // chat UI out for ConversationalPlanner, so handleChatSubmit's bubble
+    // landed in `messages` that is no longer rendered and the sentence was
+    // dropped without ever reaching /api/plan/converse.
+    //
+    // This replaced an "open chat mode" that set a `chatMode` flag and called
+    // a `handleChatSubmit` writing into `messages`. Both are gone: with the
+    // only `setChatMode(true)` removed the flag could never be true again, so
+    // the handler, the chat-mode placeholder and two always-true guards were
+    // unreachable and were deleted. If you are reinstating anything like it,
+    // the trap that made the flag unworkable is that `onSwitchToGuided` sets
+    // intent to 'place' and resets nothing else, so a mode flag left standing
+    // suppresses the guided step widgets and the skip button.
     if (!intent) {
       setShowIntent(false);
+      chatSeedRef.current = value;
+      setTextInput('');
+      setAnswer('planningMode', 'destination');
       setIntent('chat');
-      setChatMode(true);
-      handleChatSubmit();
       return;
     }
 
@@ -2393,7 +2134,7 @@ export default function PlanningChat() {
           {/* Interactive input area for guided steps — only render once the
               assistant question for this step has actually appeared in the
               chat, so the widget never shows up before its question. */}
-          {!isComplete && !chatMode && intent && currentStep &&
+          {!isComplete && intent && currentStep &&
             messages.some((m) => m.stepId === currentStep.id) && (
             <motion.div
               key={`input-${currentStepIndex}`}
@@ -2662,7 +2403,7 @@ export default function PlanningChat() {
       )}
 
       {/* Skip button for non-text skippable steps */}
-      {!isComplete && !chatMode && intent && currentStep && currentStep.skippable && currentStep.type !== 'text' && currentStep.type !== 'dates' && currentStep.type !== 'budget' && (
+      {!isComplete && intent && currentStep && currentStep.skippable && currentStep.type !== 'text' && currentStep.type !== 'dates' && currentStep.type !== 'budget' && (
         <motion.div
           className="relative z-10 flex justify-center pb-5"
           initial={{ opacity: 0 }}

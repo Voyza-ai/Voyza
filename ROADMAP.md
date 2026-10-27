@@ -1,9 +1,39 @@
-# Voyza Roadmap & Feature Checklist
+# BlueMurr Roadmap & Feature Checklist
 
 Living checklist of everything we want to build, organized by feature.
 Update as we go — tick boxes, move items between sections, add new ideas.
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open question
+
+---
+
+## 🚨 Must ship before the app is public
+
+Not dev blockers — none of these stop work today, and they were deliberately
+deferred. They are the things that must not reach real users unfinished.
+Check this section before any public release.
+
+- [ ] **GeoNames attribution needs a user-reachable surface.** CC BY 4.0
+  obliges credit, a licence link and an indication of changes. The wording is
+  settled and machine-held: it lives once in `backend/src/data/attribution.ts`,
+  `locationAttribution.test.ts` compares it to `ATTRIBUTION.md` word for word,
+  every `POST /api/locations/resolve` response carries it, and the browser hot
+  set re-exports it as `LOCATION_DATA_ATTRIBUTION`. What is missing is a page
+  that RENDERS it. Importing the constant is not compliance.
+  - The obligation is already live. The frontend answers origins from the
+    resolver, so GeoNames-derived airports are on screen today.
+  - Placement is unresolved and is the owner's call. Measured constraint:
+    `/plan` and `/results` are NOT auth-protected (only `/history` and
+    `/explore` are), while the Navbar dropdown that would naturally host a
+    link only renders when signed in. So a dropdown-only link leaves exactly
+    the anonymous visitors who can see the data with no route to the credit.
+    There is no footer and no about/settings route anywhere in `frontend/app`.
+  - Options as costed: a `/credits` route plus a small Navbar link visible in
+    both auth states; the same route linked only from the dropdown; or the
+    notice inline under the airport lists, which `ATTRIBUTION.md` argues
+    against in favour of a link.
+  - Full detail, including the other two sources and the licences
+    deliberately avoided, is in `ATTRIBUTION.md`.
 
 ---
 
@@ -45,32 +75,176 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[?]` open quest
 
 ---
 
-## 🚧 In-flight (this branch: `feat/voyza-ai-chat`)
+## 🚧 In-flight
 
-All major work on this branch is committed and pushed. See the
-"Previously shipped" section below for the full breakdown. Branch
-currently has 4 commits, not yet merged to `claude_code_backend`:
+### Location resolution rebuild (`feat/location-resolver`, not merged)
 
-```
-d4007d9  polish: fixed-size transport pills + home card refinements
-984a553  feat: home anchor — origin, multi-airport, full permutations, round-trip
-1704365  feat: AI chat refreshes flowchart transport card (leg_refresh)
-0fbbd20  feat: Voyza AI chat with trip-aware prompts + constraint proposals
-```
+Replaces five hand-maintained lookup tables with one generated artifact and a
+real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
 
-Remaining on the branch:
-- [ ] Top-4 options per between-city leg (swap `compareLeg()` →
-  `searchLegOptions(limit: 4)` in `scoreRoute`). Home legs already
-  use searchLegOptions; this extends it to inter-city legs so every
-  Connector card has 4 alternatives out of the box.
-- [ ] Backfill UI for pre-home-anchor trips without `origin_city`
-  (old trips render without a home card — graceful but unsettable).
+- [x] **Phase 0–3 done.** Pipeline, 36,009-place artifact, resolver, shadow
+  mode on `optimizer.ts`, `POST /api/locations/resolve`, and a 60 KB browser
+  hot set generated into both packages so nothing is hand-maintained twice.
+  Costs 88 MiB of backend heap, built lazily once per process — over the
+  50 MB originally budgeted; measured and recorded in the doc.
+- [ ] **Phase 4: the clarification question. NEEDS DESIGN APPROVAL.** All the
+  data is plumbed through to the frontend and nothing renders it. Four
+  decisions are the owner's — block or flag, how `not-found` differs from
+  `ambiguous` on screen, whether to show distance, and whether to persist
+  `origin_place_id` (a migration against the live project). Spelled out in
+  the "Phase 4" section of the architecture doc.
+- [x] **Two phase-5 blockers cleared.** Comma-qualified inputs (`Newark, NJ`)
+  are answered offline now, and the browser settles an ambiguous name from the
+  traveller's own coordinates without sending them anywhere — which is what
+  stopped "use my location" in Washington DC from saving Seattle's airports.
+- [x] **Phase 5 done — both origin tables deleted.** 691 lines of
+  hand-maintained lookup across two packages, their parity guard, their own
+  test suites, `shadow.ts` and `LOCATION_RESOLVER_MODE` are all gone. The
+  env-var rollback went with them, which was the honest cost: `shadow` only
+  meant something while there was a table to serve instead. Reverting is one
+  commit now.
+  - The table's KNOWLEDGE survives as `retiredOriginAirports.json` — all 146
+    answers, frozen, marked do-not-regenerate. It is the only independent
+    check the resolver has, and it both drives the regression gate and seeds
+    the browser hot set.
+  - Taking the fallback away exposed four real bugs that the table had been
+    hiding: the hot-set seeder was looking up comma forms as index keys (so
+    `Portland, Oregon` seeded nothing), and the space-separated qualifier pass
+    narrowed provenance too early, peeled only one qualifier, then peeled too
+    far. All fixed.
+  - NOT deleted, with reasons in the architecture doc: `nearestAirport.ts`
+    (a hot-set reverse lookup is measurably worse), `airportNames.ts` (nothing
+    to replace it, no twin), `cityAirports.ts` (destination-side; 156 of 169
+    entries reproduced, 13 need individual decisions).
+- [x] **California and Texas pins widened to cover their real metros.** Only
+  three airports survive the `MAX_HOME_AIRPORTS` cap, so a single pin spent
+  all three inside one metro — California priced a San Francisco traveller
+  from Los Angeles, and Texas pushed Houston, the state's largest metro,
+  outside the cap. Now `LAX, SFO, SAN` and `DFW, IAH, AUS`.
+- [ ] **GeoNames attribution needs a credits surface — the rest is done.**
+  **Deferred by the owner to pre-release; tracked in "Must ship before the app
+  is public" at the top of this file.**
+  CC BY 4.0 requires credit, a licence link and an indication of changes, and
+  the condition is now live: the frontend falls through to the resolver
+  wherever the old table is silent, so GeoNames-derived answers are on screen.
+  The endpoint returns the notice, the hot set carries it, and a test holds
+  the wording to `ATTRIBUTION.md` word for word. What is missing is a page to
+  render it on, which is a visible change and so yours to approve.
+- [x] **Pass over the pinned set done — it is clean, and now guarded.** All 93
+  airports the curated layer pins are present in the committed artifact, so
+  every one is listed upstream with scheduled service and a usable type. No
+  pin is closed, none has lost its service flag, and no pinned code is shared
+  by two airport rows (the DIA/DOH shape). `curatedPinsInService.test.ts`
+  holds this on every change, rather than only when someone regenerates.
+  - The sweep also settled what the check can mean. Measured over the 9,054
+    IATA-coded rows: 4,921 fail `scheduled_service`, 125 more are a heliport
+    or seaplane base. NO `closed` row carries an IATA code at all — upstream
+    retires the code when it marks a field closed. So the build's `closed`
+    type filter never fires, and the service flag is the whole defence.
+- [ ] **The DIA class is still undetectable offline, by construction.** An
+  airport closed in the world that upstream still lists in service keeps its
+  code precisely because upstream has not marked it closed. Compared field by
+  field, DIA and Hamad are indistinguishable: same `large_airport`, same
+  `scheduled_service=yes`, same municipality — only a missing `home_link`,
+  which thousands of live airports also lack. DIA is in the artifact and sits
+  4.5 km from the centre against Hamad's 7.9, so distance alone leads with the
+  closed field; the curated pin is the only thing holding Doha on DOH, and a
+  test now holds the pin. Finding the NEXT one needs a source we do not have.
+  - A same-municipality proximity scan (two scheduled airports under 15 km
+    apart) surfaces the shape: 11 pairs worldwide, DIA/DOH among them. The
+    other ten are legitimate — Boeing Field vs SEA, Wilson vs Nairobi, Santos
+    Dumont vs Galeão — so it is a review prompt, not a rule. Every one of the
+    eleven already resolves to the correct lead airport.
+  - OurAirports also types Burbank the same as LAX, which is why the rank term
+    cannot pick a metro's main airport on its own.
+- [x] **Lead airport can be much farther than a usable nearer one — answered,
+  and it was far narrower than 585.** The number was alarming and mostly
+  harmless. Of the 585 cities whose lead is 60 km farther and 3× the distance
+  of a later entry, 561 still carry the nearer airport INSIDE the three-code
+  fan-out, so `buildHomeLeg` prices it anyway and takes the cheapest — the
+  wrong lead costs permutation ranking, not the quoted fare. Only 24 lost it
+  entirely.
+  - The ordering rule itself is right and stays. Type-then-distance is
+    deliberate and measured, and leading Pietermaritzburg with Durban at 70 km
+    over a 4 km airstrip is the correct answer.
+  - What was actually wrong is narrower: an airport on the traveller's
+    doorstep being cut from the fan-out, so it is never priced at all.
+    Worcester, Massachusetts led with Boston at 66 km while Worcester Regional
+    sat 6 km out and fourth; Stockton led with Oakland at 86 km over its own
+    field at 9; Heidelberg and Ludwigshafen led with Frankfurt while Mannheim
+    at 5–15 km was cut. In all 61 qualifying cases both airports have
+    `servesPlace: true`, so the existing guard could not separate them.
+  - Fixed by `promoteDoorstepAirport` in the pipeline: a city's own airport
+    (≤25 km, serving) is lifted into the last fan-out slot when the lead is
+    ≥60 km away. The lead is unchanged, so ranking still uses the better
+    airport; the doorstep one just gets a price check. 63 cities reordered of
+    36,009 places.
+  - The lead-distance threshold is what makes it safe, not incidental. LCY is
+    13 km from central London against Heathrow's 24, so a naive "nearest wins"
+    rule would promote it — and `curated.ts` exists because measurement put
+    LCY ahead of LHR and a human decided otherwise. At 24 km the lead never
+    qualifies, so London and its boroughs are untouched. A test holds that.
+  - Gated to cities. Applied to regions it reordered 13 of them, Saarland and
+    Jiangsu among them, on a distance from a centroid nobody stands at.
+- [ ] **Still open from the same sweep: the ordering question at the extreme.**
+  The doorstep fix guarantees a nearby airport is PRICED; it does not change
+  which airport LEADS. Weifang still leads with Qingdao at 96 km over its own
+  WEF at 7 km, and Diyarbakır with GNY at 131 km over DIY at 7 km — both now
+  price the local field, but rank permutations from the distant one. Whether
+  the type ordinal should still win at 90+ km is a judgement nobody has made.
+- [ ] **`San Juan` resolves to Argentina, not Puerto Rico.** Also found during
+  the sweep. Eight places share the name; prominence picks San Juan, AR
+  (pop 518,624) over San Juan, PR (418,140) on raw city population, though PR
+  is far the larger travel origin once its metro is counted. Compounding it,
+  the AR entry leads with Mendoza's MDZ at 145 km rather than its own UAQ at
+  9.7 km, so a traveller meaning Puerto Rico is priced from the wrong
+  hemisphere. Needs a curated decision, like the Portland and Melbourne cases.
+
+Everything else is merged. `feat/voyza-ai-chat` and `feat/map-redesign` are
+both merged all the way to `voyza_main`; the branch flow is now
+**feature branch → `dev` → `voyza_main`**, not `claude_code_backend`.
+See "Previously shipped" below for what landed.
+
+Of the two items this section used to list as remaining:
+
+- [x] **Top-4 options per between-city leg.** Done, but not the way this
+  entry proposed. Swapping `compareLeg()` for `searchLegOptions()` inside
+  `scoreRoute` would mean M legs × N permutations of option lookups, which
+  explodes API cost. Instead `optimizer.ts` has a Step 7.5 that re-fetches
+  the full options list for the WINNING route only — M extra calls, bounded,
+  reusing Duffel's per-request offer caching from the scoring pass that just
+  ran. Connector cards get their 4 alternatives either way.
+- [ ] **`chatMode` is permanently false, so ~127 lines are dead.** Fixing the
+  pre-intent sentence drop removed the only `setChatMode(true)` in the
+  codebase — grep finds just two `setChatMode(false)` calls now. The flag had
+  to go: `onSwitchToGuided` sets intent to 'place' without resetting it, so
+  leaving it true suppressed the step widgets and the skip button and kept the
+  bar routed at `handleChatSubmit`, making the "continue with guided questions
+  instead" fallback come back question-only.
+  - Now unreachable in `PlanningChat.tsx`: `handleChatSubmit` itself
+    (~127 lines, including its `warnIfMock` call), the chat-mode placeholder
+    (:1888), the `if (chatMode)` branch of the bar submit (:1915), and both
+    `!chatMode` conditions (:2267, :2536) which are now always true.
+  - Deliberately not deleted in the bug fix, to keep that diff reviewable.
+    Worth doing as its own mechanical change before someone reads
+    `handleChatSubmit` and believes it runs.
+  - One real behaviour goes with it whenever it is removed: `handleChatSubmit`
+    called `/api/plan/interpret`, which has a keyword mock, where
+    `/api/plan/converse` returns 503 `assistant_unavailable`. So on a dev box
+    with no `ANTHROPIC_API_KEY` the opening sentence no longer parses offline.
+    Not a production concern — 503-with-Retry is the documented design, and
+    every later message in the conversation already behaved this way.
+- [ ] **Backfill UI for pre-home-anchor trips without `origin_city`.** Still
+  open. `origin` is only settable during planning (`PlanningChat`,
+  `ConversationalPlanner`); there is no way to set it on a trip that is
+  already saved, so old trips render without a home card and cannot be
+  given one.
 
 ---
 
 ## 📦 Previously shipped (ordered recent → older)
 
-### Map tab rebuild (on `feat/map-redesign`, not yet merged)
+### Map tab rebuild (merged to `voyza_main`)
 
 Five phases, all landed. The organising idea is a **drill-down**: the map
 shows the level of detail the camera is at, and the panel always agrees with
@@ -155,9 +329,9 @@ Known remaining:
       style request before anything else.
 
 
-### Voyza AI chat + home anchor (on `feat/voyza-ai-chat`, not yet merged)
+### BlueMurr AI chat + home anchor (on `feat/voyza-ai-chat`, not yet merged)
 
-Voyza AI chat v1 — constraint proposals (0fbbd20)
+BlueMurr AI chat v1 — constraint proposals (0fbbd20)
 - [x] Schema: `trips.constraints` jsonb
 - [x] `POST /api/plan/chat` with Claude tool-use (answer_only, pin_city_dates, set_min_days, set_transport_window)
 - [x] `POST /api/plan/chat-suggestions` — trip-specific dynamic prompts
@@ -223,6 +397,60 @@ Home anchor / origin model (984a553 + d4007d9)
 
 ## 📋 Backlog
 
+### Feature: Surface a price we cannot vouch for (frontend — needs design)
+
+Two hotel-price states exist in the data today and **neither is visible to the
+traveller**. The backend decides both; nothing renders either.
+
+**State 1 — distrusted (`priceSuspect`, already plumbed).** The price is out of
+line with its peers, so we demote it: `trustedFirst` in
+`backend/src/services/hotels.ts` puts it last, so it can never be the
+auto-selected hotel or reach the trip total. The flag reaches the frontend via
+`frontend/lib/hotelShape.ts` and survives the save/load round trip. But it
+appears nowhere under `frontend/components/` or `frontend/app/`, so a traveller
+who picks it from the list gets a price we do not believe, unmarked.
+`cycleHotel` steps over these, so only a deliberate pick reaches one.
+
+**State 2 — unverifiable (no flag yet).** Every price check here is a
+*comparison*: a row is suspect because it is out of line with the others in its
+search. So a search with almost nothing in it cannot be checked at all — one
+row cannot be an outlier, because the median of a one-row set is that row. No
+threshold reaches it, at any value. Measured: a Val d'Isère search returned
+exactly one hotel at **$3,377.84/night** and it went into the trip total with
+nothing having looked at it.
+
+`pickByRating` reduced how often this happens by relaxing our own 7.0
+review-score bar when a search is thin, and `searchHotels` logs
+`'Hotel search too thin to price-check — hotels[0] is unverified'` when it
+still is. But it cannot be eliminated: `Grand Turk` returns exactly **1 row**
+because the provider has nothing more to give, and `Grace Bay` returns none at
+all. Frequency before widening: 1 search in 45 returned fewer than 4 rows.
+
+**Work:**
+- [ ] Decide whether to show anything at all — doing nothing is defensible for
+      state 2, since the Val d'Isère row was most likely a *real* hotel (a
+      converted 2551m cable-car station, 9.6 from 137 reviews, peak ski week).
+      A caveat on a correct price costs trust too.
+- [ ] Design the treatment. `CLAUDE.md` applies: no glass morphism, no glows,
+      no gradient-purple AI look — derive from the existing DNA (dark `#0f0f1a`
+      surfaces, pastel city cards, dashed-route motif, blue brand). Get it
+      approved before committing.
+- [ ] One treatment may cover both states, or they may need different words:
+      "we think this price is wrong" and "we could not check this price" are
+      different claims and should not be conflated into one badge.
+- [ ] For state 2, add the flag — the backend currently only logs it. Mirror
+      the `limitedCoverage` pattern `backend/src/services/trains.ts` already
+      uses for an unpriced fare, carry it through `lib/hotelShape.ts` beside
+      `priceSuspect`, and add it to `Hotel` in `frontend/lib/types.ts`.
+- [ ] Decide what the trip total does with an unverified hotel. Trains set
+      `pricePerPerson: null` rather than inventing a figure; hotels currently
+      put the number straight in the headline.
+
+**Do not** solve this by tuning a threshold. That has been tried three times
+and each pass created a new regression — see the comment block at the top of
+the price-plausibility section in `backend/src/services/hotels.ts` for the full
+history and why deleting rows was abandoned in favour of demoting them.
+
 ### Feature: Notifications system (separate task — complex)
 - [x] `notifications` table with RLS
 - [x] GET/PATCH/DELETE endpoints
@@ -287,6 +515,75 @@ Decisions needed before building:
 
 Separately, and not map-specific: the navbar overlaps itself at 375px —
 "BlueMurr" collides with "Flowchart", and "Schedule" collides with "Log in".
+
+### Feature: Points & miles — "your points could cover this"
+
+Tell a traveller what their existing points are worth against the trip in front
+of them: *you have 60k Amex MR, that covers the Rome leg*, *Delta is running a
+transfer bonus*, *combine these two balances and the whole outbound is free*.
+
+A real differentiator — nobody comparing cash fares does this well — but the
+phases below are ordered by **what data actually exists**, not by what sounds
+best, because the obvious version of this feature depends on data we cannot get
+today.
+
+**The blocker, stated up front.** Award availability is not in Duffel. Duffel
+sells cash fares; award inventory is a different system and the airlines do not
+expose it publicly. Delta, United and JetBlue have also moved to dynamic award
+pricing with no published award chart, so "60k gets you this seat" cannot be
+derived from a table either. Any phase that quotes a real award price needs a
+dedicated award-availability source (seats.aero is the usual answer — its API
+terms, coverage and cost all need checking before committing). Phase 1 is
+designed to be useful **without** that, so this is not blocked on it.
+
+**Do NOT store loyalty credentials.** Phase 1 takes balances the user types in.
+Scraping or storing airline/card logins to read balances is a serious liability
+and is somebody else's business model (AwardWallet, MaxRewards) — if automatic
+balances are wanted, integrate one of them rather than holding the credentials.
+
+#### Phase 1 — manual balances + what they're worth (no new provider needed)
+- [ ] `user_profiles.preferences` (or a `loyalty_balances` table) holds
+      `{ program, balance, updated_at }` rows the user enters by hand
+- [ ] Program list with transfer partners and ratios — the flexible currencies
+      are the valuable part (Amex MR, Chase UR, Citi TYP, Capital One, Bilt),
+      since one balance reaches many airlines
+- [ ] Cents-per-point valuation table, **editable and visible**, not hidden in
+      code. This is subjective and travellers disagree about it; showing the
+      assumption is the difference between a useful estimate and a number
+      nobody trusts
+- [ ] Surface on the results page: "your 60k Amex MR ≈ $720 toward this trip"
+      against the cash total we already compute
+- [ ] Decide what "cheapest" means once points exist. The optimizer ranks on
+      cash today; 60k points + $50 versus $400 cash is not a comparison it can
+      make without a valuation, and the answer differs per traveller. Likely
+      answer: keep ranking on cash and show points as an overlay, rather than
+      letting a subjective rate reorder the route
+
+#### Phase 2 — real award prices (needs the availability source)
+- [ ] Pick and integrate an award-availability provider; confirm coverage for
+      the European corridors this product actually plans
+- [ ] Per-leg award option beside the cash option in the Connector card, same
+      shape as the existing flight/train comparison
+- [ ] Combine balances across programs for one itinerary — the "combine with
+      your other miles" case — including transfer ratios and transfer time
+      (some transfers take days, which matters for a trip booked next week)
+- [ ] Show the cash-plus-fees side of an award booking; "free" flights carry
+      taxes and carrier surcharges, and on some routes those are substantial
+
+#### Phase 3 — deals and transfer bonuses
+- [ ] Transfer bonuses and award sales are published as promotions, not APIs.
+      Decide curated-and-dated entries versus scraping the usual blogs —
+      curation is more work per week but cannot silently go stale or wrong
+- [ ] Alert only when it is actionable: the traveller holds the source
+      currency AND the bonus helps a trip they are actually planning. A generic
+      "Delta bonus!" banner is noise and trains people to ignore the feature
+- [ ] Expiry handling — a stale promotion is worse than none, so every entry
+      needs an end date and must disappear on its own
+
+**Open questions to settle in Phase 1:** whether points are a planning input
+(filter: "show me where my points can take me") or only an output ("here's what
+they're worth on this trip"). The first is a much bigger feature and a
+different product, so decide deliberately rather than drifting into it.
 
 ### Feature: Taste-based recommendations (map suggestions → personalized)
 
@@ -409,7 +706,7 @@ before the final "Find my trip" click.
 - [ ] Inline editable: clicking a fact lets user revise (deferred —
   the AI chat can already revise; UI affordance later)
 
-### Feature: Voyza AI — edits beyond current scope
+### Feature: BlueMurr AI — edits beyond current scope
 Tasks deferred from the current chat work:
 
 - [ ] **Planning-phase conversational revision** (task 4): during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
@@ -549,7 +846,7 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 - [ ] Activity duration clipping: 4h activities render as 2h blocks because morning slot caps at 12:00 (full duration in notes only)
 - [ ] Intent picker animation timing on rapid interactions (currently fixed via StrictMode refs, watch for regressions)
 - [ ] Canvas → Back → Flights gone — partially fixed by DB persistence work (pending full verification)
-- [ ] Canvas save silently drops transports — FIXED in feat/db-persistence
+- [x] ~~Canvas save silently drops transports~~ — FIXED in feat/db-persistence
 - [ ] Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice). No back button, no edit-previous-message. Partial workaround exists via city picker's "+ another city" but it's awkward. Full fix = task 4 (planning-phase conversational revision).
 - [ ] Origin-location lookup misses non-city inputs (states, regions, neighborhoods). User typing "from New Jersey" / "Newark" / "Long Island" / "Connecticut" → AI returns the literal string → `getOriginAirports()` lookup misses → empty `originAirports` → home flight search never runs → schedule view shows no transport blocks for day 1. Already partially fixed for "<City> City" suffix variants (commit `0f24996`). Need: state-name aliases (NJ → EWR or NYC metro, CT → BDL, etc.), region aliases (Long Island → JFK/LGA, Bay Area is already in), and a smarter normalization layer at the AI-parse step that resolves vague locations to canonical metro keys before the lookup table is queried. Affects both `frontend/lib/originAirports.ts` and `backend/src/data/originAirports.ts`.
 - [x] ~~AI chat: "are there more flights?" returns an answer-only response instead of showing options~~ — FIXED in 1704365 (leg_refresh + `show_transport_options` tool + clarifying "which leg?" routing).
@@ -557,12 +854,33 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 
 ## 🏗️ Infrastructure / ops
 
+- [ ] 🔴 **No database backups exist.** Not "the runbook isn't written" — there
+      is nothing configured to restore from. There is ONE Supabase project
+      (`vzptwvrgiaqveckrdmke`) and it holds the real trips; `dev` writes to it
+      too (see `ENVIRONMENTS.md`), so a bad migration or a bad delete run from
+      a dev branch is unrecoverable. Enable Point-in-Time Recovery or scheduled
+      backups in the Supabase dashboard — this is a dashboard change, nothing
+      in this repo can do it. Listed first here because it is the only item on
+      this page where the cost of being wrong is permanent.
+- [ ] `backend/src/tests/transportCoverage.test.ts` **does not run in CI.** It
+      is gated on `DUFFEL_ACCESS_TOKEN`, which CI does not set, so the suite
+      skips in full — and it is the only one that exercises live provider
+      responses. Everything else mocks the provider. So "all tests pass" means
+      the mocked contract holds, not that the real API still answers the way we
+      expect. Either give CI a token (a sandbox one is enough; sandbox is what
+      Duffel returns today anyway) or run it on a schedule and alert on
+      failure, so a provider changing its response shape is not discovered by a
+      traveller.
 - [ ] Rate limiting middleware (per-IP + per-user) on all `/api` routes
-- [ ] Error monitoring (Sentry or Datadog)
+- [ ] Error monitoring (Sentry or Datadog) — note `logger.error` currently goes
+      to stderr and nothing else, so an error log pages nobody
 - [ ] Structured logging with request IDs
-- [ ] Staging environment / preview deploys
+- [ ] Staging environment / preview deploys — `dev` currently shares the
+      production backend AND database, so backend changes cannot be tested
+      anywhere but production (`ENVIRONMENTS.md:13`)
 - [ ] Automated E2E tests in CI (Playwright)
-- [ ] Backup & restore runbook
+- [ ] Backup & restore runbook (the process; see the first item for the fact
+      that there is currently nothing to restore from)
 - [ ] Data retention policies documented
 
 ---
@@ -577,7 +895,7 @@ Two-tier:
 ### Trip permissions model
 Three flags on each trip (set by owner):
 - `allow_clones` (default TRUE) — whether other users can make a personal copy
-- `allow_recommendations` (default TRUE) — whether Voyza can use this trip's patterns to train the recommender
+- `allow_recommendations` (default TRUE) — whether BlueMurr can use this trip's patterns to train the recommender
 - `is_public` (default FALSE) — whether the trip shows up in `/explore` and is cloneable by anyone with the URL
 
 ### Why we preserve trip data after anonymization

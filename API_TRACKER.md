@@ -15,15 +15,16 @@ dates (2026-07-20), never "last week"._
 |---|---|---|
 | All Aboard | 🔑 **INTEGRATED** — live in searchTrains (test env) | 2026-07-29 |
 | Omio | 🔁 follow-up sent | 2026-07-27 |
-| Junction | ⏸️ went quiet mid-scheduling — final note ~08-07, then park | 2026-07-31 |
+| Junction | ⏸️ stalled — his 07-29 call offer went unanswered; with Gohil | 2026-07-31 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
 | Duffel live token | 🔲 not started | — |
-| Kiwi Tequila | 🔁 follow-up sent | 2026-07-27 |
+| Kiwi Tequila | 🔁 follow-up sent (3rd contact) | 2026-10-24 |
 | Booking.com affiliate | 🔲 not started | — |
 | Travelpayouts | 📝 draft ready | — |
-| Direct Ferries | 📝 draft ready | — |
+| Distribusion | 📤 sent, awaiting reply | 2026-10-24 |
+| Direct Ferries | 📤 sent, awaiting reply | 2026-10-24 |
 
 ---
 
@@ -61,14 +62,36 @@ dates (2026-07-20), never "last week"._
   `backend/.env`; `services/allaboard.ts` registered as a train provider.
   Live-verified: Eurostar Paris→Amsterdam $39.89, Trenitalia Rome→Florence
   from $14.70. First real rail data for FR/IT/ES/Benelux/UK.
-- **Next:** exercise it through real trip plans, then book Carl's
-  integration call (his link) to review + ask about offer-pricing latency
-  (cold getJourneyOffer can exceed 30s; their cache warms after).
+- **2026-09-03: Carl replied on the stray booking link** — their API returns no
+  link at the search or offer stage, so the booking link we were showing was not
+  theirs. Booking runs through the API: `createBooking` → `createOrder` → either
+  finalise against the wallet balance or `createPayment`, the only call that
+  returns a URL (a hosted payment page). Docs:
+  docs.allaboard.eu/tickets/book-tickets · docs.allaboard.eu/payments. He offered
+  to trace the stray link if we send him the link or session id.
+- **Next:** reply to Carl's 2026-09-03 mail — **unanswered as of 2026-10-23**:
+  send him the stray link / session id to trace, and move our booking path onto
+  `createBooking` → `createOrder` → `createPayment`. Then book his integration
+  call (his link) to review + ask about offer-pricing latency (cold
+  getJourneyOffer can exceed 30s; their cache warms after).
 - **Model note for pricing later:** displayed rail prices will sit slightly
   above operator sites (their 1% + €2 + our service fee). Keep our fee
   small; the value is one-app multi-leg booking.
 - **Note:** best odds of the bunch — developer-first company, public docs.
   First provider breakthrough; prioritize this thread.
+
+### Distribusion  📤
+- **For:** bus, rail, ferry AND airport transfers in one Retailer API —
+  ~2,000 carriers across ~70 markets. Closes three gaps at once.
+- **Sent:** 2026-10-24 — emailed partner@distribusion.com (Satwik). Asked
+  for a demo API key and an inventory overview, which is the route their
+  docs point to; onboarding runs through a Partnership Manager.
+- **Note:** retail partners already include Booking.com, Google, Expedia,
+  Omio and Trainline, so this integration is well trodden.
+- **Watch for:** accreditation and carrier-access terms are NOT on the
+  public intro page. Company registration may surface at contract stage,
+  same as All Aboard — i.e. the EIN again.
+- **Docs:** docs.distribusion.com/dt/api/getting-started/intro
 
 ### Omio  🔁
 - **For:** rail + bus search, 1,000+ operators. Multimodal hedge.
@@ -85,18 +108,22 @@ dates (2026-07-20), never "last week"._
 - **2026-07-27: Hervé Gilg (hg@junctionconnect.com) replied within minutes** —
   wants a call, offered Wed 2026-07-29 12:15 pm ET.
 - **2026-07-28:** we rescheduled (co-founder conflict) — asked for Thu same
-  time or Fri flexible. **No reply since; he'd replied in minutes before
-  the reschedule.**
+  time or Fri flexible. **He answered the same day**, offering 12:15 pm ET
+  on Wed 2026-07-29. That offer is the last message in the thread and was
+  never answered from our side. (This entry previously said "no reply
+  since", which the thread contradicts — corrected 2026-10-24.)
 - **2026-07-31 (3:50 am, his morning):** nudge sent — next week, preferably
   Mon or Fri, flexible; mentioned first rail integration shipped. Silent.
-- **2026-08-03:** two unanswered emails in a row → deliberately waiting,
-  no third ping this week. Note: August = Europe holiday season; and with
+- **2026-08-03:** one genuinely unanswered nudge (07-31) → deliberately
+  waiting, no further ping this week. Note: August = Europe holiday season; and with
   All Aboard integrated, Junction is now a nice-to-have second provider,
   not critical path.
-- **Next:** if still silent by 2026-08-07, ONE final zero-pressure note
-  (scheduled ~9:45 am his time): no scheduling ask, "no rush, door open
-  whenever your calendar opens up." Then park. Warm welcome if he ever
-  revives the thread; call prep notes preserved below.
+- **Next (as of 2026-10-24):** the ~08-07 note was planned but there is no
+  record it was ever sent, and nothing has been checked since. The thread
+  lives in Gohil's mailbox and he owns it. Two things for him: confirm
+  whether the 08-07 note went out, and note that the thing to apologise
+  for is the ignored 07-29 call offer, not general slowness. Warm welcome
+  if he ever revives the thread; call prep notes preserved below.
 - Prep (if call happens): volume story (~200 bookings, study-abroad
   students), service-fee model (post-Carl), All Aboard integration story,
   what we need (sandbox, EU rail coverage), their pricing/terms.
@@ -136,9 +163,16 @@ dates (2026-07-20), never "last week"._
   longer offers open self-serve signup (login is magic-link only; the page
   directs new affiliates to that address).
 - **2026-07-27:** follow-up sent in the same thread (BlueMurr rename noted).
-- **Next:** wait. When the key arrives → Claude integrates it as the second
-  flight source (plan step F3). If silent past ~2026-08-10, fall back to
-  Travelpayouts for LCC coverage.
+- **2026-10-24:** third contact sent by Satwik from peelasatwik5@gmail.com.
+  A new email, not the old thread — that one lives in Gohil's mailbox and
+  isn't visible from Satwik's. Asked again for Tequila affiliate or
+  metasearch access, naming the Ryanair/Wizz gap.
+- **Next:** the 2026-10-24 contact is chased automatically (see the routine
+  note in the log), so no manual nudge is needed. When a key arrives →
+  integrate as the second flight source (plan step F3). The ~2026-08-10
+  fallback deadline passed with no decision taken; Travelpayouts is still
+  the LCC fallback, and Amadeus Self-Service is now the stronger one,
+  since its published production path needs no EIN.
 
 ### Booking.com affiliate  🔲
 - **For:** commission on the hotel links we already show. Biggest easy revenue.
@@ -149,9 +183,13 @@ dates (2026-07-20), never "last week"._
 - **Next:** register —
   [answers](APPLICATION_DRAFTS.md#2-travelpayouts-hotels-via-bookingcom--flights)
 
-### Direct Ferries  📝
+### Direct Ferries  📤
 - **For:** ferries (islands) — affiliate now, Connect API later.
-- **Next:** sign up —
+- **Sent:** 2026-10-24 — emailed partnerships@directferries.com (Satwik).
+  First contact; they had never been approached before. Asked whether
+  Connect API or the affiliate programme is the right entry point.
+- **Next:** the follow-up routine chases this automatically (see log).
+  Field answers ready if they send a form back:
   [answers](APPLICATION_DRAFTS.md#3-direct-ferries-ferries--islands)
 
 ---
@@ -173,10 +211,46 @@ dates (2026-07-20), never "last week"._
 
 _Append a line whenever anything happens, newest first._
 
-- 2026-08-03 — Junction: still silent after the 07-28 reschedule and the
-  07-31 nudge (two unanswered). Decision: no third ping this week; one
-  final zero-pressure note ~08-07 if nothing, then park. August holidays
-  likely a factor; All Aboard integration lowers the stakes.
+- 2026-10-24 — **Automated follow-up routine live**
+  (`trig_01EBCw2fjwpuMxZjfEMLzfr5`, claude.ai/code/routines). Fires daily at
+  07:47 UTC but only sends when the last message in a thread is 4+ days
+  old, so the effective cadence is every 4 days. It stops for a provider
+  the moment they reply, and stops permanently after 3 follow-ups. Tone
+  escalates down, not up: nudge, then the smallest single question they
+  can answer in a line, then a zero-pressure close. First follow-up lands
+  2026-10-29, not the 28th: the originals went at 20:44 UTC, so the 4 day
+  mark falls just after that morning's run. The test run on 2026-10-24
+  correctly sent nothing (0 days elapsed). It cannot write to this repo, so
+  follow-ups will NOT appear here on their own — read the run log at that link.
+
+- 2026-10-24 — **Three outreach emails sent** (Satwik, from
+  peelasatwik5@gmail.com). All three went as new emails, not thread
+  replies, because the original provider threads live in Gohil's mailbox:
+  **Distribusion** (partner@distribusion.com — demo Retailer API key for
+  bus + ferry), **Direct Ferries** (partnerships@directferries.com —
+  Connect API vs affiliate programme), **Kiwi** (affiliates@kiwi.com —
+  Tequila affiliate or metasearch for LCCs). All confirmed in Sent at
+  20:44 UTC. All Aboard (Carl) and Junction (Hervé) deliberately left to
+  Gohil, who owns those threads and can reply in them.
+
+- 2026-09-03 — **Carl (All Aboard) replied** on the stray booking link: their API
+  returns no link at the search or offer stage, so the booking link BlueMurr was
+  showing was not theirs. Booking happens in the API — `createBooking`, then
+  `createOrder`, then either finalise against the wallet balance or
+  `createPayment`, which is the only call that returns a URL (a hosted payment
+  page). Docs: docs.allaboard.eu/tickets/book-tickets · docs.allaboard.eu/payments.
+  He offered to trace the stray link if we send him the link or session id.
+  **Still unanswered as of 2026-10-23.**
+
+- 2026-08-03 — Junction: silent since the 07-31 nudge. Decision: no third
+  ping this week; one final zero-pressure note ~08-07 if nothing, then
+  park. August holidays likely a factor; All Aboard integration lowers
+  the stakes.
+  **Corrected 2026-10-24:** this read "still silent after the 07-28
+  reschedule and the 07-31 nudge (two unanswered)". That is wrong. Hervé
+  answered the reschedule the same day with 12:15 pm ET on Wed 07-29, and
+  it was we who left that offer unanswered. Only the 07-31 nudge is
+  genuinely unanswered by him.
 
 - 2026-07-29 — **ALL ABOARD SANDBOX GRANTED** (Carl): account live at
   allaboard.eu/agent (email OTP), test-scoped API keys from Dashboard, docs

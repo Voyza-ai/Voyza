@@ -180,6 +180,33 @@ export type OptimizeResult = {
   /** Home anchor legs. Present when `origin` was passed to the request. */
   outboundLeg?: import('./types').HomeLeg | null;
   returnLeg?: import('./types').HomeLeg | null;
+  /**
+   * Set when the origin NAME had more than one real reading and the run
+   * picked one to continue. The legs above were priced from
+   * `candidates[0]`, so a total shown alongside this rests on a guess.
+   *
+   * An optimize run is already spending money on Duffel by the time the
+   * origin matters, so it cannot stop to ask — it prices the best reading
+   * and reports this instead. Mirrors backend `OriginClarification` in
+   * services/optimizer.ts.
+   *
+   * Nothing renders this yet: the question itself is a design change and
+   * needs the owner's approval. The field exists so the data stops being
+   * thrown away at the API boundary in the meantime.
+   */
+  originClarification?: {
+    /** The raw string, exactly as it arrived. */
+    input: string;
+    reason: 'multi-country' | 'near-tie' | 'not-found';
+    candidates: Array<{
+      placeId: string;
+      /** "Paris, Île-de-France, France" — enough to tell two readings apart. */
+      label: string;
+      airports: string[];
+      /** Km from the traveller or the trip, when either was known. */
+      distanceKm?: number;
+    }>;
+  };
 };
 
 export async function optimizeTrip(params: {

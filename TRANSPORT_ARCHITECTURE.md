@@ -8,7 +8,7 @@ Europe (phase 1), structured so new providers/regions plug in without rewrites
 
 ## 0. The goal, stated precisely
 
-Voyza's defensible edge is **multi-modal optimization** — comparing flights AND
+BlueMurr's defensible edge is **multi-modal optimization** — comparing flights AND
 trains door-to-door on every leg. That edge only exists where we have *good data
 for both modes*. Today we have great flight data (Duffel) almost everywhere, but
 **train data is the bottleneck**, and it's the bottleneck specifically in Europe

@@ -6,6 +6,33 @@
 import express from 'express';
 import request from 'supertest';
 
+/**
+ * `routes/plan` pulls in legOptions -> flights -> duffel -> config/env, and
+ * the real env module validates the whole schema at import time. Without this
+ * the suite cannot even load on a machine with no Duffel or Supabase
+ * credentials, which is every machine that is not the deployed backend.
+ *
+ * An explicit object rather than a spread of `jest.requireActual`: requiring
+ * the real module is the thing that fails.
+ */
+jest.mock('../config/env', () => ({
+  env: {
+    NODE_ENV: 'test',
+    DUFFEL_ACCESS_TOKEN: 'test_token',
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'test_key',
+    ANTHROPIC_API_KEY: 'test_key',
+    DB_REST_BASE_URL: 'https://v6.db.transport.rest',
+    ALLABOARD_API_URL: 'https://test.api-gateway.allaboard.eu',
+    CORS_ORIGIN: 'http://localhost:3000',
+    FRONTEND_URL: 'http://localhost:3000',
+    API_PUBLIC_URL: 'http://localhost:4000',
+    EMAIL_FROM: 'test <test@example.com>',
+    LOCATION_RESOLVER_MODE: 'shadow',
+    PORT: 4000,
+  },
+}));
+
 const mockCreate = jest.fn();
 jest.mock('../services/anthropic', () => ({
   getAnthropicSafe: jest.fn(() => ({ messages: { create: mockCreate } })),

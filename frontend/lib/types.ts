@@ -100,6 +100,43 @@ export type ScheduledEvent = {
   category?: 'activity' | 'restaurant' | 'transport' | 'free' | 'custom';
   /** Optional notes */
   notes?: string;
+  /**
+   * How long this event needs, in minutes.
+   *
+   * For anything the day planner placed this is an INVARIANT, not extra
+   * information: it always equals `endTime - startTime`. That equality is
+   * the whole point — the planner places an item at its real length or
+   * not at all, so the block the user reads can never understate it. A
+   * 4-hour activity occupies four hours of calendar.
+   *
+   * (It previously existed to record the length a fixed time slot had
+   * thrown away, alongside a `durationClipped` flag. Nothing clips any
+   * more, so the flag is gone; this field stays because it saves every
+   * consumer parsing two "HH:mm" strings, and because asserting the
+   * invariant is how the tests pin the guarantee down.)
+   *
+   * Absent on events the user created or dragged by hand, and on
+   * transport blocks, whose length comes from the carrier.
+   */
+  plannedDurationMin?: number;
+};
+
+/**
+ * Something the planner could not fit into a stay at its real length.
+ *
+ * The day planner never shortens an item to make it fit; when a day has
+ * no room it turns the item away whole and it is recorded here, so the
+ * loss is in the data rather than hidden in a block that reads shorter
+ * than the thing it names.
+ */
+export type UnscheduledItem = {
+  /** The activity or restaurant name, as the suggestion gave it. */
+  title: string;
+  kind: 'activity' | 'restaurant';
+  /** Minutes it needed. */
+  durationMin: number;
+  /** The last day it was tried on. */
+  date: string | null;
 };
 
 export type Vibe =
@@ -133,6 +170,15 @@ export type City = {
   restaurants: Restaurant[];
   /** Per-day schedule — keyed by ISO date (YYYY-MM-DD). Built when user opens day planner. */
   schedule?: Record<string, ScheduledEvent[]>;
+  /**
+   * Activities and meals this stay could not hold at their real length.
+   *
+   * In memory only for now: `backend/src/routes/trips.ts` maps city
+   * columns explicitly, so this does not round-trip through the DB. It
+   * exists so the loss is representable rather than silent — showing it
+   * to the user is a separate, design-approved change.
+   */
+  unscheduled?: UnscheduledItem[];
   vibes?: Vibe[]; // primary vibes for this city — drives the accent gradient
   colorIndex?: number; // 0–6, user can override, defaults to city position
 };
@@ -204,6 +250,35 @@ export type Trip = {
     returnAirports?: string[];
   };
   returnToHome?: boolean;
+  /**
+   * Set when the origin NAME the traveller typed had more than one real
+   * reading and the trip was priced from the most likely one.
+   *
+   * Someone typing "Portland" gets Oregon, because it is the more prominent
+   * reading. If they meant Maine, every flight and every price on this trip
+   * is for the wrong city and nothing else on screen would say so. The
+   * results page renders a line from this so the choice is visible and
+   * changeable.
+   *
+   * SESSION-SCOPED. It rides the optimize response into the store and is NOT
+   * persisted: `trips` has `origin_city` and `origin_airports` as real
+   * columns and no place id, so keeping it across a reload needs a migration
+   * against the live project. Absent on a trip loaded from the database,
+   * which is why the line is a prompt rather than a warning the user must
+   * clear.
+   */
+  originClarification?: {
+    /** The string the traveller typed, exactly. */
+    input: string;
+    reason: 'multi-country' | 'near-tie' | 'not-found';
+    candidates: Array<{
+      placeId: string;
+      /** "Portland, Oregon, United States" */
+      label: string;
+      airports: string[];
+      distanceKm?: number;
+    }>;
+  };
 };
 
 /**

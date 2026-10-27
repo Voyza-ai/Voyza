@@ -43,6 +43,17 @@ const AIRPORTS: Record<string, AirportInfo> = {
   BOS: { name: 'Boston Logan', full: 'Boston Logan International Airport' },
   DEN: { name: 'Denver Intl.', full: 'Denver International Airport' },
   ATL: { name: 'Hartsfield-Jackson', full: 'Hartsfield-Jackson Atlanta International Airport' },
+  PHL: { name: 'Philadelphia Intl.', full: 'Philadelphia International Airport' },
+  PHX: { name: 'Phoenix Sky Harbor', full: 'Phoenix Sky Harbor International Airport' },
+  LAS: { name: 'Harry Reid', full: 'Harry Reid International Airport' },
+  SLC: { name: 'Salt Lake City Intl.', full: 'Salt Lake City International Airport' },
+  MSP: { name: 'Minneapolis-Saint Paul', full: 'Minneapolis-Saint Paul International Airport' },
+  DTW: { name: 'Detroit Metro', full: 'Detroit Metropolitan Wayne County Airport' },
+  PDX: { name: 'Portland Intl.', full: 'Portland International Airport' },
+  HNL: { name: 'Daniel K. Inouye', full: 'Daniel K. Inouye International Airport' },
+  PVD: { name: 'T. F. Green', full: 'Rhode Island T. F. Green International Airport' },
+  BDL: { name: 'Bradley', full: 'Bradley International Airport' },
+  BTV: { name: 'Burlington Intl.', full: 'Patrick Leahy Burlington International Airport' },
 
   // Canada
   YYZ: { name: 'Toronto Pearson', full: 'Toronto Pearson International Airport' },

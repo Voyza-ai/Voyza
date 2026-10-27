@@ -134,7 +134,7 @@ export default function ConversationalPlanner({
     typeof v === 'string' && v.trim().length > 0;
 
   const applyUpdates = useCallback(
-    (u: ConverseResponse['updates']) => {
+    async (u: ConverseResponse['updates']) => {
       if (u.destinations) setAnswer('destinations', u.destinations);
       if (isSet(u.origin)) setAnswer('origin', u.origin);
       if (u.dates) setAnswer('dateRange', u.dates);
@@ -147,6 +147,30 @@ export default function ConversationalPlanner({
         setAnswer('returnToHome', u.returnToHome);
       if (isSet(u.notes)) setAnswer('extraNotes', u.notes);
       setAnswer('planningMode', 'destination');
+
+      // Airports last, because it is the one answer that needs an await.
+      //
+      // This path set `origin` and never `originAirports`, and it is the MAIN
+      // conversational route — `PlanningChat` fills them in three places, this
+      // component only in the geolocation branch. So a trip planned by talking
+      // reached the optimizer with an empty airport list, took the
+      // single-airport `getIataCode` fallback, and silently lost the
+      // multi-airport price comparison that makes NYC, London and Tokyo
+      // origins worth anything.
+      //
+      // Recomputed on every origin update rather than filled once: if the
+      // traveller moves their origin from New York to Boston, the old JFK/LGA/
+      // EWR list is not stale data to preserve, it is wrong data to replace.
+      // An unresolvable origin correctly yields an empty list — the same
+      // fallback as before, rather than airports for the previous city.
+      // Resolved through `locationResolver`, which replaced the hand-written
+      // `originAirports` table this branch was written against — that module
+      // no longer exists. Same call the geolocation branch below already
+      // makes, so the two origin paths in this file now agree on a source.
+      if (isSet(u.origin)) {
+        const { originAirportsForCity } = await import('@/lib/locationResolver');
+        setAnswer('originAirports', originAirportsForCity(u.origin));
+      }
     },
     [setAnswer],
   );
@@ -193,7 +217,7 @@ export default function ConversationalPlanner({
           known: knownState(),
         });
 
-        applyUpdates(result.updates);
+        await applyUpdates(result.updates);
         setFailCount(0);
 
         const withReply = [
@@ -270,9 +294,38 @@ export default function ConversationalPlanner({
       }
 
       const cityName = result.city.city;
-      const { getOriginAirports } = await import('@/lib/originAirports');
+      // Awaited, so this reaches the server for anything the bundled hot set
+      // does not carry, and passes the trip's destinations as context.
+      const { resolveLocation, originAirportsForCity } = await import('@/lib/locationResolver');
+      const answer = await resolveLocation(cityName, {
+        tripDestinationNames: answers.destinations,
+      });
+      // TODO(location-phase-4): on `ambiguous` ask which reading they mean —
+      // `answer.candidates` carries the `label` to show and the `placeId` to
+      // persist. Taking the best reading until that UI is approved, which is
+      // what the table it replaces could express.
       setAnswer('origin', cityName);
-      setAnswer('originAirports', getOriginAirports(cityName));
+      // The hand-written table leads, the resolver's answer is the fallback.
+      // Driving the real UI found why: `Newark, NJ` resolved to NOTHING here,
+      // because the hot set has no comma-qualified key and the round trip can
+      // fail, while the table answers it offline. And the frontend's answer
+      // WINS — `optimizer.ts` uses `originAirports` from the body verbatim —
+      // so serving the resolver here would bypass `LOCATION_RESOLVER_MODE`
+      // and the shadow log meant to justify the switch.
+      //
+      // `answer` is still computed: its candidates are what the phase-4
+      // question gets built from.
+      const fromTable = originAirportsForCity(cityName);
+      setAnswer(
+        'originAirports',
+        fromTable.length > 0
+          ? fromTable
+          : answer.status === 'resolved'
+            ? answer.airports.map((a) => a.iata)
+            : answer.status === 'ambiguous'
+              ? (answer.candidates[0]?.airports.map((a) => a.iata) ?? [])
+              : [],
+      );
       await send(`I'm starting from ${cityName} (detected from my location)`);
     } finally {
       setLocating(false);

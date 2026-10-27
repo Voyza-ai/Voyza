@@ -3,7 +3,7 @@ import { getIataCode, searchFlights } from './flights';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
-import { getOriginAirports } from '../data/originAirports';
+import { resolveOriginAirports, type OriginCandidate } from './location/originAirports';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
 
 type CityInput = {
@@ -110,6 +110,24 @@ export type HomeLeg = {
   alternatives?: Omit<HomeLeg, 'alternatives'>[];
 };
 
+/**
+ * An origin name that had more than one real reading, carried out on the
+ * result instead of asked about mid-run.
+ *
+ * An optimize run is already spending money on Duffel by the time the origin
+ * matters, so it prices the most prominent reading and reports this. The
+ * planner conversation can ask; the callers that cannot ask at least have
+ * something to show, and a place id to persist once someone chooses.
+ *
+ * Absent on every unambiguous origin, which is the overwhelming majority.
+ */
+export type OriginClarification = {
+  /** The raw string, exactly as it arrived. */
+  input: string;
+  reason: 'multi-country' | 'near-tie' | 'not-found';
+  candidates: OriginCandidate[];
+};
+
 export type OptimizeResult = {
   routes: OptimizedRoute[];
   bestRoute: OptimizedRoute;
@@ -130,6 +148,11 @@ export type OptimizeResult = {
    * AND the return search succeeded.
    */
   returnLeg?: HomeLeg | null;
+  /**
+   * Set when the origin name was ambiguous and the run picked a reading to
+   * continue. The legs above were priced from `candidates[0]`.
+   */
+  originClarification?: OriginClarification;
 };
 
 type OptimizeParams = {
@@ -806,25 +829,58 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
 
   const cityMap = new Map(cities.map((c) => [c.name, c]));
 
-  // Resolve origin airports: caller may pass explicit list (from
-  // originAirports.ts lookup or user prefs); otherwise we look up the
-  // multi-airport map, and fall back to a single getIataCode result
-  // if the city isn't a multi-airport metro.
+  // Resolve origin airports: the caller may pass an explicit list (from the
+  // frontend's own lookup or user prefs); otherwise resolve the name, and
+  // fall back to a single getIataCode result if nothing matched.
+  //
+  // Resolution happens HERE, at the top, before any paid call. An optimize
+  // run cannot stop to ask a question once it is spending money on Duffel,
+  // so an ambiguous origin is priced from its best reading and the question
+  // is carried out on the result as `originClarification` instead.
   let resolvedOriginAirports: string[] = [];
+  let originClarification: OriginClarification | undefined;
   if (hasOrigin) {
+    // Resolve the NAME unconditionally, even when the caller supplied its own
+    // airports. Whether the name was ambiguous is a fact about what the
+    // traveller typed, not about which airports we ended up pricing, and the
+    // caller cannot report it: the frontend's lookup returns a confident list
+    // or nothing, with no way to say "this matched four places".
+    //
+    // This used to sit inside the `else` below, which made the feature almost
+    // dead. The frontend answers `Portland` with ["PDX","SLE"] and `Melbourne`
+    // with ["MEL","AVV","MEB"] from its own copy of the artifact, so the
+    // branch never ran and the two clearest ambiguous origins never produced a
+    // clarification. Only names the frontend's hot set MISSED could ever ask.
+    //
+    // Free to do here: an in-memory artifact lookup, no network, no Duffel.
+    const resolution = resolveOriginAirports(origin!, {
+      // The destinations are the strongest context available here and cost
+      // nothing: a trip through Florence and Venice says which Rome is home.
+      tripDestinationNames: cities.map((c) => c.name),
+    });
+    if (resolution.needsClarification) {
+      originClarification = {
+        input: origin!,
+        reason: resolution.needsClarification.reason,
+        candidates: resolution.needsClarification.candidates,
+      };
+    }
+
     if (originAirports && originAirports.length > 0) {
+      // The caller already decided, and we serve that decision verbatim for
+      // PRICING. Nothing to second-guess: the frontend fills this from the
+      // same generated artifact this function would read, which is the point
+      // of having retired the two hand-written tables. The clarification
+      // above is informational and does not override it.
       resolvedOriginAirports = originAirports;
+    } else if (resolution.airports.length > 0) {
+      resolvedOriginAirports = resolution.airports;
     } else {
-      const lookup = getOriginAirports(origin!);
-      if (lookup.length > 0) {
-        resolvedOriginAirports = lookup;
-      } else {
-        try {
-          const single = await getIataCode(origin!);
-          resolvedOriginAirports = [single];
-        } catch {
-          logger.warn('Could not resolve origin IATA', { origin });
-        }
+      try {
+        const single = await getIataCode(origin!);
+        resolvedOriginAirports = [single];
+      } catch {
+        logger.warn('Could not resolve origin IATA', { origin });
       }
     }
   }
@@ -1086,5 +1142,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     dateShiftSuggestion,
     outboundLeg,
     returnLeg,
+    // Only present when the origin had more than one real reading. The legs
+    // above were priced from the first candidate, so this is how a caller
+    // learns the total it is showing rests on a guess.
+    ...(originClarification ? { originClarification } : {}),
   };
 }

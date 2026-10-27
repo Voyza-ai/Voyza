@@ -23,6 +23,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
 
+
   // Supabase (server-side only — service role has full DB access)
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
@@ -64,6 +65,27 @@ const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {
   console.error('❌ Invalid environment variables:');
   console.error(parsed.error.flatten().fieldErrors);
+
+  // Under test, THROW rather than exit.
+  //
+  // `process.exit(1)` at import time is right for a server — a process with a
+  // half-configured environment should die loudly instead of serving wrong
+  // answers. Inside Jest it is a different thing entirely: it kills the
+  // runner, not the test. In parallel mode that takes out a worker and the
+  // suite reports "child process exceptions"; with `--runInBand` the whole
+  // run dies at the first such suite and prints no summary at all, so one
+  // unconfigured suite hides the result of every other one.
+  //
+  // A throw gives Jest something it can report: that suite fails with the
+  // missing variables named, and the other 46 still run. Production behaviour
+  // is unchanged.
+  if (process.env.NODE_ENV === 'test') {
+    const fields = Object.keys(parsed.error.flatten().fieldErrors).join(', ');
+    throw new Error(
+      `Invalid environment variables: ${fields}. This suite needs them mocked — ` +
+        `see the jest.mock('../config/env', ...) at the top of legPriceCache.test.ts.`,
+    );
+  }
   process.exit(1);
 }
 
