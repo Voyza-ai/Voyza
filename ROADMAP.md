@@ -186,6 +186,37 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
     qualifies, so London and its boroughs are untouched. A test holds that.
   - Gated to cities. Applied to regions it reordered 13 of them, Saarland and
     Jiangsu among them, on a distance from a centroid nobody stands at.
+- [ ] **`moscow` and `kyiv` are the last two cityAirports calls, and both are
+  yours.** Eleven of the thirteen are decided and merged; these two are not,
+  for different reasons.
+  - **`moscow`** — the table says MOW (the metro code, covering Sheremetyevo,
+    Domodedovo and Vnukovo); the resolver says SVO, because its top candidate
+    is the federal-city REGION and regions carry no metro code, so Domodedovo
+    and Vnukovo are invisible to it. A curated alias onto the city would
+    answer MOW and restore the retired origin triple SVO/DME/VKO in place of
+    the region's SVO/VKO/ZIA.
+    - The cost, measured: it breaks Moscow, **Idaho**. Coordinates there
+      resolve to PUW 8.6 km away today and would get Sheremetyevo instead —
+      the exact rescue `servesPlace` was added for. It also removes a genuine
+      multi-country clarification question.
+    - A cleaner fix exists and was deliberately NOT made: region and city
+      produce candidates with the identical label, and `dedupeByLabel` keeps
+      the first, which is the region. Preferring the point-like place on a
+      label collision would answer MOW, keep the Idaho question, and need no
+      curated entry — but it changes which `placeId` a clarification card
+      carries, so it is a behaviour decision rather than a data one.
+  - **`kyiv`** stays hand-written and cannot be deleted. Both Kyiv airports
+    are filed upstream with no scheduled service, so nothing in the artifact
+    can answer it, and the curated layer refuses to pin a closed airport by
+    design. Its IEV value is a deterministic stub that keeps `getIataCode`
+    off a Duffel guess. When service resumes the resolver answers it with no
+    code change.
+- [ ] **Five metro codes are inferred to work with Duffel, not verified.**
+  `SEL`, `BJS`, `OSA`, `SAI` and `KTI` now ship as destination answers. The
+  table already carried ~20 metro codes (NYC, LON, TYO, OSA, BUE, MOW, BUH,
+  REK) so the mechanism is established, but `SAI` and `KTI` are new upstream
+  codes and no live search has been driven against them. Worth one real
+  Duffel call each before trusting them in production.
 - [ ] **Still open from the same sweep: the ordering question at the extreme.**
   The doorstep fix guarantees a nearby airport is PRICED; it does not change
   which airport LEADS. Weifang still leads with Qingdao at 96 km over its own
