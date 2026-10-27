@@ -71,7 +71,7 @@ type AirportNameTable = {
   names: Record<string, string>;
 };
 
-/** `null` until the chunk lands; `{}` if it never does. */
+/** `null` until the chunk lands, and still `null` if it never does. */
 let names: Record<string, string> | null = null;
 let inFlight: Promise<Record<string, string>> | null = null;
 
