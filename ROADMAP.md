@@ -186,37 +186,63 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
     qualifies, so London and its boroughs are untouched. A test holds that.
   - Gated to cities. Applied to regions it reordered 13 of them, Saarland and
     Jiangsu among them, on a distance from a centroid nobody stands at.
-- [ ] **`moscow` and `kyiv` are the last two cityAirports calls, and both are
-  yours.** Eleven of the thirteen are decided and merged; these two are not,
-  for different reasons.
-  - **`moscow`** — the table says MOW (the metro code, covering Sheremetyevo,
-    Domodedovo and Vnukovo); the resolver says SVO, because its top candidate
-    is the federal-city REGION and regions carry no metro code, so Domodedovo
-    and Vnukovo are invisible to it. A curated alias onto the city would
-    answer MOW and restore the retired origin triple SVO/DME/VKO in place of
-    the region's SVO/VKO/ZIA.
-    - The cost, measured: it breaks Moscow, **Idaho**. Coordinates there
-      resolve to PUW 8.6 km away today and would get Sheremetyevo instead —
-      the exact rescue `servesPlace` was added for. It also removes a genuine
-      multi-country clarification question.
-    - A cleaner fix exists and was deliberately NOT made: region and city
-      produce candidates with the identical label, and `dedupeByLabel` keeps
-      the first, which is the region. Preferring the point-like place on a
-      label collision would answer MOW, keep the Idaho question, and need no
-      curated entry — but it changes which `placeId` a clarification card
-      carries, so it is a behaviour decision rather than a data one.
+- [ ] **`kyiv` is the last undecided cityAirports call.** `moscow` is settled;
+  eleven of the other twelve were decided and merged earlier.
+  - **`moscow` — DONE.** Fixed by the cleaner route this entry previously
+    described as deliberately not taken: region and city produce candidates
+    with the identical label, and the dedupe kept the FIRST, which is the
+    region. It now prefers the point-like place (city, metro) over the
+    area-like one, and `fromResolution` dedupes BEFORE taking its answer,
+    since the answer is `candidates[0]`.
+    - Origin now answers SVO, DME, VKO — exactly the retired table's triple.
+      Domodedovo, Russia's second airport, had been outside the fan-out
+      because the region carries no metro code and orders airports against a
+      centroid, putting Zhukovsky ahead of it.
+    - Moscow, **Idaho** is untouched and guarded by a test: its label is
+      "Moscow, Idaho, United States", a different string, so the collision
+      rule never reaches it and PUW at 9 km still wins. The multi-country
+      clarification question also survives. This is why a curated alias was
+      the wrong fix and was not used.
+    - Picked up San Juan, Argentina for free — same shape, province over
+      city, leading with Mendoza at 145 km over the city's own UAQ at 10 km.
+    - The `moscow: 'MOW'` table entry STAYS, and is not a workaround:
+      destinations never touch the resolver. `getIataCode` consults
+      `getStaticIata` before the Supabase cache and before Duffel, so the
+      table IS the destination mechanism and its answer there is correct.
   - **`kyiv`** stays hand-written and cannot be deleted. Both Kyiv airports
     are filed upstream with no scheduled service, so nothing in the artifact
     can answer it, and the curated layer refuses to pin a closed airport by
     design. Its IEV value is a deterministic stub that keeps `getIataCode`
     off a Duffel guess. When service resumes the resolver answers it with no
-    code change.
+    code change. **Not fixable here** — it needs an upstream data change, not
+    a code change.
 - [ ] **Five metro codes are inferred to work with Duffel, not verified.**
   `SEL`, `BJS`, `OSA`, `SAI` and `KTI` now ship as destination answers. The
   table already carried ~20 metro codes (NYC, LON, TYO, OSA, BUE, MOW, BUH,
   REK) so the mechanism is established, but `SAI` and `KTI` are new upstream
   codes and no live search has been driven against them. Worth one real
   Duffel call each before trusting them in production.
+  - **Blocked, not deferred.** This container holds no Duffel credentials
+    (no `.env`, nothing matching `DUFFEL*` in the environment), so the one
+    real call per code cannot be made from here. It needs a run somewhere
+    the key is present; there is no code change to make.
+- [x] **Long airport names in the home cards — measured, no change needed.**
+  Reported as "names wrap in the 200px card, 56 of 4,008 exceed 40 chars, so
+  clamp them". Rendered in a real browser against the real components rather
+  than read off the code, the premise does not hold and a clamp would make it
+  worse.
+  - The results card (`Flowchart.tsx`) is 260px wide, not 200, and 280px tall
+    with ~100px of slack. The worst name in the table — NAT at 74 chars —
+    takes 3 lines with **zero** overflow; the date/time row does not move
+    (identical 18px bottom inset for a 15-char name and a 74-char one).
+  - The 200px card is the canvas one (`CanvasHomeCard.tsx`), which has no
+    fixed height. Measured beside a real `CanvasCityCard` in the real row
+    (`flex items-center min-w-max gap-0`): a SHORT name makes the home card
+    144.5px against the city card's 175px — 30px out of step. The longest
+    name makes it 177.5px, i.e. it LINES UP. Long names improve that row.
+  - So clamping would truncate readable text and make the row less even. The
+    third consumer (`HomeEditModal.tsx`) uses the name in a `title` tooltip,
+    where length cannot affect layout at all.
 - [ ] **Still open from the same sweep: the ordering question at the extreme.**
   The doorstep fix guarantees a nearby airport is PRICED; it does not change
   which airport LEADS. Weifang still leads with Qingdao at 96 km over its own
