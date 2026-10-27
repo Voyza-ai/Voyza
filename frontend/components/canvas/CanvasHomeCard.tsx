@@ -1,7 +1,7 @@
 'use client';
 
 import { Home, Plane, Pencil, Loader2 } from 'lucide-react';
-import { getAirportName } from '@/lib/airportNames';
+import { useAirportNames } from '@/lib/airportNames';
 
 type CanvasHomeCardProps = {
   origin: {
@@ -41,7 +41,10 @@ export default function CanvasHomeCard({ origin, direction, onEdit, legLoading }
     ? leg?.destAirport ?? airports?.[0] ?? ''
     : leg?.originAirport ?? airports?.[0] ?? '';
 
-  const airportName = airport ? getAirportName(airport) : null;
+  // Null until the generated name table's chunk lands, and null for a code
+  // it does not know; the card renders the IATA code either way.
+  const airportNameFor = useAirportNames();
+  const airportName = airport ? airportNameFor(airport) : null;
   const label = isInbound ? 'Back home' : 'Home';
   const time = isInbound ? leg?.arriveTime : leg?.departTime;
   const date = leg?.departDate ?? '';

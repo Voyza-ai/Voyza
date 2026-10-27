@@ -17,6 +17,7 @@
  * rather than guessed. See ASSIGNMENT below.
  */
 
+import { deriveAirportDisplayName } from '../../src/services/location/airportNames';
 import type { Place, PlaceAirport, LocationArtifact } from '../../src/services/location/types';
 import {
   AIRPORT_OVERRIDES,
@@ -49,6 +50,14 @@ import { fold, hasLatin, parseCsv, parseTsv } from './text';
  *    `curated.ts` instead, which is what the pin mechanism is for: the
  *    three-level airport ordinal cannot separate a gateway from a close-in
  *    secondary, so a human names the ones that matter.
+ *
+ * NOT bumped for `airportNames.json`, deliberately. The version stamps the
+ * shape of a PLACE, and a place record is byte-for-byte what version 5
+ * emitted: the names are a separate file keyed by IATA, for the measured
+ * reason in `AirportNameTable` below. Bumping would mark every artifact a
+ * reader already holds as a shape they do not understand, when nothing about
+ * the shape moved. The new file carries the same number so a stale pair is
+ * still visible in a diff.
  */
 export const SCHEMA_VERSION = 5;
 
@@ -313,9 +322,40 @@ export type AirportRankTable = {
   pinned: Record<string, string[]>;
 };
 
+/**
+ * IATA -> the airport's human name, for anything that shows a code to a
+ * traveller.
+ *
+ * ── Why a single map and not a field on `PlaceAirport` ──────────────────────
+ *
+ * The obvious shape is a `name` beside `iata` on every attachment, and it is
+ * measurably the wrong one. The artifact holds 108,452 attachments over 4,008
+ * distinct airports — an average of 27.1 places per airport — so inlining the
+ * name costs 1,720.0 KiB of name characters against 58.1 KiB for one map, and
+ * every one of those copies has to be kept consistent by construction rather
+ * than by having exactly one of them. A code is the natural key for a name:
+ * one map, generated once.
+ *
+ * ── Why its own file and not part of places.json ────────────────────────────
+ *
+ * The browser needs the names and does not get places.json: it gets the 60 KiB
+ * hot set, which is full. A standalone file can be shipped to the frontend and
+ * fetched on its own, separately from both. See `build-location-hotset.ts` for
+ * the measured numbers behind that.
+ */
+export type AirportNameTable = {
+  schemaVersion: number;
+  generatedAt: string;
+  /** The column this came from, so a reader can check it against the dump. */
+  basis: 'ourairports-name';
+  /** Every scheduled-IATA airport in the dump. IATA -> display name. */
+  names: Record<string, string>;
+};
+
 export type BuildResult = {
   artifact: LocationArtifact;
   ranks: AirportRankTable;
+  names: AirportNameTable;
   stats: BuildStats;
 };
 
@@ -1193,9 +1233,31 @@ export function build(inputs: BuildInputs): BuildResult {
     pinned: Object.fromEntries(Object.keys(pinned).sort().map((id) => [id, pinned[id]])),
   };
 
+  // EVERY scheduled-IATA airport, not just the ones some place attached.
+  //
+  // The capped `airports[]` lists reach 1,167 codes; the resolver's `iata`
+  // index reaches all 4,008, because `LAX` typed into an origin field is a
+  // real input and a synthetic `ap:` place exists for every orphan airport.
+  // A table covering only the attached codes would therefore be nameless for
+  // exactly the inputs a traveller reached by typing a code.
+  //
+  // Code-sorted so a rebuild diff reads as an airport changelog, like the
+  // artifact itself.
+  const names: AirportNameTable = {
+    schemaVersion: SCHEMA_VERSION,
+    generatedAt: inputs.generatedAt,
+    basis: 'ourairports-name',
+    names: Object.fromEntries(
+      [...byIata.values()]
+        .sort((a, b) => (a.iata < b.iata ? -1 : 1))
+        .map((a) => [a.iata, deriveAirportDisplayName(a.name)]),
+    ),
+  };
+
   return {
     artifact,
     ranks,
+    names,
     stats: {
       airportRows: parsedAirports.all,
       airportsWithIata: parsedAirports.withIata,

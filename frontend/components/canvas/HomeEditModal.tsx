@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Home, Plane, Plus } from 'lucide-react';
 import { originAirportsForCity } from '@/lib/locationResolver';
-import { getAirportName } from '@/lib/airportNames';
+import { useAirportNames } from '@/lib/airportNames';
 
 type HomeEditModalProps = {
   isOpen: boolean;
@@ -34,6 +34,12 @@ export default function HomeEditModal({
   const [selected, setSelected] = useState<string[]>(airports);
   const [customIata, setCustomIata] = useState('');
   const [touchedChips, setTouchedChips] = useState(false);
+
+  // One hook for the whole chip list rather than one per chip: the names come
+  // from a generated table shared by every card on the page, loaded as a
+  // deferred chunk. Until it lands, and for a code it does not know, the
+  // lookup gives null and the chip's tooltip falls back to the code itself.
+  const airportNameFor = useAirportNames();
 
   // Reset to current values each time the modal opens.
   useEffect(() => {
@@ -154,7 +160,7 @@ export default function HomeEditModal({
                       <button
                         key={code}
                         onClick={() => toggleAirport(code)}
-                        title={getAirportName(code) ?? code}
+                        title={airportNameFor(code) ?? code}
                         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-mono font-medium border transition-all"
                         style={{
                           background: active ? 'rgba(37,99,235,0.08)' : '#ffffff',
