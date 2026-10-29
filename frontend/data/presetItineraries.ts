@@ -921,6 +921,18 @@ export function presetCostFor(preset: PresetItinerary, travelers: number): numbe
   return Math.round(hotels + transport);
 }
 
+/**
+ * Per-person price range: two travelers sharing a room (low) to traveling
+ * solo with the room to yourself (high). Hotel rooms are the big swing, so
+ * this is the honest spread a single number would hide.
+ */
+export function presetPricePerPersonRange(preset: PresetItinerary): { low: number; high: number } {
+  return {
+    low: Math.round(presetCostFor(preset, 2) / 2),
+    high: presetCostFor(preset, 1),
+  };
+}
+
 /** Cost at the preset's default party size — used on the browse cards. */
 export function presetCost(preset: PresetItinerary): number {
   return presetCostFor(preset, preset.travelers);

@@ -25,11 +25,6 @@ const setSlider = (name: RegExp, value: number) =>
     target: { value: String(value) },
   });
 
-const setVibe = (value: string) =>
-  fireEvent.change(screen.getByRole('combobox', { name: /vibe/i }), {
-    target: { value },
-  });
-
 const apply = () =>
   fireEvent.click(screen.getByRole('button', { name: /apply filters/i }));
 
@@ -107,15 +102,10 @@ describe('BrowsePage filtering scenarios', () => {
     expect(screen.queryByText('Mediterranean Odyssey')).not.toBeInTheDocument();
   });
 
-  test('vibe dropdown filters by vibe', () => {
+  test('no "Jump to" list when there is only one section (offline catalog)', () => {
     render(<BrowsePage />);
-    setVibe('beach');
-    apply();
-    expect(screen.getByText('Greek Island Escape')).toBeInTheDocument();
-    expect(screen.queryByText('Imperial Europe by Rail')).not.toBeInTheDocument();
-    setVibe('');
-    apply();
-    expect(screen.getByText('Imperial Europe by Rail')).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: /jump to section/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /vibe/i })).not.toBeInTheDocument();
   });
 
   test('search and sidebar filters compose', () => {
@@ -149,7 +139,6 @@ describe('BrowsePage filtering scenarios', () => {
   test('clear-all link in the sidebar resets every filter', () => {
     render(<BrowsePage />);
     setSlider(/trip length/i, 5);
-    setVibe('beach');
     setSlider(/budget/i, COST_MAX - 100);
     apply();
     fireEvent.click(screen.getByRole('button', { name: /clear all/i }));

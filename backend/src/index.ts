@@ -7,6 +7,7 @@ import { logger } from './utils/logger';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/error';
 import { apiLimiter, expensiveLimiter, locationLimiter } from './middleware/rateLimit';
+import { startPresetRefreshScheduler } from './services/presets';
 
 const app = express();
 
@@ -51,6 +52,8 @@ app.use(errorHandler);
 // ─── Boot ────────────────────────────────────────────────────
 const server = app.listen(env.PORT, () => {
   logger.info('Backend listening', { port: env.PORT, env: env.NODE_ENV });
+  // Weekly Browse price refresh (see services/presets.ts).
+  if (env.NODE_ENV !== 'test') startPresetRefreshScheduler();
 });
 
 // Graceful shutdown — important when running behind a process manager
