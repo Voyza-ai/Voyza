@@ -940,3 +940,66 @@ export async function updateTripPermissions(
     body: JSON.stringify(patch),
   });
 }
+
+// ─── Browse catalog (preset trips) ───────────────────────────
+// Public endpoints — no auth, so the server-rendered SEO pages can call
+// them too.
+
+export type PresetSummary = {
+  slug: string;
+  data: import('@/data/presetItineraries').PresetItinerary;
+  vibes: string[];
+  region: string;
+  nights: number;
+  estCost: number;
+  costPerPerson: number;
+  durationBucket: 'weekend' | 'one-week' | 'two-weeks' | 'month';
+  budgetTier: '$' | '$$' | '$$$' | '$$$$';
+  categories: string[];
+  heroImageUrl: string | null;
+  staffPick: boolean;
+  source: 'curated' | 'generated';
+  refreshedAt: string | null;
+  cloneCount: number;
+  viewCount: number;
+  impressionCount: number;
+  trendingScore: number;
+  origin: { region: string; city: string; airport: string };
+};
+
+export type PresetCategory = {
+  slug: string;
+  title: string;
+  seoTitle: string;
+  metaDescription: string;
+  intro: string;
+  presetSlugs: string[];
+};
+
+export type PresetCatalog = {
+  presets: PresetSummary[];
+  editorial: { staffPicks: string[]; trending: string[] };
+  categories: PresetCategory[];
+};
+
+export async function getPresetCatalog(): Promise<PresetCatalog> {
+  const res = await fetch(`${BASE_URL}/api/presets`);
+  if (!res.ok) throw new ApiError(res.status, 'Could not load presets');
+  return res.json();
+}
+
+/** Engagement beacon (impression / view / use). Fire-and-forget: never
+ *  throws, never blocks the UI, survives page navigation (keepalive). */
+export function sendPresetEvents(events: Array<{ slug: string; kind: 'impression' | 'view' | 'use' }>): void {
+  if (events.length === 0) return;
+  try {
+    fetch(`${BASE_URL}/api/presets/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: events.slice(0, 50) }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // no-op
+  }
+}

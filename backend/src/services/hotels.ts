@@ -16,6 +16,50 @@ export type HotelResult = {
   amenities: string[];
 };
 
+// Words too generic to identify a hotel on their own.
+const GENERIC_HOTEL_WORDS = new Set(['hotel', 'hotels', 'the', 'and', 'by', 'resort', 'spa', 'a', 'of', 'de', 'la', 'le']);
+
+const hotelWords = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !GENERIC_HOTEL_WORDS.has(w));
+
+/** Same hotel? Every distinctive word of the preset's hotel name must
+ *  appear in the search result's name ("Gracery Shinjuku" matches "Hotel
+ *  Gracery Shinjuku Tokyo"). Substring matching wrongly paired short names
+ *  with unrelated hotels that happened to contain their letters. */
+export function isSameHotel(presetName: string, resultName: string): boolean {
+  const want = hotelWords(presetName);
+  if (want.length === 0) return false;
+  const got = new Set(hotelWords(resultName));
+  return want.every((w) => got.has(w));
+}
+
+/** Booking destination for one specific hotel ("hotel" type), or null when
+ *  the name doesn't resolve to that exact hotel in that city. Not cached:
+ *  only the weekly preset refresh uses it. */
+async function getHotelDestination(
+  hotelName: string,
+  cityName: string,
+): Promise<{ dest_id: string; dest_type: string } | null> {
+  if (!env.RAPIDAPI_KEY) return null;
+  const url = `https://booking-com.p.rapidapi.com/v1/hotels/locations?name=${encodeURIComponent(
+    `${hotelName} ${cityName}`,
+  )}&locale=en-gb`;
+  const res = await fetch(url, {
+    headers: { 'X-RapidAPI-Key': env.RAPIDAPI_KEY, 'X-RapidAPI-Host': 'booking-com.p.rapidapi.com' },
+  });
+  if (!res.ok) return null;
+  const list = (await res.json()) as any[];
+  const hit = (Array.isArray(list) ? list : []).find(
+    (x) => x?.dest_type === 'hotel' && x?.dest_id && isSameHotel(hotelName, String(x.name ?? '')),
+  );
+  return hit ? { dest_id: String(hit.dest_id), dest_type: 'hotel' } : null;
+}
+
 async function getDestinationId(
   cityName: string,
 ): Promise<{ dest_id: string; dest_type: string }> {
@@ -69,6 +113,9 @@ async function getDestinationId(
 
 type SearchHotelsParams = {
   city: string;
+  /** Price ONE specific hotel: resolved by name via Booking's location
+   *  search (dest_type 'hotel') instead of searching the whole city. */
+  hotelName?: string;
   checkin: string;
   checkout: string;
   adults: number;
@@ -77,7 +124,7 @@ type SearchHotelsParams = {
 };
 
 export async function searchHotels(params: SearchHotelsParams): Promise<HotelResult[]> {
-  const { city, checkin, checkout, adults, rooms, maxPrice } = params;
+  const { city, hotelName, checkin, checkout, adults, rooms, maxPrice } = params;
 
   if (!env.RAPIDAPI_KEY) {
     logger.warn('RAPIDAPI_KEY not set — returning empty hotel results');
@@ -85,7 +132,9 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
   }
 
   try {
-    const { dest_id, dest_type } = await getDestinationId(city);
+    const dest = hotelName ? await getHotelDestination(hotelName, city) : await getDestinationId(city);
+    if (!dest) return [];
+    const { dest_id, dest_type } = dest;
 
     const searchParams = new URLSearchParams({
       dest_id,

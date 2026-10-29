@@ -9,6 +9,10 @@ jest.mock('next/navigation', () => ({
   useSearchParams: () => mockSearchParams,
   useParams: () => ({ tripId: 'trip-test-123' }),
   usePathname: () => '/test',
+  // Server pages call notFound(); Next implements it by throwing.
+  notFound: () => {
+    throw new Error('NEXT_NOT_FOUND');
+  },
 }));
 
 // Mock next/link
@@ -170,6 +174,9 @@ jest.mock('@/lib/api', () => ({
   }),
   cancelAccountDeletion: jest.fn().mockResolvedValue({ success: true }),
   getPopularTrips: jest.fn().mockResolvedValue({ trips: [] }),
+  // Empty catalog → Browse keeps its bundled presets (the offline fallback).
+  getPresetCatalog: jest.fn().mockResolvedValue({ presets: [], editorial: { staffPicks: [], trending: [] }, categories: [] }),
+  sendPresetEvents: jest.fn(),
   updateTripPermissions: jest.fn().mockResolvedValue({ permissions: {} }),
   // null-safe default: an unchanged role never toasts or locks the canvas.
   getCanvasRole: jest.fn().mockResolvedValue({ role: 'editor' }),

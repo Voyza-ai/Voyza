@@ -353,6 +353,39 @@ without having to type anything — AND be the SEO surface that ranks
 for long-tail queries like "adventure trips from NYC under $1500".
 
 **Phase 1 — Decide & design (blocks everything else)**
+
+> **Decisions (locked 2026-10-10, revised 2026-10-21 — implemented on feat/work):**
+> - **Taxonomy** (`backend/src/services/presetTaxonomy.ts`): vibes = the app-wide 8
+>   (beach, food, history, art, nature, city, nightlife, romance; "adventure" → nature,
+>   "culture" → history+art, "food+wine" → food). **"family" is excluded**: no trip data
+>   can verify kid-friendliness; revisit with an explicit editorial flag. Duration:
+>   weekend ≤4n · 1 wk 5–8 · 2 wk 9–15 · month 16+. Budget tiers on **per-person** cost:
+>   $ <$750 · $$ <$1.5k · $$$ <$3k · $$$$ $3k+. Origin regions: US-East (JFK), US-West
+>   (LAX), Europe (LHR), Asia (SIN); catalog presets are priced from US-East, and "Plan a
+>   similar trip" re-prices from the traveler's own origin.
+> - **Category pages vs dynamic filters:** the full grid is 8 vibes × 5 destination
+>   regions × 4 lengths × 4 tiers × 4 origins = **2,560** combinations — far too many
+>   pages, most empty. So **8 editorial category pages**; everything else is dynamic on
+>   /browse (search, length + budget sliders, jump-to-section).
+> - **Page structure:** separate `/browse` page. Navbar link removed for now (owner, 2026-10-28) — reached via the hub, `/trips` SEO pages and direct links.
+> - **DB schema:** `preset_trips` + `preset_events` (migration 013).
+> - **Editorial / SEO strategy:** categories = Romance in Europe, Culture under $2k,
+>   Adventure trips from NYC, Beach escapes, Food trips, Weekend getaways, Two-week epics,
+>   Asia adventures — each with its own SEO title/description/intro copy (style: one
+>   sensory hook sentence, then what the trips include, second person, no hype).
+>   Trending = last-7-day score (use ×5, click-through/view ×1, impression ×0.05).
+>   **Staff-pick criteria** live in `backend/src/data/presets/editorial.json` (hand-reviewed,
+>   verified photo, plannable route, ≤6 spanning ≥2 regions + ≥2 lengths) and are enforced
+>   by a test.
+> - **SEO plan:** URLs `/trips/<category-slug>` + `/trips` hub; per-page title, meta
+>   description, canonical, Open Graph; schema.org `ItemList` of `TouristTrip`, each with a
+>   **`TravelAction`** (origin hub → first city) + `BreadcrumbList`; `/sitemap.xml` +
+>   `/robots.txt` (private app pages disallowed).
+> - **Hero images:** stock photos — the Wikipedia/Wikimedia lead image of each trip's
+>   signature landmark, falling back to the first city (no image-generation pass); logos,
+>   maps, flags, and crests are filtered out.
+> - **Row layout (owner decision 2026-10-21):** instead of horizontal-scroll rows, the
+>   category headers live inside the main grid as sections, 3 cards per row.
 - [ ] **Taxonomy**: lock the final list of vibes (beach, adventure, culture, romance, family, food+wine, etc.), budget tiers ($, $$, $$$, $$$$), duration buckets (weekend, 1 wk, 2 wk, month), origin regions (US-East, US-West, Europe, Asia). Decide combinatorially how many category pages we support vs. dynamic filters
 - [ ] **Page structure decision**: input-at-top-of-home with browse rows below, OR separate `/browse` page linked from nav. Affects how much the landing page has to do on first paint
 - [ ] **DB schema**: `preset_trips` table — inputs (vibe/budget/duration/origin-region), generated trip JSON, category tag(s), `created_at`, `refresh_status`, `hero_image_url`, `clone_count`, `impression_count`, `view_count`

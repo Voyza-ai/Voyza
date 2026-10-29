@@ -13,9 +13,9 @@ dates (2026-07-20), never "last week"._
 
 | Provider | Status | Sent |
 |---|---|---|
-| All Aboard | 🔑 **INTEGRATED** — live in searchTrains (test env) | 2026-07-29 |
+| All Aboard | 🔑 **INTEGRATED** — live in searchTrains (test env); catch-up sent | 2026-10-26 |
 | Omio | 🔁 follow-up sent | 2026-07-27 |
-| Junction | ⏸️ went quiet mid-scheduling — final note ~08-07, then park | 2026-07-31 |
+| Junction | 🔁 reconnect note sent after ~3 months silent | 2026-10-26 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
@@ -69,6 +69,17 @@ dates (2026-07-20), never "last week"._
   small; the value is one-app multi-leg booking.
 - **Note:** best odds of the bunch — developer-first company, public docs.
   First provider breakthrough; prioritize this thread.
+- **2026-09-03: Carl replied** — the API returns no link at search/offer
+  stage (our UI's link was our own homepage placeholder). Booking is
+  createBooking → createOrder → wallet or createPayment (hosted payment page,
+  the only URL). Docs: docs.allaboard.eu/tickets/book-tickets + /payments.
+  Test key validity: mid-November to year end.
+- **2026-10-26: catch-up reply sent** (same thread) — placeholder link
+  removed, integration running on test gateway (planner + weekly preset
+  re-pricing), booking flow next via hosted payment page + our service fee.
+  Asked how test-key renewal / production key works and what they need
+  before go-live. Said prototype ready by mid-November.
+- **Next:** await reply; renew/upgrade the key before it lapses at year end.
 
 ### Omio  🔁
 - **For:** rail + bus search, 1,000+ operators. Multimodal hedge.
@@ -97,6 +108,11 @@ dates (2026-07-20), never "last week"._
   (scheduled ~9:45 am his time): no scheduling ask, "no rush, door open
   whenever your calendar opens up." Then park. Warm welcome if he ever
   revives the thread; call prep notes preserved below.
+- **2026-10-26: reconnect note sent** (same thread, ~3 months after the
+  07-31 nudge) — live rail fares in the planner, prototype ready by
+  mid-November, still keen on a call re flights + routes beyond Europe;
+  asked him to name a time.
+- **Next:** wait. If silent ~2 weeks, park for good.
 - Prep (if call happens): volume story (~200 bookings, study-abroad
   students), service-fee model (post-Carl), All Aboard integration story,
   what we need (sandbox, EU rail coverage), their pricing/terms.
@@ -172,6 +188,15 @@ dates (2026-07-20), never "last week"._
 ## Response log
 
 _Append a line whenever anything happens, newest first._
+
+- 2026-10-26 — Catch-up emails sent (Gohil, same threads): **All Aboard**
+  (Carl) — progress update, asked about key renewal / production key and
+  go-live needs, prototype by mid-November. **Junction** (Hervé) — reconnect
+  note, asked for a call time.
+
+- 2026-09-03 — **Carl (All Aboard) replied**: no link at search/offer stage;
+  booking is createBooking → createOrder → createPayment (hosted payment
+  page). See All Aboard section.
 
 - 2026-08-03 — Junction: still silent after the 07-28 reschedule and the
   07-31 nudge (two unanswered). Decision: no third ping this week; one

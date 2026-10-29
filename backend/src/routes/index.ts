@@ -10,6 +10,7 @@ import trips from './trips';
 import users from './users';
 import notifications from './notifications';
 import email from './email';
+import presets from './presets';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
@@ -36,6 +37,8 @@ router.use('/notifications', requireAuth, notifications);
 // No requireAuth: unsubscribe links arrive from emails (no session), and
 // run-jobs authenticates schedulers via the CRON_SECRET header itself.
 router.use('/email', email);
+// Public: backs the server-rendered SEO category pages (crawlers are signed out).
+router.use('/presets', presets);
 
 // ─── Compare Leg ─────────────────────────────────────────────
 const compareLegSchema = z.object({

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useMemo, useEffect, useRef, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -19,11 +19,18 @@ import {
   SlidersHorizontal,
   Minus,
   Plus,
+  Star,
+  Flame,
+  ArrowRight,
 } from 'lucide-react';
+import Link from 'next/link';
 import Navbar from '@/components/shared/Navbar';
 import PopularTravelerTrips from '@/components/browse/PopularTravelerTrips';
+import MiniRoute from '@/components/browse/MiniRoute';
+import { getPresetCatalog, sendPresetEvents, type PresetCatalog } from '@/lib/api';
 import LoginModal from '@/components/shared/LoginModal';
 import { useAuthStore } from '@/store/authStore';
+import { useTripStore } from '@/store/tripStore';
 import { getCityColor } from '@/lib/cityColors';
 import { searchPresets } from '@/lib/marketplaceSearch';
 import {
@@ -32,10 +39,10 @@ import {
   presetNights,
   presetCost,
   presetCostFor,
+  presetPricePerPersonRange,
   buildPresetTrip,
   presetVibes,
 } from '@/data/presetItineraries';
-import type { Vibe } from '@/lib/types';
 import {
   stashCanvasIntent,
   clearCanvasIntent,
@@ -46,30 +53,31 @@ import { detectNearestAirportCity } from '@/lib/nearestAirport';
 import { getOriginAirports } from '@/lib/originAirports';
 import { getUseLocationPref, setUseLocationPref } from '@/lib/locationPref';
 
-const VIBES: Array<{ key: Vibe; label: string }> = [
-  { key: 'beach', label: 'Beach' },
-  { key: 'food', label: 'Food' },
-  { key: 'history', label: 'History' },
-  { key: 'art', label: 'Art' },
-  { key: 'nature', label: 'Nature' },
-  { key: 'city', label: 'City' },
-  { key: 'nightlife', label: 'Nightlife' },
-  { key: 'romance', label: 'Romance' },
-];
-
-// Slider bounds derived from the catalog, so they stay honest as presets
-// are added. Sliders sit at their max by default, which means "any".
-const NIGHTS_MIN = Math.min(...PRESET_ITINERARIES.map(presetNights));
-const NIGHTS_MAX = Math.max(...PRESET_ITINERARIES.map(presetNights));
-const COST_MIN = Math.floor(Math.min(...PRESET_ITINERARIES.map(presetCost)) / 100) * 100;
-const COST_MAX = Math.ceil(Math.max(...PRESET_ITINERARIES.map(presetCost)) / 100) * 100;
+// Slider bounds derived from the LIVE catalog, so they stay honest as
+// presets are added. Sliders sit at their max by default = "any".
+const catalogBounds = (presets: PresetItinerary[]) => ({
+  nightsMin: Math.min(...presets.map(presetNights)),
+  nightsMax: Math.max(...presets.map(presetNights)),
+  costMin: Math.floor(Math.min(...presets.map(presetCost)) / 100) * 100,
+  costMax: Math.ceil(Math.max(...presets.map(presetCost)) / 100) * 100,
+});
 
 const bannerBackground = (preset: PresetItinerary) =>
   preset.coverImage
     ? `linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.55) 100%), url(${preset.coverImage}) center/cover no-repeat, ${preset.coverGradient}`
     : preset.coverGradient;
 
+// Next 14: useSearchParams (the ?preset= deep link) needs a Suspense
+// boundary for static rendering.
 export default function BrowsePage() {
+  return (
+    <Suspense fallback={null}>
+      <BrowsePageInner />
+    </Suspense>
+  );
+}
+
+function BrowsePageInner() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const [selected, setSelected] = useState<PresetItinerary | null>(null);
@@ -100,18 +108,71 @@ export default function BrowsePage() {
   };
   const [query, setQuery] = useState('');
 
+  // Live catalog from the API (curated + AI-generated, with engagement,
+  // editorial rows, and category rows). Starts as the bundled presets so
+  // the page renders instantly and still works if the API is down.
+  const [catalogData, setCatalogData] = useState<PresetCatalog | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    getPresetCatalog()
+      .then((c) => {
+        if (!disposed && c.presets.length > 0) setCatalogData(c);
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+    };
+  }, []);
+  const catalog = useMemo<PresetItinerary[]>(
+    () => (catalogData ? catalogData.presets.map((p) => p.data) : PRESET_ITINERARIES),
+    [catalogData],
+  );
+  const bounds = useMemo(() => catalogBounds(catalog), [catalog]);
+  const NIGHTS_MIN = bounds.nightsMin;
+  const NIGHTS_MAX = bounds.nightsMax;
+  const COST_MIN = bounds.costMin;
+  const COST_MAX = bounds.costMax;
+
+  // Deep link from an SEO landing page: /browse?preset=<slug> opens it.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const slug = searchParams?.get('preset');
+    if (!slug) return;
+    const p = catalog.find((x) => x.slug === slug);
+    if (p) {
+      setSelected(p);
+      setTravelers(p.travelers);
+    }
+  }, [searchParams, catalog]);
+
   // Deferred filters: the sidebar controls edit a DRAFT; nothing filters
   // until the user clicks "Apply filters", which commits draft → applied.
   // Sliders filter by "at most" — full-right means no limit.
-  type Filters = { maxNights: number; maxBudget: number; vibe: Vibe | '' };
-  const NO_FILTERS: Filters = { maxNights: NIGHTS_MAX, maxBudget: COST_MAX, vibe: '' };
+  type Filters = { maxNights: number; maxBudget: number };
+  const NO_FILTERS: Filters = { maxNights: NIGHTS_MAX, maxBudget: COST_MAX };
   const [draft, setDraft] = useState<Filters>(NO_FILTERS);
   const [applied, setApplied] = useState<Filters>(NO_FILTERS);
+  // When the live catalog widens the bounds, a slider still sitting at the
+  // OLD max ("any") must move to the new max — otherwise newly loaded
+  // longer/pricier trips would be silently filtered out.
+  const prevBoundsRef = useRef(bounds);
+  useEffect(() => {
+    const prev = prevBoundsRef.current;
+    if (prev === bounds) return;
+    const widen = (f: Filters): Filters => ({
+      ...f,
+      maxNights: f.maxNights >= prev.nightsMax ? bounds.nightsMax : f.maxNights,
+      maxBudget: f.maxBudget >= prev.costMax ? bounds.costMax : f.maxBudget,
+    });
+    setDraft(widen);
+    setApplied(widen);
+    prevBoundsRef.current = bounds;
+  }, [bounds]);
 
   // Instant natural-language search — re-scores on every keystroke, no
   // network round-trip. Empty query shows the whole marketplace. The
   // applied sidebar filters then narrow whatever the search produced.
-  const searchResults = useMemo(() => searchPresets(query, PRESET_ITINERARIES), [query]);
+  const searchResults = useMemo(() => searchPresets(query, catalog), [query, catalog]);
   const isFiltering = query.trim().length > 0;
 
   const results = useMemo(
@@ -119,18 +180,16 @@ export default function BrowsePage() {
       searchResults.filter(
         (r) =>
           presetNights(r.preset) <= applied.maxNights &&
-          presetCost(r.preset) <= applied.maxBudget &&
-          (applied.vibe === '' || presetVibes(r.preset).includes(applied.vibe)),
+          presetCost(r.preset) <= applied.maxBudget,
       ),
     [searchResults, applied],
   );
 
   const filtersDirty =
     draft.maxNights !== applied.maxNights ||
-    draft.maxBudget !== applied.maxBudget ||
-    draft.vibe !== applied.vibe;
+    draft.maxBudget !== applied.maxBudget;
   const anyFilterActive =
-    applied.maxNights < NIGHTS_MAX || applied.maxBudget < COST_MAX || applied.vibe !== '';
+    applied.maxNights < NIGHTS_MAX || applied.maxBudget < COST_MAX;
 
   const applyFilters = () => setApplied(draft);
   const clearFilters = () => {
@@ -186,7 +245,55 @@ export default function BrowsePage() {
   // Save the preset to the user's trips (same saveTrip flow as a planned
   // trip, so it lands in their history), then open the results page for it
   // where they can edit freely.
+  // "Plan a similar trip": instead of copying the preset's stored prices,
+  // pre-fill the planner with its shape (cities, ~same length, party,
+  // origin, vibe, budget) and immediately run a FRESH optimize with
+  // today's prices — the same autorun path the savings-pill replan uses.
+  // The user lands on results and can tweak before saving.
+  const [planning, setPlanning] = useState(false);
+  const planSimilar = async (preset: PresetItinerary) => {
+    if (planning) return;
+    setPlanning(true);
+    sendPresetEvents([{ slug: preset.slug, kind: 'use' }]);
+    const origin = (await detectOrigin()) ?? { city: 'New York', airports: ['JFK'] };
+    const start = new Date();
+    start.setDate(start.getDate() + 30);
+    const end = new Date(start);
+    end.setDate(end.getDate() + presetNights(preset));
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const staged = {
+      destinations: preset.cities.map((c) => c.name),
+      dateRange: { start: iso(start), end: iso(end) },
+      travelers,
+      origin: origin.city,
+      originAirports: origin.airports,
+      returnToHome: true,
+      planningMode: 'destination',
+      vibe: presetVibes(preset)[0],
+      budget: presetCostFor(preset, travelers),
+      budgetPerPerson: false,
+    };
+    // Start from a clean planning session: resume=1 (needed for autorun)
+    // keeps whatever the store holds, and a leftover answer from an earlier
+    // plan — e.g. `nights`, which outranks the date range — would silently
+    // reshape this trip. Safe here: an event handler, not a render.
+    useTripStore.getState().resetPlanning();
+    try {
+      sessionStorage.setItem('bluemurr-autorun', JSON.stringify(staged));
+    } catch {
+      // storage blocked — the planner opens normally instead of auto-running
+    }
+    router.push('/plan?resume=1&autorun=1');
+  };
+
+  // Detail opened → a "view" engagement event (feeds Trending).
+  useEffect(() => {
+    if (selected) sendPresetEvents([{ slug: selected.slug, kind: 'view' }]);
+  }, [selected]);
+
   const saveAndOpen = async (preset: PresetItinerary) => {
+    sendPresetEvents([{ slug: preset.slug, kind: 'use' }]);
     const origin = await detectOrigin();
     if (!user) {
       stashCanvasIntent(buildIntent(preset, origin));
@@ -218,6 +325,158 @@ export default function BrowsePage() {
       setSaving(false);
     }
   };
+
+  // ── Headed sections for the grid ─────────────────────────────
+  type Section = {
+    key: string;
+    title: string;
+    icon?: 'star' | 'flame';
+    href?: string;
+    presets: PresetItinerary[];
+  };
+  const sections = useMemo<Section[]>(() => {
+    const filtered = results.map((r) => r.preset);
+    if (isFiltering) return [{ key: 'search', title: 'Search results', presets: filtered }];
+    const visible = new Map(filtered.map((p) => [p.slug, p]));
+    const pick = (slugs: string[]) =>
+      slugs.map((slug) => visible.get(slug)).filter((p): p is PresetItinerary => !!p);
+    const out: Section[] = [];
+    if (catalogData) {
+      out.push({ key: 'staff', title: 'Staff picks', icon: 'star', presets: pick(catalogData.editorial.staffPicks) });
+      out.push({ key: 'trending', title: 'Trending this week', icon: 'flame', presets: pick(catalogData.editorial.trending) });
+      for (const c of catalogData.categories) {
+        out.push({ key: c.slug, title: c.title, href: `/trips/${c.slug}`, presets: pick(c.presetSlugs) });
+      }
+    }
+    out.push({ key: 'all', title: 'All trips', presets: filtered });
+    return out.filter((sec) => sec.presets.length > 0);
+  }, [results, isFiltering, catalogData]);
+
+  // One impression beacon per catalog load for the cards in the editorial
+  // and category sections (deduped). Feeds the Trending ranking.
+  const impressionsSentRef = useRef(false);
+  useEffect(() => {
+    if (impressionsSentRef.current || !catalogData) return;
+    impressionsSentRef.current = true;
+    const shown = Array.from(
+      new Set(sections.filter((sec) => sec.key !== 'all' && sec.key !== 'search').flatMap((sec) => sec.presets.map((p) => p.slug))),
+    );
+    sendPresetEvents(shown.map((slug) => ({ slug, kind: 'impression' as const })));
+  }, [catalogData, sections]);
+
+  // Category badge: the preset's first category (catalog order), falling
+  // back to its scope ("One country") when the live catalog isn't loaded.
+  const categoryLabelFor = (slug: string): string | undefined => {
+    if (!catalogData) return undefined;
+    const cats = catalogData.presets.find((p) => p.slug === slug)?.categories ?? [];
+    return catalogData.categories.find((c) => cats.includes(c.slug))?.title;
+  };
+
+  const renderCard = (preset: PresetItinerary, idx: number) => (
+            <motion.button
+              key={preset.slug}
+              onClick={() => {
+                setSelected(preset);
+                setTravelers(preset.travelers);
+              }}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: idx * 0.05, ease: 'easeOut' }}
+              whileHover={{ y: -3 }}
+              className="text-left bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col min-h-[420px]"
+            >
+              {/* Gradient banner. w-full is load-bearing: the card is a
+                  <button>, and Safari doesn't stretch a flex button's
+                  children — without it the banner shrank to the title's
+                  width and the photo covered only part of the card. */}
+              <div
+                className="w-full h-44 flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
+                style={{ background: bannerBackground(preset) }}
+              >
+                <span
+                  className="absolute top-2 right-2 text-[9px] font-medium px-1.5 py-0.5 rounded-full"
+                  style={{ background: 'rgba(0,0,0,0.35)', color: 'white' }}
+                  data-testid="category-badge"
+                >
+                  {(categoryLabelFor(preset.slug) ?? preset.scope).toUpperCase()}
+                </span>
+                <div className="text-white text-[15px] font-bold leading-tight drop-shadow-sm line-clamp-2">
+                  {preset.title}
+                </div>
+                <div className="text-white/85 text-[10px] mt-0.5">{preset.flags}</div>
+              </div>
+
+              {/* Body (w-full: same Safari <button> stretch fix as the banner) */}
+              <div className="w-full p-4 flex-1 flex flex-col min-h-0">
+                <p className="text-[12px] text-gray-600 leading-snug mb-2">
+                  {preset.tagline}
+                </p>
+                <div className="mb-2.5">
+                  <MiniRoute cities={preset.cities} />
+                </div>
+
+                {/* Vibe chips */}
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {presetVibes(preset).slice(0, 4).map((v) => (
+                    <span
+                      key={v}
+                      className="px-2 py-0.5 rounded-full text-[9px] font-medium uppercase tracking-wider"
+                      style={{ background: 'rgba(37,99,235,0.07)', color: '#2563eb' }}
+                    >
+                      {v}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Highlights — the best moment from each city */}
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-1.5">
+                    Highlights
+                  </div>
+                  <ul className="flex flex-col gap-1.5">
+                    {preset.cities.slice(0, 4).map(
+                      (c) =>
+                        c.activities[0] && (
+                          <li
+                            key={c.name}
+                            className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-snug"
+                          >
+                            <Sparkles
+                              size={10}
+                              className="flex-shrink-0 mt-0.5"
+                              style={{ color: '#2563eb' }}
+                            />
+                            <span>{c.activities[0]}</span>
+                          </li>
+                        ),
+                    )}
+                  </ul>
+                </div>
+
+                <div className="flex items-center justify-between mt-auto pt-3 border-t border-gray-100">
+                  <div className="flex gap-2.5 text-[10px] text-gray-500">
+                    <span className="flex items-center gap-0.5">
+                      <Moon size={10} />
+                      {presetNights(preset)}n
+                    </span>
+                    <span className="flex items-center gap-0.5">
+                      <Users size={10} />
+                      {preset.travelers}
+                    </span>
+                  </div>
+                  <span
+                    className="text-[12px] font-semibold"
+                    style={{ color: '#2563eb' }}
+                    title="Per person: 2 sharing a room – solo"
+                  >
+                    ${presetPricePerPersonRange(preset).low.toLocaleString()}–$
+                    {presetPricePerPersonRange(preset).high.toLocaleString()}
+                    <span className="font-normal text-gray-400"> /person</span>
+                  </span>
+                </div>
+              </div>
+            </motion.button>
+  );
 
   return (
     <main className="min-h-screen" style={{ background: '#f0f4f8' }}>
@@ -261,7 +520,7 @@ export default function BrowsePage() {
           </div>
           {(isFiltering || anyFilterActive) && results.length > 0 && (
             <div className="text-[11px] text-gray-400 text-center mt-2.5">
-              {results.length} of {PRESET_ITINERARIES.length} itineraries
+              {results.length} of {catalog.length} itineraries
               {isFiltering ? ' match — best match first' : ''}
             </div>
           )}
@@ -272,7 +531,7 @@ export default function BrowsePage() {
             on the same axis as the search bar above. */}
         <div className="flex flex-col lg:flex-row gap-6 items-start">
           {/* ─── Filter sidebar ─── */}
-          <aside className="w-full lg:w-60 flex-shrink-0 lg:sticky lg:top-20 bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col gap-6">
+          <aside className="w-full lg:w-60 flex-shrink-0 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col gap-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-gray-800 text-[13px] font-semibold">
                 <SlidersHorizontal size={14} style={{ color: '#2563eb' }} />
@@ -348,31 +607,6 @@ export default function BrowsePage() {
               </div>
             </div>
 
-            {/* Vibe dropdown */}
-            <div>
-              <label
-                htmlFor="filter-vibe"
-                className="block text-[10px] uppercase tracking-wider text-gray-400 mb-2"
-              >
-                Vibe
-              </label>
-              <select
-                id="filter-vibe"
-                aria-label="Vibe"
-                value={draft.vibe}
-                onChange={(e) => setDraft((d) => ({ ...d, vibe: e.target.value as Vibe | '' }))}
-                className="w-full px-3 py-2 rounded-xl text-[12px] text-gray-800 outline-none cursor-pointer border transition-colors focus:border-[#2563eb]"
-                style={{ background: '#f0f4f8', borderColor: 'rgba(0,0,0,0.08)' }}
-              >
-                <option value="">Any vibe</option>
-                {VIBES.map((v) => (
-                  <option key={v.key} value={v.key}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             {/* Apply — filters only take effect when clicked */}
             <button
               onClick={applyFilters}
@@ -384,13 +618,40 @@ export default function BrowsePage() {
             </button>
 
             <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-3">
-              {results.length} of {PRESET_ITINERARIES.length} itineraries shown
+              {results.length} of {catalog.length} itineraries shown
               {filtersDirty && (
                 <span className="block mt-1 text-amber-600">
                   Unapplied changes — click Apply
                 </span>
               )}
             </div>
+
+            {/* Jump to a section — the page's headers, as navigation.
+                Lists only sections currently on the page. */}
+            {sections.length > 1 && (
+              <nav aria-label="Jump to section" className="border-t border-gray-100 pt-4">
+                <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Jump to</div>
+                <ul className="flex flex-col gap-0.5">
+                  {sections.map((section) => (
+                    <li key={section.key}>
+                      <button
+                        onClick={() =>
+                          document
+                            .getElementById(`section-${section.key}`)
+                            ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                        }
+                        className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-left text-[12px] text-gray-700 hover:bg-[#f0f4f8] hover:text-[#2563eb] transition-colors"
+                      >
+                        <span className="truncate">{section.title}</span>
+                        <span className="text-[10px] text-gray-400 flex-shrink-0">
+                          {section.presets.length}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            )}
           </aside>
 
           {/* ─── Main column: results fill all remaining width ─── */}
@@ -404,7 +665,7 @@ export default function BrowsePage() {
                 <p className="text-[13px] text-gray-500 mb-5 max-w-sm">
                   {isFiltering
                     ? 'There are matching trips outside your current filters.'
-                    : 'Try raising the length or budget sliders, or switching the vibe.'}
+                    : 'Try raising the length or budget sliders.'}
                 </p>
                 <button
                   onClick={clearFilters}
@@ -441,108 +702,40 @@ export default function BrowsePage() {
               </div>
             )}
 
-            {/* Cards — compact squares, 3-up on desktop */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {results.map(({ preset }, idx) => (
-                <motion.button
-                  key={preset.slug}
-                  onClick={() => {
-                    setSelected(preset);
-                    setTravelers(preset.travelers);
-                  }}
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: idx * 0.05, ease: 'easeOut' }}
-                  whileHover={{ y: -3 }}
-                  className="text-left bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col min-h-[420px]"
+            {/* Headed sections, 3 cards per row. Browsing: Staff picks,
+                Trending, each category, then All trips — every section
+                narrowed by the search box + sidebar filters (empty sections
+                hide). Searching: one relevance-ranked "Search results". */}
+            <div className="flex flex-col gap-8">
+              {sections.map((section) => (
+                <section
+                  key={section.key}
+                  id={`section-${section.key}`}
+                  aria-label={section.title}
+                  className="scroll-mt-24"
                 >
-                  {/* Gradient banner. w-full is load-bearing: the card is a
-                      <button>, and Safari doesn't stretch a flex button's
-                      children — without it the banner shrank to the title's
-                      width and the photo covered only part of the card. */}
-                  <div
-                    className="w-full h-44 flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
-                    style={{ background: bannerBackground(preset) }}
-                  >
-                    <span
-                      className="absolute top-2 right-2 text-[9px] font-medium px-1.5 py-0.5 rounded-full"
-                      style={{ background: 'rgba(255,255,255,0.25)', color: 'white' }}
-                    >
-                      {preset.scope.toUpperCase()}
-                    </span>
-                    <div className="text-white text-[15px] font-bold leading-tight drop-shadow-sm line-clamp-2">
-                      {preset.title}
-                    </div>
-                    <div className="text-white/85 text-[10px] mt-0.5">{preset.flags}</div>
-                  </div>
-
-                  {/* Body (w-full: same Safari <button> stretch fix as the banner) */}
-                  <div className="w-full p-4 flex-1 flex flex-col min-h-0">
-                    <p className="text-[12px] text-gray-600 leading-snug mb-2">
-                      {preset.tagline}
-                    </p>
-                    <div className="flex items-center gap-1 text-[11px] text-gray-500 min-w-0 mb-2.5">
-                      <MapPin size={11} className="flex-shrink-0" />
-                      <span className="truncate">
-                        {preset.cities.map((c) => c.name).join(' → ')}
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="flex items-center gap-1.5 text-[15px] font-semibold text-gray-900">
+                      {section.icon === 'star' && <Star size={14} className="text-amber-500" />}
+                      {section.icon === 'flame' && <Flame size={14} className="text-orange-500" />}
+                      {section.title}
+                      <span className="text-[12px] font-normal text-gray-400">
+                        {section.presets.length}
                       </span>
-                    </div>
-
-                    {/* Vibe chips */}
-                    <div className="flex flex-wrap gap-1 mb-3">
-                      {presetVibes(preset).slice(0, 4).map((v) => (
-                        <span
-                          key={v}
-                          className="px-2 py-0.5 rounded-full text-[9px] font-medium uppercase tracking-wider"
-                          style={{ background: 'rgba(37,99,235,0.07)', color: '#2563eb' }}
-                        >
-                          {v}
-                        </span>
-                      ))}
-                    </div>
-
-                    {/* Highlights — the best moment from each city */}
-                    <div>
-                      <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-1.5">
-                        Highlights
-                      </div>
-                      <ul className="flex flex-col gap-1.5">
-                        {preset.cities.slice(0, 4).map(
-                          (c) =>
-                            c.activities[0] && (
-                              <li
-                                key={c.name}
-                                className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-snug"
-                              >
-                                <Sparkles
-                                  size={10}
-                                  className="flex-shrink-0 mt-0.5"
-                                  style={{ color: '#2563eb' }}
-                                />
-                                <span>{c.activities[0]}</span>
-                              </li>
-                            ),
-                        )}
-                      </ul>
-                    </div>
-
-                    <div className="flex items-center justify-between mt-auto pt-3 border-t border-gray-100">
-                      <div className="flex gap-2.5 text-[10px] text-gray-500">
-                        <span className="flex items-center gap-0.5">
-                          <Moon size={10} />
-                          {presetNights(preset)}n
-                        </span>
-                        <span className="flex items-center gap-0.5">
-                          <Users size={10} />
-                          {preset.travelers}
-                        </span>
-                      </div>
-                      <span className="text-[12px] font-semibold" style={{ color: '#2563eb' }}>
-                        ~${presetCost(preset).toLocaleString()}
-                      </span>
-                    </div>
+                    </h2>
+                    {section.href && (
+                      <Link
+                        href={section.href}
+                        className="flex items-center gap-1 text-[12px] font-medium text-[#2563eb] hover:underline underline-offset-2"
+                      >
+                        See all <ArrowRight size={12} />
+                      </Link>
+                    )}
                   </div>
-                </motion.button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {section.presets.map((preset, idx) => renderCard(preset, idx))}
+                  </div>
+                </section>
               ))}
             </div>
           </div>
@@ -736,8 +929,18 @@ export default function BrowsePage() {
                       Close
                     </button>
                     <button
+                      onClick={() => planSimilar(selected)}
+                      disabled={saving || locating || planning}
+                      title="Re-plan this route with today's live prices"
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all hover:bg-blue-50 disabled:opacity-50"
+                      style={{ color: '#2563eb', border: '1px solid #2563eb' }}
+                    >
+                      {planning ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                      {planning ? 'Planning…' : 'Plan a similar trip'}
+                    </button>
+                    <button
                       onClick={() => saveAndOpen(selected)}
-                      disabled={saving || locating}
+                      disabled={saving || locating || planning}
                       className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-50"
                       style={{ background: '#2563eb' }}
                     >

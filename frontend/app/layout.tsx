@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import '@/styles/globals.css';
 import AuthProvider from '@/components/shared/AuthProvider';
+import { SITE_URL } from '@/lib/site';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: 'BlueMurr — The Smartest Way to Travel',
   description:
     'Less money, less searching, more vibes. BlueMurr finds the cheapest way to take any trip — optimizing across flights and trains simultaneously.',
