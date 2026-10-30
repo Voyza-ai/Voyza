@@ -90,7 +90,7 @@ describe('the header while home legs are re-priced for another origin', () => {
 
     render(<ResultsPage />);
     expect(perPersonLine()).toBe(perPerson(trip));
-    expect(screen.getByText('Best price')).toBeInTheDocument();
+    expect(screen.getByText('Live prices')).toBeInTheDocument();
 
     await chooseMaine();
     await waitFor(() => expect(mockedFetchHomeLegs).toHaveBeenCalledTimes(2));
@@ -102,7 +102,7 @@ describe('the header while home legs are re-priced for another origin', () => {
     expect(screen.getAllByText(/Finding flights/i).length).toBeGreaterThan(0);
     // ...but the header still prices a whole trip, and invents no saving.
     expect(perPersonLine()).toBe(perPerson(trip));
-    expect(screen.getByText('Best price')).toBeInTheDocument();
+    expect(screen.getByText('Live prices')).toBeInTheDocument();
     expect(screen.queryByText('You can save')).not.toBeInTheDocument();
 
     // One direction lands: the header still holds the last settled total. It
@@ -145,7 +145,7 @@ describe('the header while home legs are re-priced for another origin', () => {
     await waitFor(() => expect(perPersonLine()).toBe(perPerson(settled)));
     expect(liveTripTotal(settled)).toBeLessThan(liveTripTotal(trip));
     expect(screen.queryByText('You can save')).not.toBeInTheDocument();
-    expect(screen.getByText('Best price')).toBeInTheDocument();
+    expect(screen.getByText('Live prices')).toBeInTheDocument();
     // The stored total follows the live one, so the baseline moved with it.
     expect(settled.totalCost).toBe(liveTripTotal(settled));
   });

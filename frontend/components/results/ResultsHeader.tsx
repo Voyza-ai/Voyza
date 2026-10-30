@@ -158,8 +158,12 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
   const shiftSavings = trip.dateShiftSuggestion?.savings ?? 0;
   const shiftIsBest = shiftSavings > liveSavings;
   const bestSavings = shiftIsBest ? shiftSavings : liveSavings;
-  // Nothing cheaper exists: neither the routing nor any nearby start date
-  // beats these prices. Say so positively instead of "You can save $0".
+  // Nothing to offer: no routing saving and no date-shift suggestion. Said as
+  // what it is — live prices for these dates — not as "Best price". The
+  // optimizer's date probe returns no suggestion alike when it found nothing,
+  // when it was skipped (an inter-city leg unpriced) or failed, and it never
+  // runs for a saved Browse preset or after the dates change, so "nothing
+  // cheaper" is not something the client can claim. Never "You can save $0".
   const nothingToSave = Math.round(bestSavings) <= 0;
   const shiftDateNice = (() => {
     const iso = trip.dateShiftSuggestion?.newStartDate;
@@ -441,7 +445,7 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
                 )}
               </div>
               <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
-                {nothingToSave ? 'Best price' : `$${animatedSavings.toLocaleString()}`}
+                {nothingToSave ? 'Live prices' : `$${animatedSavings.toLocaleString()}`}
               </div>
               <div className="text-[#22c088]/50 text-[9px]">
                 {nothingToSave
