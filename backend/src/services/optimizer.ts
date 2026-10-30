@@ -24,13 +24,22 @@ import { AppError } from '../middleware/error';
  * (10 min) already decide deliberately. A rejected lookup stays rejected
  * for the rest of the run — the same answer every caller would have got.
  *
- * Trip context: `iata` is the ONE place this run resolves a city to an
- * airport — compareLeg, the home-leg estimates and builds, the origin and
- * metro fallbacks all go through it — and it always passes the trip's city
- * names, so "Lagos" on a Lisbon + Porto trip is FAO and bare it is LOS.
- * Keying the memo by name alone stays correct: the context is the same for
- * every lookup in a run (the whole trip), so within a run a name has exactly
- * one answer; a different trip is a different run with its own memo.
+ * Trip context: `iata` resolves every DESTINATION in this run — compareLeg
+ * and the home-leg estimates and builds go through it — and always passes
+ * the trip's city names, so "Lagos" on a Lisbon + Porto trip is FAO and
+ * bare it is LOS. Keying its memo by name alone stays correct: the context
+ * is the same for every destination lookup in a run, so within a run a name
+ * has exactly one answer; another trip is another run with its own memo.
+ *
+ * The HOME city is a different question and goes through `homeIata`, with
+ * NO trip context and its own memo. Where someone lives is independent of
+ * where they are going — a Portugal itinerary makes Lagos, Portugal LESS
+ * likely to be home, not more — and the destinations as context actively
+ * hurt: getIataCode checks a Duffel suggestion against the trip's stops, so
+ * a home town only Duffel knows (far from the trip, by definition) was
+ * refused and the trip lost its home flights. Separate memos also mean a
+ * name that is both home and a stop ("Lagos" -> LOS home, FAO stop) never
+ * shares one answer.
  */
 type RunContext = {
   /** Every city on the trip — the context every airport lookup gets. */
@@ -41,6 +50,8 @@ type RunContext = {
    * is fixed (compareLeg passes the same names it was given by this run).
    */
   iata: (cityName: string, context?: IataLookupContext) => Promise<string>;
+  /** getIataCode for the HOME city: no trip context, its own memo. */
+  homeIata: (cityName: string) => Promise<string>;
   compare: (params: CompareLegParams) => Promise<LegComparison>;
   /** searchFlights, counted — see `flightOutcomes`. */
   flights: typeof searchFlights;
@@ -72,18 +83,24 @@ function createRunContext(tripCityNames: string[]): RunContext {
     }
   };
 
-  const iataMemo = new Map<string, Promise<string>>();
-  const iata = (cityName: string): Promise<string> => {
-    let hit = iataMemo.get(cityName);
-    if (!hit) {
-      hit = getIataCode(cityName, { tripDestinationNames: tripCityNames });
-      hit.catch((err: any) => {
-        if ((err?.statusCode ?? 0) >= 500) noteThrow(err);
-      });
-      iataMemo.set(cityName, hit);
-    }
-    return hit;
+  const memoized = (lookup: (cityName: string) => Promise<string>) => {
+    const memo = new Map<string, Promise<string>>();
+    return (cityName: string): Promise<string> => {
+      let hit = memo.get(cityName);
+      if (!hit) {
+        hit = lookup(cityName);
+        hit.catch((err: any) => {
+          if ((err?.statusCode ?? 0) >= 500) noteThrow(err);
+        });
+        memo.set(cityName, hit);
+      }
+      return hit;
+    };
   };
+  const iata = memoized((cityName) =>
+    getIataCode(cityName, { tripDestinationNames: tripCityNames }),
+  );
+  const homeIata = memoized((cityName) => getIataCode(cityName));
 
   const compareMemo = new Map<string, Promise<LegComparison>>();
   const compare = (params: CompareLegParams): Promise<LegComparison> => {
@@ -106,7 +123,7 @@ function createRunContext(tripCityNames: string[]): RunContext {
     return hit;
   };
 
-  return { tripCityNames, iata, compare, flights, flightOutcomes };
+  return { tripCityNames, iata, homeIata, compare, flights, flightOutcomes };
 }
 
 type CityInput = {
@@ -972,10 +989,11 @@ export async function buildHomeLeg(params: {
    *  but the NYC metro code has plenty). */
   originCity?: string;
   /**
-   * Every city on the trip, so the destination (and the metro fallback)
-   * resolve to the reading this trip means — "Lagos" on a Lisbon + Porto
-   * trip is FAO. Used when no run context is passed (/api/flights/home-legs);
-   * inside optimize() the run's context already carries the trip.
+   * Every city on the trip, so the DESTINATION resolves to the reading this
+   * trip means — "Lagos" on a Lisbon + Porto trip is FAO. The metro fallback
+   * resolves the home city and never uses it. Used when no run context is
+   * passed (/api/flights/home-legs); inside optimize() the run's context
+   * already carries the trip.
    */
   tripCityNames?: string[];
 }, ctx: RunContext = createRunContext(params.tripCityNames ?? [])): Promise<HomeLeg | null> {
@@ -994,7 +1012,8 @@ export async function buildHomeLeg(params: {
   // origin city's metro/primary code, which covers all its airports.
   if (offers.length === 0 && params.originCity) {
     try {
-      const metro = await ctx.iata(params.originCity);
+      // The HOME city's code — no trip context (see RunContext.homeIata).
+      const metro = await ctx.homeIata(params.originCity);
       // Compare against the capped list — with a longer array the metro
       // code could sit past the cap, i.e. never actually searched.
       if (metro && !homeAirportsFor(params.originAirports).includes(metro.toUpperCase())) {
@@ -1132,7 +1151,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       resolvedOriginAirports = resolution.airports;
     } else {
       try {
-        const single = await ctx.iata(origin!);
+        // The HOME city — no trip context (see RunContext.homeIata).
+        const single = await ctx.homeIata(origin!);
         resolvedOriginAirports = [single];
       } catch {
         logger.warn('Could not resolve origin IATA', { origin });
