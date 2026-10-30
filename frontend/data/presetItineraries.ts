@@ -908,10 +908,16 @@ export function presetBudgetBucket(preset: PresetItinerary): BudgetBucket {
   return 'premium';
 }
 
+/** Hotel rooms a party books: rooms sleep 2. The one rule both the /browse
+ *  quote (presetCostFor) and the saved trip (buildPresetTrip) price with. */
+export function presetRooms(travelers: number): number {
+  return Math.max(1, Math.ceil(travelers / 2));
+}
+
 /** Rough all-in cost for a given party size: hotel rooms sleep 2, so rooms
  *  scale at ceil(travelers/2); inter-city transport is per person. */
 export function presetCostFor(preset: PresetItinerary, travelers: number): number {
-  const rooms = Math.max(1, Math.ceil(travelers / 2));
+  const rooms = presetRooms(travelers);
   const hotels =
     preset.cities.reduce((s, c) => s + c.hotel.pricePerNight * c.nights, 0) * rooms;
   const transport = preset.cities.reduce(
@@ -953,6 +959,27 @@ export function buildPresetTrip(
   const start = new Date();
   start.setDate(start.getDate() + 30);
 
+  // A preset stores prices in its own units — transport PER PERSON, hotels
+  // PER ROOM per night — while a saved Trip holds party totals throughout:
+  // tripTotals sums Transport.price as the whole party's fare, and a hotel's
+  // pricePerNight is the party's nightly bill for every room it books (the
+  // planner-wide model: rooms = ceil(travelers / 2), the price covering all
+  // of them, no separate room multiplier). Converting here is what makes the
+  // saved trip's header match the /browse quote (presetCostFor). Copying
+  // the stored numbers put the header at 0.90× the quote for 2 travelers,
+  // 0.45× for 4 and 0.30× for 6 (agent-a presets_units2).
+  const rooms = presetRooms(travelers);
+  const partyTransport = (t: Transport): Transport => ({
+    ...t,
+    price: t.price * travelers,
+    ...(t.alternatives ? { alternatives: t.alternatives.map(partyTransport) } : {}),
+  });
+  const partyHotel = (h: Hotel): Hotel => ({
+    ...h,
+    pricePerNight: h.pricePerNight * rooms,
+    ...(h.taxesPerNight != null ? { taxesPerNight: h.taxesPerNight * rooms } : {}),
+  });
+
   let cursor = new Date(start);
   const cities: City[] = preset.cities.map((pc, i) => {
     const arrival = toIso(cursor);
@@ -962,12 +989,13 @@ export function buildPresetTrip(
     cursor = dep;
 
     const transportOut = pc.transportOut
-      ? { ...pc.transportOut, from: pc.name, to: preset.cities[i + 1]?.name ?? '' }
+      ? { ...partyTransport(pc.transportOut), from: pc.name, to: preset.cities[i + 1]?.name ?? '' }
       : { ...EMPTY_TRANSPORT };
     const prev = preset.cities[i - 1];
     const transportIn = prev?.transportOut
-      ? { ...prev.transportOut, from: prev.name, to: pc.name }
+      ? { ...partyTransport(prev.transportOut), from: prev.name, to: pc.name }
       : { ...EMPTY_TRANSPORT };
+    const hotel = partyHotel(pc.hotel);
 
     return {
       name: pc.name,
@@ -975,8 +1003,8 @@ export function buildPresetTrip(
       dates: { arrival, departure },
       transportIn,
       transportOut,
-      hotel: pc.hotel,
-      hotels: [pc.hotel],
+      hotel,
+      hotels: [hotel],
       selectedHotelIndex: 0,
       activities: pc.activities,
       restaurants: pc.restaurants,
