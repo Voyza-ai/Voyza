@@ -24,6 +24,7 @@ import { converse } from '../services/planConverse';
 import { compareLeg } from '../services/compareLeg';
 import { getCityCountry } from '../data/cityCountries';
 import { parseDurationMinutes } from '../utils/duration';
+import { todayIso } from '../utils/dates';
 
 import { getAnthropicSafe } from '../services/anthropic';
 
@@ -790,7 +791,13 @@ router.post(
     }
     messages.push({ role: 'user', content: message });
 
+    // Today's date is computed per request (never cached across days).
+    // Without it the model has to guess the year of a pin, and a wrong
+    // guess (Dec 2024 for this December) is refused by pinProblem() as
+    // "already passed" — a confusing answer to a reasonable request.
     const systemPrompt = `You are BlueMurr AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
+
+Today is ${todayIso()} (UTC). Trip dates are always in the future: a date the user gives without a year ("Dec 10", "the 15th") means its next occurrence after today.
 
 You have six tools:
 1. answer_only — for plain questions, explanations, small talk, AND for clarifying questions when the user's request is ambiguous about which leg.
@@ -1397,7 +1404,11 @@ router.post(
         // old "one enhancement (activity/swap)" asked for things no tool
         // does — "Add Thames river activity in London?" got "I can't book
         // activities directly" (D-07).
-        system: `You generate 4 short, specific, trip-tailored prompt suggestions that the user could click to start a conversation with BlueMurr AI about their itinerary. Each suggestion:
+        system: `You generate 4 short, specific, trip-tailored prompt suggestions that the user could click to start a conversation with BlueMurr AI about their itinerary.
+
+Today is ${todayIso()} (UTC). Any date a suggestion mentions must be in the future.
+
+Each suggestion:
 - Is under 40 characters
 - References a specific city, leg, or feature of THIS trip (not generic)
 - Is a question or a request the user might realistically have
