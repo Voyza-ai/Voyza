@@ -54,6 +54,13 @@ export type CompareLegParams = {
    * means: "Lagos" on a Lisbon + Porto trip is FAO, bare it is LOS.
    */
   tripCityNames?: string[];
+  /**
+   * The caller shows this flight to a person (its times and stops on a card),
+   * so the cached flight row — price and duration only — won't do; search
+   * instead (searchFlights' own 10-minute memo still dedupes). The optimizer
+   * ranks on price and leaves this off.
+   */
+  display?: boolean;
 };
 
 /**
@@ -134,7 +141,7 @@ export async function compareLeg(
   // the artifact cannot answer either way, where the trip only changes which
   // Duffel suggestion is believed — rare, and no worse than before.
   // Trains are searched by city name, not airport, so their rows are kept.
-  const flightCacheUsable = !dependsOnTrip(origin) && !dependsOnTrip(destination);
+  const flightCacheUsable = !params.display && !dependsOnTrip(origin) && !dependsOnTrip(destination);
 
   // Both airports, looked up alongside the cache reads. A leg whose two
   // cities share an airport — Zurich → Interlaken is ZRH → ZRH, Oxford →

@@ -60,7 +60,9 @@ router.post(
   '/search/compare-leg',
   asyncHandler(async (req, res) => {
     const input = compareLegSchema.parse(req.body);
-    const result = await compareLeg(input);
+    // Every caller of this route puts the flight on a card (the results
+    // page and canvas re-pricing a leg after a date change): it needs times.
+    const result = await compareLeg({ ...input, display: true });
     res.json(result);
   }),
 );
