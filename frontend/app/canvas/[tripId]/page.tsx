@@ -708,12 +708,19 @@ function CanvasPageInner() {
   // Backstop: broadcasts are fire-and-forget, so on the rare chance one is
   // dropped while I'm on the canvas (connected + focused, so neither the focus
   // nor reconnect handler fires), re-derive my role on a slow poll. Guarantees
-  // the view converges on the real role within ~25s in every case. The call is
-  // cheap and a no-op when nothing changed, so we don't bother gating on tab
-  // visibility (a backgrounded tab still self-heals rather than waiting for a
-  // return-to-focus that may never come).
+  // the view converges on the real role within ~25s of being looked at.
+  //
+  // Paused while the tab is hidden. Each poll is a request against the
+  // general 100-per-15-minutes limit, and every canvas tab polled whether or
+  // not anyone was looking: two tabs left open spent 72 of the 100, which
+  // 429s the planner in another tab — and the frontend swallows 429s. A
+  // hidden tab's role only matters once it is seen again, and the
+  // visibilitychange handler below re-checks at exactly that moment, so the
+  // view still converges before anyone can act on a stale role.
   useEffect(() => {
-    const id = setInterval(refreshRole, 25000);
+    const id = setInterval(() => {
+      if (!document.hidden) refreshRole();
+    }, 25000);
     return () => clearInterval(id);
   }, [refreshRole]);
 
