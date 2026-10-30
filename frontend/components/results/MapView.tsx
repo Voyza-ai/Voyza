@@ -14,7 +14,7 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import { Trip } from '@/lib/types';
-import { geocodeCities, GeoPoint } from '@/lib/geocode';
+import { geocodeTripCities, GeoPoint } from '@/lib/geocode';
 import { unwrapLons, centroid } from '@/lib/mapBounds';
 import { visitOrderLabel } from '@/lib/visitOrder';
 import { getCityColor, HOME_COLOR } from '@/lib/cityColors';
@@ -857,7 +857,7 @@ export default function MapView({ trip }: MapViewProps) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    geocodeCities(names.map((n) => n.query)).then((points) => {
+    geocodeTripCities(names.map((n) => n.query)).then((points) => {
       if (cancelled) return;
       const resolved: PinPoint[] = [];
       const failed: string[] = [];

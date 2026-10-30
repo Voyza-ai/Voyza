@@ -9,6 +9,9 @@ import {
   PRESET_ORIGIN_REGION,
   REGION_LABELS,
 } from './presetTaxonomy';
+import { resolve } from './location';
+import { originIndex } from './location/originAirports';
+import { getStaticIata } from '../data/cityAirports';
 
 /**
  * Pure pieces of the AI preset generator (scripts/generatePresets.ts):
@@ -259,6 +262,82 @@ export function wikimediaThumb(url: string, width = 1280): string {
   return `https://upload.wikimedia.org/wikipedia/commons/thumb/${a}/${ab}/${file}/${width}px-${file}`;
 }
 
+// ── Checks the model's output can't be trusted to pass (audit E16) ──────
+// Measured on the shipped generated.json: "Ferry + Transfer" stored as a
+// FLIGHT, a hotel named "Hotel A", and cities no airport serves.
+
+/** Modes the planner doesn't model. A leg naming one is not a flight or a
+ *  train, whatever its `mode` says ("Ferry + Transfer" was a "flight"). */
+const OTHER_MODE_WORDS =
+  /\b(ferry|ferries|boat|bus|coach|transfer|shuttle|car|taxi|drive|driving|cruise|catamaran|hydrofoil|minivan|van)\b/i;
+/** Names that only a train operator carries. "Express" is deliberately
+ *  absent: Sky Express is an airline. */
+const RAIL_WORDS =
+  /\b(rail|railways?|railjet|trains?|shinkansen|eurostar|tgv|ouigo|thalys|frecciarossa|frecciargento|trenitalia|italo|sncf|renfe|amtrak|bahn)\b/i;
+/** Names that only an airline carries. Plenty of airlines have none of
+ *  these (Scoot, Volaris, LATAM), so this only catches a train that is
+ *  plainly an airline, never the other way round. */
+const AIR_WORDS = /\b(air|airlines?|airways|aerol[ií]neas|aviation|flights?)\b/i;
+
+/** Why `operator` can't run a leg of this `mode`, or null when it can. */
+export function operatorModeProblem(mode: string, operator: string): string | null {
+  const op = operator.trim();
+  if (!op) return 'no operator';
+  if (OTHER_MODE_WORDS.test(op)) return `operator "${op}" is not a ${mode}`;
+  if (mode === 'flight' && RAIL_WORDS.test(op)) return `operator "${op}" is a train, not a flight`;
+  if (mode === 'train' && AIR_WORDS.test(op)) return `operator "${op}" is an airline, not a train`;
+  return null;
+}
+
+/** Words that say what kind of place a hotel is, not which one. */
+const GENERIC_HOTEL_WORDS = new Set([
+  'hotel', 'hotels', 'resort', 'resorts', 'inn', 'hostel', 'lodge', 'motel', 'suites', 'suite',
+  'rooms', 'apartments', 'apartment', 'villa', 'villas', 'guesthouse', 'guest', 'house', 'bnb',
+  'b&b', 'boutique', 'spa', 'the', 'and', '&', 'by', 'local', 'central', 'city', 'centre',
+  'center', 'downtown', 'old', 'town', 'beach', 'grand', 'luxury', 'budget', 'small', 'cozy',
+  'charming', 'traditional', 'modern', 'view', 'standard', 'example', 'sample', 'generic',
+]);
+
+/**
+ * True when a hotel name has nothing that identifies a real property —
+ * "Hotel A", "The Hotel", "Boutique Hotel 2". Single letters and numbers
+ * don't count. A city name DOES count ("Krabi Resort" is a real hotel).
+ */
+export function isGenericHotelName(name: string): boolean {
+  const words = name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .split(/[^a-z0-9&]+/)
+    .filter(Boolean);
+  return !words.some((w) => !GENERIC_HOTEL_WORDS.has(w) && !/^\d+$/.test(w) && w.length > 1);
+}
+
+/** Farthest an airport can be and still be a city's gateway: Kyoto flies
+ *  from KIX, 81 km away. */
+export const MAX_GATEWAY_KM = 150;
+
+/**
+ * The airport a preset city is reached through, from the location resolver
+ * (`"<city>, <country>"`, the reading in that country, its first airport
+ * that serves it within MAX_GATEWAY_KM) — or, failing that, the hand-pinned
+ * city → airport table getIataCode itself consults first, so a town someone
+ * has pinned (km unknown) passes exactly when the planner can price it.
+ * Null when there is neither: the planner prices every home and inter-city
+ * flight from an airport, so such a city can't be priced or re-priced.
+ */
+export function gatewayAirport(city: string, country: string): { iata: string; km: number | null } | null {
+  const want = ISO2[countryKey(country)];
+  const r = resolve(`${city}, ${country}`, {}, originIndex());
+  const places =
+    r.status === 'resolved' ? [r.place] : r.status === 'ambiguous' ? r.candidates.map((c) => c.place) : [];
+  const place = places.find((p) => !want || p.country === want);
+  const airport = place?.airports.find((a) => a.servesPlace && a.km <= MAX_GATEWAY_KM);
+  if (airport) return { iata: airport.iata, km: Math.round(airport.km) };
+  const pinned = getStaticIata(city);
+  return pinned ? { iata: pinned, km: null } : null;
+}
+
 const GRADIENTS = [
   'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
   'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
@@ -291,9 +370,15 @@ export function validateGenerated(
   const cleanCities = cities.map((c: any, i: number) => {
     const last = i === cities.length - 1;
     if (!c?.name || !c?.country) problems.push(`city ${i}: missing name/country`);
+    else if (!gatewayAirport(String(c.name), String(c.country))) {
+      problems.push(`city ${i}: no airport within ${MAX_GATEWAY_KM} km of ${c.name}, ${c.country}`);
+    }
     if (!(c?.nights >= 1)) problems.push(`city ${i}: bad nights`);
     const ppn = Number(c?.hotel?.pricePerNight);
     if (!(ppn >= 20 && ppn <= 2000)) problems.push(`city ${i}: implausible hotel price ${ppn}`);
+    if (isGenericHotelName(String(c?.hotel?.name ?? ''))) {
+      problems.push(`city ${i}: generic hotel name "${c?.hotel?.name ?? ''}"`);
+    }
     if (!Array.isArray(c?.activities) || c.activities.length < 2) problems.push(`city ${i}: too few activities`);
     if (!Array.isArray(c?.restaurants) || c.restaurants.length < 1) problems.push(`city ${i}: no restaurants`);
     const vibes = (Array.isArray(c?.vibes) ? c.vibes : []).filter((v: any) => VIBES.includes(v));
@@ -304,6 +389,9 @@ export function validateGenerated(
       problems.push(`city ${i}: missing/invalid transportOut`);
     } else if (!(Number(transportOut.price) >= 5 && Number(transportOut.price) <= 1500)) {
       problems.push(`city ${i}: implausible transport price ${transportOut.price}`);
+    } else {
+      const mismatch = operatorModeProblem(transportOut.mode, String(transportOut.operator ?? ''));
+      if (mismatch) problems.push(`city ${i}: ${mismatch}`);
     }
     return {
       name: String(c?.name ?? ''),

@@ -43,6 +43,7 @@ import {
   buildPresetTrip,
   presetVibes,
 } from '@/data/presetItineraries';
+import { cardCoverBackground, modalCoverBackground } from '@/components/browse/coverBackground';
 import {
   stashCanvasIntent,
   clearCanvasIntent,
@@ -61,11 +62,6 @@ const catalogBounds = (presets: PresetItinerary[]) => ({
   costMin: Math.floor(Math.min(...presets.map(presetCost)) / 100) * 100,
   costMax: Math.ceil(Math.max(...presets.map(presetCost)) / 100) * 100,
 });
-
-const bannerBackground = (preset: PresetItinerary) =>
-  preset.coverImage
-    ? `linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.55) 100%), url(${preset.coverImage}) center/cover no-repeat, ${preset.coverGradient}`
-    : preset.coverGradient;
 
 // Next 14: useSearchParams (the ?preset= deep link) needs a Suspense
 // boundary for static rendering.
@@ -98,6 +94,11 @@ function BrowsePageInner() {
   // client render the same default and hydration stays clean.
   const [useLocation, setUseLocation] = useState(true);
   useEffect(() => setUseLocation(getUseLocationPref()), []);
+  // The switch's CURRENT value for code that is mid-await: detection can sit
+  // on the browser's prompt for seconds, and a user who turns the switch off
+  // meanwhile must not have a late position saved anyway.
+  const useLocationRef = useRef(useLocation);
+  useLocationRef.current = useLocation;
   const toggleUseLocation = () => {
     const next = !useLocation;
     setUseLocation(next);
@@ -133,13 +134,20 @@ function BrowsePageInner() {
   const COST_MIN = bounds.costMin;
   const COST_MAX = bounds.costMax;
 
-  // Deep link from an SEO landing page: /browse?preset=<slug> opens it.
+  // Deep link from an SEO landing page: /browse?preset=<slug> opens it —
+  // ONCE per slug. `catalog` changes identity when the live catalog replaces
+  // the bundled one a moment after mount; re-running on that re-opened a
+  // modal the user had already closed, reset their party size to the
+  // preset's default and sent a second 'view' beacon (audit E13). A slug
+  // only the live catalog has stays unhandled until that catalog arrives.
   const searchParams = useSearchParams();
+  const deepLinkHandledRef = useRef<string | null>(null);
   useEffect(() => {
     const slug = searchParams?.get('preset');
-    if (!slug) return;
+    if (!slug || deepLinkHandledRef.current === slug) return;
     const p = catalog.find((x) => x.slug === slug);
     if (p) {
+      deepLinkHandledRef.current = slug;
       setSelected(p);
       setTravelers(p.travelers);
     }
@@ -227,26 +235,39 @@ function BrowsePageInner() {
     if (!useLocation) return undefined;
     setLocating(true);
     try {
+      // Bounded, prompt included (detectNearestAirportCity): an ignored
+      // prompt ends in the JFK default instead of a button that spins forever.
       const result = await detectNearestAirportCity();
-      if (!result.ok) return undefined;
+      if (!result.ok || !useLocationRef.current) return undefined;
+      // Empty for single-airport cities — the backend resolves the IATA
+      // code from the city name, same as a typed planner answer.
+      //
+      // The real geolocation reading is passed as `userLatLon`, and it
+      // matters: this table's DC row is named exactly `Washington`, which
+      // is ambiguous between the District and Washington State, and the
+      // more prominent reading is the STATE. Without the coordinates, every
+      // "use my location" tap in the DC metro saved Seattle's airports.
+      //
+      // Still synchronous and still offline — `resolveLocally` applies the
+      // position rule against the hot set, which carries coordinates for
+      // every place it ships. Nothing is sent anywhere, which is the
+      // promise `nearestAirport.ts` makes about these coordinates.
+      //
+      // The coordinates only settle an `ask` entry (Washington). For a name
+      // whose stored answer is a `prominence` pick — Tokyo, Seoul, Istanbul,
+      // Dubai, Mexico City, São Paulo… — `resolveLocally` defers to the
+      // server when handed coordinates, and Browse never asks the server, so
+      // 20 major cities saved NO origin airports (audit E15). Without
+      // coordinates the same entry answers with its stored winner, which for
+      // every city in this table is the city itself (measured: geo-origin
+      // sweep over AIRPORT_CITIES). So: coordinates first, the plain name
+      // only when they produced nothing.
+      const near = originAirportsForCity(result.city.city, 3, {
+        userLatLon: result.coords,
+      });
       const origin = {
         city: result.city.city,
-        // Empty for single-airport cities — the backend resolves the IATA
-        // code from the city name, same as a typed planner answer.
-        //
-        // The real geolocation reading is passed as `userLatLon`, and it
-        // matters: this table's DC row is named exactly `Washington`, which
-        // is ambiguous between the District and Washington State, and the
-        // more prominent reading is the STATE. Without the coordinates, every
-        // "use my location" tap in the DC metro saved Seattle's airports.
-        //
-        // Still synchronous and still offline — `resolveLocally` applies the
-        // position rule against the hot set, which carries coordinates for
-        // every place it ships. Nothing is sent anywhere, which is the
-        // promise `nearestAirport.ts` makes about these coordinates.
-        airports: originAirportsForCity(result.city.city, 3, {
-          userLatLon: result.coords,
-        }),
+        airports: near.length > 0 ? near : originAirportsForCity(result.city.city),
       };
       setDetectedOrigin(origin);
       return origin;
@@ -284,8 +305,11 @@ function BrowsePageInner() {
       returnToHome: true,
       planningMode: 'destination',
       vibe: presetVibes(preset)[0],
-      budget: presetCostFor(preset, travelers),
-      budgetPerPerson: false,
+      // No budget is staged. The preset's quote is not a budget the user set,
+      // and it leaves out the home flights: staged as one, it capped hotels at
+      // 40% of a too-small figure (36 of 37 bundled preset hotels sat above
+      // that cap), and BudgetOverBanner, which compares the trip's whole total
+      // against it, read "over budget" on every similar trip.
     };
     // Start from a clean planning session: resume=1 (needed for autorun)
     // keeps whatever the store holds, and a leftover answer from an earlier
@@ -404,7 +428,7 @@ function BrowsePageInner() {
                   width and the photo covered only part of the card. */}
               <div
                 className="w-full h-44 flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
-                style={{ background: bannerBackground(preset) }}
+                style={{ background: cardCoverBackground(preset) }}
               >
                 <span
                   className="absolute top-2 right-2 text-[9px] font-medium px-1.5 py-0.5 rounded-full"
@@ -778,7 +802,7 @@ function BrowsePageInner() {
                 {/* Banner */}
                 <div
                   className="px-6 pt-5 pb-4 relative flex-shrink-0"
-                  style={{ background: bannerBackground(selected) }}
+                  style={{ background: modalCoverBackground(selected) }}
                 >
                   <button
                     onClick={() => setSelected(null)}

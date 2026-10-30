@@ -24,6 +24,14 @@ type TripStore = {
    */
   priceMode: 'total' | 'perPerson';
 
+  /**
+   * True once this page load has put the trip back from sessionStorage after
+   * a reload (restoreTripSession). Lets a mount that would otherwise re-buy
+   * something the trip already showed — the chat's suggestion chips — tell a
+   * reload apart from an ordinary visit. Never persisted.
+   */
+  restoredFromSession: boolean;
+
   // Actions
   setAnswer: (key: keyof PlanningAnswers, value: unknown) => void;
   nextStep: () => void;
@@ -68,6 +76,7 @@ export const useTripStore = create<TripStore>((set) => ({
   currentTrip: null,
   chatHistory: [],
   priceMode: 'total',
+  restoredFromSession: false,
 
   setAnswer: (key, value) =>
     set((state) => ({ answers: { ...state.answers, [key]: value } })),
@@ -353,3 +362,106 @@ export const useTripStore = create<TripStore>((set) => ({
       isLoading: false,
     }),
 }));
+
+// ─── The current trip survives a reload of this tab ──────────────────────────
+//
+// An unsaved trip lives nowhere but this store: the planner hands it over and
+// routes to a bare `/results`. So a reload found an empty store and the
+// results page sent a signed-out traveller to an empty `/plan` — a presenter
+// pressing refresh mid-demo lost the whole trip.
+//
+// sessionStorage rather than localStorage: it is per TAB and ends with the
+// tab, so two tabs planning two trips never overwrite each other and nothing
+// outlives the session on a shared machine. Written here on every change;
+// read back only by the results page, and only for a bare `/results` — a
+// `?tripId=` reload still reads the database, which is how it picks up a
+// canvas save made in another tab.
+//
+// The trip goes in whole. Measured in the browser, planning from captured
+// production responses: 21 KB for a 3-city trip and 34 KB for a 5-city one,
+// hotel lists (17-20 rows a city) about half of each, against a quota of
+// megabytes. Trimming it would only add ways for a restored trip to differ
+// from the one on screen before the reload.
+
+const SESSION_KEY = 'bluemurr-current-trip';
+/** Bump when the stored shape changes, so an old snapshot is ignored, not misread. */
+const SESSION_VERSION = 1;
+
+type TripSnapshot = {
+  v: number;
+  trip: Trip;
+  priceMode: 'total' | 'perPerson';
+};
+
+/** sessionStorage, or null on the server and wherever reading it throws. */
+function tabStorage(): Storage | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null; // storage disabled — touching the property throws
+  }
+}
+
+function writeSnapshot(trip: Trip | null, priceMode: 'total' | 'perPerson') {
+  const storage = tabStorage();
+  if (!storage) return;
+  try {
+    if (!trip) {
+      storage.removeItem(SESSION_KEY);
+      return;
+    }
+    const snapshot: TripSnapshot = { v: SESSION_VERSION, trip, priceMode };
+    storage.setItem(SESSION_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Over quota, or storage blocked. Drop the entry rather than leave the
+    // previous one: a reload that brings back an OLDER trip is worse than
+    // one that brings back nothing.
+    try {
+      storage.removeItem(SESSION_KEY);
+    } catch {
+      // blocked outright — nothing was stored, nothing to clear
+    }
+  }
+}
+
+/**
+ * Put this tab's last trip back in the store. True when it did.
+ *
+ * Only a snapshot this build wrote is accepted, and only one shaped well
+ * enough for the results page's first render, which reads `city.hotels` and
+ * `city.dates` straight away. Anything else is ignored, leaving the store
+ * empty — exactly the state a reload produced before this existed.
+ */
+export function restoreTripSession(): boolean {
+  const storage = tabStorage();
+  if (!storage) return false;
+  let snapshot: Partial<TripSnapshot> | null;
+  try {
+    const raw = storage.getItem(SESSION_KEY);
+    snapshot = raw ? JSON.parse(raw) : null;
+  } catch {
+    return false;
+  }
+  const trip = snapshot?.trip;
+  const usable =
+    snapshot?.v === SESSION_VERSION &&
+    !!trip &&
+    Array.isArray(trip.cities) &&
+    trip.cities.every((c) => !!c && Array.isArray(c.hotels) && !!c.dates);
+  if (!usable) return false;
+  useTripStore.setState({
+    currentTrip: trip,
+    priceMode: snapshot?.priceMode === 'perPerson' ? 'perPerson' : 'total',
+    restoredFromSession: true,
+  });
+  return true;
+}
+
+// Browser only: on the server this module is shared by every request.
+if (typeof window !== 'undefined') {
+  useTripStore.subscribe((state, prev) => {
+    if (state.currentTrip === prev.currentTrip && state.priceMode === prev.priceMode) return;
+    writeSnapshot(state.currentTrip, state.priceMode);
+  });
+}

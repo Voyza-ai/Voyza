@@ -58,6 +58,16 @@ const envSchema = z.object({
   API_PUBLIC_URL: z.string().default('http://localhost:4000'),
   // Shared secret for POST /api/email/run-jobs (grace reminders + digest).
   CRON_SECRET: z.string().optional(),
+
+  // Browse preset price refresh (services/presets.ts) — the in-process
+  // 6-hourly scheduler AND POST /api/presets/run-refresh. OFF unless set to
+  // exactly "true": the refresh writes into the one Supabase project that
+  // also holds real trips, so a laptop running `npm run dev` must never
+  // start it by accident. Turn it on in ONE deployment only.
+  PRESET_REFRESH_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v.trim().toLowerCase() === 'true'),
 });
 
 const parsed = envSchema.safeParse(process.env);

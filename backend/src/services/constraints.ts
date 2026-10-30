@@ -1,19 +1,26 @@
 /**
- * Trip constraints — user-stated intent that the AI chat collects and
- * the optimizer honors. Lives in `trips.constraints` jsonb.
+ * Trip constraints — user-stated intent that the AI chat (/api/plan/chat)
+ * collects. Same shape as the `trips.constraints` jsonb column.
  *
  * Three flavors for the current MVP:
  *   - Pinned cities:   "I need to be in Rome March 5-10" → lock exact dates
  *   - Min days:        "at least 3 days in Tokyo"        → extend stay
  *   - Transport windows: "no flights before 5pm"          → filter options
  *
- * Applied eagerly for the first two (dates change immediately, shown in
- * the proposal diff). Stored-but-not-yet-applied for transport windows
- * (full filtering requires a compareLeg refactor; MVP acknowledges the
- * constraint and honors it on next explicit re-optimize).
+ * What actually happens to them: each is applied ONCE, when the chat
+ * proposes it. Pins and min-days recompute the city dates in the proposal
+ * diff (applyDateConstraints below); a transport window filters the one leg
+ * search it arrives with (legOptions.searchLegOptions). Nothing applies
+ * them again afterwards:
+ *   - the optimizer never reads constraints, so a re-optimize ignores them;
+ *   - no route writes them — POST /api/trips, PATCH /api/trips/:id and the
+ *     canvas save don't accept the field, so `trips.constraints` stays at
+ *     its '{}' default and a reloaded trip comes back without them;
+ *   - they live only on the in-memory trip of the results page (the canvas
+ *     drops them), where a later chat turn re-applies the date ones.
  */
 
-import { addDays } from '../utils/dates';
+import { addDays, todayIso } from '../utils/dates';
 
 export type PinnedCity = {
   city: string;
@@ -211,6 +218,157 @@ export function applyDateConstraints<
   void byArrival;
 
   return { cities: next, diff };
+}
+
+// ─── Validation for constraints the AI chat proposes ─────────
+//
+// The chat route used to apply whatever the model sent. Scripted on
+// /api/plan/chat (B10): a pin dated 2025 moved the whole trip to
+// Dec 2024 – Jan 2025; "Dec 9" was stored as a date and every later city
+// became "Dec 12 → Dec 12"; minNights 400 pushed the trip to 2028; "three"
+// was stored as null under a reply saying "Giving you three nights". Each
+// check below returns a short reason for the reply, or null when fine.
+
+/**
+ * Longest stay one constraint may ask for in a single city — a pin's
+ * length or a min-days rule. Two months is beyond any trip this planner
+ * builds; past it the number is a mis-read, not intent (400 above).
+ */
+export const MAX_STAY_NIGHTS = 60;
+
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** A real calendar date written exactly YYYY-MM-DD ("2026-02-30", "Dec 9" and "2026-12-9" are not). */
+export function isIsoDate(s: unknown): s is string {
+  if (typeof s !== 'string') return false;
+  const m = ISO_DATE.exec(s);
+  if (!m) return false;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.toISOString().slice(0, 10) === s;
+}
+
+/** Whole nights from one YYYY-MM-DD to another (negative if reversed). */
+function nightsFromTo(arrival: string, departure: string): number {
+  return Math.round(
+    (new Date(`${departure}T00:00:00Z`).getTime() - new Date(`${arrival}T00:00:00Z`).getTime()) /
+      86_400_000,
+  );
+}
+
+/**
+ * The earliest date a constraint may put a stay on: YESTERDAY in UTC, not
+ * today. The server runs UTC but the user's "today" is local, and west of
+ * Greenwich the evening is already tomorrow in UTC — 8pm in New York is
+ * 00:00Z the next day — so a strict UTC-today check would refuse a pin
+ * starting on the user's own today. No zone is more than 12 hours behind
+ * UTC, so the user's date is never more than one day behind ours: one day
+ * of slack never refuses a real today and still refuses anything past.
+ * (Resolving relative dates in the user's zone — "tomorrow" said in a New
+ * York evening lands a day late — is a separate, frontend-side fix.)
+ */
+export function earliestAllowedDate(today: string = todayIso()): string {
+  return addDays(today, -1);
+}
+
+/** Why a pin can't be applied, or null when it can. */
+export function pinProblem(
+  arrival: unknown,
+  departure: unknown,
+  today: string = todayIso(),
+): string | null {
+  if (!isIsoDate(arrival) || !isIsoDate(departure)) {
+    return `I need real dates written YYYY-MM-DD, and got ${JSON.stringify(arrival)} to ${JSON.stringify(departure)}`;
+  }
+  if (departure <= arrival) return 'the departure date has to be after the arrival date';
+  if (arrival < earliestAllowedDate(today)) return 'those dates have already passed';
+  const nights = nightsFromTo(arrival, departure);
+  if (nights > MAX_STAY_NIGHTS) {
+    return `that's ${nights} nights, and I can plan at most ${MAX_STAY_NIGHTS} in one city`;
+  }
+  return null;
+}
+
+/**
+ * The minimum-nights value as a whole number from 1 to MAX_STAY_NIGHTS,
+ * or null. A numeric string ("3") is accepted — it is what the user meant
+ * — but words, fractions, zero and negatives are not.
+ */
+export function parseMinNights(raw: unknown): number | null {
+  const n =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && /^\s*\d+\s*$/.test(raw)
+        ? Number(raw)
+        : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= MAX_STAY_NIGHTS ? n : null;
+}
+
+type DatedCity = { name: string; arrival_date?: string | null; departure_date?: string | null };
+
+/**
+ * Why a proposed set of city dates can't be offered, or null. Compares the
+ * proposal with the trip as it stands and only blames what the proposal
+ * CHANGED, so a trip that was already odd doesn't make every later edit
+ * fail:
+ *   - a city whose start moved now starts before earliestAllowedDate()
+ *     (a pin near today pushes the cities before it into the past);
+ *   - two consecutive stays overlap that didn't before (a city leaves after
+ *     the next one starts) — what two pins with too little room between
+ *     them, or a min-days rule running into the next pin, produce.
+ */
+export function scheduleProblem(
+  before: DatedCity[],
+  after: DatedCity[],
+  today: string = todayIso(),
+): string | null {
+  const earliest = earliestAllowedDate(today);
+  for (let i = 0; i < after.length; i++) {
+    const a = after[i];
+    // Only a START the proposal moved: extending a stay already under way
+    // keeps its (past) arrival and is fine.
+    const startMoved = a.arrival_date !== before[i]?.arrival_date;
+    if (startMoved && a.arrival_date && a.arrival_date < earliest) {
+      return `${a.name} would start on ${a.arrival_date}, which has already passed`;
+    }
+  }
+  const overlaps = (cities: DatedCity[], i: number) => {
+    const leave = cities[i]?.departure_date;
+    const next = cities[i + 1]?.arrival_date;
+    return !!leave && !!next && next < leave;
+  };
+  for (let i = 0; i + 1 < after.length; i++) {
+    if (overlaps(after, i) && !overlaps(before, i)) {
+      const a = after[i];
+      const b = after[i + 1];
+      return `${a.name} (until ${a.departure_date}) and ${b.name} (from ${b.arrival_date}) would overlap`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Why a min-days rule didn't take effect on its city, or null when the
+ * city now has at least that many nights. applyDateConstraints never
+ * stretches a pinned city, so a rule longer than the pin is silently
+ * skipped — the reply used to say "Giving you six nights" anyway.
+ */
+export function minDaysProblem(
+  city: DatedCity | undefined,
+  minNights: number,
+  constraints: TripConstraints,
+): string | null {
+  if (!city?.arrival_date || !city.departure_date) {
+    return `${city?.name ?? 'that city'} has no dates yet`;
+  }
+  const nights = nightsFromTo(city.arrival_date, city.departure_date);
+  if (nights >= minNights) return null;
+  const pin = (constraints.pinned_cities ?? []).find(
+    (p) => p.city.toLowerCase() === city.name.toLowerCase(),
+  );
+  if (pin) {
+    return `it's pinned to ${pin.arrival} – ${pin.departure} (${nights} night${nights === 1 ? '' : 's'})`;
+  }
+  return `it would still have only ${nights} night${nights === 1 ? '' : 's'}`;
 }
 
 /**

@@ -84,7 +84,9 @@ jest.mock('../services/supabase', () => ({
 
 jest.mock('../services/flights', () => ({
   searchFlights: jest.fn(),
-  getIataCode: jest.fn().mockResolvedValue('FCO'),
+  // One code per city: a constant code would make every leg a flight from
+  // an airport to itself, which compareLeg rightly never searches.
+  getIataCode: jest.fn(async (name: string) => name.slice(0, 3).toUpperCase()),
 }));
 
 jest.mock('../services/trains', () => ({

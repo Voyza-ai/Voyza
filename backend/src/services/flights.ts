@@ -1,8 +1,18 @@
 import { getDuffel } from './duffel';
+import { currentDuffelRetryBudget } from './duffelBudget';
 import { getSupabase } from './supabase';
 import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
 import { getStaticIata } from '../data/cityAirports';
+import {
+  consistentWithAnchors,
+  destinationAnchors,
+  namedAsAsked,
+  resolveDestinationIata,
+  type DestinationContext,
+  type SuggestedPlace,
+} from './location/destinationAirport';
+import { sameAirportArea } from './location/sameAirportArea';
 import { parseIsoDuration } from '../utils/duration';
 import { elapsedMinutesBetween } from '../utils/localTime';
 
@@ -69,6 +79,11 @@ async function withSearchSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
   activeSearches++;
   try {
+    // A call can queue here for a while; if Duffel rate-limited us in the
+    // meantime, don't spend a request finding that out. withRetry waits
+    // the pause out (or gives up, within its budget).
+    const paused = duffelPausedUntil - Date.now();
+    if (paused > 0) throw rateLimitedError(paused);
     return await fn();
   } finally {
     activeSearches--;
@@ -150,8 +165,58 @@ export function retryDelayFromHeaders(err: any): number | null {
   return null;
 }
 
+/**
+ * Most time ONE Duffel call may spend waiting to retry, across all its
+ * attempts. Duffel's limit is 60 requests per 60-second window per token
+ * (docs, errors page: `ratelimit-reset` is when the window resets), so 65s
+ * is "wait for the next window once, never longer".
+ *
+ * Without a total, each of 3 retries could sleep up to MAX_RETRY_DELAY_MS
+ * (2 minutes), so one search could stall for six — and the gate below meant
+ * six such sleepers stalled every search behind them. A call that would
+ * have to wait past its budget fails now instead: its leg comes back
+ * unpriced (the optimizer already ranks and displays that honestly) and the
+ * plan finishes.
+ */
+const MAX_TOTAL_RETRY_WAIT_MS = 65_000;
+
+/**
+ * When Duffel said "rate limited until T", every request sent before T is
+ * refused too — and may count against the next window. So the first 429
+ * that carries a reset time pauses ALL Duffel calls from this process until
+ * then, instead of each in-flight call discovering it separately and
+ * burning an attempt. Epoch ms; 0 = not paused.
+ */
+let duffelPausedUntil = 0;
+
+/** Exposed for tests: forget any rate-limit pause. */
+export function resetDuffelRateLimitPause(): void {
+  duffelPausedUntil = 0;
+}
+
+function rateLimitedError(waitMs: number): Error {
+  // Same shape a DuffelError 429 has, so callers' handling is unchanged.
+  const err: any = new Error(
+    `Duffel rate limit: next window in ${Math.ceil(waitMs / 1000)}s, past this search's retry budget`,
+  );
+  err.meta = { status: 429 };
+  return err;
+}
+
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
+  // A caller doing optional work may cap it lower (see duffelBudget.ts).
+  const budget = Math.min(MAX_TOTAL_RETRY_WAIT_MS, currentDuffelRetryBudget() ?? Infinity);
+  let waited = 0;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Honour a pause another call already learned about — before sending.
+    const paused = duffelPausedUntil - Date.now();
+    if (paused > 0) {
+      // A little spread so every paused call doesn't fire on the same ms.
+      const wait = paused + Math.round(Math.random() * 1000);
+      if (waited + wait > budget) throw rateLimitedError(paused);
+      await sleep(wait);
+      waited += wait;
+    }
     try {
       return await fn();
     } catch (err: any) {
@@ -161,11 +226,19 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
         // Prefer the server-declared reset time; otherwise jittered
         // exponential backoff (synchronized retries just re-collide).
         const headerDelay = retryDelayFromHeaders(err);
+        if (status === 429 && headerDelay != null && headerDelay > 0) {
+          duffelPausedUntil = Math.max(duffelPausedUntil, Date.now() + headerDelay);
+        }
         const base = Math.pow(2, attempt) * 1000;
         const jittered = Math.round(base * (0.5 + Math.random()));
+        const pausedFor = duffelPausedUntil - Date.now();
         const delay = headerDelay != null
           ? headerDelay + Math.round(Math.random() * 1000)
-          : jittered;
+          : status === 429 && pausedFor > 0
+            ? pausedFor + Math.round(Math.random() * 1000) // stopped by the shared pause
+            : jittered;
+        // Out of budget: fail this one call now rather than sleep past it.
+        if (waited + delay > budget) throw err;
         logger.warn('Duffel retryable error — backing off', {
           status,
           attempt,
@@ -173,6 +246,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
           fromHeader: headerDelay != null,
         });
         await sleep(delay);
+        waited += delay;
         continue;
       }
       throw err;
@@ -217,6 +291,10 @@ function cachedSearch(key: string, run: () => Promise<FlightOffer[]>): Promise<F
 
 export async function searchFlights(params: SearchFlightsParams): Promise<FlightOffer[]> {
   const { origin, destination, date, travelers, cabinClass } = params;
+  // A place to itself (ZRH → ZRH, LHR → LON) is not a flight, and never
+  // reaches Duffel. Callers that count outcomes (the optimizer) skip such a
+  // leg before getting here; this is the floor for every other path.
+  if (sameAirportArea(origin, destination)) return [];
   const key = `${origin}|${destination}|${date}|${travelers}|${cabinClass ?? 'economy'}`;
   return cachedSearch(key, () => searchFlightsUncached(params));
 }
@@ -271,8 +349,12 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
   const duffel = getDuffel();
 
   try {
-    const offerRequest = await withSearchSlot(() =>
-      withRetry(() =>
+    // Retry OUTSIDE the slot: a call sleeping on a backoff or a rate-limit
+    // pause used to keep its slot for the whole sleep, so six sleepers froze
+    // every other search. Each attempt now takes a slot only while it is
+    // actually talking to Duffel.
+    const offerRequest = await withRetry(() =>
+      withSearchSlot(() =>
         duffel.offerRequests.create({
           slices: [
             {
@@ -450,24 +532,83 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
   }
 }
 
-export async function getIataCode(cityName: string): Promise<string> {
+/**
+ * What a caller may know about the trip a city is on. Optional, and names
+ * only — the optimizer holds plain strings. With it, `Portland` on a trip
+ * through Boston is Maine's PWM; without it, it is Oregon's PDX, as before.
+ * Passing the city itself among the names is harmless: it is dropped.
+ */
+export type IataLookupContext = DestinationContext;
+
+/** A Duffel place reduced to what `destinationAirport.ts` checks. */
+function suggestedPlace(p: any): SuggestedPlace {
+  // A `city` place may carry no coordinates of its own; its airports do.
+  const hasPoint = (x: any): boolean =>
+    typeof x?.latitude === 'number' && typeof x?.longitude === 'number';
+  const located = hasPoint(p) ? p : (p?.airports ?? []).find(hasPoint);
+  return {
+    iataCode: String(p.iata_code).toUpperCase(),
+    country: p.iata_country_code ?? null,
+    lat: typeof located?.latitude === 'number' ? located.latitude : null,
+    lon: typeof located?.longitude === 'number' ? located.longitude : null,
+    names: [p.name, p.city_name, p.city?.name].filter(
+      (n: unknown): n is string => typeof n === 'string' && n.length > 0,
+    ),
+  };
+}
+
+export async function getIataCode(
+  cityName: string,
+  context: IataLookupContext = {},
+): Promise<string> {
   // Curated override first — deterministic, and corrects known bad
   // auto-resolutions (e.g. Kyoto, which has no airport of its own and
   // otherwise mis-resolved to ACC/Accra). Takes precedence over any stale
-  // cached row.
+  // cached row, and over trip context: see `resolveDestinationIata` for the
+  // measured flips that would cost.
   const override = getStaticIata(cityName);
   if (override) return override;
 
+  // The artifact next, BEFORE the cache. The cache holds whatever Duffel's
+  // fuzzy place search once returned, forever — Siena -> JHB (Malaysia),
+  // Sintra -> SQG (Indonesia), Bath -> BUT (Bhutan) — while the artifact
+  // answers all three from data: FLR, LIS, BRS. Asking it first means a
+  // stale row can no longer win for any name the artifact can answer.
+  // In-memory, no network, and no database read.
+  const fromArtifact = resolveDestinationIata(cityName, context);
+  if (fromArtifact) return fromArtifact;
+
+  // Where the artifact says this name is, when it could not answer it. Empty
+  // when it knows nothing about the name and there is no trip.
+  const anchors = destinationAnchors(cityName, context);
+
   const supabase = getSupabase();
 
-  // Check cache first
+  // Check cache. Rows were written before suggestions were checked, so when
+  // the artifact knows where the name is, a row is held to the same test a
+  // fresh suggestion is, and skipped rather than served if it fails. Nothing
+  // here deletes it; the next verified suggestion overwrites it.
   const { data: cached } = await supabase
     .from('airport_codes')
-    .select('iata_code')
+    .select('iata_code, country')
     .eq('city_name', cityName.toLowerCase())
     .single();
 
-  if (cached?.iata_code) return cached.iata_code;
+  if (cached?.iata_code) {
+    const row: SuggestedPlace = {
+      iataCode: String(cached.iata_code).toUpperCase(),
+      country: typeof cached.country === 'string' ? cached.country : null,
+      lat: null,
+      lon: null,
+      names: [],
+    };
+    if (anchors.length === 0 || consistentWithAnchors(row, anchors)) return cached.iata_code;
+    logger.warn('Skipped a cached IATA row the artifact contradicts', {
+      city: cityName,
+      cached: row.iataCode,
+      cachedCountry: row.country,
+    });
+  }
 
   // Fetch from Duffel
   const duffel = getDuffel();
@@ -476,23 +617,52 @@ export async function getIataCode(cityName: string): Promise<string> {
       duffel.suggestions.list({ query: cityName }),
     );
 
-    const places = (response as any)?.data ?? [];
-    const airport = places.find(
-      (p: any) => p.type === 'airport' || p.type === 'city',
+    const places = ((response as any)?.data ?? []).filter(
+      (p: any) => (p?.type === 'airport' || p?.type === 'city') && p?.iata_code,
     );
 
-    if (!airport?.iata_code) {
+    // Duffel's place search is fuzzy, and its first hit was trusted and
+    // cached forever. Now a suggestion is accepted only if it is where the
+    // artifact says the name is (`destinationAnchors`), and only then cached.
+    // With no evidence at all it must at least be NAMED what was asked, and
+    // is served for this call only — never cached, so a guess cannot become
+    // permanent. Every production failure measured fails both checks.
+    let chosen: SuggestedPlace | null = null;
+    let verified = false;
+    for (const p of places) {
+      const place = suggestedPlace(p);
+      if (anchors.length > 0) {
+        if (consistentWithAnchors(place, anchors)) {
+          chosen = place;
+          verified = true;
+          break;
+        }
+      } else if (namedAsAsked(cityName, place)) {
+        chosen = place;
+        break;
+      }
+    }
+
+    if (!chosen) {
+      if (places.length > 0) {
+        logger.warn('Refused unverifiable Duffel IATA suggestions', {
+          city: cityName,
+          suggested: places.slice(0, 3).map((p: any) => p.iata_code),
+          check: anchors.length > 0 ? 'not where the artifact places the name' : 'not named as asked',
+        });
+      }
       throw new AppError(404, `No IATA code found for "${cityName}"`);
     }
 
-    // Cache it
-    await supabase.from('airport_codes').upsert({
-      city_name: cityName.toLowerCase(),
-      iata_code: airport.iata_code,
-      country: airport.iata_country_code ?? null,
-    });
+    if (verified) {
+      await supabase.from('airport_codes').upsert({
+        city_name: cityName.toLowerCase(),
+        iata_code: chosen.iataCode,
+        country: chosen.country,
+      });
+    }
 
-    return airport.iata_code;
+    return chosen.iataCode;
   } catch (err: any) {
     if (err instanceof AppError) throw err;
     throw new AppError(502, `IATA lookup failed for "${cityName}": ${err?.message}`);

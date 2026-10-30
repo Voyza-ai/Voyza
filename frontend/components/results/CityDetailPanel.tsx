@@ -78,12 +78,11 @@ export default function CityDetailPanel({
     ? null
     : city.hotels[city.selectedHotelIndex] ?? city.hotels[0];
 
-  // Room calculation: prefer 1 room for the whole group unless maxGuests is set
-  const guestsPerRoom = selectedHotel?.maxGuests;
-  const roomsNeeded = guestsPerRoom ? Math.ceil(trip.travelers / guestsPerRoom) : 1;
-  const stayRoom = displayAmount(eff.roomSubtotal * roomsNeeded, priceMode, trip.travelers);
-  const stayTaxes = displayAmount(eff.taxesSubtotal * roomsNeeded, priceMode, trip.travelers);
-  const stayTotal = displayAmount(eff.total * roomsNeeded, priceMode, trip.travelers);
+  // The hotel's price already covers every room the party needs (see
+  // `hotelsTotal` in lib/tripTotals.ts), so the stay is shown as priced.
+  const stayRoom = displayAmount(eff.roomSubtotal, priceMode, trip.travelers);
+  const stayTaxes = displayAmount(eff.taxesSubtotal, priceMode, trip.travelers);
+  const stayTotal = displayAmount(eff.total, priceMode, trip.travelers);
   const stayPerNight = displayAmount(eff.pricePerNight, priceMode, trip.travelers);
   const hasTaxes = stayTaxes > 0;
 
@@ -251,7 +250,7 @@ export default function CityDetailPanel({
                   ${stayTotal.toLocaleString()}
                 </span>
                 <span className="tabular-nums" style={{ color: `${color.text}60` }}>
-                  · {nights} {nights === 1 ? 'night' : 'nights'}{roomsNeeded > 1 && ` · ${roomsNeeded} rooms`}
+                  · {nights} {nights === 1 ? 'night' : 'nights'}
                 </span>
                 {hasTaxes && (
                   <Info size={11} className="ml-0.5" style={{ color: `${color.text}70` }} />
@@ -268,11 +267,11 @@ export default function CityDetailPanel({
                     style={{ color: `${color.text}88` }}
                   >
                     <div className="flex justify-between w-full">
-                      <span>Room · ${stayPerNight.toLocaleString()} × {nights} {nights === 1 ? 'night' : 'nights'}{roomsNeeded > 1 && ` × ${roomsNeeded} rooms`}</span>
+                      <span>Room · ${stayPerNight.toLocaleString()} × {nights} {nights === 1 ? 'night' : 'nights'}</span>
                       <span>${stayRoom.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between w-full">
-                      <span>Taxes &amp; fees{roomsNeeded > 1 && ` (${roomsNeeded} rooms)`}</span>
+                      <span>Taxes &amp; fees</span>
                       <span>${stayTaxes.toLocaleString()}</span>
                     </div>
                   </motion.div>
@@ -791,12 +790,10 @@ function HotelDetail({
   }
 
   const accent = color.text;
-  // Prefer 1 room for the whole group unless maxGuests is explicitly set
-  const guestsPerRoom = hotel.maxGuests;
-  const roomsNeeded = guestsPerRoom ? Math.ceil(travelers / guestsPerRoom) : 1;
-  const guestsPerRoomActual = roomsNeeded > 1 ? Math.ceil(travelers / roomsNeeded) : travelers;
-  const taxesGroup = (hotel.taxesPerNight ?? 0) * nights * roomsNeeded;
-  const roomGroup = hotel.pricePerNight * nights * roomsNeeded;
+  // The price already covers every room the party needs (see `hotelsTotal`
+  // in lib/tripTotals.ts), so nothing here multiplies it by a room count.
+  const taxesGroup = (hotel.taxesPerNight ?? 0) * nights;
+  const roomGroup = hotel.pricePerNight * nights;
   const totalGroup = roomGroup + taxesGroup;
   const taxes = displayAmount(taxesGroup, priceMode, travelers);
   const room = displayAmount(roomGroup, priceMode, travelers);
@@ -880,10 +877,13 @@ function HotelDetail({
             {travelers} {travelers === 1 ? 'traveler' : 'travelers'}
           </div>
           <div className="text-[11px]" style={{ color: `${accent}80` }}>
+            {/* Rendered unchanged from when this came from the dead
+                `maxGuests` branch, which always resolved to one room. The
+                price is now for ceil(travelers / 2) rooms, so this copy is
+                stale for groups of 3+; correcting it is a copy change and
+                waits for the owner's approval. */}
             {nights} {nights === 1 ? 'night' : 'nights'} ·{' '}
-            {roomsNeeded === 1
-              ? '1 room'
-              : `${roomsNeeded} rooms (${guestsPerRoomActual} per room)`}
+            {'1 room'}
           </div>
         </div>
       </div>
@@ -901,13 +901,13 @@ function HotelDetail({
         >
           <div className="flex justify-between text-[13px]" style={{ color: `${accent}cc` }}>
             <span>
-              ${perNight.toLocaleString()}/night × {nights} {nights === 1 ? 'night' : 'nights'}{roomsNeeded > 1 && ` × ${roomsNeeded} rooms`}
+              ${perNight.toLocaleString()}/night × {nights} {nights === 1 ? 'night' : 'nights'}
             </span>
             <span className="font-medium tabular-nums" style={{ color: accent }}>${room.toLocaleString()}</span>
           </div>
           {taxes > 0 && (
             <div className="flex justify-between text-[13px]" style={{ color: `${accent}cc` }}>
-              <span>Taxes &amp; fees{roomsNeeded > 1 && ` (${roomsNeeded} rooms)`}</span>
+              <span>Taxes &amp; fees</span>
               <span className="font-medium tabular-nums" style={{ color: accent }}>${taxes.toLocaleString()}</span>
             </div>
           )}

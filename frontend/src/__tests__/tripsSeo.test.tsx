@@ -35,7 +35,10 @@ beforeEach(() => {
     if (url.includes('/api/presets/category/weekend-getaways')) {
       return { ok: true, status: 200, json: async () => ({ category, presets: [parisSummary] }) };
     }
-    if (url.includes('/api/presets/category/')) return { ok: false, status: 404, json: async () => ({}) };
+    // The backend's own answer for an unknown category (routes/presets.ts).
+    if (url.includes('/api/presets/category/')) {
+      return { ok: false, status: 404, json: async () => ({ error: 'Category not found' }) };
+    }
     if (url.endsWith('/api/presets')) {
       return {
         ok: true,

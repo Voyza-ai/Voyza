@@ -5,13 +5,26 @@ import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import {
   applyDateConstraints,
+  isIsoDate,
+  MAX_STAY_NIGHTS,
   mergeConstraints,
+  minDaysProblem,
+  parseMinNights,
+  pinProblem,
+  scheduleProblem,
   TripConstraints,
 } from '../services/constraints';
-import { searchLegOptions, LegOption } from '../services/legOptions';
+import {
+  searchLegOptions,
+  LegOption,
+  normalizeTimeWindow,
+  NormalizedTimeWindow,
+} from '../services/legOptions';
 import { converse } from '../services/planConverse';
 import { compareLeg } from '../services/compareLeg';
 import { getCityCountry } from '../data/cityCountries';
+import { parseDurationMinutes } from '../utils/duration';
+import { todayIso } from '../utils/dates';
 
 import { getAnthropicSafe } from '../services/anthropic';
 
@@ -485,12 +498,18 @@ router.post(
 //   - Merge the new constraint onto trip.constraints
 //   - Apply date-bearing constraints (pin + min_days) to recompute city
 //     dates — this is what produces the Accept-or-Reject diff card
-//   - Return { type: 'proposal', reply, proposal: {...} } — nothing is
-//     persisted until the user clicks Accept and the frontend calls
-//     PATCH /api/trips/:id (or leaves it in memory until Save)
+//   - Return { type: 'proposal', reply, proposal: {...} }. Accept applies
+//     proposal.proposedTrip on the client: the trip store on /results, or
+//     canvas local state on /canvas, which autosaves the new city dates
+//     like any manual edit. Accept itself sends nothing to this route.
 //
-// transport_windows are stored on Accept but not yet applied (would
-// require compareLeg to accept time filters — tracked in ROADMAP).
+// The constraints themselves are applied once, here, and never again:
+// the optimizer doesn't read them, and no trips write path (POST/PATCH
+// /api/trips, canvas save) accepts them, so `trips.constraints` stays '{}'.
+// They survive only on the results page's in-memory trip, where the next
+// chat turn re-applies the date ones (see services/constraints.ts).
+// transport_windows filter the one leg search they arrive with
+// (set_transport_window below) and are not re-applied by anything.
 const historyMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string(),
@@ -671,6 +690,86 @@ function summarizeTripForChat(trip: any): any {
   };
 }
 
+type TripLegLookup =
+  | { kind: 'leg'; fromCity: any; toCity: any }
+  | { kind: 'unknown_city' }
+  | { kind: 'not_a_leg'; fromName: string; toName: string };
+
+/**
+ * Resolve the `from → to` the model named to a leg of THIS trip — two
+ * CONSECUTIVE cities in trip order. Both cities merely being in the trip is
+ * not enough (B9). Scans pairs rather than taking each city's first match,
+ * so a repeat visit (Rome → Florence → Rome) still finds Florence → Rome.
+ */
+function findTripLeg(cities: any[], from: unknown, to: unknown): TripLegLookup {
+  const fromLower = String(from).toLowerCase();
+  const toLower = String(to).toLowerCase();
+  for (let i = 0; i + 1 < cities.length; i++) {
+    if (
+      cities[i].name.toLowerCase() === fromLower &&
+      cities[i + 1].name.toLowerCase() === toLower
+    ) {
+      return { kind: 'leg', fromCity: cities[i], toCity: cities[i + 1] };
+    }
+  }
+  const fromCity = cities.find((c: any) => c.name.toLowerCase() === fromLower);
+  const toCity = cities.find((c: any) => c.name.toLowerCase() === toLower);
+  if (!fromCity || !toCity) return { kind: 'unknown_city' };
+  return { kind: 'not_a_leg', fromName: fromCity.name, toName: toCity.name };
+}
+
+/**
+ * The reply for a non-leg: names the trip's real legs so the user (and the
+ * model, which reads this back as history next turn) can pick one.
+ */
+function notALegReply(
+  cities: any[],
+  lookup: { fromName: string; toName: string },
+): string {
+  const asked = `${lookup.fromName} → ${lookup.toName}`;
+  const legs = cities.slice(1).map((c: any, i: number) => `${cities[i].name} → ${c.name}`);
+  if (legs.length === 0) {
+    return `${asked} isn't a leg of this trip — it has no travel between cities.`;
+  }
+  if (legs.length === 1) {
+    return `${asked} isn't a leg of this trip — its only leg is ${legs[0]}. Did you mean that one?`;
+  }
+  const listed = `${legs.slice(0, -1).join(', ')} and ${legs[legs.length - 1]}`;
+  return `${asked} isn't a leg of this trip — its legs are ${listed}. Which one did you mean?`;
+}
+
+/**
+ * The leg's current transport (frontend Transport shape) as a LegOption,
+ * so a refresh can list it first and the frontend's legOptionToTransport
+ * rebuilds the same selection. priceDelta is 0 by definition.
+ */
+function transportToLegOption(t: any, currency: string): LegOption {
+  return {
+    mode: t.mode,
+    operator: t.operator ?? '',
+    flightNumber: (t.mode === 'train' ? t.trainNumber : t.flightNumber) ?? null,
+    price: t.price,
+    currency,
+    departTime: t.departTime ?? null,
+    arriveTime: t.arriveTime ?? null,
+    duration: t.duration ?? '',
+    durationMinutes: parseDurationMinutes(t.duration),
+    stops: t.layovers ?? 0,
+    bookingUrl: t.bookingUrl ?? null,
+    priceDelta: 0,
+  };
+}
+
+/** Same departure at the same price — a fresh search re-finding the current option. */
+function isSameLegOption(a: LegOption, b: LegOption): boolean {
+  return (
+    a.mode === b.mode &&
+    a.operator === b.operator &&
+    a.departTime === b.departTime &&
+    Math.abs(a.price - b.price) < 0.01
+  );
+}
+
 router.post(
   '/chat',
   asyncHandler(async (req, res) => {
@@ -698,7 +797,13 @@ router.post(
     }
     messages.push({ role: 'user', content: message });
 
+    // Today's date is computed per request (never cached across days).
+    // Without it the model has to guess the year of a pin, and a wrong
+    // guess (Dec 2024 for this December) is refused by pinProblem() as
+    // "already passed" — a confusing answer to a reasonable request.
     const systemPrompt = `You are BlueMurr AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
+
+Today is ${todayIso()} (UTC). Trip dates are always in the future: a date the user gives without a year ("Dec 10", "the 15th") means its next occurrence after today.
 
 You have six tools:
 1. answer_only — for plain questions, explanations, small talk, AND for clarifying questions when the user's request is ambiguous about which leg.
@@ -783,20 +888,21 @@ ${JSON.stringify(tripSummary, null, 2)}
     //     to switch (which routes through show_transport_options) or
     //     accept the current pick.
     if (toolName === 'compare_modes') {
-      const fromLower = String(toolInput.from).toLowerCase();
-      const toLower = String(toolInput.to).toLowerCase();
-      const fromCity = (currentTrip.cities ?? []).find(
-        (c: any) => c.name.toLowerCase() === fromLower,
-      );
-      const toCity = (currentTrip.cities ?? []).find(
-        (c: any) => c.name.toLowerCase() === toLower,
-      );
-      if (!fromCity || !toCity) {
+      const lookup = findTripLeg(currentTrip.cities ?? [], toolInput.from, toolInput.to);
+      if (lookup.kind === 'unknown_city') {
         return res.json({
           type: 'answer',
           reply: `I couldn\'t find a ${toolInput.from} → ${toolInput.to} leg in your trip.`,
         });
       }
+      // Same rule as the leg-refresh tools below: a comparison for a
+      // non-leg would be priced on the wrong day (the from-city's departure
+      // to a DIFFERENT next city), and its "Switch" button asks for that
+      // non-leg as a refresh next.
+      if (lookup.kind === 'not_a_leg') {
+        return res.json({ type: 'answer', reply: notALegReply(currentTrip.cities, lookup) });
+      }
+      const { fromCity, toCity } = lookup;
 
       const travelDate =
         fromCity.dates?.departure ?? fromCity.departure_date ?? null;
@@ -855,9 +961,13 @@ ${JSON.stringify(tripSummary, null, 2)}
           }
         : null;
 
+      // The reply is built from what the search found, not the model's
+      // `explanation`: the model writes that BEFORE the search runs, so it
+      // can only guess. In the demo it said "trains take about 4 hours
+      // longer" above a card reading "Train — No options found" (D-07).
       return res.json({
         type: 'mode_comparison',
-        reply: toolInput.explanation ?? `Here\'s flight vs train for ${fromCity.name} → ${toCity.name}.`,
+        reply: describeComparison(fromCity.name, toCity.name, travelDate, flightSummary, trainSummary, cmp),
         comparison: {
           fromCity: fromCity.name,
           toCity: toCity.name,
@@ -880,23 +990,30 @@ ${JSON.stringify(tripSummary, null, 2)}
     //     directly on the flowchart — no inline card in chat. Chat just
     //     shows a one-line summary ("Found 12, showing top 4").
     //
-    //     set_transport_window ALSO persists the constraint so future
-    //     re-optimizations honor the time bound.
+    //     set_transport_window also returns the window in
+    //     updatedConstraints, which the frontend keeps on the in-memory
+    //     trip. That is a record, not a rule: no save path writes it and no
+    //     re-optimization reads it.
     if (toolName === 'set_transport_window' || toolName === 'show_transport_options') {
-      const fromLower = String(toolInput.from).toLowerCase();
-      const toLower = String(toolInput.to).toLowerCase();
-      const fromCity = (currentTrip.cities ?? []).find(
-        (c: any) => c.name.toLowerCase() === fromLower,
-      );
-      const toCity = (currentTrip.cities ?? []).find(
-        (c: any) => c.name.toLowerCase() === toLower,
-      );
-      if (!fromCity || !toCity) {
+      const lookup = findTripLeg(currentTrip.cities ?? [], toolInput.from, toolInput.to);
+      if (lookup.kind === 'unknown_city') {
         return res.json({
           type: 'answer',
           reply: `I couldn\'t find a ${toolInput.from} → ${toolInput.to} flight or train in your trip.`,
         });
       }
+      // Both cities exist but aren't consecutive: there is no such leg to
+      // refresh. The frontend applies a refresh by city NAME — it sets the
+      // from-city's transportOut and the to-city's transportIn — so on
+      // Rome → Venice → Florence a "Rome → Florence" refresh overwrote
+      // Rome's real Rome → Venice leg with a $95 Rome → Florence flight
+      // while Venice still showed Rome → Venice inbound, and "Florence →
+      // Rome" overwrote Rome's inbound home flight (B9, scripted on this
+      // route). Answer instead, naming the legs that do exist.
+      if (lookup.kind === 'not_a_leg') {
+        return res.json({ type: 'answer', reply: notALegReply(currentTrip.cities, lookup) });
+      }
+      const { fromCity, toCity } = lookup;
 
       const travelDate =
         fromCity.dates?.departure ?? fromCity.departure_date ?? null;
@@ -911,16 +1028,27 @@ ${JSON.stringify(tripSummary, null, 2)}
       const currentPrice = currentTransport?.price ?? 0;
 
       // Only set_transport_window has a window; show_transport_options
-      // passes no bounds (we still use the same search path).
-      const window =
-        toolName === 'set_transport_window'
-          ? {
-              earliestDepart: toolInput.earliestDepart ?? null,
-              latestDepart: toolInput.latestDepart ?? null,
-              earliestArrive: toolInput.earliestArrive ?? null,
-              latestArrive: toolInput.latestArrive ?? null,
-            }
-          : undefined;
+      // passes no bounds (we still use the same search path). Bounds are
+      // normalised to HH:MM here ("5pm" → "17:00") so the filter, the
+      // reply and the stored constraint all use the same value. A bound
+      // we can't read is answered as such BEFORE searching — it used to be
+      // ignored while the reply claimed it (B10).
+      let window: NormalizedTimeWindow | undefined;
+      if (toolName === 'set_transport_window') {
+        const normalized = normalizeTimeWindow({
+          earliestDepart: toolInput.earliestDepart,
+          latestDepart: toolInput.latestDepart,
+          earliestArrive: toolInput.earliestArrive,
+          latestArrive: toolInput.latestArrive,
+        });
+        if (!normalized.ok) {
+          return res.json({
+            type: 'answer',
+            reply: `I couldn\'t set a time window on ${fromCity.name} → ${toCity.name}: ${JSON.stringify(normalized.raw)} isn\'t a clock time I can use for the ${WINDOW_BOUND_LABEL[normalized.bound]}. Give me one like 17:00 or 5pm.`,
+          });
+        }
+        window = normalized.window;
+      }
 
       const legSearch = await searchLegOptions({
         from: fromCity.name,
@@ -968,6 +1096,28 @@ ${JSON.stringify(tripSummary, null, 2)}
       // Build a one-line summary for the chat bubble.
       const shownCount = legSearch.options.length;
       const cheapest = legSearch.options[0];
+
+      // The frontend makes options[0] the leg's selection
+      // (applyLegRefreshToTrip), so a refresh whose fresh cheapest costs
+      // MORE than the leg's current option raised the trip on a "cheaper"
+      // request: in the demo run "is there a cheaper way?" took Paris →
+      // Zurich $278 → $282 and the trip $5,014 → $5,018 under the reply
+      // "cheapest is +$4" (D-03). show_transport_options is for browsing
+      // and cost-cutting, so the current option stays first and the fresh
+      // ones follow as alternatives the user can still pick on the card.
+      // set_transport_window is exempt: the current option may break the
+      // user's window, and moving off it is the point.
+      const keepCurrent =
+        toolName === 'show_transport_options' &&
+        currentTransport != null &&
+        currentPrice > 0 &&
+        cheapest.price >= currentPrice;
+      let options = legSearch.options;
+      if (keepCurrent) {
+        const kept = transportToLegOption(currentTransport, cheapest.currency);
+        options = [kept, ...options.filter((o) => !isSameLegOption(o, kept))].slice(0, 4);
+      }
+
       const summaryBits: string[] = [];
       const foundCountPhrase =
         totalFound > shownCount
@@ -979,7 +1129,13 @@ ${JSON.stringify(tripSummary, null, 2)}
         if (windowPhrase) summaryBits.push(windowPhrase);
       }
       const delta = cheapest.priceDelta;
-      if (currentPrice > 0 && delta < 0) {
+      if (keepCurrent) {
+        const nextBest =
+          delta >= 0.5 ? `next best is +$${delta.toFixed(0)}` : 'next best costs the same';
+        summaryBits.push(
+          `nothing cheaper than your current $${currentPrice.toFixed(0)}, so I kept it (${nextBest})`,
+        );
+      } else if (currentPrice > 0 && delta < 0) {
         summaryBits.push(`cheapest saves $${Math.abs(delta).toFixed(0)}`);
       } else if (currentPrice > 0 && delta > 0) {
         summaryBits.push(`cheapest is +$${delta.toFixed(0)}`);
@@ -987,8 +1143,9 @@ ${JSON.stringify(tripSummary, null, 2)}
       const summary =
         summaryBits.join(' — ') + '. Pick one on the transport card to use it.';
 
-      // If this was set_transport_window, persist the intent on the trip
-      // so future re-optimizations honor the bound.
+      // If this was set_transport_window, record the window on the trip's
+      // constraints. Record only — it isn't saved and nothing re-applies
+      // it (see the route header above).
       let updatedConstraints = existingConstraints;
       if (toolName === 'set_transport_window' && window) {
         const constraintUpdate: TripConstraints = {
@@ -1013,7 +1170,7 @@ ${JSON.stringify(tripSummary, null, 2)}
           fromCity: fromCity.name,
           toCity: toCity.name,
           date: travelDate,
-          options: legSearch.options,
+          options,
           totalFound,
           updatedConstraints,
         },
@@ -1022,6 +1179,20 @@ ${JSON.stringify(tripSummary, null, 2)}
 
     // --- Date-bearing tools: pin_city_dates, set_min_days. These
     //     compute a new set of city dates + a visual diff.
+    //
+    //     The proposal's reply is the model's own `explanation`, written
+    //     before anything was checked — so a constraint we can't apply
+    //     must NOT become a proposal, or the chat claims it anyway
+    //     ("Giving you three nights in Rome" over an unchanged trip, B10).
+    //     Each failed check answers instead: "I couldn't <attempt>:
+    //     <reason>." That reply is the chat bubble, and the model reads it
+    //     back as history next turn.
+    let attempt = '';
+    let target: any = null;
+    let minNights: number | null = null;
+    const couldnt = (reason: string) =>
+      res.json({ type: 'answer', reply: `I couldn\'t ${attempt}: ${reason}.` });
+
     if (toolName === 'pin_city_dates') {
       const match = (currentTrip.cities ?? []).find(
         (c: any) => c.name.toLowerCase() === String(toolInput.city).toLowerCase(),
@@ -1034,6 +1205,15 @@ ${JSON.stringify(tripSummary, null, 2)}
             .join(', ')}?`,
         });
       }
+      // Name the dates when they are dates: a wrong year the model picked
+      // is then visible to the user in the refusal itself.
+      attempt =
+        isIsoDate(toolInput.arrival) && isIsoDate(toolInput.departure)
+          ? `pin ${match.name} to ${toolInput.arrival} – ${toolInput.departure}`
+          : `pin ${match.name}`;
+      const problem = pinProblem(toolInput.arrival, toolInput.departure);
+      if (problem) return couldnt(problem);
+      target = match;
       constraintUpdate = {
         pinned_cities: [
           { city: match.name, arrival: toolInput.arrival, departure: toolInput.departure },
@@ -1049,8 +1229,17 @@ ${JSON.stringify(tripSummary, null, 2)}
           reply: `I couldn\'t find "${toolInput.city}" in your trip.`,
         });
       }
+      minNights = parseMinNights(toolInput.minNights);
+      if (minNights == null) {
+        attempt = `set a minimum stay for ${match.name}`;
+        return couldnt(
+          `it has to be a whole number of nights from 1 to ${MAX_STAY_NIGHTS}, and I got ${JSON.stringify(toolInput.minNights ?? null)}`,
+        );
+      }
+      attempt = `give ${match.name} at least ${minNights} night${minNights === 1 ? '' : 's'}`;
+      target = match;
       constraintUpdate = {
-        min_days: [{ city: match.name, minNights: Number(toolInput.minNights) }],
+        min_days: [{ city: match.name, minNights }],
       };
     }
 
@@ -1062,6 +1251,24 @@ ${JSON.stringify(tripSummary, null, 2)}
       departure_date: c.dates?.departure ?? c.departure_date ?? null,
     }));
     const { cities: newCities, diff } = applyDateConstraints(dbShapeCities, proposedConstraints);
+
+    if (target) {
+      // Valid on its own can still be impossible in context: a pin that
+      // pushes earlier cities into the past, or two pins with too little
+      // room for the stays between them. Scripted before this check,
+      // Rome pinned Dec 8–12 plus Florence pinned Dec 13–15 proposed
+      // Venice Dec 11–13 — overlapping Rome — with no warning.
+      const schedule = scheduleProblem(dbShapeCities, newCities);
+      if (schedule) return couldnt(schedule);
+      if (minNights != null) {
+        const shortfall = minDaysProblem(
+          newCities[(currentTrip.cities ?? []).indexOf(target)],
+          minNights,
+          proposedConstraints,
+        );
+        if (shortfall) return couldnt(shortfall);
+      }
+    }
 
     const proposedTrip = {
       ...currentTrip,
@@ -1089,6 +1296,51 @@ ${JSON.stringify(tripSummary, null, 2)}
     });
   }),
 );
+
+/**
+ * The compare_modes reply, stated from the same numbers the card shows.
+ * A missing mode is said plainly ("I found no train …"), a train with no
+ * price is "at an unknown price", and cheaper/faster is only claimed when
+ * both sides have the number it depends on.
+ */
+function describeComparison(
+  from: string,
+  to: string,
+  date: string,
+  flight: { price: number; duration: string; durationMinutes: number } | null,
+  train: { price: number; duration: string; durationMinutes: number } | null,
+  cmp: { cheapest: string; fastest: string },
+): string {
+  const leg = `${from} → ${to}`;
+  const price = (p: number) => (p > 0 ? `from $${Math.round(p)}` : 'at an unknown price');
+  if (flight && !train) {
+    return `I found no train for ${leg} on ${date} — only flights, ${price(flight.price)} (${flight.duration}).`;
+  }
+  if (train && !flight) {
+    return `I found no flight for ${leg} on ${date} — only trains, ${price(train.price)} (${train.duration}).`;
+  }
+  if (!flight || !train) return `I couldn\'t find any flight or train options for ${leg} on ${date}.`;
+
+  const found = `${leg} on ${date}: flight ${price(flight.price)} (${flight.duration}), train ${price(train.price)} (${train.duration}).`;
+  const isMode = (m: string) => m === 'flight' || m === 'train';
+  const cheaper =
+    flight.price > 0 && train.price > 0 && isMode(cmp.cheapest) ? cmp.cheapest : null;
+  const faster =
+    flight.durationMinutes > 0 && train.durationMinutes > 0 && isMode(cmp.fastest) ? cmp.fastest : null;
+  if (cheaper && cheaper === faster) return `${found} The ${cheaper} is both cheaper and faster.`;
+  if (cheaper && faster) return `${found} The ${cheaper} is cheaper; the ${faster} is faster.`;
+  if (cheaper) return `${found} The ${cheaper} is cheaper.`;
+  if (faster) return `${found} The ${faster} is faster.`;
+  return found;
+}
+
+/** How a window bound reads in a reply. */
+const WINDOW_BOUND_LABEL = {
+  earliestDepart: 'earliest departure',
+  latestDepart: 'latest departure',
+  earliestArrive: 'earliest arrival',
+  latestArrive: 'latest arrival',
+} as const;
 
 /**
  * Human-readable phrase describing a time window, e.g.
@@ -1138,27 +1390,62 @@ router.post(
     const { DEFAULT_MODEL } = require('../services/anthropic');
     const summary = summarizeTripForChat(currentTrip);
 
+    // Which legs have any train in the trip. Rail can come back empty (the
+    // demo triage found it empty in production: no ALLABOARD_API_KEY), and a chip
+    // like "Can we take train Rome→Florence?" then leads straight to a
+    // comparison card reading "Train — No options found" (D-07).
+    const tripCities = currentTrip.cities ?? [];
+    const legs = tripCities.slice(0, -1).map((c: any, i: number) => ({
+      from: c.name,
+      to: tripCities[i + 1].name,
+      mode: c.transportOut?.mode ?? null,
+      trainFound:
+        c.transportOut?.mode === 'train' ||
+        (c.transportOut?.alternatives ?? []).some((a: any) => a?.mode === 'train'),
+    }));
+    const anyTrain = legs.some((l: any) => l.trainFound);
+
     try {
       const response = await anthropic.messages.create({
         model: DEFAULT_MODEL,
         max_tokens: 400,
-        system: `You generate 4 short, specific, trip-tailored prompt suggestions that the user could click to start a conversation with BlueMurr AI about their itinerary. Each suggestion:
+        // The chat's tools are listed so suggestions stay inside them: the
+        // old "one enhancement (activity/swap)" asked for things no tool
+        // does — "Add Thames river activity in London?" got "I can't book
+        // activities directly" (D-07).
+        system: `You generate 4 short, specific, trip-tailored prompt suggestions that the user could click to start a conversation with BlueMurr AI about their itinerary.
+
+Today is ${todayIso()} (UTC). Any date a suggestion mentions must be in the future.
+
+Each suggestion:
 - Is under 40 characters
 - References a specific city, leg, or feature of THIS trip (not generic)
 - Is a question or a request the user might realistically have
-- Covers a mix: one "why" question (ordering/pricing), one cost-cutting request, one constraint/timing request, one enhancement (activity/swap)
+- Is something BlueMurr AI can actually do (below)
+
+BlueMurr AI CAN: explain the trip (why this city order, why a price); lock a city to specific dates; give a city more nights; set a departure or arrival time limit on one leg; show cheaper or other flight/train options for one named leg; compare flight vs train for one named leg.
+BlueMurr AI can NOT: book anything, add activities, tours or restaurants, change hotels, or add, remove or swap cities. Never suggest those.
+
+Trains: mention a train only for a leg whose "trainFound" is true in "legs". If no leg has "trainFound": true, do not mention trains at all.
+
+Cover a mix: one "why" question (ordering/pricing), one cheaper-option request naming a specific leg, one dates or time-of-day request, and one more of any kind above.
 
 Return ONLY a JSON array of 4 strings, no prose, no markdown fences.`,
         messages: [
-          { role: 'user', content: `Trip:\n${JSON.stringify(summary, null, 2)}` },
+          { role: 'user', content: `Trip:\n${JSON.stringify({ ...summary, legs }, null, 2)}` },
         ],
       });
 
       const text = response.content?.[0]?.type === 'text' ? (response.content[0] as any).text : '';
       const parsed = extractJson(text);
       if (Array.isArray(parsed) && parsed.every((s) => typeof s === 'string') && parsed.length >= 3) {
-        // Trim to 4, pad with fallback if fewer than 4.
-        const trimmed = parsed.slice(0, 4).map((s: string) => s.slice(0, 60));
+        // The prompt asks; this enforces. Drop any suggestion for something
+        // the chat can't do, and any train suggestion when no leg has a
+        // train — then trim to 4 and pad with fallback as before.
+        const doable = parsed.filter(
+          (s: string) => !CANT_DO_SUGGESTION.test(s) && (anyTrain || !TRAIN_SUGGESTION.test(s)),
+        );
+        const trimmed = doable.slice(0, 4).map((s: string) => s.slice(0, 60));
         while (trimmed.length < 4) trimmed.push(fallback[trimmed.length]);
         return res.json({ suggestions: trimmed });
       }
@@ -1169,6 +1456,12 @@ Return ONLY a JSON array of 4 strings, no prose, no markdown fences.`,
     return res.json({ suggestions: fallback });
   }),
 );
+
+/** Suggestions for things no chat tool does (booking, activities, …). */
+const CANT_DO_SUGGESTION =
+  /\b(activit(?:y|ies)|tours?|restaurants?|book(?:s|ed|ing)?|reserv\w*|tickets?)\b/i;
+/** Suggestions about trains — dropped when no leg of the trip has one. */
+const TRAIN_SUGGESTION = /\b(trains?|rail)\b/i;
 
 /**
  * Rule-based fallback for dynamic prompts when the AI call fails or
