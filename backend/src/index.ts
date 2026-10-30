@@ -13,7 +13,7 @@ import {
   locationLimiter,
   optimizeLimiter,
 } from './middleware/rateLimit';
-import { startPresetRefreshScheduler } from './services/presets';
+import { startPresetRefreshScheduler, warmPresetChecks } from './services/presets';
 import { originIndex } from './services/location/originAirports';
 
 const app = express();
@@ -97,6 +97,16 @@ function warmLocationIndex(): void {
       logger.info('Location index built', { ms: Date.now() - started });
     } catch (err: any) {
       logger.error('Location index warm-up failed — the first request will build it', {
+        errMessage: err?.message,
+      });
+    }
+    // Then the Browse catalog's preset checks, which read that index.
+    const presetsStarted = Date.now();
+    try {
+      warmPresetChecks();
+      logger.info('Preset checks warmed', { ms: Date.now() - presetsStarted });
+    } catch (err: any) {
+      logger.error('Preset check warm-up failed — the first /api/presets will run them', {
         errMessage: err?.message,
       });
     }
