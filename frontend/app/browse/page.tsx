@@ -43,6 +43,7 @@ import {
   buildPresetTrip,
   presetVibes,
 } from '@/data/presetItineraries';
+import { cardCoverBackground, modalCoverBackground } from '@/components/browse/coverBackground';
 import {
   stashCanvasIntent,
   clearCanvasIntent,
@@ -61,11 +62,6 @@ const catalogBounds = (presets: PresetItinerary[]) => ({
   costMin: Math.floor(Math.min(...presets.map(presetCost)) / 100) * 100,
   costMax: Math.ceil(Math.max(...presets.map(presetCost)) / 100) * 100,
 });
-
-const bannerBackground = (preset: PresetItinerary) =>
-  preset.coverImage
-    ? `linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.55) 100%), url(${preset.coverImage}) center/cover no-repeat, ${preset.coverGradient}`
-    : preset.coverGradient;
 
 // Next 14: useSearchParams (the ?preset= deep link) needs a Suspense
 // boundary for static rendering.
@@ -429,7 +425,7 @@ function BrowsePageInner() {
                   width and the photo covered only part of the card. */}
               <div
                 className="w-full h-44 flex-shrink-0 px-4 flex flex-col justify-end pb-2.5 relative"
-                style={{ background: bannerBackground(preset) }}
+                style={{ background: cardCoverBackground(preset) }}
               >
                 <span
                   className="absolute top-2 right-2 text-[9px] font-medium px-1.5 py-0.5 rounded-full"
@@ -803,7 +799,7 @@ function BrowsePageInner() {
                 {/* Banner */}
                 <div
                   className="px-6 pt-5 pb-4 relative flex-shrink-0"
-                  style={{ background: bannerBackground(selected) }}
+                  style={{ background: modalCoverBackground(selected) }}
                 >
                   <button
                     onClick={() => setSelected(null)}

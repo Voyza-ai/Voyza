@@ -851,6 +851,24 @@ export const PRESET_ITINERARIES: PresetItinerary[] = [
   },
 ];
 
+/**
+ * A cover's card-thumbnail rendition: the same Wikimedia Commons file at
+ * 960px instead of 1280px. /browse cards draw covers ~366 CSS px wide —
+ * 732 device px at 2× — so 960 still oversamples, while the 1280px
+ * originals cost 3.3 MB for one page of cards (audit C6). Every catalog
+ * cover's 960px rendition was requested once from a browser and returned
+ * 200 (Wikimedia renders new widths lazily). Anything that isn't a 1280px
+ * Commons thumbnail comes back unchanged.
+ */
+export function coverThumbUrl(url: string): string;
+export function coverThumbUrl(url: string | undefined): string | undefined;
+export function coverThumbUrl(url: string | undefined): string | undefined {
+  return url?.replace(
+    /^(https:\/\/upload\.wikimedia\.org\/wikipedia\/commons\/thumb\/.+)\/1280px-([^/]+)$/,
+    '$1/960px-$2',
+  );
+}
+
 const EMPTY_TRANSPORT: Transport = { mode: 'flight', operator: '', duration: '', price: 0 };
 
 const toIso = (d: Date) =>
