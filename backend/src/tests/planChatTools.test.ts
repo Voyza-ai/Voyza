@@ -469,3 +469,38 @@ describe('D-03 — a transport refresh never swaps in a pricier option', () => {
     expect(res.body.refresh.options[0]).toMatchObject({ departTime: '16:00', price: 110 });
   });
 });
+
+describe('D-07 — compare_modes reports what was found, not what the model guessed', () => {
+  const app = createApp();
+  const flight = { id: 'f', price: 95, currency: 'USD', departure: '', arrival: '', durationMinutes: 240, stops: 0, carrier: 'Mock Air', carrierCode: 'MK', bookingUrl: 'https://example.test', raw: {} };
+  const train = { id: 't', price: 40, currency: 'USD', departure: '', arrival: '', durationMinutes: 95, operator: 'Trenitalia', bookingUrl: null };
+  const guess = "Here's flight vs train for Rome → Venice — flights save about 4 hours.";
+
+  it('says plainly that no train was found, instead of the model\'s invented duration gap', async () => {
+    mockCompareLeg.mockResolvedValue({ flightOption: flight, trainOption: null, cheapest: 'flight', fastest: 'flight', recommendation: 'flight', priceDifference: 0, timeDifference: 0 });
+    const res = await chat(app, 'compare_modes', { from: 'Rome', to: 'Venice', explanation: guess });
+    expect(res.body.type).toBe('mode_comparison');
+    expect(res.body.comparison.train).toBeNull();
+    expect(res.body.reply).toBe('I found no train for Rome → Venice on 2026-12-10 — only flights, from $95 (4h).');
+  });
+
+  it('says plainly that no flight was found', async () => {
+    mockCompareLeg.mockResolvedValue({ flightOption: null, trainOption: train, cheapest: 'train', fastest: 'train', recommendation: 'train', priceDifference: 0, timeDifference: 0 });
+    const res = await chat(app, 'compare_modes', { from: 'Rome', to: 'Venice', explanation: guess });
+    expect(res.body.reply).toBe('I found no flight for Rome → Venice on 2026-12-10 — only trains, from $40 (1h 35m).');
+  });
+
+  it('states both found options with the card\'s own numbers', async () => {
+    mockCompareLeg.mockResolvedValue({ flightOption: flight, trainOption: train, cheapest: 'train', fastest: 'train', recommendation: 'train', priceDifference: 55, timeDifference: 145 });
+    const res = await chat(app, 'compare_modes', { from: 'Rome', to: 'Venice', explanation: guess });
+    expect(res.body.reply).toBe('Rome → Venice on 2026-12-10: flight from $95 (4h), train from $40 (1h 35m). The train is both cheaper and faster.');
+    expect(res.body.comparison.flight).toMatchObject({ price: 95, duration: '4h' });
+    expect(res.body.comparison.train).toMatchObject({ price: 40, duration: '1h 35m' });
+  });
+
+  it('does not invent a price for a train whose price is unknown', async () => {
+    mockCompareLeg.mockResolvedValue({ flightOption: flight, trainOption: { ...train, price: null }, cheapest: 'flight', fastest: 'train', recommendation: 'flight', priceDifference: 0, timeDifference: 145 });
+    const res = await chat(app, 'compare_modes', { from: 'Rome', to: 'Venice', explanation: guess });
+    expect(res.body.reply).toBe('Rome → Venice on 2026-12-10: flight from $95 (4h), train at an unknown price (1h 35m). The train is faster.');
+  });
+});

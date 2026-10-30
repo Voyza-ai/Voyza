@@ -948,9 +948,13 @@ ${JSON.stringify(tripSummary, null, 2)}
           }
         : null;
 
+      // The reply is built from what the search found, not the model's
+      // `explanation`: the model writes that BEFORE the search runs, so it
+      // can only guess. In the demo it said "trains take about 4 hours
+      // longer" above a card reading "Train — No options found" (D-07).
       return res.json({
         type: 'mode_comparison',
-        reply: toolInput.explanation ?? `Here\'s flight vs train for ${fromCity.name} → ${toCity.name}.`,
+        reply: describeComparison(fromCity.name, toCity.name, travelDate, flightSummary, trainSummary, cmp),
         comparison: {
           fromCity: fromCity.name,
           toCity: toCity.name,
@@ -1276,6 +1280,43 @@ ${JSON.stringify(tripSummary, null, 2)}
     });
   }),
 );
+
+/**
+ * The compare_modes reply, stated from the same numbers the card shows.
+ * A missing mode is said plainly ("I found no train …"), a train with no
+ * price is "at an unknown price", and cheaper/faster is only claimed when
+ * both sides have the number it depends on.
+ */
+function describeComparison(
+  from: string,
+  to: string,
+  date: string,
+  flight: { price: number; duration: string; durationMinutes: number } | null,
+  train: { price: number; duration: string; durationMinutes: number } | null,
+  cmp: { cheapest: string; fastest: string },
+): string {
+  const leg = `${from} → ${to}`;
+  const price = (p: number) => (p > 0 ? `from $${Math.round(p)}` : 'at an unknown price');
+  if (flight && !train) {
+    return `I found no train for ${leg} on ${date} — only flights, ${price(flight.price)} (${flight.duration}).`;
+  }
+  if (train && !flight) {
+    return `I found no flight for ${leg} on ${date} — only trains, ${price(train.price)} (${train.duration}).`;
+  }
+  if (!flight || !train) return `I couldn\'t find any flight or train options for ${leg} on ${date}.`;
+
+  const found = `${leg} on ${date}: flight ${price(flight.price)} (${flight.duration}), train ${price(train.price)} (${train.duration}).`;
+  const isMode = (m: string) => m === 'flight' || m === 'train';
+  const cheaper =
+    flight.price > 0 && train.price > 0 && isMode(cmp.cheapest) ? cmp.cheapest : null;
+  const faster =
+    flight.durationMinutes > 0 && train.durationMinutes > 0 && isMode(cmp.fastest) ? cmp.fastest : null;
+  if (cheaper && cheaper === faster) return `${found} The ${cheaper} is both cheaper and faster.`;
+  if (cheaper && faster) return `${found} The ${cheaper} is cheaper; the ${faster} is faster.`;
+  if (cheaper) return `${found} The ${cheaper} is cheaper.`;
+  if (faster) return `${found} The ${faster} is faster.`;
+  return found;
+}
 
 /** How a window bound reads in a reply. */
 const WINDOW_BOUND_LABEL = {
