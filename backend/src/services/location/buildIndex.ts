@@ -180,13 +180,15 @@ export function buildIndex(artifact: LocationArtifact): BuiltIndex {
   // Most prominent first, so the single-valued `iata` map resolves a shared
   // code to the place a traveller means: LAX is Los Angeles, not Burbank, even
   // though both legitimately list it.
-  const places = [...artifact.places].sort(
-    (a, b) => prominenceOf(b) - prominenceOf(a) || a.id.localeCompare(b.id),
-  );
+  //
+  // Each place is scored once: in the comparator, prominenceOf ran ~1.1M times
+  // for 36k places, 1.3 s of a 1.8 s build under jest.
+  const scored = artifact.places.map((place) => ({ place, score: prominenceOf(place) }));
+  scored.sort((a, b) => b.score - a.score || a.place.id.localeCompare(b.place.id));
 
-  for (const place of places) {
+  for (const { place, score } of scored) {
     byId.set(place.id, place);
-    prominence.set(place.id, prominenceOf(place));
+    prominence.set(place.id, score);
 
     if (place.kind === 'country') countryNames.set(place.country.toUpperCase(), place.name);
     if ((place.kind === 'state' || place.kind === 'region') && place.admin) {

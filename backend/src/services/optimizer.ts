@@ -56,6 +56,8 @@ type RunContext = {
   /** getIataCode for the HOME city: no trip context, its own memo. */
   homeIata: (cityName: string) => Promise<string>;
   compare: (params: CompareLegParams) => Promise<LegComparison>;
+  /** `compare`'s answers so far, by compareKey. */
+  compareMemo: Map<string, Promise<LegComparison>>;
   /** searchFlights, counted — see `flightOutcomes`. */
   flights: typeof searchFlights;
   /**
@@ -107,17 +109,7 @@ function createRunContext(tripCityNames: string[]): RunContext {
 
   const compareMemo = new Map<string, Promise<LegComparison>>();
   const compare = (params: CompareLegParams): Promise<LegComparison> => {
-    // Every input compareLeg reads — a memo must never merge two travel
-    // days, party sizes or country hints. (tripCityNames is left out: it is
-    // the same for the whole run.)
-    const key = [
-      params.origin,
-      params.destination,
-      params.date,
-      params.travelers,
-      params.originCountry ?? '',
-      params.destinationCountry ?? '',
-    ].join('|');
+    const key = compareKey(params);
     let hit = compareMemo.get(key);
     if (!hit) {
       hit = compareLeg(params, { getIataCode: iata, searchFlights: flights });
@@ -126,7 +118,97 @@ function createRunContext(tripCityNames: string[]): RunContext {
     return hit;
   };
 
-  return { tripCityNames, iata, homeIata, compare, flights, flightOutcomes };
+  return { tripCityNames, iata, homeIata, compare, compareMemo, flights, flightOutcomes };
+}
+
+/**
+ * Every input compareLeg reads — a memo must never merge two travel days,
+ * party sizes or country hints. (tripCityNames is left out: it is the same
+ * for the whole run.)
+ */
+function compareKey(params: CompareLegParams): string {
+  return [
+    params.origin,
+    params.destination,
+    params.date,
+    params.travelers,
+    params.originCountry ?? '',
+    params.destinationCountry ?? '',
+  ].join('|');
+}
+
+/**
+ * The date-shift probe's Duffel work, held so it can be given up on (see
+ * DATE_SHIFT_GRACE_MS). At most `limit` units are let through at a time —
+ * a unit is one compareLeg call or one home-flight search, i.e. at most one
+ * Duffel offer request. Once the probe is given up on, every unit still
+ * waiting is refused instead of sent, so an abandoned probe stops spending
+ * the Duffel rate limit after the ones already in flight.
+ *
+ * Why a gate of our own: searchFlights has no way to cancel a search once
+ * it is queued in flights.ts (and none to abort one in flight), and the
+ * probe used to hand it every search at once. Holding them here is the only
+ * point where an unsent search can still be dropped.
+ */
+type ProbeGate = {
+  run<T>(unit: () => Promise<T>): Promise<T>;
+  /** Refuse every unit from now on; says how many were running and waiting. */
+  abandon(): { inFlight: number; waiting: number };
+  readonly abandoned: boolean;
+};
+
+function createProbeGate(limit: number): ProbeGate {
+  let abandoned = false;
+  let active = 0;
+  const waiters: Array<() => void> = [];
+  return {
+    get abandoned() {
+      return abandoned;
+    },
+    abandon() {
+      abandoned = true;
+      const at = { inFlight: active, waiting: waiters.length };
+      waiters.splice(0).forEach((wake) => wake());
+      return at;
+    },
+    async run<T>(unit: () => Promise<T>): Promise<T> {
+      while (active >= limit && !abandoned) {
+        await new Promise<void>((resolve) => waiters.push(resolve));
+      }
+      if (abandoned) {
+        throw new Error('Date-shift probe given up on: search not sent');
+      }
+      active++;
+      try {
+        return await unit();
+      } finally {
+        active--;
+        waiters.shift()?.();
+      }
+    },
+  };
+}
+
+/**
+ * The run context the date-shift probe prices through: the run's airport
+ * memos and counted searches, with every NEW leg comparison and home-flight
+ * search going through `gate`. A leg the run already compared is served from
+ * the run's memo without waiting on the gate. The probe's own comparisons
+ * get their own memo, so an answer it was refused never reaches the run's.
+ */
+function probeContext(ctx: RunContext, gate: ProbeGate): RunContext {
+  const memo = new Map<string, Promise<LegComparison>>();
+  const compare = (params: CompareLegParams): Promise<LegComparison> => {
+    const key = compareKey(params);
+    let hit = ctx.compareMemo.get(key) ?? memo.get(key);
+    if (!hit) {
+      hit = gate.run(() => compareLeg(params, { getIataCode: ctx.iata, searchFlights: ctx.flights }));
+      memo.set(key, hit);
+    }
+    return hit;
+  };
+  const flights: typeof searchFlights = (params) => gate.run(() => ctx.flights(params));
+  return { ...ctx, compare, compareMemo: memo, flights };
 }
 
 type CityInput = {
@@ -390,6 +472,44 @@ const MAX_HOME_AIRPORTS = 3;
  * 3s still covers one ordinary 5xx backoff (1-3s on the first retry).
  */
 const DATE_SHIFT_RETRY_WAIT_MS = 3000;
+
+/**
+ * How long the date-shift probe may run past the core result (winner chosen,
+ * leg alternatives and home legs built) on a trip of 4+ cities. Past it the
+ * plan is returned without a suggestion and with dateShiftChecked: false,
+ * which the results header reads as "no price claim" — honest, not wrong.
+ *
+ * The probe is a banner, and on 4+ cities it was the tail of the response:
+ * a 5-city trip needed 20 Duffel searches after the winner was known, the
+ * last 8.2s of 52.8s at production's ~2.5 searches/s (6.2s of 37.6s with 6
+ * search slots and no rate limit; mocked-latency harness). 1.5s is about one
+ * Duffel round trip (1.3-1.9s measured): a probe that is down to its last
+ * searches, or is served from cache (the same trip re-planned within
+ * flights.ts' 10 minutes), still lands; one that needs another round of
+ * searches does not hold the plan for it.
+ */
+const DATE_SHIFT_GRACE_MS = 1500;
+
+/**
+ * The same limit for 1-3 city trips, where the probe is kept as it was: it is
+ * what puts "Best price for these dates" in their results header. There it
+ * needs 8-16 searches after the winner — on the owner's 3-city trip, 4.5s past
+ * the core result with 6 search slots and 5.3s at ~2.5 searches/s. 10s
+ * covers the largest 3-city probe at that rate (16 searches ≈ 6.4s plus one
+ * round trip) and its hotel check; it only cuts a probe stuck behind
+ * rate-limit retries, which could otherwise hold the plan open for as long as
+ * those take.
+ */
+const DATE_SHIFT_GRACE_SHORT_TRIP_MS = 10_000;
+
+/**
+ * Most date-shift probe searches handed to flights.ts at once on a trip of
+ * 4+ cities — the width of flights.ts' own gate (MAX_CONCURRENT_SEARCHES), so
+ * a probe running alone is not slowed, and a probe given up on leaves at most
+ * this many in flight. 1-3 city trips hand every search over at once, as
+ * before: their probe is rarely given up on.
+ */
+const PROBE_MAX_IN_FLIGHT = 6;
 
 /**
  * Distribute a total night count across N cities.
@@ -1515,8 +1635,13 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
 
   // Step 7: date-shift suggestion — probe a few ±1/±2 day offsets on the
   // winning ordering to see if leaving earlier/later saves meaningful money.
-  // Runs in parallel; any failures silently skip this feature.
+  // Runs in parallel; any failures silently skip this feature. Its new
+  // searches go through `probeGate`, so that once the plan stops waiting
+  // for it (DATE_SHIFT_GRACE_MS) the ones not yet sent never are.
   const dateShiftOutcome: DateShiftOutcome = { offsetsPriced: 0, hadCandidate: false, hotelsPriced: false };
+  const shortTrip = cities.length <= 3;
+  const probeGate = createProbeGate(shortTrip ? Infinity : PROBE_MAX_IN_FLIGHT);
+  const probeCtx = probeContext(ctx, probeGate);
   const dateShiftTransportTask = (async (): Promise<DateShiftSuggestion | undefined> => {
     try {
       // Baseline = the winning route's inter-city legs (plus, inside the
@@ -1548,7 +1673,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
             cityMap,
             nightsArray,
             home,
-            ctx,
+            probeCtx,
             dateShiftOutcome,
           ),
         );
@@ -1652,7 +1777,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // transport candidate, no hotel searches.
   const dateShiftTask = (async (): Promise<DateShiftSuggestion | undefined> => {
     const transport = await dateShiftTransportTask;
-    if (!transport) return undefined;
+    // Given up on: nobody will read the answer, so no hotel searches for it.
+    if (!transport || probeGate.abandoned) return undefined;
     dateShiftOutcome.hadCandidate = true;
     const [outbound] = await homeLegsTask;
     const planned = stayDates(bestOrdering, startDate, nightsArray, outbound);
@@ -1664,11 +1790,34 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     return confirmDateShiftWithHotels(transport, stays, travelers, dateShiftOutcome);
   })();
 
-  const [dateShiftSuggestion, , [outboundLeg, returnLeg]] = await Promise.all([
+  // The core result: the winner's leg alternatives and home legs. The probe
+  // gets until then plus a grace, and no longer — it is a banner, and on a
+  // 5-city trip it was the last 20 searches of the response. Given up on,
+  // the plan goes out with no suggestion and dateShiftChecked: false (the
+  // results header then makes no price claim); its unsent searches are
+  // dropped (probeGate) and the few in flight finish into flights.ts' cache.
+  const [, [outboundLeg, returnLeg]] = await Promise.all([enrichTask, homeLegsTask]);
+  const graceMs = shortTrip ? DATE_SHIFT_GRACE_SHORT_TRIP_MS : DATE_SHIFT_GRACE_MS;
+  const PROBE_TIMED_OUT = Symbol('probe timed out');
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
+  const probeResult = await Promise.race([
     dateShiftTask,
-    enrichTask,
-    homeLegsTask,
+    new Promise<typeof PROBE_TIMED_OUT>((resolve) => {
+      graceTimer = setTimeout(() => resolve(PROBE_TIMED_OUT), graceMs);
+    }),
   ]);
+  clearTimeout(graceTimer);
+  const probeTimedOut = probeResult === PROBE_TIMED_OUT;
+  if (probeTimedOut) {
+    const { inFlight, waiting } = probeGate.abandon();
+    logger.info('Date-shift probe given up: not done within the grace after the plan', {
+      cities: cities.length,
+      graceMs,
+      inFlight,
+      notSent: waiting,
+    });
+  }
+  const dateShiftSuggestion = probeTimedOut ? undefined : (probeResult as DateShiftSuggestion | undefined);
 
   // Step 6: assign arrival/departure dates for the best ordering using
   // the per-city nights array. This keeps the displayed calendar
@@ -1705,7 +1854,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     dates,
     dateShiftSuggestion,
     dateShiftChecked:
-      dateShiftOutcome.offsetsPriced > 0 && (!dateShiftOutcome.hadCandidate || dateShiftOutcome.hotelsPriced),
+      !probeTimedOut &&
+      dateShiftOutcome.offsetsPriced > 0 &&
+      (!dateShiftOutcome.hadCandidate || dateShiftOutcome.hotelsPriced),
     outboundLeg,
     returnLeg,
     // Only present when the origin had more than one real reading. The legs
