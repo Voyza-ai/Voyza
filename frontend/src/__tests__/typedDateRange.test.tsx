@@ -102,8 +102,8 @@ describe('the guided planner, dates typed into the bar', () => {
     const a = useTripStore.getState().answers;
     expect(a.flexible).toBe(false);
     expect(a.nights).toBe(7);
-    // The echo is unchanged copy: the start date, as before.
-    expect(screen.getByText('2027-01-10')).toBeInTheDocument();
+    // The echo names both ends, in words (D-19; was "2027-01-10").
+    expect(screen.getByText('Jan 10 – Jan 17, 2027')).toBeInTheDocument();
 
     // The flow still asks for nights (a separate, pre-existing issue:
     // `advanceToNextStep` reads `answers` from the render closure, so it

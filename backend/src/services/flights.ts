@@ -289,6 +289,11 @@ function cachedSearch(key: string, run: () => Promise<FlightOffer[]>): Promise<F
   return promise;
 }
 
+/** Duffel's fictional test-mode airline ("Duffel Airways", IATA ZZ). */
+function isDuffelTestAirline(offer: { carrier: string; carrierCode: string }): boolean {
+  return offer.carrierCode.toUpperCase() === 'ZZ' || /^duffel airways$/i.test(offer.carrier.trim());
+}
+
 export async function searchFlights(params: SearchFlightsParams): Promise<FlightOffer[]> {
   const { origin, destination, date, travelers, cabinClass } = params;
   // A place to itself (ZRH → ZRH, LHR → LON) is not a flight, and never
@@ -409,14 +414,23 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
       };
     });
 
+    // Duffel's test mode sells some routes through its own fictional
+    // airline, "Duffel Airways" (IATA ZZ); a live token never returns it.
+    // The owner's production trip had it on two of three return-flight
+    // alternatives, so opening the card showed a fake airline. Dropped when
+    // any real airline is in the results; kept when it is all there is, so
+    // the leg still has a price instead of turning "unavailable".
+    const realAirlines = mapped.filter((o) => !isDuffelTestAirline(o));
+    const shown = realAirlines.length > 0 ? realAirlines : mapped;
+
     // One line per search, not per offer: if this fires, Duffel gave us
     // neither an ISO duration nor airport time zones for this route and the
     // affected cards will show no duration at all.
-    const unknownDurations = mapped.filter((o) => o.durationMinutes <= 0).length;
+    const unknownDurations = shown.filter((o) => o.durationMinutes <= 0).length;
     if (unknownDurations > 0) {
       logger.warn('Duffel offers with no usable duration', {
         unknownDurations,
-        totalOffers: mapped.length,
+        totalOffers: shown.length,
         origin,
         destination,
         date,
@@ -430,7 +444,7 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
     // a price comparison against a $300 one and land in the trip total.
     const { convertToUsd } = await import('./currency');
     const converted = await Promise.all(
-      mapped.map(async (o): Promise<FlightOffer | null> => {
+      shown.map(async (o): Promise<FlightOffer | null> => {
         // A price that cannot be real is dropped, not carried. `total_amount`
         // absent becomes parseFloat('0') === 0 at the mapping above, and 0 is
         // the most dangerous value on this path: compareLeg picks the CHEAPEST

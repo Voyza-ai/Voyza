@@ -62,3 +62,34 @@ describe('My Trips — Share to Explore', () => {
     await waitFor(() => expect(sw).toHaveAttribute('aria-checked', 'false'));
   });
 });
+
+describe('My Trips — card wording', () => {
+  it('a one-city trip reads "1 city", and the start date is in words', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        trips: [
+          {
+            ...ownedTrip,
+            id: 'trip-2',
+            title: 'Paris Long Weekend',
+            city_count: 1,
+            cities: ['Paris'],
+            date_range: { start: '2026-11-29', end: '2026-12-02' },
+          },
+        ],
+        shared: [],
+      }),
+    });
+    render(<HistoryPage />);
+    expect(await screen.findByText('1 city')).toBeInTheDocument();
+    expect(screen.queryByText(/1 cities/)).not.toBeInTheDocument();
+    expect(screen.getByText('Nov 29, 2026')).toBeInTheDocument();
+    expect(screen.queryByText('2026-11-29')).not.toBeInTheDocument();
+  });
+
+  it('more cities keep the plural', async () => {
+    render(<HistoryPage />);
+    expect(await screen.findByText('3 cities')).toBeInTheDocument();
+  });
+});

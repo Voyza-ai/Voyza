@@ -381,6 +381,7 @@ router.post(
                     bookingUrl: r.bookingUrl,
                     reviewCount: r.reviewCount,
                     priceSuspect: r.priceSuspect,
+                    taxesPerNight: r.taxesPerNight,
                   }));
                   city.hotel = city.hotels[0];
                   city.selectedHotelIndex = 0;

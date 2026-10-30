@@ -2,6 +2,7 @@
 
 // Plain conditional rendering — no AnimatePresence (it gets stuck mid-exit
 // when the tab is throttled or not visible). The morph is now an instant swap.
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Plane,
@@ -68,6 +69,19 @@ export default function Connector({
   const modeLabel = isFlight ? 'Flight' : isTrain ? 'Train' : 'Bus';
   const alternatives = transport.alternatives ?? [];
 
+  // An expanded card widens in place (transition-[width], 300ms). Near the
+  // flowchart's right edge that pushed part of it past the scroller, behind
+  // the AI panel (D-14). Once it has widened, scroll it into the flowchart's
+  // view; `nearest` leaves a card that is already fully visible where it is.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isExpanded) return;
+    const t = window.setTimeout(() => {
+      rootRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }, 320);
+    return () => window.clearTimeout(t);
+  }, [isExpanded]);
+
   // Render an explicit "we couldn't find any transport" pill instead of the
   // normal price/time card. Without this branch the user sees a $0 mode pill
   // with empty time fields and reasonably assumes the app is broken.
@@ -123,6 +137,7 @@ export default function Connector({
 
   return (
     <div
+      ref={rootRef}
       className={`flex-shrink-0 flex items-center justify-center self-center transition-[width] duration-300 ease-out ${
         isExpanded ? 'w-[560px] px-3 py-4' : 'w-[200px] px-0 py-8'
       } relative`}

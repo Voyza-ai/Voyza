@@ -28,6 +28,7 @@ import { useTripStore } from '@/store/tripStore';
 import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
 import { nightsBetween } from '@/lib/hotelScore';
 import { getCityColor, CITY_COLORS } from '@/lib/cityColors';
+import { hasStay } from './CityCard';
 import { VIBE_LABEL } from '@/lib/cityTheme';
 
 type CityDetailPanelProps = {
@@ -37,6 +38,16 @@ type CityDetailPanelProps = {
   onPrev: () => void;
   onNext: () => void;
 };
+
+/**
+ * Rooms the stay is priced for — the backend's rule (services/hotels.ts
+ * `roomsFor`): two adults to a room, one room for a party of 1–2. The app
+ * sends no room count, so the backend always applies it, and the hotel's
+ * price covers every one of these rooms.
+ */
+export function roomsFor(adults: number): number {
+  return Number.isFinite(adults) && adults > 2 ? Math.ceil(adults / 2) : 1;
+}
 
 const formatDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
@@ -81,8 +92,10 @@ export default function CityDetailPanel({
   // The hotel's price already covers every room the party needs (see
   // `hotelsTotal` in lib/tripTotals.ts), so the stay is shown as priced.
   const stayRoom = displayAmount(eff.roomSubtotal, priceMode, trip.travelers);
-  const stayTaxes = displayAmount(eff.taxesSubtotal, priceMode, trip.travelers);
   const stayTotal = displayAmount(eff.total, priceMode, trip.travelers);
+  // Taxes as the difference of the two shown amounts, so the breakdown adds
+  // up after rounding: 810.36 + 40.38 = 850.74 read "$810 + $40 = $851".
+  const stayTaxes = eff.taxesSubtotal > 0 ? stayTotal - stayRoom : 0;
   const stayPerNight = displayAmount(eff.pricePerNight, priceMode, trip.travelers);
   const hasTaxes = stayTaxes > 0;
 
@@ -232,52 +245,55 @@ export default function CityDetailPanel({
               <Building2 size={12} />
               <span>Where you&apos;ll stay</span>
             </div>
-            <div className="flex flex-col items-end">
-              <button
-                type="button"
-                onClick={() => hasTaxes && setShowFees((v) => !v)}
-                className={`group flex items-center gap-1.5 text-[11px] px-2.5 py-1 -mr-2 rounded-full border transition-all duration-200 ${
-                  hasTaxes ? 'cursor-pointer' : 'cursor-default'
-                }`}
-                style={{
-                  borderColor: hasTaxes ? color.border : 'transparent',
-                  background: hasTaxes ? `${color.text}0c` : 'transparent',
-                }}
-                aria-label={hasTaxes ? 'Toggle fee breakdown' : undefined}
-              >
-                <span style={{ color: `${color.text}88` }}>Stay total</span>
-                <span className="font-semibold tabular-nums" style={{ color: color.text }}>
-                  ${stayTotal.toLocaleString()}
-                </span>
-                <span className="tabular-nums" style={{ color: `${color.text}60` }}>
-                  · {nights} {nights === 1 ? 'night' : 'nights'}
-                </span>
-                {hasTaxes && (
-                  <Info size={11} className="ml-0.5" style={{ color: `${color.text}70` }} />
-                )}
-              </button>
-              <AnimatePresence initial={false}>
-                {hasTaxes && showFees && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                    animate={{ opacity: 1, height: 'auto', marginTop: 6 }}
-                    exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                    transition={{ duration: 0.22, ease: [0.22, 0.61, 0.36, 1] }}
-                    className="overflow-hidden flex flex-col items-end gap-0.5 text-[10.5px] tabular-nums min-w-[180px]"
-                    style={{ color: `${color.text}88` }}
-                  >
-                    <div className="flex justify-between w-full">
-                      <span>Room · ${stayPerNight.toLocaleString()} × {nights} {nights === 1 ? 'night' : 'nights'}</span>
-                      <span>${stayRoom.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between w-full">
-                      <span>Taxes &amp; fees</span>
-                      <span>${stayTaxes.toLocaleString()}</span>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            {/* No stay found: no "$0" stay total. */}
+            {hasStay(city) && (
+              <div className="flex flex-col items-end">
+                <button
+                  type="button"
+                  onClick={() => hasTaxes && setShowFees((v) => !v)}
+                  className={`group flex items-center gap-1.5 text-[11px] px-2.5 py-1 -mr-2 rounded-full border transition-all duration-200 ${
+                    hasTaxes ? 'cursor-pointer' : 'cursor-default'
+                  }`}
+                  style={{
+                    borderColor: hasTaxes ? color.border : 'transparent',
+                    background: hasTaxes ? `${color.text}0c` : 'transparent',
+                  }}
+                  aria-label={hasTaxes ? 'Toggle fee breakdown' : undefined}
+                >
+                  <span style={{ color: `${color.text}88` }}>Stay total</span>
+                  <span className="font-semibold tabular-nums" style={{ color: color.text }}>
+                    ${stayTotal.toLocaleString()}
+                  </span>
+                  <span className="tabular-nums" style={{ color: `${color.text}60` }}>
+                    · {nights} {nights === 1 ? 'night' : 'nights'}
+                  </span>
+                  {hasTaxes && (
+                    <Info size={11} className="ml-0.5" style={{ color: `${color.text}70` }} />
+                  )}
+                </button>
+                <AnimatePresence initial={false}>
+                  {hasTaxes && showFees && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                      animate={{ opacity: 1, height: 'auto', marginTop: 6 }}
+                      exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                      transition={{ duration: 0.22, ease: [0.22, 0.61, 0.36, 1] }}
+                      className="overflow-hidden flex flex-col items-end gap-0.5 text-[10.5px] tabular-nums min-w-[180px]"
+                      style={{ color: `${color.text}88` }}
+                    >
+                      <div className="flex justify-between w-full">
+                        <span>Room · ${stayPerNight.toLocaleString()} × {nights} {nights === 1 ? 'night' : 'nights'}</span>
+                        <span>${stayRoom.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between w-full">
+                        <span>Taxes &amp; fees</span>
+                        <span>${stayTaxes.toLocaleString()}</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
           </div>
 
           {/* Coming-soon actions */}
@@ -350,7 +366,13 @@ export default function CityDetailPanel({
           className={`px-6 py-5 flex flex-col gap-3 overflow-y-auto min-h-0 ${scrollCls}`}
           style={{ background: `${color.text}06` }}
         >
-          <HotelDetail hotel={selectedHotel} nights={nights} travelers={trip.travelers} color={color} />
+          <HotelDetail
+            hotel={selectedHotel}
+            isCustom={!!city.customHotel}
+            nights={nights}
+            travelers={trip.travelers}
+            color={color}
+          />
         </div>
       </div>
 
@@ -482,8 +504,10 @@ function HotelRow({
   const taxesGroup = (hotel.taxesPerNight ?? 0) * nights;
   const roomGroup = hotel.pricePerNight * nights;
   const totalGroup = roomGroup + taxesGroup;
-  const taxes = displayAmount(taxesGroup, priceMode, travelers);
   const total = displayAmount(totalGroup, priceMode, travelers);
+  // Same rounding rule as the breakdown: the part of the shown total that
+  // isn't the shown room price.
+  const taxes = taxesGroup > 0 ? total - displayAmount(roomGroup, priceMode, travelers) : 0;
   const perNight = displayAmount(hotel.pricePerNight, priceMode, travelers);
   const isTop = rank === 0;
 
@@ -771,11 +795,14 @@ function CustomHotelForm({
 
 function HotelDetail({
   hotel,
+  isCustom,
   nights,
   travelers,
   color,
 }: {
   hotel: Hotel | null;
+  /** A custom stay replaces the ranked list; otherwise no hotel = none found. */
+  isCustom: boolean;
   nights: number;
   travelers: number;
   color: { bg: string; text: string; border: string; name: string };
@@ -784,7 +811,7 @@ function HotelDetail({
   if (!hotel) {
     return (
       <div className="flex items-center justify-center h-full" style={{ color: `${color.text}70` }}>
-        <span className="text-sm">Using custom hotel</span>
+        <span className="text-sm">{isCustom ? 'Using custom hotel' : 'No options found'}</span>
       </div>
     );
   }
@@ -795,10 +822,13 @@ function HotelDetail({
   const taxesGroup = (hotel.taxesPerNight ?? 0) * nights;
   const roomGroup = hotel.pricePerNight * nights;
   const totalGroup = roomGroup + taxesGroup;
-  const taxes = displayAmount(taxesGroup, priceMode, travelers);
   const room = displayAmount(roomGroup, priceMode, travelers);
   const total = displayAmount(totalGroup, priceMode, travelers);
+  // The difference of the two shown amounts, so the lines add up after
+  // rounding (810.36 + 40.38 = 850.74 read "$810 + $40 = $851").
+  const taxes = taxesGroup > 0 ? total - room : 0;
   const perNight = displayAmount(hotel.pricePerNight, priceMode, travelers);
+  const rooms = roomsFor(travelers);
   // The explanatory "per person" footer is only useful when the main figures
   // are group totals — when the toggle is already in per-person mode, hide it.
   const perPerson =
@@ -877,13 +907,8 @@ function HotelDetail({
             {travelers} {travelers === 1 ? 'traveler' : 'travelers'}
           </div>
           <div className="text-[11px]" style={{ color: `${accent}80` }}>
-            {/* Rendered unchanged from when this came from the dead
-                `maxGuests` branch, which always resolved to one room. The
-                price is now for ceil(travelers / 2) rooms, so this copy is
-                stale for groups of 3+; correcting it is a copy change and
-                waits for the owner's approval. */}
             {nights} {nights === 1 ? 'night' : 'nights'} ·{' '}
-            {'1 room'}
+            {rooms} {rooms === 1 ? 'room' : 'rooms'}
           </div>
         </div>
       </div>
