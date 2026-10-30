@@ -92,8 +92,10 @@ export default function CityDetailPanel({
   // The hotel's price already covers every room the party needs (see
   // `hotelsTotal` in lib/tripTotals.ts), so the stay is shown as priced.
   const stayRoom = displayAmount(eff.roomSubtotal, priceMode, trip.travelers);
-  const stayTaxes = displayAmount(eff.taxesSubtotal, priceMode, trip.travelers);
   const stayTotal = displayAmount(eff.total, priceMode, trip.travelers);
+  // Taxes as the difference of the two shown amounts, so the breakdown adds
+  // up after rounding: 810.36 + 40.38 = 850.74 read "$810 + $40 = $851".
+  const stayTaxes = eff.taxesSubtotal > 0 ? stayTotal - stayRoom : 0;
   const stayPerNight = displayAmount(eff.pricePerNight, priceMode, trip.travelers);
   const hasTaxes = stayTaxes > 0;
 
@@ -502,8 +504,10 @@ function HotelRow({
   const taxesGroup = (hotel.taxesPerNight ?? 0) * nights;
   const roomGroup = hotel.pricePerNight * nights;
   const totalGroup = roomGroup + taxesGroup;
-  const taxes = displayAmount(taxesGroup, priceMode, travelers);
   const total = displayAmount(totalGroup, priceMode, travelers);
+  // Same rounding rule as the breakdown: the part of the shown total that
+  // isn't the shown room price.
+  const taxes = taxesGroup > 0 ? total - displayAmount(roomGroup, priceMode, travelers) : 0;
   const perNight = displayAmount(hotel.pricePerNight, priceMode, travelers);
   const isTop = rank === 0;
 
@@ -818,9 +822,11 @@ function HotelDetail({
   const taxesGroup = (hotel.taxesPerNight ?? 0) * nights;
   const roomGroup = hotel.pricePerNight * nights;
   const totalGroup = roomGroup + taxesGroup;
-  const taxes = displayAmount(taxesGroup, priceMode, travelers);
   const room = displayAmount(roomGroup, priceMode, travelers);
   const total = displayAmount(totalGroup, priceMode, travelers);
+  // The difference of the two shown amounts, so the lines add up after
+  // rounding (810.36 + 40.38 = 850.74 read "$810 + $40 = $851").
+  const taxes = taxesGroup > 0 ? total - room : 0;
   const perNight = displayAmount(hotel.pricePerNight, priceMode, travelers);
   const rooms = roomsFor(travelers);
   // The explanatory "per person" footer is only useful when the main figures

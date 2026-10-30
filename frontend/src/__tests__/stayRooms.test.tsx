@@ -54,3 +54,21 @@ describe('taxes & fees, when the backend sends them', () => {
     expect(screen.getAllByText('$300').length).toBeGreaterThan(0);
   });
 });
+
+describe('the breakdown adds up after rounding', () => {
+  it('room $810 + taxes $41 = $851, never "$810 + $40 = $851"', () => {
+    // Final verification, Paris with Booking's excluded charges: $405.18 a
+    // night and $20.19 taxes a night over 2 nights — 810.36 + 40.38 =
+    // 850.74. Rounded line by line it read $810 + $40 under a $851 total.
+    const hotel = { ...mockHotel, pricePerNight: 405.18, taxesPerNight: 20.19 };
+    const city = buildCity({ hotels: [hotel], hotel, dates: { arrival: '2027-01-11', departure: '2027-01-13' } });
+    const trip = tripWith([city], 6);
+    useTripStore.setState({ currentTrip: trip });
+    render(<CityDetailPanel trip={trip} cityIndex={0} {...panelProps} />);
+    expect(screen.getByText('$810')).toBeInTheDocument();
+    expect(screen.getByText('$41')).toBeInTheDocument();
+    expect(screen.queryByText('$40')).not.toBeInTheDocument();
+    expect(screen.getByText('incl. $41 taxes')).toBeInTheDocument();
+    expect(screen.getAllByText('$851').length).toBeGreaterThan(0);
+  });
+});
