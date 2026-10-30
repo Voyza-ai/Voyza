@@ -6,6 +6,7 @@ import { searchLegOptions, LegOption } from './legOptions';
 import { resolveOriginAirports, type OriginCandidate } from './location/originAirports';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
 import { withDuffelRetryBudget } from './duffelBudget';
+import { AppError } from '../middleware/error';
 
 /**
  * Lookups shared by everything ONE optimize() run does (B8).
@@ -30,14 +31,44 @@ import { withDuffelRetryBudget } from './duffelBudget';
 type RunContext = {
   iata: (cityName: string) => Promise<string>;
   compare: (params: CompareLegParams) => Promise<LegComparison>;
+  /** searchFlights, counted — see `flightOutcomes`. */
+  flights: typeof searchFlights;
+  /**
+   * How this run's flight searches ended (B14). `answered` includes a search
+   * that came back with no offers: that is a route nobody flies, not an
+   * outage. `threw` counts searches that errored after flights.ts' retries,
+   * plus airport lookups that failed with a 5xx (Duffel down before a search
+   * could even start); a 404 "no airport" is neither.
+   */
+  flightOutcomes: { answered: number; threw: number; firstError: unknown };
 };
 
 function createRunContext(): RunContext {
+  const flightOutcomes: RunContext['flightOutcomes'] = { answered: 0, threw: 0, firstError: undefined };
+  const noteThrow = (err: unknown) => {
+    flightOutcomes.threw++;
+    if (flightOutcomes.firstError === undefined) flightOutcomes.firstError = err;
+  };
+
+  const flights: typeof searchFlights = async (params) => {
+    try {
+      const offers = await searchFlights(params);
+      flightOutcomes.answered++;
+      return offers;
+    } catch (err) {
+      noteThrow(err);
+      throw err;
+    }
+  };
+
   const iataMemo = new Map<string, Promise<string>>();
   const iata = (cityName: string): Promise<string> => {
     let hit = iataMemo.get(cityName);
     if (!hit) {
       hit = getIataCode(cityName);
+      hit.catch((err: any) => {
+        if ((err?.statusCode ?? 0) >= 500) noteThrow(err);
+      });
       iataMemo.set(cityName, hit);
     }
     return hit;
@@ -57,13 +88,13 @@ function createRunContext(): RunContext {
     ].join('|');
     let hit = compareMemo.get(key);
     if (!hit) {
-      hit = compareLeg(params, { getIataCode: iata });
+      hit = compareLeg(params, { getIataCode: iata, searchFlights: flights });
       compareMemo.set(key, hit);
     }
     return hit;
   };
 
-  return { iata, compare };
+  return { iata, compare, flights, flightOutcomes };
 }
 
 type CityInput = {
@@ -804,7 +835,7 @@ async function searchHomeFlights(ctx: RunContext, params: {
       const origin = reverse ? cityIata : homeAirport;
       const destination = reverse ? homeAirport : cityIata;
       try {
-        const offers = await searchFlights({ origin, destination, date, travelers });
+        const offers = await ctx.flights({ origin, destination, date, travelers });
         return offers.map((o: any) => ({
           offer: o,
           homeAirport,
@@ -1404,6 +1435,25 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     // max(startDate, …) as well: latestArrival can only fall before the
     // start date if city 0 had zero nights, which the request schema rejects.
     dates[firstCity] = { ...dates[firstCity], arrival: arrival < startDate ? startDate : arrival };
+  }
+
+  // Every flight search failed and nothing else priced the trip (B14): this
+  // is an outage, not a trip. It used to return 200 with every leg
+  // "unavailable", both home flights null and totalCost $0 — a card that
+  // reads like a real, free itinerary. A 502 lands in the planner's
+  // existing error message instead. Narrow on purpose: one search that
+  // ANSWERED (even with no offers), or one leg rail priced, and the trip is
+  // returned as before.
+  const { answered, threw, firstError } = ctx.flightOutcomes;
+  const nothingPriced =
+    topRoutes[0].legs.every((leg) => leg.cost === Infinity) && !outboundLeg && !returnLeg;
+  if (answered === 0 && threw > 0 && nothingPriced) {
+    logger.error('Optimize failed: every flight search errored', { threw });
+    // flights.ts' own message ("Flight search failed: …"), the same text
+    // /api/flights/search returns for the same failure.
+    const message =
+      firstError instanceof Error && firstError.message ? firstError.message : 'Flight search failed';
+    throw new AppError(502, message, { source: 'duffel' });
   }
 
   const publicRoutes = topRoutes.map(toPublicRoute);
