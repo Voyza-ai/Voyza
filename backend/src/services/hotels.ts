@@ -40,6 +40,23 @@ export type HotelResult = {
 const LOCATION_CACHE_TIMEOUT_MS = 1500;
 
 /**
+ * How long any one Booking.com request may take before we give up on it.
+ *
+ * These fetches had no bound at all, so a provider that accepted the
+ * connection and never answered held the search for undici's defaults (five
+ * minutes for headers, five more for the body) while the planner sat on
+ * "Finding hotels..." — and the canvas save route awaits this service inline.
+ *
+ * Sized from production, not from a guess: the whole `/api/hotels/search`
+ * round trip measured 0.86-1.70s across nine calls on 2026-10-29 (median
+ * ~1.1s), and that includes the locations lookup, the search AND currency
+ * conversion. 10s per request is ~6x the slowest whole call, so it should only
+ * ever fire on a request that has stopped. A timed-out search is caught like
+ * any other failure and returns no hotels, which the planner already handles.
+ */
+const BOOKING_FETCH_TIMEOUT_MS = 10_000;
+
+/**
  * PostgREST's "no rows matched" code from `.single()`.
  *
  * This is an ordinary cache miss on a city we haven't looked up yet — the
@@ -186,6 +203,7 @@ async function getHotelDestination(
   )}&locale=en-gb`;
   const res = await fetch(url, {
     headers: { 'X-RapidAPI-Key': env.RAPIDAPI_KEY, 'X-RapidAPI-Host': 'booking-com.p.rapidapi.com' },
+    signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
   });
   if (!res.ok) return null;
   const list = (await res.json()) as any[];
@@ -253,6 +271,7 @@ async function getDestinationId(
         'X-RapidAPI-Key': apiKey,
         'X-RapidAPI-Host': 'booking-com.p.rapidapi.com',
       },
+      signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
       throw new Error(`Booking.com locations API returned ${res.status}`);
@@ -1007,11 +1026,13 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     // throttled moment — surfacing as "$0/night, ★0" in the UI.
     let res: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
+      // A fresh signal per attempt: a 429 retry gets its own full window.
       res = await fetch(url, {
         headers: {
           'X-RapidAPI-Key': env.RAPIDAPI_KEY,
           'X-RapidAPI-Host': 'booking-com.p.rapidapi.com',
         },
+        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
       if (res.status !== 429) break;
       const delay = 300 * Math.pow(2, attempt); // 300ms, 600ms, 1200ms
