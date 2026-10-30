@@ -64,6 +64,13 @@ type SearchParams = {
    * destination side for now).
    */
   fromAirports?: string[];
+  /**
+   * Every city on the trip, so a name with more than one reading resolves
+   * to the one this trip means (getIataCode's `tripDestinationNames`):
+   * "Lagos" on a Lisbon + Porto trip is FAO, not LOS. Optional — without it
+   * each name gets its no-context answer, as before.
+   */
+  tripCityNames?: string[];
 };
 
 /**
@@ -263,6 +270,7 @@ export async function searchLegOptions(
     currentPrice = 0,
     limit = 5,
     fromAirports,
+    tripCityNames,
   } = params;
 
   // Read every bound up front. One we can't read is an error, not a
@@ -292,11 +300,13 @@ export async function searchLegOptions(
   const [flights, trains] = await Promise.all([
     (async () => {
       try {
-        const destIata = await getIataCode(to);
+        // The trip decides which reading of a shared name it means.
+        const tripContext = { tripDestinationNames: tripCityNames ?? [] };
+        const destIata = await getIataCode(to, tripContext);
         const origins =
           fromAirports && fromAirports.length > 0
             ? fromAirports
-            : [await getIataCode(from)];
+            : [await getIataCode(from, tripContext)];
 
         // One searchFlights call per origin airport; results merged.
         // Individual origin failures (e.g. LGA has no offers but JFK does)
