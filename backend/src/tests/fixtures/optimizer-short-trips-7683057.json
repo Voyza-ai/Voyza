@@ -1,0 +1,1289 @@
+{
+  "one": {
+    "flights": [
+      "HMA>LIS@2030-01-10#2",
+      "HMA>LIS@2030-01-10#2",
+      "HMA>LIS@2030-01-10#2",
+      "HMB>LIS@2030-01-08#2",
+      "HMB>LIS@2030-01-09#2",
+      "HMB>LIS@2030-01-10#2",
+      "HMB>LIS@2030-01-10#2",
+      "HMB>LIS@2030-01-10#2",
+      "HMB>LIS@2030-01-11#2",
+      "HMB>LIS@2030-01-12#2",
+      "LIS>HMA@2030-01-13#2",
+      "LIS>HMA@2030-01-14#2",
+      "LIS>HMA@2030-01-15#2",
+      "LIS>HMA@2030-01-15#2",
+      "LIS>HMA@2030-01-15#2",
+      "LIS>HMA@2030-01-16#2",
+      "LIS>HMA@2030-01-17#2",
+      "LIS>HMB@2030-01-15#2",
+      "LIS>HMB@2030-01-15#2",
+      "LIS>HMB@2030-01-15#2"
+    ],
+    "hotels": [
+      "Lisbon@2030-01-09..2030-01-13#2",
+      "Lisbon@2030-01-11..2030-01-15#2"
+    ],
+    "result": {
+      "routes": [
+        {
+          "ordering": [
+            "Lisbon"
+          ],
+          "totalCost": 633.52,
+          "rankCost": 633.52,
+          "legs": []
+        }
+      ],
+      "bestRoute": {
+        "ordering": [
+          "Lisbon"
+        ],
+        "totalCost": 633.52,
+        "rankCost": 633.52,
+        "legs": []
+      },
+      "savingsVsNaive": 0,
+      "iataCodes": {
+        "Lisbon": "LIS"
+      },
+      "dates": {
+        "Lisbon": {
+          "arrival": "2030-01-11",
+          "departure": "2030-01-15"
+        }
+      },
+      "dateShiftChecked": true,
+      "outboundLeg": {
+        "originAirport": "HMB",
+        "destAirport": "LIS",
+        "price": 307.84,
+        "currency": "USD",
+        "durationMinutes": 138,
+        "operator": "Air 0",
+        "carrierCode": "A0",
+        "departTime": "08:00",
+        "arriveTime": "07:00",
+        "departDate": "2030-01-10",
+        "arriveDate": "2030-01-11",
+        "stops": 0,
+        "bookingUrl": "https://example.test/HMB-LIS-2030-01-10",
+        "alternatives": [
+          {
+            "originAirport": "HMB",
+            "destAirport": "LIS",
+            "price": 347.84,
+            "currency": "USD",
+            "durationMinutes": 138,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "07:00",
+            "departDate": "2030-01-10",
+            "arriveDate": "2030-01-11",
+            "stops": 1,
+            "bookingUrl": "https://example.test/HMB-LIS-2030-01-10"
+          },
+          {
+            "originAirport": "HMA",
+            "destAirport": "LIS",
+            "price": 878.22,
+            "currency": "USD",
+            "durationMinutes": 347,
+            "operator": "Air 0",
+            "carrierCode": "A0",
+            "departTime": "08:00",
+            "arriveTime": "07:00",
+            "departDate": "2030-01-10",
+            "arriveDate": "2030-01-11",
+            "stops": 0,
+            "bookingUrl": "https://example.test/HMA-LIS-2030-01-10"
+          },
+          {
+            "originAirport": "HMA",
+            "destAirport": "LIS",
+            "price": 918.22,
+            "currency": "USD",
+            "durationMinutes": 347,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "07:00",
+            "departDate": "2030-01-10",
+            "arriveDate": "2030-01-11",
+            "stops": 1,
+            "bookingUrl": "https://example.test/HMA-LIS-2030-01-10"
+          }
+        ]
+      },
+      "returnLeg": {
+        "originAirport": "LIS",
+        "destAirport": "HMA",
+        "price": 325.68,
+        "currency": "USD",
+        "durationMinutes": 167,
+        "operator": "Air 0",
+        "carrierCode": "A0",
+        "departTime": "08:00",
+        "arriveTime": "21:00",
+        "departDate": "2030-01-15",
+        "arriveDate": "2030-01-15",
+        "stops": 0,
+        "bookingUrl": "https://example.test/LIS-HMA-2030-01-15",
+        "alternatives": [
+          {
+            "originAirport": "LIS",
+            "destAirport": "HMB",
+            "price": 327.52,
+            "currency": "USD",
+            "durationMinutes": 168,
+            "operator": "Air 0",
+            "carrierCode": "A0",
+            "departTime": "08:00",
+            "arriveTime": "21:00",
+            "departDate": "2030-01-15",
+            "arriveDate": "2030-01-15",
+            "stops": 0,
+            "bookingUrl": "https://example.test/LIS-HMB-2030-01-15"
+          },
+          {
+            "originAirport": "LIS",
+            "destAirport": "HMA",
+            "price": 365.68,
+            "currency": "USD",
+            "durationMinutes": 167,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "21:00",
+            "departDate": "2030-01-15",
+            "arriveDate": "2030-01-15",
+            "stops": 1,
+            "bookingUrl": "https://example.test/LIS-HMA-2030-01-15"
+          },
+          {
+            "originAirport": "LIS",
+            "destAirport": "HMB",
+            "price": 367.52,
+            "currency": "USD",
+            "durationMinutes": 168,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "21:00",
+            "departDate": "2030-01-15",
+            "arriveDate": "2030-01-15",
+            "stops": 1,
+            "bookingUrl": "https://example.test/LIS-HMB-2030-01-15"
+          }
+        ]
+      },
+      "originClarification": {
+        "input": "Home",
+        "reason": "not-found",
+        "candidates": [
+          {
+            "placeId": "gn:3169070",
+            "label": "Rome, Lazio, Italy",
+            "airports": [
+              "FCO",
+              "CIA",
+              "PEG"
+            ]
+          },
+          {
+            "placeId": "gn:2365267",
+            "label": "Lomé, Maritime, Togo",
+            "airports": [
+              "LFW"
+            ]
+          },
+          {
+            "placeId": "adm:SY.11",
+            "label": "Homs, Syria",
+            "airports": [
+              "DAM",
+              "LTK"
+            ]
+          },
+          {
+            "placeId": "gn:119208",
+            "label": "Qom, Qom Province, Iran",
+            "airports": [
+              "IKA",
+              "THR",
+              "PYK"
+            ]
+          },
+          {
+            "placeId": "gn:1862627",
+            "label": "Himeji, Hyōgo, Japan",
+            "airports": [
+              "UKB",
+              "KIX",
+              "ITM"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "two": {
+    "flights": [
+      "AMS>HMA@2030-01-14#2",
+      "AMS>HMA@2030-01-15#2",
+      "AMS>HMA@2030-01-16#2",
+      "AMS>HMA@2030-01-16#2",
+      "AMS>HMA@2030-01-16#2",
+      "AMS>HMA@2030-01-17#2",
+      "AMS>HMA@2030-01-18#2",
+      "AMS>HMB@2030-01-16#2",
+      "AMS>HMB@2030-01-16#2",
+      "AMS>HMB@2030-01-16#2",
+      "AMS>PAR@2030-01-13#2",
+      "HMA>AMS@2030-01-10#2",
+      "HMA>PAR@2030-01-10#2",
+      "HMA>PAR@2030-01-10#2",
+      "HMA>PAR@2030-01-10#2",
+      "HMB>AMS@2030-01-10#2",
+      "HMB>PAR@2030-01-08#2",
+      "HMB>PAR@2030-01-09#2",
+      "HMB>PAR@2030-01-10#2",
+      "HMB>PAR@2030-01-10#2",
+      "HMB>PAR@2030-01-10#2",
+      "HMB>PAR@2030-01-11#2",
+      "HMB>PAR@2030-01-12#2",
+      "PAR>AMS@2030-01-11#2",
+      "PAR>AMS@2030-01-12#2",
+      "PAR>AMS@2030-01-13#2",
+      "PAR>AMS@2030-01-13#2",
+      "PAR>AMS@2030-01-14#2",
+      "PAR>AMS@2030-01-15#2",
+      "PAR>HMA@2030-01-16#2",
+      "PAR>HMB@2030-01-16#2"
+    ],
+    "hotels": [
+      "Amsterdam@2030-01-12..2030-01-15#2",
+      "Amsterdam@2030-01-13..2030-01-16#2",
+      "Paris@2030-01-10..2030-01-12#2",
+      "Paris@2030-01-11..2030-01-13#2"
+    ],
+    "result": {
+      "routes": [
+        {
+          "ordering": [
+            "Paris",
+            "Amsterdam"
+          ],
+          "totalCost": 1213.72,
+          "rankCost": 1213.72,
+          "legs": [
+            {
+              "from": "Paris",
+              "to": "Amsterdam",
+              "comparison": {
+                "flightOption": {
+                  "id": "f-PAR-AMS-2030-01-13-0",
+                  "price": 282.5,
+                  "durationMinutes": 103,
+                  "carrier": "Air 0",
+                  "carrierCode": "A0",
+                  "departure": "2030-01-13T08:00:00",
+                  "arrival": "2030-01-13T21:00:00",
+                  "currency": "USD",
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/PAR-AMS-2030-01-13",
+                  "raw": {}
+                },
+                "trainOption": null,
+                "cheapest": "flight",
+                "fastest": "flight",
+                "recommendation": "flight",
+                "priceDifference": 0,
+                "timeDifference": 0
+              },
+              "cost": 282.5,
+              "options": [
+                {
+                  "mode": "flight",
+                  "operator": "Air 0",
+                  "flightNumber": "A0",
+                  "price": 282.5,
+                  "currency": "USD",
+                  "departTime": "08:00",
+                  "arriveTime": "21:00",
+                  "duration": "1h 43m",
+                  "durationMinutes": 103,
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/PAR-AMS-2030-01-13",
+                  "priceDelta": 0
+                },
+                {
+                  "mode": "flight",
+                  "operator": "Air 1",
+                  "flightNumber": "A1",
+                  "price": 322.5,
+                  "currency": "USD",
+                  "departTime": "09:00",
+                  "arriveTime": "21:00",
+                  "duration": "1h 43m",
+                  "durationMinutes": 103,
+                  "stops": 1,
+                  "bookingUrl": "https://example.test/PAR-AMS-2030-01-13",
+                  "priceDelta": 40
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ordering": [
+            "Amsterdam",
+            "Paris"
+          ],
+          "totalCost": 1524.06,
+          "rankCost": 1524.06,
+          "legs": [
+            {
+              "from": "Amsterdam",
+              "to": "Paris",
+              "comparison": {
+                "flightOption": {
+                  "id": "f-AMS-PAR-2030-01-13-0",
+                  "price": 313.88,
+                  "durationMinutes": 123,
+                  "carrier": "Air 0",
+                  "carrierCode": "A0",
+                  "departure": "2030-01-13T08:00:00",
+                  "arrival": "2030-01-13T21:00:00",
+                  "currency": "USD",
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/AMS-PAR-2030-01-13",
+                  "raw": {}
+                },
+                "trainOption": null,
+                "cheapest": "flight",
+                "fastest": "flight",
+                "recommendation": "flight",
+                "priceDifference": 0,
+                "timeDifference": 0
+              },
+              "cost": 313.88
+            }
+          ]
+        }
+      ],
+      "bestRoute": {
+        "ordering": [
+          "Paris",
+          "Amsterdam"
+        ],
+        "totalCost": 1213.72,
+        "rankCost": 1213.72,
+        "legs": [
+          {
+            "from": "Paris",
+            "to": "Amsterdam",
+            "comparison": {
+              "flightOption": {
+                "id": "f-PAR-AMS-2030-01-13-0",
+                "price": 282.5,
+                "durationMinutes": 103,
+                "carrier": "Air 0",
+                "carrierCode": "A0",
+                "departure": "2030-01-13T08:00:00",
+                "arrival": "2030-01-13T21:00:00",
+                "currency": "USD",
+                "stops": 0,
+                "bookingUrl": "https://example.test/PAR-AMS-2030-01-13",
+                "raw": {}
+              },
+              "trainOption": null,
+              "cheapest": "flight",
+              "fastest": "flight",
+              "recommendation": "flight",
+              "priceDifference": 0,
+              "timeDifference": 0
+            },
+            "cost": 282.5,
+            "options": [
+              {
+                "mode": "flight",
+                "operator": "Air 0",
+                "flightNumber": "A0",
+                "price": 282.5,
+                "currency": "USD",
+                "departTime": "08:00",
+                "arriveTime": "21:00",
+                "duration": "1h 43m",
+                "durationMinutes": 103,
+                "stops": 0,
+                "bookingUrl": "https://example.test/PAR-AMS-2030-01-13",
+                "priceDelta": 0
+              },
+              {
+                "mode": "flight",
+                "operator": "Air 1",
+                "flightNumber": "A1",
+                "price": 322.5,
+                "currency": "USD",
+                "departTime": "09:00",
+                "arriveTime": "21:00",
+                "duration": "1h 43m",
+                "durationMinutes": 103,
+                "stops": 1,
+                "bookingUrl": "https://example.test/PAR-AMS-2030-01-13",
+                "priceDelta": 40
+              }
+            ]
+          }
+        ]
+      },
+      "savingsVsNaive": 310.3399999999999,
+      "iataCodes": {
+        "Amsterdam": "AMS",
+        "Paris": "PAR"
+      },
+      "dates": {
+        "Paris": {
+          "arrival": "2030-01-11",
+          "departure": "2030-01-13"
+        },
+        "Amsterdam": {
+          "arrival": "2030-01-13",
+          "departure": "2030-01-16"
+        }
+      },
+      "dateShiftChecked": true,
+      "outboundLeg": {
+        "originAirport": "HMB",
+        "destAirport": "PAR",
+        "price": 363.22,
+        "currency": "USD",
+        "durationMinutes": 133,
+        "operator": "Air 0",
+        "carrierCode": "A0",
+        "departTime": "08:00",
+        "arriveTime": "07:00",
+        "departDate": "2030-01-10",
+        "arriveDate": "2030-01-11",
+        "stops": 0,
+        "bookingUrl": "https://example.test/HMB-PAR-2030-01-10",
+        "alternatives": [
+          {
+            "originAirport": "HMB",
+            "destAirport": "PAR",
+            "price": 403.22,
+            "currency": "USD",
+            "durationMinutes": 133,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "07:00",
+            "departDate": "2030-01-10",
+            "arriveDate": "2030-01-11",
+            "stops": 1,
+            "bookingUrl": "https://example.test/HMB-PAR-2030-01-10"
+          },
+          {
+            "originAirport": "HMA",
+            "destAirport": "PAR",
+            "price": 598.4,
+            "currency": "USD",
+            "durationMinutes": 342,
+            "operator": "Air 0",
+            "carrierCode": "A0",
+            "departTime": "08:00",
+            "arriveTime": "07:00",
+            "departDate": "2030-01-10",
+            "arriveDate": "2030-01-11",
+            "stops": 0,
+            "bookingUrl": "https://example.test/HMA-PAR-2030-01-10"
+          },
+          {
+            "originAirport": "HMA",
+            "destAirport": "PAR",
+            "price": 638.4,
+            "currency": "USD",
+            "durationMinutes": 342,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "07:00",
+            "departDate": "2030-01-10",
+            "arriveDate": "2030-01-11",
+            "stops": 1,
+            "bookingUrl": "https://example.test/HMA-PAR-2030-01-10"
+          }
+        ]
+      },
+      "returnLeg": {
+        "originAirport": "AMS",
+        "destAirport": "HMA",
+        "price": 568,
+        "currency": "USD",
+        "durationMinutes": 390,
+        "operator": "Air 0",
+        "carrierCode": "A0",
+        "departTime": "08:00",
+        "arriveTime": "21:00",
+        "departDate": "2030-01-16",
+        "arriveDate": "2030-01-16",
+        "stops": 0,
+        "bookingUrl": "https://example.test/AMS-HMA-2030-01-16",
+        "alternatives": [
+          {
+            "originAirport": "AMS",
+            "destAirport": "HMA",
+            "price": 608,
+            "currency": "USD",
+            "durationMinutes": 390,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "21:00",
+            "departDate": "2030-01-16",
+            "arriveDate": "2030-01-16",
+            "stops": 1,
+            "bookingUrl": "https://example.test/AMS-HMA-2030-01-16"
+          },
+          {
+            "originAirport": "AMS",
+            "destAirport": "HMB",
+            "price": 1026.56,
+            "currency": "USD",
+            "durationMinutes": 391,
+            "operator": "Air 0",
+            "carrierCode": "A0",
+            "departTime": "08:00",
+            "arriveTime": "21:00",
+            "departDate": "2030-01-16",
+            "arriveDate": "2030-01-16",
+            "stops": 0,
+            "bookingUrl": "https://example.test/AMS-HMB-2030-01-16"
+          },
+          {
+            "originAirport": "AMS",
+            "destAirport": "HMB",
+            "price": 1066.56,
+            "currency": "USD",
+            "durationMinutes": 391,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "21:00",
+            "departDate": "2030-01-16",
+            "arriveDate": "2030-01-16",
+            "stops": 1,
+            "bookingUrl": "https://example.test/AMS-HMB-2030-01-16"
+          }
+        ]
+      },
+      "originClarification": {
+        "input": "Home",
+        "reason": "not-found",
+        "candidates": [
+          {
+            "placeId": "gn:3169070",
+            "label": "Rome, Lazio, Italy",
+            "airports": [
+              "FCO",
+              "CIA",
+              "PEG"
+            ]
+          },
+          {
+            "placeId": "gn:2365267",
+            "label": "Lomé, Maritime, Togo",
+            "airports": [
+              "LFW"
+            ]
+          },
+          {
+            "placeId": "adm:SY.11",
+            "label": "Homs, Syria",
+            "airports": [
+              "DAM",
+              "LTK"
+            ]
+          },
+          {
+            "placeId": "gn:119208",
+            "label": "Qom, Qom Province, Iran",
+            "airports": [
+              "IKA",
+              "THR",
+              "PYK"
+            ]
+          },
+          {
+            "placeId": "gn:1862627",
+            "label": "Himeji, Hyōgo, Japan",
+            "airports": [
+              "UKB",
+              "KIX",
+              "ITM"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "three": {
+    "flights": [
+      "HMA>LON@2030-01-10#6",
+      "HMA>LON@2030-01-10#6",
+      "HMA>PAR@2030-01-10#6",
+      "HMA>PAR@2030-01-10#6",
+      "HMA>PAR@2030-01-10#6",
+      "HMA>PAR@2030-01-10#6",
+      "HMA>ZUR@2030-01-10#6",
+      "HMA>ZUR@2030-01-10#6",
+      "HMB>LON@2030-01-10#6",
+      "HMB>LON@2030-01-10#6",
+      "HMB>PAR@2030-01-08#6",
+      "HMB>PAR@2030-01-09#6",
+      "HMB>PAR@2030-01-10#6",
+      "HMB>PAR@2030-01-10#6",
+      "HMB>PAR@2030-01-10#6",
+      "HMB>PAR@2030-01-10#6",
+      "HMB>PAR@2030-01-11#6",
+      "HMB>PAR@2030-01-12#6",
+      "HMB>ZUR@2030-01-10#6",
+      "HMB>ZUR@2030-01-10#6",
+      "LON>HMA@2030-01-17#6",
+      "LON>HMA@2030-01-17#6",
+      "LON>HMA@2030-01-17#6",
+      "LON>HMA@2030-01-17#6",
+      "LON>HMB@2030-01-15#6",
+      "LON>HMB@2030-01-16#6",
+      "LON>HMB@2030-01-17#6",
+      "LON>HMB@2030-01-17#6",
+      "LON>HMB@2030-01-17#6",
+      "LON>HMB@2030-01-17#6",
+      "LON>HMB@2030-01-18#6",
+      "LON>HMB@2030-01-19#6",
+      "LON>PAR@2030-01-13#6",
+      "LON>PAR@2030-01-15#6",
+      "LON>ZUR@2030-01-13#6",
+      "LON>ZUR@2030-01-15#6",
+      "PAR>HMA@2030-01-17#6",
+      "PAR>HMA@2030-01-17#6",
+      "PAR>HMB@2030-01-17#6",
+      "PAR>HMB@2030-01-17#6",
+      "PAR>LON@2030-01-13#6",
+      "PAR>LON@2030-01-15#6",
+      "PAR>ZUR@2030-01-11#6",
+      "PAR>ZUR@2030-01-12#6",
+      "PAR>ZUR@2030-01-13#6",
+      "PAR>ZUR@2030-01-13#6",
+      "PAR>ZUR@2030-01-14#6",
+      "PAR>ZUR@2030-01-15#6",
+      "ZUR>HMA@2030-01-17#6",
+      "ZUR>HMA@2030-01-17#6",
+      "ZUR>HMB@2030-01-17#6",
+      "ZUR>HMB@2030-01-17#6",
+      "ZUR>LON@2030-01-13#6",
+      "ZUR>LON@2030-01-14#6",
+      "ZUR>LON@2030-01-15#6",
+      "ZUR>LON@2030-01-15#6",
+      "ZUR>LON@2030-01-16#6",
+      "ZUR>LON@2030-01-17#6",
+      "ZUR>PAR@2030-01-13#6",
+      "ZUR>PAR@2030-01-15#6"
+    ],
+    "hotels": [
+      "London@2030-01-15..2030-01-17#6",
+      "London@2030-01-16..2030-01-18#6",
+      "Paris@2030-01-11..2030-01-13#6",
+      "Paris@2030-01-12..2030-01-14#6",
+      "Zurich@2030-01-13..2030-01-15#6",
+      "Zurich@2030-01-14..2030-01-16#6"
+    ],
+    "result": {
+      "routes": [
+        {
+          "ordering": [
+            "Paris",
+            "Zurich",
+            "London"
+          ],
+          "totalCost": 6270.36,
+          "rankCost": 6270.36,
+          "legs": [
+            {
+              "from": "Paris",
+              "to": "Zurich",
+              "comparison": {
+                "flightOption": {
+                  "id": "f-PAR-ZUR-2030-01-13-0",
+                  "price": 1617,
+                  "durationMinutes": 375,
+                  "carrier": "Air 0",
+                  "carrierCode": "A0",
+                  "departure": "2030-01-13T08:00:00",
+                  "arrival": "2030-01-13T21:00:00",
+                  "currency": "USD",
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/PAR-ZUR-2030-01-13",
+                  "raw": {}
+                },
+                "trainOption": null,
+                "cheapest": "flight",
+                "fastest": "flight",
+                "recommendation": "flight",
+                "priceDifference": 0,
+                "timeDifference": 0
+              },
+              "cost": 1617,
+              "options": [
+                {
+                  "mode": "flight",
+                  "operator": "Air 0",
+                  "flightNumber": "A0",
+                  "price": 1617,
+                  "currency": "USD",
+                  "departTime": "08:00",
+                  "arriveTime": "21:00",
+                  "duration": "6h 15m",
+                  "durationMinutes": 375,
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/PAR-ZUR-2030-01-13",
+                  "priceDelta": 0
+                },
+                {
+                  "mode": "flight",
+                  "operator": "Air 1",
+                  "flightNumber": "A1",
+                  "price": 1657,
+                  "currency": "USD",
+                  "departTime": "09:00",
+                  "arriveTime": "21:00",
+                  "duration": "6h 15m",
+                  "durationMinutes": 375,
+                  "stops": 1,
+                  "bookingUrl": "https://example.test/PAR-ZUR-2030-01-13",
+                  "priceDelta": 40
+                }
+              ]
+            },
+            {
+              "from": "Zurich",
+              "to": "London",
+              "comparison": {
+                "flightOption": {
+                  "id": "f-ZUR-LON-2030-01-15-0",
+                  "price": 1365,
+                  "durationMinutes": 165,
+                  "carrier": "Air 0",
+                  "carrierCode": "A0",
+                  "departure": "2030-01-15T08:00:00",
+                  "arrival": "2030-01-15T21:00:00",
+                  "currency": "USD",
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/ZUR-LON-2030-01-15",
+                  "raw": {}
+                },
+                "trainOption": null,
+                "cheapest": "flight",
+                "fastest": "flight",
+                "recommendation": "flight",
+                "priceDifference": 0,
+                "timeDifference": 0
+              },
+              "cost": 1365,
+              "options": [
+                {
+                  "mode": "flight",
+                  "operator": "Air 0",
+                  "flightNumber": "A0",
+                  "price": 1365,
+                  "currency": "USD",
+                  "departTime": "08:00",
+                  "arriveTime": "21:00",
+                  "duration": "2h 45m",
+                  "durationMinutes": 165,
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/ZUR-LON-2030-01-15",
+                  "priceDelta": 0
+                },
+                {
+                  "mode": "flight",
+                  "operator": "Air 1",
+                  "flightNumber": "A1",
+                  "price": 1405,
+                  "currency": "USD",
+                  "departTime": "09:00",
+                  "arriveTime": "21:00",
+                  "duration": "2h 45m",
+                  "durationMinutes": 165,
+                  "stops": 1,
+                  "bookingUrl": "https://example.test/ZUR-LON-2030-01-15",
+                  "priceDelta": 40
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ordering": [
+            "Paris",
+            "London",
+            "Zurich"
+          ],
+          "totalCost": 6615.36,
+          "rankCost": 6615.36,
+          "legs": [
+            {
+              "from": "Paris",
+              "to": "London",
+              "comparison": {
+                "flightOption": {
+                  "id": "f-PAR-LON-2030-01-13-0",
+                  "price": 1800.48,
+                  "durationMinutes": 331,
+                  "carrier": "Air 0",
+                  "carrierCode": "A0",
+                  "departure": "2030-01-13T08:00:00",
+                  "arrival": "2030-01-13T21:00:00",
+                  "currency": "USD",
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/PAR-LON-2030-01-13",
+                  "raw": {}
+                },
+                "trainOption": null,
+                "cheapest": "flight",
+                "fastest": "flight",
+                "recommendation": "flight",
+                "priceDifference": 0,
+                "timeDifference": 0
+              },
+              "cost": 1800.48
+            },
+            {
+              "from": "London",
+              "to": "Zurich",
+              "comparison": {
+                "flightOption": {
+                  "id": "f-LON-ZUR-2030-01-15-0",
+                  "price": 2183.22,
+                  "durationMinutes": 301,
+                  "carrier": "Air 0",
+                  "carrierCode": "A0",
+                  "departure": "2030-01-15T08:00:00",
+                  "arrival": "2030-01-15T21:00:00",
+                  "currency": "USD",
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/LON-ZUR-2030-01-15",
+                  "raw": {}
+                },
+                "trainOption": null,
+                "cheapest": "flight",
+                "fastest": "flight",
+                "recommendation": "flight",
+                "priceDifference": 0,
+                "timeDifference": 0
+              },
+              "cost": 2183.22
+            }
+          ]
+        },
+        {
+          "ordering": [
+            "London",
+            "Paris",
+            "Zurich"
+          ],
+          "totalCost": 6977.88,
+          "rankCost": 6977.88,
+          "legs": [
+            {
+              "from": "London",
+              "to": "Paris",
+              "comparison": {
+                "flightOption": {
+                  "id": "f-LON-PAR-2030-01-13-0",
+                  "price": 2712.84,
+                  "durationMinutes": 471,
+                  "carrier": "Air 0",
+                  "carrierCode": "A0",
+                  "departure": "2030-01-13T08:00:00",
+                  "arrival": "2030-01-13T21:00:00",
+                  "currency": "USD",
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/LON-PAR-2030-01-13",
+                  "raw": {}
+                },
+                "trainOption": null,
+                "cheapest": "flight",
+                "fastest": "flight",
+                "recommendation": "flight",
+                "priceDifference": 0,
+                "timeDifference": 0
+              },
+              "cost": 2712.84
+            },
+            {
+              "from": "Paris",
+              "to": "Zurich",
+              "comparison": {
+                "flightOption": {
+                  "id": "f-PAR-ZUR-2030-01-15-0",
+                  "price": 1663.2,
+                  "durationMinutes": 375,
+                  "carrier": "Air 0",
+                  "carrierCode": "A0",
+                  "departure": "2030-01-15T08:00:00",
+                  "arrival": "2030-01-15T21:00:00",
+                  "currency": "USD",
+                  "stops": 0,
+                  "bookingUrl": "https://example.test/PAR-ZUR-2030-01-15",
+                  "raw": {}
+                },
+                "trainOption": null,
+                "cheapest": "flight",
+                "fastest": "flight",
+                "recommendation": "flight",
+                "priceDifference": 0,
+                "timeDifference": 0
+              },
+              "cost": 1663.2
+            }
+          ]
+        }
+      ],
+      "bestRoute": {
+        "ordering": [
+          "Paris",
+          "Zurich",
+          "London"
+        ],
+        "totalCost": 6270.36,
+        "rankCost": 6270.36,
+        "legs": [
+          {
+            "from": "Paris",
+            "to": "Zurich",
+            "comparison": {
+              "flightOption": {
+                "id": "f-PAR-ZUR-2030-01-13-0",
+                "price": 1617,
+                "durationMinutes": 375,
+                "carrier": "Air 0",
+                "carrierCode": "A0",
+                "departure": "2030-01-13T08:00:00",
+                "arrival": "2030-01-13T21:00:00",
+                "currency": "USD",
+                "stops": 0,
+                "bookingUrl": "https://example.test/PAR-ZUR-2030-01-13",
+                "raw": {}
+              },
+              "trainOption": null,
+              "cheapest": "flight",
+              "fastest": "flight",
+              "recommendation": "flight",
+              "priceDifference": 0,
+              "timeDifference": 0
+            },
+            "cost": 1617,
+            "options": [
+              {
+                "mode": "flight",
+                "operator": "Air 0",
+                "flightNumber": "A0",
+                "price": 1617,
+                "currency": "USD",
+                "departTime": "08:00",
+                "arriveTime": "21:00",
+                "duration": "6h 15m",
+                "durationMinutes": 375,
+                "stops": 0,
+                "bookingUrl": "https://example.test/PAR-ZUR-2030-01-13",
+                "priceDelta": 0
+              },
+              {
+                "mode": "flight",
+                "operator": "Air 1",
+                "flightNumber": "A1",
+                "price": 1657,
+                "currency": "USD",
+                "departTime": "09:00",
+                "arriveTime": "21:00",
+                "duration": "6h 15m",
+                "durationMinutes": 375,
+                "stops": 1,
+                "bookingUrl": "https://example.test/PAR-ZUR-2030-01-13",
+                "priceDelta": 40
+              }
+            ]
+          },
+          {
+            "from": "Zurich",
+            "to": "London",
+            "comparison": {
+              "flightOption": {
+                "id": "f-ZUR-LON-2030-01-15-0",
+                "price": 1365,
+                "durationMinutes": 165,
+                "carrier": "Air 0",
+                "carrierCode": "A0",
+                "departure": "2030-01-15T08:00:00",
+                "arrival": "2030-01-15T21:00:00",
+                "currency": "USD",
+                "stops": 0,
+                "bookingUrl": "https://example.test/ZUR-LON-2030-01-15",
+                "raw": {}
+              },
+              "trainOption": null,
+              "cheapest": "flight",
+              "fastest": "flight",
+              "recommendation": "flight",
+              "priceDifference": 0,
+              "timeDifference": 0
+            },
+            "cost": 1365,
+            "options": [
+              {
+                "mode": "flight",
+                "operator": "Air 0",
+                "flightNumber": "A0",
+                "price": 1365,
+                "currency": "USD",
+                "departTime": "08:00",
+                "arriveTime": "21:00",
+                "duration": "2h 45m",
+                "durationMinutes": 165,
+                "stops": 0,
+                "bookingUrl": "https://example.test/ZUR-LON-2030-01-15",
+                "priceDelta": 0
+              },
+              {
+                "mode": "flight",
+                "operator": "Air 1",
+                "flightNumber": "A1",
+                "price": 1405,
+                "currency": "USD",
+                "departTime": "09:00",
+                "arriveTime": "21:00",
+                "duration": "2h 45m",
+                "durationMinutes": 165,
+                "stops": 1,
+                "bookingUrl": "https://example.test/ZUR-LON-2030-01-15",
+                "priceDelta": 40
+              }
+            ]
+          }
+        ]
+      },
+      "savingsVsNaive": 707.5200000000004,
+      "iataCodes": {
+        "London": "LON",
+        "Paris": "PAR",
+        "Zurich": "ZUR"
+      },
+      "dates": {
+        "Paris": {
+          "arrival": "2030-01-11",
+          "departure": "2030-01-13"
+        },
+        "Zurich": {
+          "arrival": "2030-01-13",
+          "departure": "2030-01-15"
+        },
+        "London": {
+          "arrival": "2030-01-15",
+          "departure": "2030-01-17"
+        }
+      },
+      "dateShiftSuggestion": {
+        "dayOffset": 1,
+        "newStartDate": "2030-01-11",
+        "newTotalCost": 6748.98,
+        "savings": 571.38,
+        "options": [
+          {
+            "dayOffset": 1,
+            "newStartDate": "2030-01-11",
+            "newTotalCost": 6748.98,
+            "savings": 571.38
+          }
+        ]
+      },
+      "dateShiftChecked": true,
+      "outboundLeg": {
+        "originAirport": "HMB",
+        "destAirport": "PAR",
+        "price": 1089.66,
+        "currency": "USD",
+        "durationMinutes": 133,
+        "operator": "Air 0",
+        "carrierCode": "A0",
+        "departTime": "08:00",
+        "arriveTime": "07:00",
+        "departDate": "2030-01-10",
+        "arriveDate": "2030-01-11",
+        "stops": 0,
+        "bookingUrl": "https://example.test/HMB-PAR-2030-01-10",
+        "alternatives": [
+          {
+            "originAirport": "HMB",
+            "destAirport": "PAR",
+            "price": 1129.66,
+            "currency": "USD",
+            "durationMinutes": 133,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "07:00",
+            "departDate": "2030-01-10",
+            "arriveDate": "2030-01-11",
+            "stops": 1,
+            "bookingUrl": "https://example.test/HMB-PAR-2030-01-10"
+          },
+          {
+            "originAirport": "HMA",
+            "destAirport": "PAR",
+            "price": 1795.2,
+            "currency": "USD",
+            "durationMinutes": 342,
+            "operator": "Air 0",
+            "carrierCode": "A0",
+            "departTime": "08:00",
+            "arriveTime": "07:00",
+            "departDate": "2030-01-10",
+            "arriveDate": "2030-01-11",
+            "stops": 0,
+            "bookingUrl": "https://example.test/HMA-PAR-2030-01-10"
+          },
+          {
+            "originAirport": "HMA",
+            "destAirport": "PAR",
+            "price": 1835.2,
+            "currency": "USD",
+            "durationMinutes": 342,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "07:00",
+            "departDate": "2030-01-10",
+            "arriveDate": "2030-01-11",
+            "stops": 1,
+            "bookingUrl": "https://example.test/HMA-PAR-2030-01-10"
+          }
+        ]
+      },
+      "returnLeg": {
+        "originAirport": "LON",
+        "destAirport": "HMB",
+        "price": 2198.7,
+        "currency": "USD",
+        "durationMinutes": 339,
+        "operator": "Air 0",
+        "carrierCode": "A0",
+        "departTime": "08:00",
+        "arriveTime": "21:00",
+        "departDate": "2030-01-17",
+        "arriveDate": "2030-01-17",
+        "stops": 0,
+        "bookingUrl": "https://example.test/LON-HMB-2030-01-17",
+        "alternatives": [
+          {
+            "originAirport": "LON",
+            "destAirport": "HMB",
+            "price": 2238.7,
+            "currency": "USD",
+            "durationMinutes": 339,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "21:00",
+            "departDate": "2030-01-17",
+            "arriveDate": "2030-01-17",
+            "stops": 1,
+            "bookingUrl": "https://example.test/LON-HMB-2030-01-17"
+          },
+          {
+            "originAirport": "LON",
+            "destAirport": "HMA",
+            "price": 2275.92,
+            "currency": "USD",
+            "durationMinutes": 338,
+            "operator": "Air 0",
+            "carrierCode": "A0",
+            "departTime": "08:00",
+            "arriveTime": "21:00",
+            "departDate": "2030-01-17",
+            "arriveDate": "2030-01-17",
+            "stops": 0,
+            "bookingUrl": "https://example.test/LON-HMA-2030-01-17"
+          },
+          {
+            "originAirport": "LON",
+            "destAirport": "HMA",
+            "price": 2315.92,
+            "currency": "USD",
+            "durationMinutes": 338,
+            "operator": "Air 1",
+            "carrierCode": "A1",
+            "departTime": "09:00",
+            "arriveTime": "21:00",
+            "departDate": "2030-01-17",
+            "arriveDate": "2030-01-17",
+            "stops": 1,
+            "bookingUrl": "https://example.test/LON-HMA-2030-01-17"
+          }
+        ]
+      },
+      "originClarification": {
+        "input": "Home",
+        "reason": "not-found",
+        "candidates": [
+          {
+            "placeId": "gn:3169070",
+            "label": "Rome, Lazio, Italy",
+            "airports": [
+              "FCO",
+              "CIA",
+              "PEG"
+            ]
+          },
+          {
+            "placeId": "gn:2365267",
+            "label": "Lomé, Maritime, Togo",
+            "airports": [
+              "LFW"
+            ]
+          },
+          {
+            "placeId": "adm:SY.11",
+            "label": "Homs, Syria",
+            "airports": [
+              "DAM",
+              "LTK"
+            ]
+          },
+          {
+            "placeId": "gn:119208",
+            "label": "Qom, Qom Province, Iran",
+            "airports": [
+              "IKA",
+              "THR",
+              "PYK"
+            ]
+          },
+          {
+            "placeId": "gn:1862627",
+            "label": "Himeji, Hyōgo, Japan",
+            "airports": [
+              "UKB",
+              "KIX",
+              "ITM"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
