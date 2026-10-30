@@ -501,14 +501,17 @@ function BrowsePageInner() {
                       {preset.travelers}
                     </span>
                   </div>
+                  {/* The quote is hotels + transport BETWEEN cities: the flights
+                      from home are priced live when the trip is saved, so the
+                      saved trip's total is higher (E10). Said where it's shown. */}
                   <span
                     className="text-[12px] font-semibold"
                     style={{ color: '#2563eb' }}
-                    title="Per person: 2 sharing a room – solo"
+                    title="Per person: 2 sharing a room – solo, excluding flights from home"
                   >
                     ${presetPricePerPersonRange(preset).low.toLocaleString()}–$
                     {presetPricePerPersonRange(preset).high.toLocaleString()}
-                    <span className="font-normal text-gray-400"> /person</span>
+                    <span className="font-normal text-gray-400"> /person · excl. home flights</span>
                   </span>
                 </div>
               </div>
@@ -827,7 +830,10 @@ function BrowsePageInner() {
                     <span className="flex items-center gap-1">
                       <Users size={12} /> {travelers} {travelers === 1 ? 'traveler' : 'travelers'}
                     </span>
-                    <span className="font-semibold">~${presetCostFor(selected, travelers).toLocaleString()}</span>
+                    <span className="font-semibold">
+                      ~${presetCostFor(selected, travelers).toLocaleString()}
+                      <span className="font-normal"> · excl. home flights</span>
+                    </span>
                   </div>
                 </div>
 
