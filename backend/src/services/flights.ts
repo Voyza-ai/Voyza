@@ -3,6 +3,14 @@ import { getSupabase } from './supabase';
 import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
 import { getStaticIata } from '../data/cityAirports';
+import {
+  consistentWithAnchors,
+  destinationAnchors,
+  namedAsAsked,
+  resolveDestinationIata,
+  type DestinationContext,
+  type SuggestedPlace,
+} from './location/destinationAirport';
 import { parseIsoDuration } from '../utils/duration';
 import { elapsedMinutesBetween } from '../utils/localTime';
 
@@ -450,24 +458,83 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
   }
 }
 
-export async function getIataCode(cityName: string): Promise<string> {
+/**
+ * What a caller may know about the trip a city is on. Optional, and names
+ * only — the optimizer holds plain strings. With it, `Portland` on a trip
+ * through Boston is Maine's PWM; without it, it is Oregon's PDX, as before.
+ * Passing the city itself among the names is harmless: it is dropped.
+ */
+export type IataLookupContext = DestinationContext;
+
+/** A Duffel place reduced to what `destinationAirport.ts` checks. */
+function suggestedPlace(p: any): SuggestedPlace {
+  // A `city` place may carry no coordinates of its own; its airports do.
+  const hasPoint = (x: any): boolean =>
+    typeof x?.latitude === 'number' && typeof x?.longitude === 'number';
+  const located = hasPoint(p) ? p : (p?.airports ?? []).find(hasPoint);
+  return {
+    iataCode: String(p.iata_code).toUpperCase(),
+    country: p.iata_country_code ?? null,
+    lat: typeof located?.latitude === 'number' ? located.latitude : null,
+    lon: typeof located?.longitude === 'number' ? located.longitude : null,
+    names: [p.name, p.city_name, p.city?.name].filter(
+      (n: unknown): n is string => typeof n === 'string' && n.length > 0,
+    ),
+  };
+}
+
+export async function getIataCode(
+  cityName: string,
+  context: IataLookupContext = {},
+): Promise<string> {
   // Curated override first — deterministic, and corrects known bad
   // auto-resolutions (e.g. Kyoto, which has no airport of its own and
   // otherwise mis-resolved to ACC/Accra). Takes precedence over any stale
-  // cached row.
+  // cached row, and over trip context: see `resolveDestinationIata` for the
+  // measured flips that would cost.
   const override = getStaticIata(cityName);
   if (override) return override;
 
+  // The artifact next, BEFORE the cache. The cache holds whatever Duffel's
+  // fuzzy place search once returned, forever — Siena -> JHB (Malaysia),
+  // Sintra -> SQG (Indonesia), Bath -> BUT (Bhutan) — while the artifact
+  // answers all three from data: FLR, LIS, BRS. Asking it first means a
+  // stale row can no longer win for any name the artifact can answer.
+  // In-memory, no network, and no database read.
+  const fromArtifact = resolveDestinationIata(cityName, context);
+  if (fromArtifact) return fromArtifact;
+
+  // Where the artifact says this name is, when it could not answer it. Empty
+  // when it knows nothing about the name and there is no trip.
+  const anchors = destinationAnchors(cityName, context);
+
   const supabase = getSupabase();
 
-  // Check cache first
+  // Check cache. Rows were written before suggestions were checked, so when
+  // the artifact knows where the name is, a row is held to the same test a
+  // fresh suggestion is, and skipped rather than served if it fails. Nothing
+  // here deletes it; the next verified suggestion overwrites it.
   const { data: cached } = await supabase
     .from('airport_codes')
-    .select('iata_code')
+    .select('iata_code, country')
     .eq('city_name', cityName.toLowerCase())
     .single();
 
-  if (cached?.iata_code) return cached.iata_code;
+  if (cached?.iata_code) {
+    const row: SuggestedPlace = {
+      iataCode: String(cached.iata_code).toUpperCase(),
+      country: typeof cached.country === 'string' ? cached.country : null,
+      lat: null,
+      lon: null,
+      names: [],
+    };
+    if (anchors.length === 0 || consistentWithAnchors(row, anchors)) return cached.iata_code;
+    logger.warn('Skipped a cached IATA row the artifact contradicts', {
+      city: cityName,
+      cached: row.iataCode,
+      cachedCountry: row.country,
+    });
+  }
 
   // Fetch from Duffel
   const duffel = getDuffel();
@@ -476,23 +543,52 @@ export async function getIataCode(cityName: string): Promise<string> {
       duffel.suggestions.list({ query: cityName }),
     );
 
-    const places = (response as any)?.data ?? [];
-    const airport = places.find(
-      (p: any) => p.type === 'airport' || p.type === 'city',
+    const places = ((response as any)?.data ?? []).filter(
+      (p: any) => (p?.type === 'airport' || p?.type === 'city') && p?.iata_code,
     );
 
-    if (!airport?.iata_code) {
+    // Duffel's place search is fuzzy, and its first hit was trusted and
+    // cached forever. Now a suggestion is accepted only if it is where the
+    // artifact says the name is (`destinationAnchors`), and only then cached.
+    // With no evidence at all it must at least be NAMED what was asked, and
+    // is served for this call only — never cached, so a guess cannot become
+    // permanent. Every production failure measured fails both checks.
+    let chosen: SuggestedPlace | null = null;
+    let verified = false;
+    for (const p of places) {
+      const place = suggestedPlace(p);
+      if (anchors.length > 0) {
+        if (consistentWithAnchors(place, anchors)) {
+          chosen = place;
+          verified = true;
+          break;
+        }
+      } else if (namedAsAsked(cityName, place)) {
+        chosen = place;
+        break;
+      }
+    }
+
+    if (!chosen) {
+      if (places.length > 0) {
+        logger.warn('Refused unverifiable Duffel IATA suggestions', {
+          city: cityName,
+          suggested: places.slice(0, 3).map((p: any) => p.iata_code),
+          check: anchors.length > 0 ? 'not where the artifact places the name' : 'not named as asked',
+        });
+      }
       throw new AppError(404, `No IATA code found for "${cityName}"`);
     }
 
-    // Cache it
-    await supabase.from('airport_codes').upsert({
-      city_name: cityName.toLowerCase(),
-      iata_code: airport.iata_code,
-      country: airport.iata_country_code ?? null,
-    });
+    if (verified) {
+      await supabase.from('airport_codes').upsert({
+        city_name: cityName.toLowerCase(),
+        iata_code: chosen.iataCode,
+        country: chosen.country,
+      });
+    }
 
-    return airport.iata_code;
+    return chosen.iataCode;
   } catch (err: any) {
     if (err instanceof AppError) throw err;
     throw new AppError(502, `IATA lookup failed for "${cityName}": ${err?.message}`);

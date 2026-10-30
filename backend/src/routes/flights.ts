@@ -40,13 +40,22 @@ router.post(
 
 const iataSchema = z.object({
   cityName: z.string().min(1),
+  /**
+   * The other stops on the trip, when the caller knows them: they decide
+   * which `Lagos` is meant. Optional, and bounded exactly as
+   * `/api/locations/resolve` bounds the same field.
+   */
+  tripDestinationNames: z.array(z.string().min(1).max(120)).max(12).optional(),
 });
 
 router.post(
   '/iata',
   asyncHandler(async (req, res) => {
-    const { cityName } = iataSchema.parse(req.body);
-    const iataCode = await getIataCode(cityName);
+    const { cityName, tripDestinationNames } = iataSchema.parse(req.body);
+    const iataCode = await getIataCode(
+      cityName,
+      tripDestinationNames ? { tripDestinationNames } : {},
+    );
     res.json({ cityName, iataCode });
   }),
 );
