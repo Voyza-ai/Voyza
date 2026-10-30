@@ -1,5 +1,6 @@
 import { City, Trip, ScheduledEvent, Transport, HomeLeg, UnscheduledItem } from './types';
 import { parseLocal, toIso } from './dateHelpers';
+import { homeDepartureDay } from './tripSpan';
 // `import type` only — keeps the fetch layer in lib/api out of this
 // module's runtime graph while still typing the AI's suggestion shapes.
 import type { ActivitySuggestion, RestaurantSuggestion } from './api';
@@ -96,6 +97,13 @@ export type DayTransportContext = {
   events: ScheduledEvent[];
   windowStart: number;
   windowEnd: number;
+  /**
+   * True on the HOME departure day of an overnight outbound — the day the
+   * traveller leaves home, before the first stay begins. `events` is the
+   * home side of the trip (head to the airport, the flight) and nothing may
+   * be planned around it: the traveller is not in the city yet.
+   */
+  homeSideOnly?: true;
 };
 
 /**
@@ -121,6 +129,38 @@ export function buildDayTransportContext(
   const isArrival = city.dates.arrival === date;
   const isDeparture = city.dates.departure === date;
   const lastIndex = trip.cities.length - 1;
+
+  // The home departure day of an overnight outbound (JFK 19:25 Jan 10 →
+  // Paris 12:10 Jan 11). The first stay starts the day the flight LANDS, so
+  // this day is before it: the traveller heads to the airport and boards, and
+  // that is all. Same two blocks, with the same titles and times, that the
+  // same-day branch below renders — the "Arrive at" marker stays on the
+  // landing day.
+  if (cityIndex === 0 && date === homeDepartureDay(trip)) {
+    const t = homeLegToTransport(trip.origin?.outboundLeg);
+    if (t?.departTime) {
+      const departMins = timeToMinutes(t.departTime);
+      const fromShort = shortStation(t.fromStation) || 'the airport';
+      const toShort = shortStation(t.toStation) || city.name;
+      events.push({
+        id: newId(),
+        title: `Head to ${fromShort}`,
+        startTime: minutesToTime(Math.max(0, departMins - (BUFFER_MIN[t.mode] ?? 60))),
+        endTime: minutesToTime(departMins),
+        category: 'transport',
+        notes: 'Allow 2h for check-in & security',
+      });
+      events.push({
+        id: newId(),
+        title: `Flight ${fromShort} → ${toShort}`,
+        startTime: t.departTime,
+        endTime: t.arriveTime ?? minutesToTime(Math.min(departMins + 60, 24 * 60)),
+        category: 'transport',
+        notes: t.duration || undefined,
+      });
+    }
+    return { events, windowStart: 24 * 60, windowEnd: 0, homeSideOnly: true };
+  }
 
   // Resolve the effective inbound transport. For cities[0] (the first
   // destination), the home outbound leg is the one that brought the user
@@ -590,6 +630,8 @@ export function buildDefaultSchedule(
 ): ScheduledEvent[] {
   const ctx = buildDayTransportContext(city, date, trip, cityIndex);
   const events = [...ctx.events];
+  // Leaving home: nothing in the city is planned on this day.
+  if (ctx.homeSideOnly) return events;
 
   const dayStart = Math.max(DAY_OPEN_MIN, ctx.windowStart);
   const dayEnd = Math.min(DAY_CLOSE_MIN, ctx.windowEnd);
@@ -750,6 +792,16 @@ export function buildCityScheduleFromSuggestions(
   };
 
   let idCounter = 0;
+
+  // The home departure day of an overnight outbound sits BEFORE the stay:
+  // the head-to-airport and flight blocks live there, under the first city
+  // (the same way the fly-home day lives under the last one), and nothing
+  // from the city's queues is spent on it.
+  const homeDeparture = cityIndex === 0 ? homeDepartureDay(trip) : null;
+  if (homeDeparture) {
+    const { events } = buildDayTransportContext(city, homeDeparture, trip, cityIndex);
+    if (events.length > 0) schedule[homeDeparture] = events;
+  }
 
   for (let dayIdx = 0; dayIdx < dayCount; dayIdx++) {
     const dayDate = new Date(arrival);
