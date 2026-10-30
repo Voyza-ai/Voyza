@@ -908,8 +908,10 @@ function BrowsePageInner() {
                   </div>
                 </div>
 
-                {/* Footer */}
-                <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
+                {/* Footer — wraps to two rows when the party controls and the
+                    actions don't fit one (they didn't at 1440px: "Plan a
+                    similar trip" broke onto three lines); no label breaks. */}
+                <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-x-3 gap-y-3">
                   {/* Ask party size before saving — the built itinerary uses it */}
                   <div className="flex items-center gap-3">
                     <div
@@ -956,7 +958,7 @@ function BrowsePageInner() {
                         size={13}
                         style={{ color: useLocation ? '#2563eb' : '#9ca3af' }}
                       />
-                      <span className="text-[12px] text-gray-600 hidden sm:inline">
+                      <span className="text-[12px] text-gray-600 hidden sm:inline whitespace-nowrap">
                         Use my location
                       </span>
                       <span
@@ -971,10 +973,10 @@ function BrowsePageInner() {
                       </span>
                     </button>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 ml-auto">
                     <button
                       onClick={() => setSelected(null)}
-                      className="px-4 py-2 rounded-lg text-[13px] font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+                      className="px-4 py-2 rounded-lg text-[13px] font-medium text-gray-600 hover:bg-gray-100 transition-colors whitespace-nowrap"
                     >
                       Close
                     </button>
@@ -982,7 +984,7 @@ function BrowsePageInner() {
                       onClick={() => planSimilar(selected)}
                       disabled={saving || locating || planning}
                       title="Re-plan this route with today's live prices"
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all hover:bg-blue-50 disabled:opacity-50"
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap"
                       style={{ color: '#2563eb', border: '1px solid #2563eb' }}
                     >
                       {planning ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
@@ -991,7 +993,7 @@ function BrowsePageInner() {
                     <button
                       onClick={() => saveAndOpen(selected)}
                       disabled={saving || locating || planning}
-                      className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-50"
+                      className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-50 whitespace-nowrap"
                       style={{ background: '#2563eb' }}
                     >
                       {saving || locating ? (
