@@ -1430,11 +1430,14 @@ export default function PlanningChat() {
 
       const fetchOne = async (city: (typeof trip.cities)[number]) => {
         try {
-          const results = await searchHotels({
+          const stay = {
             city: city.name,
             checkin: city.dates.arrival,
             checkout: city.dates.departure,
             adults: travelers,
+          };
+          let results = await searchHotels({
+            ...stay,
             // maxPrice in searchHotels is total-stay not per-night — compute
             // nights-for-this-city × nightly cap as the stay cap.
             ...(hotelNightlyCap !== undefined
@@ -1452,6 +1455,16 @@ export default function PlanningChat() {
                 }
               : {}),
           });
+          // Nothing under the budget cap: ask once more without it. An empty
+          // search leaves the city on `buildTripFromOptimize`'s placeholder,
+          // a nameless "$0/night" hotel that adds $0 to the total — and the
+          // cap is a rule of thumb (40% of the budget), not the traveller's
+          // own limit. A real hotel over it is an answer the budget banner can
+          // speak to; $0 is not. Only when a cap was applied: an uncapped
+          // search asked again is the same request.
+          if (results.length === 0 && hotelNightlyCap !== undefined) {
+            results = await searchHotels(stay);
+          }
           if (results.length > 0) {
             const hotels = results.map(hotelFromResult);
             return { hotels, hotel: hotels[0], selectedHotelIndex: 0 };
