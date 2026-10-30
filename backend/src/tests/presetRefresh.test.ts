@@ -23,6 +23,7 @@ jest.mock('../services/supabase', () => ({
         patch = p;
         return chain;
       });
+      chain.is = jest.fn(() => chain);
       chain.eq = jest.fn((col: string, val: any) => {
         if (patch && col === 'slug') updates.push({ slug: val, patch });
         return chain;
@@ -33,7 +34,14 @@ jest.mock('../services/supabase', () => ({
   }),
 }));
 
-import { refreshPresetPrices, presetRefreshDue, runScheduledPresetRefresh, isSameHotel, isPlausibleRefresh } from '../services/presets';
+import {
+  refreshPresetPrices,
+  presetRefreshDue,
+  runScheduledPresetRefresh,
+  isSameHotel,
+  isPlausibleRefresh,
+  resetPresetRefreshState,
+} from '../services/presets';
 
 const preset = () => ({
   slug: 'two-city',
@@ -68,6 +76,7 @@ const preset = () => ({
 });
 
 beforeEach(() => {
+  resetPresetRefreshState();
   rows = [{ slug: 'two-city', data: preset(), source: 'curated' }];
   updates.length = 0;
   mockCompareLeg.mockReset();
@@ -88,7 +97,7 @@ describe('refreshPresetPrices (weekly job)', () => {
       flightOption: null,
     });
     const r = await refreshPresetPrices(new Date('2026-10-10T00:00:00Z'));
-    expect(r).toEqual({ refreshed: 1, failed: 0 });
+    expect(r).toEqual({ refreshed: 1, failed: 0, skipped: 0 });
 
     // Priced for ONE traveler (preset transport prices are per person), on
     // the day the leg departs: Rome's 2-night stay from 11-09 ends 11-11.
@@ -156,7 +165,7 @@ describe('refreshPresetPrices (weekly job)', () => {
   it('marks a preset failed (and keeps going) when search throws', async () => {
     mockCompareLeg.mockRejectedValue(new Error('upstream down'));
     const r = await refreshPresetPrices();
-    expect(r).toEqual({ refreshed: 0, failed: 1 });
+    expect(r).toEqual({ refreshed: 0, failed: 1, skipped: 0 });
     expect(updates.pop()!.patch).toEqual({ refresh_status: 'failed' });
   });
 
@@ -195,7 +204,7 @@ describe('refreshPresetPrices (weekly job)', () => {
     mockCompareLeg.mockResolvedValue({ recommendation: 'unavailable', trainOption: null, flightOption: null });
     mockSearchHotels.mockRejectedValue(new Error('quota'));
     const r = await refreshPresetPrices();
-    expect(r).toEqual({ refreshed: 0, failed: 1 });
+    expect(r).toEqual({ refreshed: 0, failed: 1, skipped: 0 });
     expect(finalData().cities.map((c: any) => c.hotel.pricePerNight)).toEqual([100, 100]);
   });
 });

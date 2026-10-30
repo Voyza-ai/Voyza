@@ -58,6 +58,7 @@ import presetsRouter from '../routes/presets';
 import { errorHandler } from '../middleware/error';
 import {
   refreshPresetPrices,
+  resetPresetRefreshState,
   startPresetRefreshScheduler,
   withPresetRefreshLock,
 } from '../services/presets';
@@ -105,6 +106,7 @@ const SANDBOX_FARE = {
 const NOW = new Date('2026-10-29T12:00:00Z');
 
 beforeEach(() => {
+  resetPresetRefreshState();
   for (const k of Object.keys(mockEnv)) delete mockEnv[k];
   Object.assign(mockEnv, {
     SUPABASE_URL: 'https://test.supabase.co',

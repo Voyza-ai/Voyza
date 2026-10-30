@@ -392,9 +392,91 @@ async function repricePreset(
   return out;
 }
 
+// ── Which rows a run touches (audit E6) ─────────────────────────────────
+
+const WEEK_MS = 7 * 86_400_000;
+/** First retry of a preset whose refresh failed; doubles per failure, capped at a week. */
+const BACKOFF_BASE_MS = 12 * 60 * 60 * 1000;
+/** Re-pricing one preset takes seconds. A row still 'refreshing' this long
+ *  after we first saw it was abandoned by a process that died mid-run. */
+const STALE_CLAIM_MS = 60 * 60 * 1000;
+
 /**
- * Weekly price refresh: re-price every published preset (repricePreset),
- * then recompute the derived cost facts.
+ * Per-process memory. Lost on restart, which costs at most one early retry
+ * per preset — the schema has no column to hold it and stays unchanged.
+ */
+const backoff = new Map<string, { failures: number; nextAttemptAt: number }>();
+const refreshingSince = new Map<string, number>();
+
+/** Test seam: forget backoff and stale-claim memory. */
+export function resetPresetRefreshState(): void {
+  backoff.clear();
+  refreshingSince.clear();
+}
+
+type RefreshRow = {
+  slug: string;
+  data: PresetData;
+  source: 'curated' | 'generated';
+  refresh_status: string;
+  refreshed_at: string | null;
+};
+
+/**
+ * Due = never refreshed or last live over a week ago, not backing off, and
+ * not mid-refresh elsewhere. The run used to re-price EVERY row whenever
+ * any one was due — so one preset that kept failing re-priced the whole
+ * catalog every 6 hours, and a restart re-priced rows refreshed minutes
+ * earlier.
+ */
+function rowIsDue(row: RefreshRow, nowMs: number): boolean {
+  const b = backoff.get(row.slug);
+  if (b && b.nextAttemptAt > nowMs) return false;
+  if (row.refresh_status === 'refreshing') {
+    const since = refreshingSince.get(row.slug);
+    if (since === undefined) {
+      refreshingSince.set(row.slug, nowMs);
+      return false; // probably another process, right now
+    }
+    return nowMs - since >= STALE_CLAIM_MS;
+  }
+  refreshingSince.delete(row.slug);
+  return !row.refreshed_at || nowMs - Date.parse(row.refreshed_at) > WEEK_MS;
+}
+
+function backOff(slug: string, nowMs: number): void {
+  const failures = (backoff.get(slug)?.failures ?? 0) + 1;
+  backoff.set(slug, {
+    failures,
+    nextAttemptAt: nowMs + Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), WEEK_MS),
+  });
+}
+
+/**
+ * Claim a row with a conditional update: it flips to 'refreshing' only if
+ * it still holds exactly the state this run read. A second process (Railway
+ * plus a laptop, or two replicas) that read the same row loses the race and
+ * skips it — the in-process flag alone could not see the other process.
+ */
+async function claimRow(supabase: ReturnType<typeof getSupabase>, row: RefreshRow): Promise<boolean> {
+  let claim = supabase
+    .from('preset_trips')
+    .update({ refresh_status: 'refreshing' })
+    .eq('slug', row.slug)
+    .eq('refresh_status', row.refresh_status);
+  claim = row.refreshed_at == null ? claim.is('refreshed_at', null) : claim.eq('refreshed_at', row.refreshed_at);
+  const { data, error } = await claim.select('slug');
+  if (error) {
+    logger.warn('preset refresh: could not claim row', { slug: row.slug, message: error.message });
+    return false;
+  }
+  return (data?.length ?? 0) > 0;
+}
+
+/**
+ * Weekly price refresh: re-price each DUE published preset
+ * (repricePreset), then recompute the derived cost facts. `only` names
+ * presets to re-price now, due or not (manual spot-checks).
  *
  * A preset is marked 'fresh' — and refreshed_at bumped — only when at least
  * one of its prices really came back from a live source and no search
@@ -402,7 +484,10 @@ async function repricePreset(
  * allows) with the reasons logged, and refreshed_at is left alone, so it
  * still says when the prices were last live. It used to stamp 'fresh' for
  * a week even when every provider came back empty (audit E5). Live prices
- * found on a failed attempt are still saved — they are real.
+ * found on a failed attempt are still saved — they are real. A failed
+ * preset backs off (12 h, doubling, capped at a week) instead of being
+ * retried every tick, and every write is checked: a write that fails is a
+ * failure, not a silent "refreshed".
  */
 export async function refreshPresetPrices(
   now = new Date(),
@@ -410,23 +495,48 @@ export async function refreshPresetPrices(
 ): Promise<{
   refreshed: number;
   failed: number;
+  /** Not due, backing off, or claimed by another process. */
+  skipped: number;
 }> {
   const supabase = getSupabase();
-  let query = supabase.from('preset_trips').select('slug, data, source').eq('status', 'published');
-  // Limit to specific presets (manual spot-checks; the weekly run does all).
-  if (opts.only?.length) query = query.in('slug', opts.only);
+  let query = supabase
+    .from('preset_trips')
+    .select('slug, data, source, refresh_status, refreshed_at')
+    .eq('status', 'published');
+  const only = opts.only?.length ? opts.only : null;
+  if (only) query = query.in('slug', only);
   const { data: rows, error } = await query;
   if (error) throw new Error(error.message);
 
-  const start = new Date(now.getTime() + 30 * 86_400_000).toISOString().split('T')[0];
+  const nowMs = now.getTime();
+  const start = new Date(nowMs + 30 * 86_400_000).toISOString().split('T')[0];
   const liveFlights = liveFlightFaresAvailable();
   let refreshed = 0;
   let failed = 0;
+  let skipped = 0;
 
-  for (const row of rows ?? []) {
+  const markFailed = async (slug: string, why: string) => {
+    failed++;
+    backOff(slug, nowMs);
+    logger.warn('preset refresh failed (non-fatal)', { slug, message: why });
+    // Release the claim so the row isn't left 'refreshing'.
+    const { error: releaseError } = await supabase
+      .from('preset_trips')
+      .update({ refresh_status: 'failed' })
+      .eq('slug', slug);
+    if (releaseError) {
+      logger.warn('preset refresh: could not release row', { slug, message: releaseError.message });
+    }
+  };
+
+  for (const row of (rows ?? []) as RefreshRow[]) {
+    if ((!only && !rowIsDue(row, nowMs)) || !(await claimRow(supabase, row))) {
+      skipped++;
+      continue;
+    }
+    refreshingSince.delete(row.slug);
     const data: PresetData = JSON.parse(JSON.stringify(row.data));
     try {
-      await supabase.from('preset_trips').update({ refresh_status: 'refreshing' }).eq('slug', row.slug);
       const outcome = await repricePreset(row.slug, data, start, liveFlights);
       const fresh = outcome.live > 0 && outcome.errors.length === 0;
       logger.info('preset refresh', {
@@ -448,21 +558,24 @@ export async function refreshPresetPrices(
         });
       }
       if (fresh) patch.refreshed_at = now.toISOString();
-      await supabase.from('preset_trips').update(patch).eq('slug', row.slug);
-      if (fresh) refreshed++;
-      else failed++;
+      const { error: writeError } = await supabase.from('preset_trips').update(patch).eq('slug', row.slug);
+      if (writeError) {
+        await markFailed(row.slug, `could not save: ${writeError.message}`);
+      } else if (fresh) {
+        refreshed++;
+        backoff.delete(row.slug);
+      } else {
+        failed++;
+        backOff(row.slug, nowMs);
+      }
     } catch (err: any) {
-      failed++;
-      logger.warn('preset refresh failed (non-fatal)', { slug: row.slug, message: err?.message });
-      await supabase.from('preset_trips').update({ refresh_status: 'failed' }).eq('slug', row.slug);
+      await markFailed(row.slug, err?.message ?? 'unexpected error');
     }
   }
-  return { refreshed, failed };
+  return { refreshed, failed, skipped };
 }
 
 // ── Weekly schedule ─────────────────────────────────────────────────────
-
-const WEEK_MS = 7 * 86_400_000;
 
 /** True when the catalog's prices are due: any preset never refreshed, or
  *  the oldest refresh is over a week old. Exported for tests. */

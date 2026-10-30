@@ -46,7 +46,7 @@ jest.mock('../services/supabase', () => ({
 }));
 
 import curated from '../data/presets/curated.json';
-import { refreshPresetPrices } from '../services/presets';
+import { refreshPresetPrices, resetPresetRefreshState } from '../services/presets';
 
 const bundled = (slug: string) => JSON.parse(JSON.stringify((curated as any[]).find((p) => p.slug === slug)));
 const rowFor = (data: any, extra: any = {}) => ({
@@ -63,6 +63,7 @@ const NOW = new Date('2026-10-29T12:00:00Z');
 const week = (n: number) => new Date(NOW.getTime() + n * 8 * 86_400_000);
 
 beforeEach(() => {
+  resetPresetRefreshState();
   for (const k of Object.keys(mockEnv)) delete mockEnv[k];
   Object.assign(mockEnv, { SUPABASE_URL: 'https://test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k' });
   mockDb.rows = [];
@@ -77,7 +78,7 @@ describe("'fresh' means a price really came back live (E5)", () => {
     const data = bundled('italian-renaissance-trail');
     mockDb.rows = [rowFor(data, { refreshed_at: '2026-10-01T00:00:00.000Z' })];
     const r = await refreshPresetPrices(NOW);
-    expect(r).toEqual({ refreshed: 0, failed: 1 });
+    expect(r).toEqual({ refreshed: 0, failed: 1, skipped: 0 });
     expect(mockDb.rows[0].refresh_status).toBe('failed');
     expect(mockDb.rows[0].refreshed_at).toBe('2026-10-01T00:00:00.000Z');
     expect(mockDb.rows[0].data).toEqual(data);
@@ -91,7 +92,7 @@ describe("'fresh' means a price really came back live (E5)", () => {
       city === 'Rome' ? [{ name: rome.name, pricePerNight: rome.pricePerNight + 11.4 }] : [],
     );
     const r = await refreshPresetPrices(NOW);
-    expect(r).toEqual({ refreshed: 1, failed: 0 });
+    expect(r).toEqual({ refreshed: 1, failed: 0, skipped: 0 });
     expect(mockDb.rows[0].refresh_status).toBe('fresh');
     expect(mockDb.rows[0].refreshed_at).toBe(NOW.toISOString());
     expect(mockDb.rows[0].data.cities[0].hotel.pricePerNight).toBe(rome.pricePerNight + 11);
@@ -106,7 +107,7 @@ describe("'fresh' means a price really came back live (E5)", () => {
       return city === 'Rome' ? [{ name: rome.name, pricePerNight: rome.pricePerNight + 5 }] : [];
     });
     const r = await refreshPresetPrices(NOW);
-    expect(r).toEqual({ refreshed: 0, failed: 1 });
+    expect(r).toEqual({ refreshed: 0, failed: 1, skipped: 0 });
     expect(mockDb.rows[0].refresh_status).toBe('failed');
     expect(mockDb.rows[0].refreshed_at).toBeNull();
     expect(mockDb.rows[0].data.cities[0].hotel.pricePerNight).toBe(rome.pricePerNight + 5);
@@ -126,7 +127,7 @@ describe("'fresh' means a price really came back live (E5)", () => {
       flightOption: { price: 60, carrier: 'ITA', durationMinutes: 60 },
     });
     mockEnv.DUFFEL_ACCESS_TOKEN = 'duffel_live_x';
-    expect(await refreshPresetPrices(NOW)).toEqual({ refreshed: 1, failed: 0 });
+    expect(await refreshPresetPrices(NOW)).toEqual({ refreshed: 1, failed: 0, skipped: 0 });
     expect(mockDb.rows[0].data.cities[0].transportOut).toEqual(data.cities[0].transportOut);
   });
 });
