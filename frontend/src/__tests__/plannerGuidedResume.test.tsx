@@ -124,7 +124,7 @@ it('a one-click date-shift replan after a guided session runs as before', async 
   mockedOptimize.mockReturnValue(new Promise(() => {}) as any);
   render(<PlanningChat />);
 
-  expect(await screen.findByText(/Recalculating your trip starting 2027-01-11/)).toBeInTheDocument();
+  expect(await screen.findByText(/Recalculating your trip starting Jan 11, 2027/)).toBeInTheDocument();
   // The old transcript is not resurrected over the replan.
   expect(screen.queryByText('I have a place in mind')).toBeNull();
 }, 20_000);
