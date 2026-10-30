@@ -63,7 +63,7 @@ const city = (over: any = {}) => ({
   name: 'Rome',
   country: 'Italy',
   nights: 2,
-  hotel: { name: 'H', rating: 8.5, pricePerNight: 150, area: 'Centro' },
+  hotel: { name: 'Hotel Artemide', rating: 8.5, pricePerNight: 150, area: 'Centro' },
   activities: ['Colosseum', 'Vatican'],
   restaurants: [{ name: 'R', cuisine: 'Italian', priceRange: '$$' }],
   vibes: ['history'],
