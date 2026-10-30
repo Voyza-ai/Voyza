@@ -103,3 +103,19 @@ export function parseDurationMinutes(input: string | number | null | undefined):
   const fallback = parseInt(s, 10);
   return Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
 }
+
+/**
+ * Minutes as people write a trip duration: "55m", "1h", "2h 5m". Empty for
+ * an unknown (0, negative or missing) length. Never "0h 55m": production's
+ * Florence → Rome pill read that (2026-10-30), from a formatter that always
+ * printed both units.
+ */
+export function formatDurationMinutes(minutes: number | null | undefined): string {
+  if (!minutes || minutes < 0) return '';
+  const total = Math.round(minutes);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}

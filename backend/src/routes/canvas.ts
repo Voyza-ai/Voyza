@@ -8,7 +8,7 @@ import { searchHotels } from '../services/hotels';
 import { createNotification } from '../services/notifications';
 import { sendEmail, emailTemplates, unsubscribeUrlFor } from '../services/email';
 import { env } from '../config/env';
-import { parseDurationMinutes } from '../utils/duration';
+import { formatDurationMinutes, parseDurationMinutes } from '../utils/duration';
 import { buildTripFromDb, liveTripTotal, resolveTripTitle } from '../utils/tripShape';
 import { redactMemberIdentity, MemberRequester } from '../utils/memberVisibility';
 
@@ -433,7 +433,7 @@ router.post(
                     state.cities[idx].transportOut = {
                       mode: best.mode,
                       price: best.price,
-                      duration: `${Math.floor(best.duration / 60)}h ${best.duration % 60}m`,
+                      duration: formatDurationMinutes(best.duration),
                       operator: best.operator,
                       from: origin,
                       to: dest,

@@ -1,3 +1,5 @@
+import { formatDurationMinutes } from './duration';
+
 /**
  * Reconstruct the frontend Trip shape from its DB rows (trips + cities + transports).
  *
@@ -23,14 +25,7 @@ const emptyTransport = {
   price: 0,
 };
 
-function formatDuration(minutes: number | null | undefined): string {
-  if (!minutes || minutes < 0) return '';
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h > 0 && m > 0) return `${h}h ${m}m`;
-  if (h > 0) return `${h}h`;
-  return `${m}m`;
-}
+const formatDuration = formatDurationMinutes;
 
 /**
  * Booking links we used to fabricate for rail legs — the providers' marketing
