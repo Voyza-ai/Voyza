@@ -12,6 +12,42 @@ const REVALIDATE_SECONDS = 3600;
  *  unknown category (backend/src/routes/presets.ts). Keep the two in sync. */
 const CATEGORY_NOT_FOUND = 'Category not found';
 
+/**
+ * JSON for an inline <script type="application/ld+json">. JSON.stringify
+ * alone is not safe there: a preset whose text contains `</script>` would
+ * end the tag and the rest would be parsed as HTML (audit E21). Writing
+ * `<`, `>` and `&` — plus U+2028 / U+2029, which JavaScript treats as
+ * newlines — as JSON unicode escapes keeps it one inert JSON string that
+ * parses back to exactly the same value.
+ */
+// From an escaped string, so this source file never holds the raw U+2028 /
+// U+2029 characters (line terminators: one inside a regex literal breaks it).
+const LINE_SEPARATORS = new RegExp('[\\u2028\\u2029]', 'g');
+
+export function serializeJsonLd(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(LINE_SEPARATORS, (c) => `\\u${c.charCodeAt(0).toString(16)}`);
+}
+
+/**
+ * When the catalog last changed, for sitemap `lastModified`: the newest
+ * price refresh across its presets. Undefined when no preset has been
+ * refreshed (the bundled catalog, and the DB until the refresh is switched
+ * on) — leaving `lastModified` out is honest, while `new Date()` told
+ * crawlers every page changed on every hourly rebuild (audit E21).
+ */
+export function catalogLastModified(catalog: PresetCatalog | null): Date | undefined {
+  let newest: number | undefined;
+  for (const p of catalog?.presets ?? []) {
+    const t = p.refreshedAt ? Date.parse(p.refreshedAt) : NaN;
+    if (Number.isFinite(t) && (newest === undefined || t > newest)) newest = t;
+  }
+  return newest === undefined ? undefined : new Date(newest);
+}
+
 export async function fetchCatalogServer(): Promise<PresetCatalog | null> {
   try {
     const res = await fetch(`${API_URL}/api/presets`, { next: { revalidate: REVALIDATE_SECONDS } });

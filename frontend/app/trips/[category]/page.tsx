@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import Navbar from '@/components/shared/Navbar';
 import MiniRoute from '@/components/browse/MiniRoute';
 import { presetPricePerPersonRange } from '@/data/presetItineraries';
-import { fetchCatalogServer, fetchCategoryServer } from '@/lib/presetsServer';
+import { fetchCatalogServer, fetchCategoryServer, serializeJsonLd } from '@/lib/presetsServer';
 import { SITE_URL } from '@/lib/site';
 
 /**
@@ -134,7 +134,7 @@ export default async function CategoryPage({ params }: { params: { category: str
   return (
     <main className="min-h-screen" style={{ background: '#f0f4f8' }}>
       <Navbar />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }} />
       <div className="pt-20 px-5 pb-16 max-w-6xl mx-auto">
         <nav aria-label="Breadcrumb" className="text-[12px] text-gray-400 mb-3">
           <Link href="/" className="hover:text-gray-600">Home</Link>
