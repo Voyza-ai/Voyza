@@ -1,16 +1,23 @@
 /**
- * Trip constraints — user-stated intent that the AI chat collects and
- * the optimizer honors. Lives in `trips.constraints` jsonb.
+ * Trip constraints — user-stated intent that the AI chat (/api/plan/chat)
+ * collects. Same shape as the `trips.constraints` jsonb column.
  *
  * Three flavors for the current MVP:
  *   - Pinned cities:   "I need to be in Rome March 5-10" → lock exact dates
  *   - Min days:        "at least 3 days in Tokyo"        → extend stay
  *   - Transport windows: "no flights before 5pm"          → filter options
  *
- * Applied eagerly for the first two (dates change immediately, shown in
- * the proposal diff). Stored-but-not-yet-applied for transport windows
- * (full filtering requires a compareLeg refactor; MVP acknowledges the
- * constraint and honors it on next explicit re-optimize).
+ * What actually happens to them: each is applied ONCE, when the chat
+ * proposes it. Pins and min-days recompute the city dates in the proposal
+ * diff (applyDateConstraints below); a transport window filters the one leg
+ * search it arrives with (legOptions.searchLegOptions). Nothing applies
+ * them again afterwards:
+ *   - the optimizer never reads constraints, so a re-optimize ignores them;
+ *   - no route writes them — POST /api/trips, PATCH /api/trips/:id and the
+ *     canvas save don't accept the field, so `trips.constraints` stays at
+ *     its '{}' default and a reloaded trip comes back without them;
+ *   - they live only on the in-memory trip of the results page (the canvas
+ *     drops them), where a later chat turn re-applies the date ones.
  */
 
 import { addDays, todayIso } from '../utils/dates';

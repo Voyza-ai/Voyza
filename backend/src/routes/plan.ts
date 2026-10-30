@@ -498,12 +498,18 @@ router.post(
 //   - Merge the new constraint onto trip.constraints
 //   - Apply date-bearing constraints (pin + min_days) to recompute city
 //     dates — this is what produces the Accept-or-Reject diff card
-//   - Return { type: 'proposal', reply, proposal: {...} } — nothing is
-//     persisted until the user clicks Accept and the frontend calls
-//     PATCH /api/trips/:id (or leaves it in memory until Save)
+//   - Return { type: 'proposal', reply, proposal: {...} }. Accept applies
+//     proposal.proposedTrip on the client: the trip store on /results, or
+//     canvas local state on /canvas, which autosaves the new city dates
+//     like any manual edit. Accept itself sends nothing to this route.
 //
-// transport_windows are stored on Accept but not yet applied (would
-// require compareLeg to accept time filters — tracked in ROADMAP).
+// The constraints themselves are applied once, here, and never again:
+// the optimizer doesn't read them, and no trips write path (POST/PATCH
+// /api/trips, canvas save) accepts them, so `trips.constraints` stays '{}'.
+// They survive only on the results page's in-memory trip, where the next
+// chat turn re-applies the date ones (see services/constraints.ts).
+// transport_windows filter the one leg search they arrive with
+// (set_transport_window below) and are not re-applied by anything.
 const historyMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string(),
@@ -984,8 +990,10 @@ ${JSON.stringify(tripSummary, null, 2)}
     //     directly on the flowchart — no inline card in chat. Chat just
     //     shows a one-line summary ("Found 12, showing top 4").
     //
-    //     set_transport_window ALSO persists the constraint so future
-    //     re-optimizations honor the time bound.
+    //     set_transport_window also returns the window in
+    //     updatedConstraints, which the frontend keeps on the in-memory
+    //     trip. That is a record, not a rule: no save path writes it and no
+    //     re-optimization reads it.
     if (toolName === 'set_transport_window' || toolName === 'show_transport_options') {
       const lookup = findTripLeg(currentTrip.cities ?? [], toolInput.from, toolInput.to);
       if (lookup.kind === 'unknown_city') {
@@ -1135,8 +1143,9 @@ ${JSON.stringify(tripSummary, null, 2)}
       const summary =
         summaryBits.join(' — ') + '. Pick one on the transport card to use it.';
 
-      // If this was set_transport_window, persist the intent on the trip
-      // so future re-optimizations honor the bound.
+      // If this was set_transport_window, record the window on the trip's
+      // constraints. Record only — it isn't saved and nothing re-applies
+      // it (see the route header above).
       let updatedConstraints = existingConstraints;
       if (toolName === 'set_transport_window' && window) {
         const constraintUpdate: TripConstraints = {
