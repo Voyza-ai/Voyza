@@ -7,6 +7,7 @@ import { updateTripPermissions } from '@/lib/api';
 import Navbar from '@/components/shared/Navbar';
 import ProtectedRoute from '@/components/shared/ProtectedRoute';
 import { getAuthHeader } from '@/lib/supabase';
+import { humanDay } from '@/lib/dateHelpers';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -76,6 +77,7 @@ function TripCard({
   // Name only — the API deliberately doesn't send the owner's email
   // (their PII; everyone the trip is shared with reads this list).
   const sharedBy = trip.owner_name || 'someone';
+  const cityCount = trip.city_count ?? trip.cities.length;
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
       <div
@@ -110,7 +112,7 @@ function TripCard({
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mb-3">
           <span className="flex items-center gap-1">
             <MapPin size={12} />
-            {trip.city_count ?? trip.cities.length} cities
+            {cityCount} {cityCount === 1 ? 'city' : 'cities'}
           </span>
           <span className="flex items-center gap-1">
             <Users size={12} />
@@ -119,7 +121,7 @@ function TripCard({
           {trip.date_range && (
             <span className="flex items-center gap-1">
               <Calendar size={12} />
-              {trip.date_range.start}
+              {humanDay(trip.date_range.start)}
             </span>
           )}
         </div>
