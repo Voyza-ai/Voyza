@@ -23,6 +23,7 @@ import {
 import { converse } from '../services/planConverse';
 import { compareLeg } from '../services/compareLeg';
 import { getCityCountry } from '../data/cityCountries';
+import { parseDurationMinutes } from '../utils/duration';
 
 import { getAnthropicSafe } from '../services/anthropic';
 
@@ -730,6 +731,38 @@ function notALegReply(
   return `${asked} isn't a leg of this trip — its legs are ${listed}. Which one did you mean?`;
 }
 
+/**
+ * The leg's current transport (frontend Transport shape) as a LegOption,
+ * so a refresh can list it first and the frontend's legOptionToTransport
+ * rebuilds the same selection. priceDelta is 0 by definition.
+ */
+function transportToLegOption(t: any, currency: string): LegOption {
+  return {
+    mode: t.mode,
+    operator: t.operator ?? '',
+    flightNumber: (t.mode === 'train' ? t.trainNumber : t.flightNumber) ?? null,
+    price: t.price,
+    currency,
+    departTime: t.departTime ?? null,
+    arriveTime: t.arriveTime ?? null,
+    duration: t.duration ?? '',
+    durationMinutes: parseDurationMinutes(t.duration),
+    stops: t.layovers ?? 0,
+    bookingUrl: t.bookingUrl ?? null,
+    priceDelta: 0,
+  };
+}
+
+/** Same departure at the same price — a fresh search re-finding the current option. */
+function isSameLegOption(a: LegOption, b: LegOption): boolean {
+  return (
+    a.mode === b.mode &&
+    a.operator === b.operator &&
+    a.departTime === b.departTime &&
+    Math.abs(a.price - b.price) < 0.01
+  );
+}
+
 router.post(
   '/chat',
   asyncHandler(async (req, res) => {
@@ -1044,6 +1077,28 @@ ${JSON.stringify(tripSummary, null, 2)}
       // Build a one-line summary for the chat bubble.
       const shownCount = legSearch.options.length;
       const cheapest = legSearch.options[0];
+
+      // The frontend makes options[0] the leg's selection
+      // (applyLegRefreshToTrip), so a refresh whose fresh cheapest costs
+      // MORE than the leg's current option raised the trip on a "cheaper"
+      // request: in the demo run "is there a cheaper way?" took Paris →
+      // Zurich $278 → $282 and the trip $5,014 → $5,018 under the reply
+      // "cheapest is +$4" (D-03). show_transport_options is for browsing
+      // and cost-cutting, so the current option stays first and the fresh
+      // ones follow as alternatives the user can still pick on the card.
+      // set_transport_window is exempt: the current option may break the
+      // user's window, and moving off it is the point.
+      const keepCurrent =
+        toolName === 'show_transport_options' &&
+        currentTransport != null &&
+        currentPrice > 0 &&
+        cheapest.price >= currentPrice;
+      let options = legSearch.options;
+      if (keepCurrent) {
+        const kept = transportToLegOption(currentTransport, cheapest.currency);
+        options = [kept, ...options.filter((o) => !isSameLegOption(o, kept))].slice(0, 4);
+      }
+
       const summaryBits: string[] = [];
       const foundCountPhrase =
         totalFound > shownCount
@@ -1055,7 +1110,13 @@ ${JSON.stringify(tripSummary, null, 2)}
         if (windowPhrase) summaryBits.push(windowPhrase);
       }
       const delta = cheapest.priceDelta;
-      if (currentPrice > 0 && delta < 0) {
+      if (keepCurrent) {
+        const nextBest =
+          delta >= 0.5 ? `next best is +$${delta.toFixed(0)}` : 'next best costs the same';
+        summaryBits.push(
+          `nothing cheaper than your current $${currentPrice.toFixed(0)}, so I kept it (${nextBest})`,
+        );
+      } else if (currentPrice > 0 && delta < 0) {
         summaryBits.push(`cheapest saves $${Math.abs(delta).toFixed(0)}`);
       } else if (currentPrice > 0 && delta > 0) {
         summaryBits.push(`cheapest is +$${delta.toFixed(0)}`);
@@ -1089,7 +1150,7 @@ ${JSON.stringify(tripSummary, null, 2)}
           fromCity: fromCity.name,
           toCity: toCity.name,
           date: travelDate,
-          options: legSearch.options,
+          options,
           totalFound,
           updatedConstraints,
         },

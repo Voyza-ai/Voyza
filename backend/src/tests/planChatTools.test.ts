@@ -196,7 +196,9 @@ describe('B9 — leg tools only act on legs in the trip order', () => {
     expect(res.body.refresh.fromCity).toBe('Rome');
     expect(res.body.refresh.toCity).toBe('Venice');
     expect(res.body.refresh.date).toBe('2026-12-10');
-    expect(res.body.refresh.options.map((o: any) => o.price)).toEqual([110, 120]);
+    // Both fresh fares are listed. (Whether the leg's current $110 also
+    // leads the list is D-03's rule, tested below.)
+    expect(res.body.refresh.options.map((o: any) => o.price)).toEqual(expect.arrayContaining([110, 120]));
   });
 
   it('finds the right leg when a city is visited twice (Rome → Florence → Rome)', async () => {
@@ -409,5 +411,61 @@ describe('B10 — set_min_days', () => {
     expect(res.body.proposal.proposedTrip.cities.map((c: any) => c.dates.departure)).toEqual([
       '2026-12-11', '2026-12-13', '2026-12-15',
     ]);
+  });
+});
+
+describe('D-03 — a transport refresh never swaps in a pricier option', () => {
+  const app = createApp();
+  /** baseTrip with Rome → Venice currently at `price`, optionally overriding its fields. */
+  const tripWithRomeVenice = (price: number, extra: Record<string, any> = {}) => {
+    const t: any = baseTrip();
+    t.cities[0].transportOut = { ...t.cities[0].transportOut, price, ...extra };
+    t.cities[1].transportIn = { ...t.cities[1].transportIn, price, ...extra };
+    return t;
+  };
+
+  it('keeps the current option when nothing fresh is cheaper, and says so', async () => {
+    // Fresh Rome → Venice: $110 (16:00) and $120 (07:15); current is $105.
+    // Before: options[0] was the $110, which the frontend made the leg's
+    // selection — the "cheaper" request raised the trip total by $5.
+    const res = await chat(app, 'show_transport_options', { from: 'Rome', to: 'Venice', explanation: 'x' }, tripWithRomeVenice(105));
+    expect(res.body.type).toBe('leg_refresh');
+    const [first, ...rest] = res.body.refresh.options;
+    expect(first).toMatchObject({ mode: 'flight', operator: 'X', price: 105, priceDelta: 0, duration: '1h' });
+    expect(rest.map((o: any) => o.price)).toEqual([110, 120]);
+    expect(res.body.reply).toContain('nothing cheaper than your current $105');
+    expect(res.body.reply).toContain('kept it');
+    expect(res.body.reply).not.toMatch(/cheapest is \+/);
+  });
+
+  it('keeps the current option on a tie too (no churn for the same price)', async () => {
+    const res = await chat(app, 'show_transport_options', { from: 'Rome', to: 'Venice', explanation: 'x' }, tripWithRomeVenice(110));
+    expect(res.body.refresh.options[0]).toMatchObject({ operator: 'X', price: 110 });
+  });
+
+  it('drops the fresh copy of the current option instead of listing it twice', async () => {
+    const res = await chat(
+      app,
+      'show_transport_options',
+      { from: 'Rome', to: 'Venice', explanation: 'x' },
+      tripWithRomeVenice(110, { operator: 'Mock Air', departTime: '16:00' }),
+    );
+    expect(res.body.refresh.options.map((o: any) => `${o.departTime} $${o.price}`)).toEqual(['16:00 $110', '07:15 $120']);
+  });
+
+  it('still switches to a fresh option that is cheaper (control)', async () => {
+    const res = await chat(app, 'show_transport_options', { from: 'Rome', to: 'Venice', explanation: 'x' }, tripWithRomeVenice(130));
+    expect(res.body.refresh.options[0]).toMatchObject({ departTime: '16:00', price: 110, priceDelta: -20 });
+    expect(res.body.reply).toContain('cheapest saves $20');
+  });
+
+  it('does not apply to set_transport_window, which must move off a current option outside the window', async () => {
+    const res = await chat(
+      app,
+      'set_transport_window',
+      { from: 'Rome', to: 'Venice', earliestDepart: '15:00', latestDepart: null, earliestArrive: null, latestArrive: null, explanation: 'x' },
+      tripWithRomeVenice(105),
+    );
+    expect(res.body.refresh.options[0]).toMatchObject({ departTime: '16:00', price: 110 });
   });
 });
