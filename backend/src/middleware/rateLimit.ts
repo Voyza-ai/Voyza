@@ -54,6 +54,7 @@ export const RATE_LIMITS = {
   general: 600,
   expensive: 300,
   optimize: 40,
+  hotels: 120,
   canvasRole: 600,
   locations: 600,
 } as const;
@@ -198,6 +199,37 @@ export const expensiveLimiter = rateLimit({
 export const optimizeLimiter = rateLimit({
   windowMs: WINDOW_MS,
   max: RATE_LIMITS.optimize,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip,
+  message: { error: 'Too many requests to this resource — please slow down.' },
+});
+
+/**
+ * POST /api/hotels/search, on top of the expensive cap.
+ *
+ * Every search that misses the 10-minute cache (services/hotels.ts) is a
+ * Booking call on our RapidAPI quota, and under the shared expensive cap one
+ * IP could spend all 300 of a window on hotels alone.
+ *
+ * Sized from what the planner actually sends. One plan is one search per city
+ * (PlanningChat), plus at most one more per city when a budget-capped search
+ * comes back empty and is asked again without the cap; changing a stay's dates
+ * re-searches the cities that moved; a "start 2 days earlier" replan is a new
+ * plan. So the heavy session the caps above are sized against — 10 five-city
+ * plans a window — is 50 searches, 100 if every one of them hits the budget
+ * retry, and a 6-city plan with its retries, a dozen whole-trip date changes and
+ * a date-shift replan is 96. 120 clears both, which is 2.4x the heavy
+ * session's usual 50, while cutting what one IP can spend on hotels to 40% of
+ * what the shared cap allowed. The searches optimize makes for its date-shift
+ * check run inside that one request and are bounded by optimizeLimiter.
+ *
+ * Same message as expensiveLimiter: the client cannot tell them apart and has
+ * no reason to.
+ */
+export const hotelSearchLimiter = rateLimit({
+  windowMs: WINDOW_MS,
+  max: RATE_LIMITS.hotels,
   standardHeaders: true,
   legacyHeaders: false,
   skip,
