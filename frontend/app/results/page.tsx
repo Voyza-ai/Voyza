@@ -23,7 +23,7 @@ import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, getTrip, fetchHomeLegs, updateTrip } from '@/lib/api';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 import { originAirportsForCity } from '@/lib/locationResolver';
-import { Hotel, City, Transport } from '@/lib/types';
+import { Hotel, City, Transport, HomeLeg } from '@/lib/types';
 import { useAuthStore } from '@/store/authStore';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
@@ -269,6 +269,26 @@ function ResultsPageInner() {
   const [homeLegSearch, setHomeLegSearch] = useState({ outbound: false, return: false });
 
   /**
+   * The legs a re-search is replacing, kept for the HEADER's arithmetic only
+   * until their replacements land (audit D-09).
+   *
+   * chooseOrigin clears the home legs so the flowchart shows its searching
+   * pill, but the header prices the trip from the same object: for the ~4 s
+   * the search took, the total dropped by both flights and the savings pill
+   * read the gap as money saved. Measured on the other-Portland choice: total
+   * $1,991 → $1,063 with "You can save $320", then $1,645 once the Maine
+   * fares arrived. The header now keeps pricing the previous legs until each
+   * direction's search settles, so it moves once, from one real total to the
+   * next. The flowchart and the store see the cleared legs exactly as before.
+   */
+  const [legsBeingReplaced, setLegsBeingReplaced] = useState<{
+    outbound: HomeLeg | null;
+    return: HomeLeg | null;
+  } | null>(null);
+  const settleReplacedLeg = (dir: 'outbound' | 'return') =>
+    setLegsBeingReplaced((r) => (r && r[dir] ? { ...r, [dir]: null } : r));
+
+  /**
    * The traveller picked a different reading of an ambiguous origin.
    *
    * Clears the home legs and the once-per-trip guard so the backfill effect
@@ -290,6 +310,10 @@ function ResultsPageInner() {
     // "Portland". Labels are built name-first, so the leading segment is it.
     const shortName = choice.label.split(',')[0]?.trim() || trip.origin.city;
     homeLegsFetchedRef.current = null;
+    setLegsBeingReplaced({
+      outbound: trip.origin.outboundLeg ?? null,
+      return: trip.origin.returnLeg ?? null,
+    });
     setTrip({
       ...trip,
       origin: {
@@ -307,18 +331,29 @@ function ResultsPageInner() {
 
   useEffect(() => {
     const trip = currentTrip;
-    if (!trip?.origin?.city || trip.cities.length === 0) return;
+    // No search will run, so nothing is coming to replace the header's legs.
+    const noReplacement = () => setLegsBeingReplaced((r) => (r ? null : r));
+    if (!trip?.origin?.city || trip.cities.length === 0) {
+      noReplacement();
+      return;
+    }
     const key = trip.id ?? 'store-trip';
     if (homeLegsFetchedRef.current === key) return;
 
     const needOutbound = !trip.origin.outboundLeg;
     const needReturn = (trip.returnToHome ?? true) && !trip.origin.returnLeg;
-    if (!needOutbound && !needReturn) return;
+    if (!needOutbound && !needReturn) {
+      noReplacement();
+      return;
+    }
     homeLegsFetchedRef.current = key;
 
     const first = trip.cities[0];
     const last = trip.cities[trip.cities.length - 1];
-    if (!first?.dates?.arrival) return;
+    if (!first?.dates?.arrival) {
+      noReplacement();
+      return;
+    }
 
     // Airports may be empty on older trips — fall back to the known-airports
     // lookup for the home city. Synchronous and offline on purpose: this runs
@@ -366,10 +401,14 @@ function ResultsPageInner() {
         })
           .then((r) => merge('outbound', r.outboundLeg ?? null))
           .catch(() => {})
-          .finally(() => setHomeLegSearch((s) => ({ ...s, outbound: false }))),
+          .finally(() => {
+            setHomeLegSearch((s) => ({ ...s, outbound: false }));
+            settleReplacedLeg('outbound');
+          }),
       );
     } else {
       setHomeLegSearch((s) => ({ ...s, outbound: false }));
+      settleReplacedLeg('outbound');
     }
 
     if (needReturn && retAirports.length > 0) {
@@ -387,10 +426,14 @@ function ResultsPageInner() {
         })
           .then((r) => merge('return', r.returnLeg ?? null))
           .catch(() => {})
-          .finally(() => setHomeLegSearch((s) => ({ ...s, return: false }))),
+          .finally(() => {
+            setHomeLegSearch((s) => ({ ...s, return: false }));
+            settleReplacedLeg('return');
+          }),
       );
     } else {
       setHomeLegSearch((s) => ({ ...s, return: false }));
+      settleReplacedLeg('return');
     }
 
     // Persist whatever was found so the next load doesn't re-search.
@@ -443,6 +486,24 @@ function ResultsPageInner() {
 
   if (!currentTrip) return null;
 
+  // What the header prices: the trip, with any leg still being re-searched
+  // standing in for itself until it lands (see legsBeingReplaced).
+  const origin = currentTrip.origin;
+  const headerTrip =
+    origin &&
+    legsBeingReplaced &&
+    ((!origin.outboundLeg && legsBeingReplaced.outbound) ||
+      (!origin.returnLeg && legsBeingReplaced.return))
+      ? {
+          ...currentTrip,
+          origin: {
+            ...origin,
+            outboundLeg: origin.outboundLeg ?? legsBeingReplaced.outbound,
+            returnLeg: origin.returnLeg ?? legsBeingReplaced.return,
+          },
+        }
+      : currentTrip;
+
   const handleCityClick = (cityIndex: number) => {
     setOpenCityIndex(cityIndex);
     setOpenActivitiesIndex(null);
@@ -467,7 +528,7 @@ function ResultsPageInner() {
       <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 px-2 pb-2 pt-[3rem] w-full">
         {/* Main column — header pinned, cards fill the rest */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
-          <ResultsHeader trip={currentTrip} />
+          <ResultsHeader trip={headerTrip} />
           {typeof currentTrip.budget === 'number' && (
             <BudgetOverBanner budget={currentTrip.budget} totalCost={currentTrip.totalCost} />
           )}
