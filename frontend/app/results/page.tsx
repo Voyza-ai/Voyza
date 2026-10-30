@@ -234,8 +234,9 @@ function ResultsPageInner() {
   // means the header moves once, from one real total to the next, and never
   // reads a missing price as money saved.
   //
-  // When the last job lands, the stored total follows the live one. Its
-  // baseline moves with it: the header's saving is
+  // When the last job lands, the stored total follows the live one (and is
+  // persisted for a saved trip, so My Trips shows what opening the trip
+  // shows). Its baseline moves with it: the header's saving is
   // totalCost + savings − live total, so a re-price that left the old
   // baseline behind turned "the Maine fares are cheaper" into "You can save
   // $1,950 vs default routing".
@@ -259,6 +260,9 @@ function ResultsPageInner() {
     const live = liveTripTotal(cur);
     if (!Number.isFinite(live) || live === cur.totalCost) return;
     setTrip({ ...cur, totalCost: live });
+    if (cur.id && !cur.id.startsWith('mock')) {
+      updateTrip(cur.id, { totalCost: live }).catch(() => {});
+    }
   };
 
   /** Count a re-price job in flight; the last one to finish settles the header. */

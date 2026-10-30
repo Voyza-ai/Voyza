@@ -9,13 +9,18 @@ import ResultsPage from '@/app/results/page';
 import type { HomeLeg, Trip } from '@/lib/types';
 
 /**
- * Re-pricing and the header's two numbers (item 3).
+ * Re-pricing and the header's two numbers (items 3 and 4).
  *
  * Item 3: while a re-price is in flight the header shows the trip as it last
  * settled — never a total or a saving computed from a half-searched trip — and
  * when it settles the stored total follows the live one, so a cheaper result
  * is a new price, not "You can save $X".
  *
+ * Item 4: My Trips lists `trips.total_cost`. When this page re-prices a SAVED
+ * trip, the settled live total is written back with updateTrip, so the list
+ * shows what opening the trip shows. Harness, saved Paris Long Weekend preset
+ * for 4: My Trips $1,344 (the preset's quote, home flights excluded) while the
+ * trip it opened said $2,390.
  */
 
 const mockedFetchHomeLegs = fetchHomeLegs as jest.MockedFunction<typeof fetchHomeLegs>;
@@ -87,7 +92,7 @@ beforeEach(() => {
 });
 
 describe("a saved preset's first hotel search", () => {
-  it('holds the header until the search lands, then stores the live total', async () => {
+  it('holds the header until the search lands, then stores and persists the live total', async () => {
     const trip = savedPreset();
     useTripStore.setState({ currentTrip: trip });
     const hotels = deferred<any>();
@@ -106,6 +111,8 @@ describe("a saved preset's first hotel search", () => {
     expect(settled.cities[0].hotel.name).toBe('Mama Shelter Paris East');
     const live = liveTripTotal(settled);
     await waitFor(() => expect(perPersonLine()).toBe(perPerson(settled)));
+    // Before: never written back; My Trips kept $1,344.
+    await waitFor(() => expect(mockedUpdateTrip).toHaveBeenCalledWith('c6961a4e-saved', { totalCost: live }));
     expect(settled.totalCost).toBe(live);
     expect(screen.queryByText('You can save')).not.toBeInTheDocument();
   });
@@ -125,7 +132,7 @@ describe("a saved preset's first hotel search", () => {
     expect(screen.queryByText('You can save')).not.toBeInTheDocument();
   });
 
-  it('a re-price is held and stored in memory', async () => {
+  it('an unsaved trip is re-priced in memory only', async () => {
     const trip = { ...savedPreset(), id: undefined };
     useTripStore.setState({ currentTrip: trip });
     mockedSearchHotels.mockResolvedValue([
@@ -139,3 +146,22 @@ describe("a saved preset's first hotel search", () => {
   });
 });
 
+describe('home legs found for a saved trip', () => {
+  it('persists the live total with them', async () => {
+    const trip = savedPreset();
+    trip.cities[0].hotels = [trip.cities[0].hotel, { ...trip.cities[0].hotel, name: 'Second' }];
+    trip.origin = { ...trip.origin!, outboundLeg: null, returnLeg: null };
+    useTripStore.setState({ currentTrip: trip });
+    mockedFetchHomeLegs.mockImplementation(async (p: any) =>
+      p.outbound
+        ? ({ outboundLeg: leg({}), returnLeg: null, firstCityArrival: '2026-11-30' } as any)
+        : ({ outboundLeg: null, returnLeg: leg({ originAirport: 'PAR', destAirport: 'JFK', departDate: '2026-12-02' }) } as any),
+    );
+    render(<ResultsPage />);
+    await waitFor(() => expect(useTripStore.getState().currentTrip!.origin?.returnLeg).toBeTruthy());
+    const settled = useTripStore.getState().currentTrip!;
+    await waitFor(() =>
+      expect(mockedUpdateTrip).toHaveBeenCalledWith('c6961a4e-saved', { totalCost: liveTripTotal(settled) }),
+    );
+  });
+});
