@@ -933,6 +933,38 @@ export function pickByRating(rows: HotelResult[], city: string): HotelResult[] {
  * row is flagged the order is unchanged and index 0 is flagged, because a
  * suspicious price still beats an empty city.
  */
+/**
+ * The provider's property link, opened on the stay we priced.
+ *
+ * Booking returns a bare property page (`/hotel/fr/<slug>.html`), and that is
+ * what the "Book" button opened: no dates, and Booking's own default party of
+ * two in one room. So the traveller landed on a different price from the one
+ * in their trip, for a stay they had not asked about — for a group, a very
+ * different one, since the trip's price covers every room.
+ *
+ * These are the parameter names Booking's own search links use. Set rather
+ * than appended, so a provider URL that already carries one is corrected
+ * instead of duplicated, and anything else on it (affiliate ids, labels) is
+ * kept. A URL that does not parse is returned as it came: a link without the
+ * stay is the old behaviour, a broken link is worse.
+ */
+export function bookingUrlForStay(
+  raw: string,
+  stay: { checkin: string; checkout: string; adults: number; rooms: number },
+): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return raw;
+  }
+  url.searchParams.set('checkin', stay.checkin);
+  url.searchParams.set('checkout', stay.checkout);
+  url.searchParams.set('group_adults', String(stay.adults));
+  url.searchParams.set('no_rooms', String(stay.rooms));
+  return url.toString();
+}
+
 export function trustedFirst(hotels: HotelResult[]): HotelResult[] {
   const trusted: HotelResult[] = [];
   const suspect: HotelResult[] = [];
@@ -1015,7 +1047,10 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
         reviewCount: parseInt(h.review_nr ?? h.review_score_word ?? '0', 10) || 0,
         stars: parseInt(h.class ?? '0', 10) || 0,
         thumbnail: h.main_photo_url ?? h.max_photo_url ?? '',
-        bookingUrl: h.url ?? `https://www.booking.com/hotel/${h.hotel_id ?? ''}.html`,
+        bookingUrl: bookingUrlForStay(
+          h.url ?? `https://www.booking.com/hotel/${h.hotel_id ?? ''}.html`,
+          { checkin, checkout, adults, rooms },
+        ),
         amenities: [] as string[],
       };
     };

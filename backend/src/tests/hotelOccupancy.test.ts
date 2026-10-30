@@ -301,3 +301,58 @@ describe('guards on a multi-room price give the single-room verdicts', () => {
     expect([1, 2, 3, 4, 5, 6, 7].map(roomsFor)).toEqual([1, 1, 2, 2, 3, 3, 4]);
   });
 });
+
+/**
+ * The "Book" link on a hotel. The provider's `url` is a bare property page, so
+ * a click opened Booking with no dates and its own default party — a different
+ * price from the one the trip showed, for a stay the traveller did not ask
+ * about.
+ */
+describe('the Book link carries the stay that was priced', () => {
+  const linkFor = async (
+    body: Record<string, unknown>,
+    row: Record<string, unknown> = raw('51086', 'Mercure', 1803.78, 4),
+  ) => {
+    stubBooking([row]);
+    const res = await request(app).post('/api/hotels/search').send(body);
+    return new URL(res.body.hotels[0].bookingUrl);
+  };
+
+  it('dates, adults and rooms — including the default room count', async () => {
+    const s = stay();
+    const url = await linkFor({ city: 'Paris', ...s, adults: 6 });
+
+    expect(url.origin + url.pathname).toBe('https://www.booking.com/hotel/fr/51086.html');
+    expect(url.searchParams.get('checkin')).toBe(s.checkin);
+    expect(url.searchParams.get('checkout')).toBe(s.checkout);
+    expect(url.searchParams.get('group_adults')).toBe('6');
+    expect(url.searchParams.get('no_rooms')).toBe('3');
+  });
+
+  it('an explicit room count is the one in the link', async () => {
+    const url = await linkFor({ city: 'Paris', ...stay(), adults: 6, rooms: 2 });
+    expect(url.searchParams.get('no_rooms')).toBe('2');
+  });
+
+  it("keeps the provider's own query parameters", async () => {
+    const row = {
+      ...raw('77', 'Tracked', 600, 3),
+      url: 'https://www.booking.com/hotel/fr/77.html?aid=304142&label=x',
+    };
+    const url = await linkFor({ city: 'Paris', ...stay(), adults: 2 }, row);
+
+    expect(url.searchParams.get('aid')).toBe('304142');
+    expect(url.searchParams.get('label')).toBe('x');
+    expect(url.searchParams.get('group_adults')).toBe('2');
+    expect(url.searchParams.get('no_rooms')).toBe('1');
+  });
+
+  it('the fallback link for a row with no url gets the stay as well', async () => {
+    const { url: _drop, ...noUrl } = raw('88', 'No URL', 600, 3);
+    const url = await linkFor({ city: 'Paris', ...stay(), adults: 3 }, noUrl);
+
+    expect(url.pathname).toBe('/hotel/88.html');
+    expect(url.searchParams.get('group_adults')).toBe('3');
+    expect(url.searchParams.get('no_rooms')).toBe('2');
+  });
+});
