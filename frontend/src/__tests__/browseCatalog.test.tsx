@@ -224,7 +224,10 @@ describe('Plan a similar trip', () => {
     expect(staged.destinations).toEqual(paris.cities.map((c) => c.name));
     expect(staged.travelers).toBe(paris.travelers);
     expect(staged.returnToHome).toBe(true);
-    expect(staged.budget).toBe(presetCostFor(paris, paris.travelers));
+    // The quote is not the user's budget and excludes home flights; staging
+    // it capped the preset's own hotels and flagged every trip over budget.
+    expect(staged.budget).toBeUndefined();
+    expect(staged.budgetPerPerson).toBeUndefined();
     // Same length as the preset, dated ~30 days out.
     const nights =
       (new Date(staged.dateRange.end).getTime() - new Date(staged.dateRange.start).getTime()) / 86_400_000;

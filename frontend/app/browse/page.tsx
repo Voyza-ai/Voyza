@@ -305,8 +305,11 @@ function BrowsePageInner() {
       returnToHome: true,
       planningMode: 'destination',
       vibe: presetVibes(preset)[0],
-      budget: presetCostFor(preset, travelers),
-      budgetPerPerson: false,
+      // No budget is staged. The preset's quote is not a budget the user set,
+      // and it leaves out the home flights: staged as one, it capped hotels at
+      // 40% of a too-small figure (36 of 37 bundled preset hotels sat above
+      // that cap), and BudgetOverBanner, which compares the trip's whole total
+      // against it, read "over budget" on every similar trip.
     };
     // Start from a clean planning session: resume=1 (needed for autorun)
     // keeps whatever the store holds, and a leftover answer from an earlier
