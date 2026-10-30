@@ -14,6 +14,7 @@ import {
   ModeComparison,
 } from '@/lib/api';
 import { useTripStore } from '@/store/tripStore';
+import { displayAmount } from '@/lib/tripTotals';
 
 type Message = {
   id: number;
@@ -25,7 +26,28 @@ type Message = {
   proposalState?: 'pending' | 'accepted' | 'rejected';
   /** Present on AI messages that carry an inline flight-vs-train comparison. */
   comparison?: ModeComparison;
+  /**
+   * The opening lines. Their amounts are group totals fixed when the panel
+   * opened, and are worded at render time (`messageText`) so they read in
+   * the unit the Total / Per person toggle shows, like every other price.
+   */
+  intro?: { kind: 'greeting'; cities: number; savings: number } | { kind: 'shiftTip'; text: string; savings: number };
 };
+
+/**
+ * What a message says, in the unit the price toggle shows. The greeting's
+ * baseline is the optimizer's: the cities in the order they were given
+ * (optimizer.ts savingsVsNaive), not a "most common routing".
+ */
+function messageText(m: Message, priceMode: 'total' | 'perPerson', travelers: number): string {
+  if (!m.intro) return m.content;
+  const perPerson = priceMode === 'perPerson' && travelers > 1;
+  const amount = `$${displayAmount(m.intro.savings, priceMode, travelers).toLocaleString()}${perPerson ? ' per person' : ''}`;
+  if (m.intro.kind === 'shiftTip') return `${m.intro.text} would save about ${amount}.`;
+  return m.intro.savings > 0
+    ? `I built this ${m.intro.cities}-city trip to save you ${amount} vs your original city order. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`
+    : `You're working on a ${m.intro.cities}-city trip. Ask me anything — swap transports, shift dates, rework a city, or ask why things are ordered this way.`;
+}
 
 type AIChatPanelProps = {
   trip: Trip;
@@ -248,10 +270,8 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
       {
         id: 0,
         role: 'ai',
-        content:
-          trip.savings > 0
-            ? `I built this ${trip.cities.length}-city trip to save you $${trip.savings} vs the most common routing. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`
-            : `You're working on a ${trip.cities.length}-city trip. Ask me anything — swap transports, shift dates, rework a city, or ask why things are ordered this way.`,
+        content: '',
+        intro: { kind: 'greeting', cities: trip.cities.length, savings: trip.savings },
       },
     ];
     // Date-shift savings tip — used to be a page banner above the flowchart;
@@ -270,11 +290,13 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
       initial.push({
         id: 1,
         role: 'ai',
-        content: `💡 Heads up — starting ${n} day${n === 1 ? '' : 's'} ${dir} (${nice}) would save about $${Math.round(shift.savings)}.`,
+        content: '',
+        intro: { kind: 'shiftTip', text: `💡 Heads up — starting ${n} day${n === 1 ? '' : 's'} ${dir} (${nice})`, savings: shift.savings },
       });
     }
     return initial;
   });
+  const priceMode = useTripStore((s) => s.priceMode);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>(fallbackSuggestions(trip));
@@ -324,7 +346,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     // Build history from current text messages only (proposal cards are UI state).
     const history: ChatTurn[] = messages
       .filter((m) => !m.proposal)
-      .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
+      .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: messageText(m, priceMode, trip.travelers) }));
 
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
@@ -387,7 +409,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     } finally {
       setIsTyping(false);
     }
-  }, [isTyping, trip, messages, applyTrip, latestTrip]);
+  }, [isTyping, trip, messages, applyTrip, latestTrip, priceMode]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -461,7 +483,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
                   border: msg.role === 'user' ? '1px solid rgba(46,107,196,0.2)' : '1px solid rgba(0,0,0,0.06)',
                 }}
               >
-                {msg.content}
+                {messageText(msg, priceMode, trip.travelers)}
               </div>
 
               {/* Proposal card — only for date_shift (pin/min-days).
