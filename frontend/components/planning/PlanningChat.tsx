@@ -1361,6 +1361,15 @@ export default function PlanningChat() {
         totalNights: totalNightsForOptimize,
       });
 
+      // The user may have left /plan while that ran. The search outlives the
+      // page, and used to finish regardless: search hotels and AI picks,
+      // overwrite `currentTrip` and push /results over whatever they had
+      // gone on to look at. `mountedRef` is cleared only on a real unmount
+      // (StrictMode's remount sets it back), so this stops the search at
+      // each await — before spending more rate-limited calls, and before
+      // touching the store or the URL.
+      if (!mountedRef.current) return;
+
       trip = buildTripFromOptimize(result, travelers);
 
       // Compute a per-night hotel cap from the total budget.
@@ -1480,6 +1489,7 @@ export default function PlanningChat() {
       for (let i = 0; i < trip.cities.length; i += HOTEL_CONCURRENCY) {
         const batch = trip.cities.slice(i, i + HOTEL_CONCURRENCY);
         const batchResults = await Promise.all(batch.map(fetchOne));
+        if (!mountedRef.current) return; // left /plan — see after optimizeTrip
         hotelResults.push(...batchResults);
       }
       hotelResults.forEach((hotelResult, idx) => {
@@ -1506,6 +1516,7 @@ export default function PlanningChat() {
       // in the same order as when these calls waited for the hotels.
       setFindTripStatus('Finding things to do & places to eat...');
       const perCityResults = await Promise.all(perCityPromises);
+      if (!mountedRef.current) return; // left /plan — see after optimizeTrip
       perCityResults.forEach(({ activities, restaurants }, idx) => {
         if (activities.length > 0) {
           trip.cities[idx].activities = activities.map((s) => s.name);
@@ -1637,6 +1648,9 @@ export default function PlanningChat() {
           tripType: answers.returnToHome === false ? 'one-way' : 'round-trip',
           extras: answers.extraNotes,
         });
+        // Left /plan meanwhile: don't write this pick into the planning
+        // answers, which may already belong to a new session.
+        if (!mountedRef.current) return;
 
         // No suggestions — Claude ran + fallback empty (non-Adventure
         // vibe). Surface the reasoning_summary as the user-visible
@@ -1705,6 +1719,7 @@ export default function PlanningChat() {
         rawInput,
         userLocation: 'unknown',
       });
+      if (!mountedRef.current) return; // left /plan — see runOptimizeAndBuild
       warnIfMock(parsed);
 
       // If countries were detected (e.g. user typed "Japan"), show city picker —
