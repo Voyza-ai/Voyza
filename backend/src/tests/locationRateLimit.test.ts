@@ -3,7 +3,7 @@
  *
  * The failure this prevents: naming an origin city is a typeahead, so one
  * person can spend a dozen calls on a single field. Counted against the
- * shared 100-per-15-minutes `/api` budget, those calls 429 the actual
+ * shared general `/api` budget, those calls 429 the actual
  * planning flow — the user gets "too many requests" on the thing they were
  * trying to do, caused by the autocomplete that was helping them.
  *
@@ -30,10 +30,10 @@ import express from 'express';
 import request from 'supertest';
 
 import locations from '../routes/locations';
-import { apiLimiter, locationLimiter } from '../middleware/rateLimit';
+import { apiLimiter, locationLimiter, RATE_LIMITS } from '../middleware/rateLimit';
 
-/** The general budget, from rateLimit.ts. */
-const GENERAL_MAX = 100;
+/** The general budget, read from rateLimit.ts so it cannot drift from it. */
+const GENERAL_MAX = RATE_LIMITS.general;
 
 function makeApp(): express.Express {
   const app = express();

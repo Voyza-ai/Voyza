@@ -6,7 +6,13 @@ import { env } from './config/env';
 import { logger } from './utils/logger';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/error';
-import { apiLimiter, expensiveLimiter, locationLimiter } from './middleware/rateLimit';
+import {
+  apiLimiter,
+  canvasRoleLimiter,
+  expensiveLimiter,
+  locationLimiter,
+  optimizeLimiter,
+} from './middleware/rateLimit';
 import { startPresetRefreshScheduler } from './services/presets';
 
 const app = express();
@@ -35,9 +41,14 @@ app.use(
   ['/api/optimize', '/api/plan', '/api/search', '/api/flights', '/api/hotels', '/api/trains'],
   expensiveLimiter,
 );
-// Its own budget, excluded from the general one above — see rateLimit.ts for
-// why a typeahead sharing the planner's allowance 429s the planner.
+// The optimize RUN fans out to dozens of Duffel searches, so it keeps a cap
+// near its old one on top of the shared expensive cap (rateLimit.ts).
+app.post('/api/optimize', optimizeLimiter);
+// Their own budgets, excluded from the general one above — see rateLimit.ts
+// for why a typeahead or a background poll sharing the planner's allowance
+// 429s the planner.
 app.use('/api/locations', locationLimiter);
+app.get('/api/canvas/:tripId/role', canvasRoleLimiter);
 
 // ─── Routes ───────────────────────────────────────────────────
 app.get('/', (_req, res) => {
@@ -65,3 +76,7 @@ const shutdown = (signal: string) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// For tests that drive the real app, middleware order and all. Importing this
+// module starts the server, exactly as running it does.
+export { app, server };
