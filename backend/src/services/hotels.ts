@@ -23,6 +23,15 @@ export type HotelResult = {
    */
   priceSuspect?: boolean;
   priceSuspectReason?: PriceSuspectReason;
+  /**
+   * Charges Booking lists as EXCLUDED from `price` (city tax, cleaning and
+   * service fees), per night, in USD, for the whole party — the same scale as
+   * `pricePerNight`. See `excludedChargesTotal`.
+   *
+   * Unset when the provider row carries no usable breakdown, which is not the
+   * same as 0: 0 means Booking said nothing is excluded.
+   */
+  taxesPerNight?: number;
 };
 
 /**
@@ -994,6 +1003,79 @@ export function bookingUrlForStay(
   return url.toString();
 }
 
+/**
+ * What Booking charges on top of the price it quotes, for the whole stay, in
+ * the row's own currency — or undefined when the row does not say, or says
+ * something that does not add up.
+ *
+ * `min_total_price` is Booking's GROSS price. Charges the property collects
+ * separately are listed as "excluded": city tax (Paris charges it per person
+ * per night), cleaning fees, service charges. Reading only the gross price
+ * understated those stays, and the planner's "Taxes & fees" line never showed.
+ *
+ * Read from the two blocks the provider sends, newest first:
+ *
+ *   composite_price_breakdown.all_inclusive_amount / .gross_amount
+ *     ({ value, currency } each)
+ *   price_breakdown.all_inclusive_price / .gross_price / .currency
+ *
+ * Field names as they appear in two raw RapidAPI Booking responses (a Vienna
+ * /v1/hotels/search with both blocks, a Paris search with the composite one
+ * only). Our own recorded captures are post-mapping and carry neither, so
+ * these are unverified against our subscription until production shows them;
+ * absent fields leave the row exactly as it was.
+ *
+ * The amounts are for everything the search asked for — every room and every
+ * guest — exactly like `min_total_price` (a two-room row's top-level amounts
+ * are the sum of its rooms in the sample). So the result is a party total and,
+ * like the price, must never be multiplied by a room count.
+ *
+ * Defensive on purpose, because a wrong extra lands in the trip total: the
+ * two amounts must be numbers in one currency, that currency must be the
+ * row's, and the gross must be the very price we quote (within rounding) —
+ * otherwise the difference describes some other price and is not ours to add.
+ * A negative difference is refused, never clamped to zero.
+ */
+export function excludedChargesTotal(
+  row: any,
+  quotedTotal: number,
+  rowCurrency: string,
+): number | undefined {
+  const num = (v: unknown): number => (typeof v === 'number' ? v : parseFloat(String(v ?? '')));
+  const code = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim() ? v.trim().toUpperCase() : undefined;
+
+  const read = (): { allIn: number; gross: number; currency?: string } | undefined => {
+    const cpb = row?.composite_price_breakdown;
+    if (cpb?.all_inclusive_amount && cpb?.gross_amount) {
+      const a = code(cpb.all_inclusive_amount.currency);
+      const g = code(cpb.gross_amount.currency);
+      if (a && g && a !== g) return undefined;
+      return {
+        allIn: num(cpb.all_inclusive_amount.value),
+        gross: num(cpb.gross_amount.value),
+        currency: a ?? g,
+      };
+    }
+    const pb = row?.price_breakdown;
+    if (pb && pb.all_inclusive_price != null && pb.gross_price != null) {
+      return { allIn: num(pb.all_inclusive_price), gross: num(pb.gross_price), currency: code(pb.currency) };
+    }
+    return undefined;
+  };
+
+  const b = read();
+  if (!b) return undefined;
+  const { allIn, gross } = b;
+  if (!Number.isFinite(allIn) || !Number.isFinite(gross) || gross <= 0) return undefined;
+  if (b.currency && b.currency !== code(rowCurrency)) return undefined;
+  if (!Number.isFinite(quotedTotal) || Math.abs(gross - quotedTotal) > Math.max(0.01, quotedTotal * 0.005)) {
+    return undefined;
+  }
+  const extra = Math.round((allIn - gross) * 100) / 100;
+  return extra >= 0 ? extra : undefined;
+}
+
 export function trustedFirst(hotels: HotelResult[]): HotelResult[] {
   const trusted: HotelResult[] = [];
   const suspect: HotelResult[] = [];
@@ -1189,12 +1271,17 @@ async function searchVettedHotels(params: {
 
     const mapRow = (h: any): HotelResult => {
       const totalPrice = parseFloat(h.min_total_price ?? h.price_breakdown?.gross_price ?? '0');
+      const currency = h.currency_code ?? h.currencycode ?? 'USD';
+      // In the row's currency and unrounded: converted to USD below, at the
+      // same rate as the price, and rounded only then.
+      const excluded = excludedChargesTotal(h, totalPrice, currency);
       return {
         id: String(h.hotel_id ?? h.id ?? ''),
         name: h.hotel_name ?? h.name ?? 'Unknown Hotel',
         price: totalPrice,
         pricePerNight: Math.round((totalPrice / nights) * 100) / 100,
-        currency: h.currency_code ?? h.currencycode ?? 'USD',
+        ...(excluded !== undefined ? { taxesPerNight: excluded / nights } : {}),
+        currency,
         rating: parseFloat(h.review_score ?? '0'),
         reviewCount: parseInt(h.review_nr ?? h.review_score_word ?? '0', 10) || 0,
         stars: parseInt(h.class ?? '0', 10) || 0,
@@ -1256,10 +1343,22 @@ async function searchVettedHotels(params: {
           });
           return null;
         }
+        // Excluded charges go through the same conversion as the price, from
+        // the stay total, so one rate prices both. A charge that cannot be
+        // converted is left unset rather than costing the row.
+        const { taxesPerNight: localTaxesPerNight, ...row } = h;
+        let taxesPerNight: number | undefined;
+        if (localTaxesPerNight !== undefined) {
+          const usdTaxes = await convertToUsd(localTaxesPerNight * nights, h.currency);
+          if (usdTaxes !== null && Number.isFinite(usdTaxes) && usdTaxes >= 0) {
+            taxesPerNight = Math.round((usdTaxes / nights) * 100) / 100;
+          }
+        }
         return {
-          ...h,
+          ...row,
           price: usdTotal,
           pricePerNight: usdPerNight,
+          ...(taxesPerNight !== undefined ? { taxesPerNight } : {}),
           currency: 'USD',
         };
       }),

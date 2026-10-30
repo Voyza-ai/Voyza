@@ -26,8 +26,17 @@ import type { Hotel } from './types';
  *
  * The backend's canvas route keeps its own copy by necessity — different
  * package — so that one is still manual.
+ *
+ * `taxesPerNight` is what Booking lists as excluded from the quoted price
+ * (city tax, cleaning and service fees), per night, for the whole party —
+ * set by the backend only when the provider's breakdown carries it. The trip
+ * total (`effectiveHotel`) and the hotel rows already add it; it only has to
+ * survive this boundary. Copied only when it is a real, non-negative amount,
+ * and left off entirely otherwise, so a result without a breakdown maps to
+ * exactly the object it always did.
  */
-export function hotelFromResult(r: HotelResult): Hotel {
+export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Hotel {
+  const taxes = r.taxesPerNight;
   return {
     name: r.name,
     rating: r.rating,
@@ -36,6 +45,9 @@ export function hotelFromResult(r: HotelResult): Hotel {
     bookingUrl: r.bookingUrl,
     reviewCount: r.reviewCount,
     priceSuspect: r.priceSuspect,
+    ...(typeof taxes === 'number' && Number.isFinite(taxes) && taxes >= 0
+      ? { taxesPerNight: taxes }
+      : {}),
   };
 }
 
