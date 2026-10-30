@@ -146,6 +146,24 @@ describe("a saved preset's first hotel search", () => {
   });
 });
 
+describe('a re-price with nothing to search', () => {
+  it('does not leave the header held: a later hotel swap still shows', async () => {
+    // Home legs missing, and no airport known for the home city: the
+    // backfill starts, but no search can run.
+    const trip = savedPreset();
+    trip.cities[0].hotels = [trip.cities[0].hotel, { ...trip.cities[0].hotel, name: 'Dearer', pricePerNight: 900 }];
+    trip.origin = { city: 'Atlantis', airports: [], outboundLeg: null, returnLeg: null };
+    useTripStore.setState({ currentTrip: trip });
+    render(<ResultsPage />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockedFetchHomeLegs).not.toHaveBeenCalled();
+    await act(async () => {
+      useTripStore.getState().setSelectedHotel(0, 1);
+    });
+    expect(perPersonLine()).toBe(perPerson(useTripStore.getState().currentTrip!));
+  });
+});
+
 describe('home legs found for a saved trip', () => {
   it('persists the live total with them', async () => {
     const trip = savedPreset();

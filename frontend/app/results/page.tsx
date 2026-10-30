@@ -265,6 +265,18 @@ function ResultsPageInner() {
     }
   };
 
+  /**
+   * A hold with no job behind it — the re-price found nothing it could
+   * search (a home city with no known airport) — would hold the header
+   * forever, and every later edit with it. Nothing was re-priced, so the
+   * hold is simply dropped.
+   */
+  const releaseIfIdle = () => {
+    if (pendingRef.current !== 0 || !frozenRef.current) return;
+    frozenRef.current = null;
+    setFrozenTrip(null);
+  };
+
   /** Count a re-price job in flight; the last one to finish settles the header. */
   const track = <T,>(job: Promise<T>): Promise<T | void> => {
     pendingRef.current += 1;
@@ -543,10 +555,14 @@ function ResultsPageInner() {
 
     const startDate = outboundStartRef.current ?? tripStartDate(trip);
     outboundStartRef.current = null;
-    if (!startDate) return;
+    if (!startDate) {
+      releaseIfIdle(); // a hold from chooseOrigin with nothing to search
+      return;
+    }
 
     freeze(trip);
     searchHomeLegs(trip, { outbound: needOutbound, return: needReturn }, startDate);
+    releaseIfIdle();
     // The AIRPORTS belong in here, not just the city name. This effect prices
     // legs from `origin.airports`, and the ambiguous-origin case changes the
     // airports while leaving the city string identical — Portland, Oregon and
@@ -615,6 +631,7 @@ function ResultsPageInner() {
               work.outboundFrom ?? tripStartDate(cur) ?? cur.cities[0].dates.arrival,
             );
           }
+          releaseIfIdle();
         });
       }),
     [], // eslint-disable-line react-hooks/exhaustive-deps
