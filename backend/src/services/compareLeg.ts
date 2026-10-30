@@ -2,6 +2,8 @@ import { searchFlights, getIataCode, FlightOffer, type IataLookupContext } from 
 import { searchTrains, TrainOffer } from './trains';
 import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
+import { getStaticIata } from '../data/cityAirports';
+import { resolveDestinationIata } from './location/destinationAirport';
 
 /**
  * Both options are priced as PARTY TOTALS for `travelers` — Duffel quotes
@@ -72,6 +74,11 @@ export async function compareLeg(
   const { origin, destination, date, travelers, originCountry, destinationCountry } = params;
   const resolveIata = deps.getIataCode ?? getIataCode;
   const findFlights = deps.searchFlights ?? searchFlights;
+  const tripNames = params.tripCityNames ?? [];
+  const dependsOnTrip = (name: string): boolean =>
+    tripNames.length > 0 &&
+    !getStaticIata(name) &&
+    resolveDestinationIata(name, { tripDestinationNames: tripNames }) !== resolveDestinationIata(name);
 
   // Check cache first.
   //
@@ -112,8 +119,24 @@ export async function compareLeg(
     return data?.[0];
   };
 
+  // The flight row is keyed by city NAME, but with trip context one name can
+  // mean two airports: Porto -> Lagos is OPO -> FAO on a Portugal trip and
+  // OPO -> LOS bare. Whichever wrote the row first would be served to the
+  // other for two hours — a Portugal trip paying Nigeria's fare, or the
+  // reverse. So a leg whose airports this trip changes neither reads nor
+  // writes the shared flight row; it is searched every time (the in-process
+  // Duffel cache in flights.ts is keyed by airport, so it still dedupes).
+  //
+  // "Changes" = getIataCode would answer differently with this trip than
+  // without: no curated row (those beat context) and the location artifact
+  // reads the name differently. In-memory, no network. Not caught: a name
+  // the artifact cannot answer either way, where the trip only changes which
+  // Duffel suggestion is believed — rare, and no worse than before.
+  // Trains are searched by city name, not airport, so their rows are kept.
+  const flightCacheUsable = !dependsOnTrip(origin) && !dependsOnTrip(destination);
+
   const [cachedFlight, cachedTrain] = await Promise.all([
-    readNewestCached('flight'),
+    flightCacheUsable ? readNewestCached('flight') : Promise.resolve(undefined),
     readNewestCached('train'),
   ]);
 
@@ -288,7 +311,7 @@ export async function compareLeg(
   const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
 
   const cacheRows: any[] = [];
-  if (bestFlight && !cachedFlight) {
+  if (bestFlight && !cachedFlight && flightCacheUsable) {
     cacheRows.push({
       origin: origin.toLowerCase(),
       destination: destination.toLowerCase(),
