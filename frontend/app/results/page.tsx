@@ -21,6 +21,7 @@ import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, getTrip, fetchHomeLegs, updateTrip } from '@/lib/api';
+import { liveTripTotal } from '@/lib/tripTotals';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 import { originAirportsForCity } from '@/lib/locationResolver';
 import { Hotel, City, Transport, HomeLeg } from '@/lib/types';
@@ -530,7 +531,10 @@ function ResultsPageInner() {
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
           <ResultsHeader trip={headerTrip} />
           {typeof currentTrip.budget === 'number' && (
-            <BudgetOverBanner budget={currentTrip.budget} totalCost={currentTrip.totalCost} />
+            // The total the header shows, not the stored totalCost: that is
+            // set once (at creation, or a preset's quote on save) and does
+            // not follow a hotel or transport swap.
+            <BudgetOverBanner budget={currentTrip.budget} totalCost={liveTripTotal(headerTrip)} />
           )}
           {currentTrip.vibeTierUp && (
             <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />

@@ -115,6 +115,45 @@ describe('geocodeTripCities', () => {
   });
 });
 
+describe('geocodeTripCities — one request per name, however many callers (F6)', () => {
+  // Integrated run, 2026-10-30: the Map tab asks for its pins twice at once
+  // (its effect re-runs), and a name the resolver cannot settle — Interlaken,
+  // an ambiguous London or Moscow — went to /api/locations/resolve twice and
+  // to Nominatim twice, the second 1.1 s later in the queue.
+  it('shares an in-flight lookup instead of repeating it', async () => {
+    serve({ 'Interlaken, Switzerland': { status: 'unknown', suggestions: [] } });
+    const [a, b] = await Promise.all([
+      geocodeTripCities(['Interlaken, Switzerland']),
+      geocodeTripCities(['Interlaken, Switzerland']),
+    ]);
+    expect(a).toEqual([null]);
+    expect(b).toEqual([null]);
+    // Before: 2 and 2.
+    expect(resolverCalls()).toHaveLength(1);
+    expect(nominatimCalls()).toHaveLength(1);
+  }, 10000);
+
+  it('asks again once the lookup has settled with no answer (a later visit may get one)', async () => {
+    serve({ 'Grindelwald, Switzerland': { status: 'unknown', suggestions: [] } });
+    await geocodeTripCities(['Grindelwald, Switzerland']);
+    await geocodeTripCities(['Grindelwald, Switzerland']);
+    expect(nominatimCalls()).toHaveLength(2);
+  }, 10000);
+
+  it('a found place is cached, so even a later caller makes no request', async () => {
+    serve(
+      { 'Lauterbrunnen, Switzerland': { status: 'unknown', suggestions: [] } },
+      { 'Lauterbrunnen, Switzerland': [{ lat: '46.5935', lon: '7.9091' }] },
+    );
+    await Promise.all([
+      geocodeTripCities(['Lauterbrunnen, Switzerland']),
+      geocodeTripCities(['Lauterbrunnen, Switzerland']),
+    ]);
+    await geocodeTripCities(['Lauterbrunnen, Switzerland']);
+    expect(nominatimCalls()).toHaveLength(1);
+  }, 10000);
+});
+
 describe('geocodeCities (sights, hotels, day trips) is unchanged', () => {
   it('still asks Nominatim even for a name the resolver would answer, and keeps its class', async () => {
     serve({}, { 'Paris, France': [{ lat: '48.8535', lon: '2.3484', class: 'boundary', type: 'administrative' }] });

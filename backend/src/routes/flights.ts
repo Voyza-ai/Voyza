@@ -76,6 +76,13 @@ const homeLegsSchema = z.object({
   lastCity: z.string().min(1),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD').optional(),
+  /**
+   * The first city's departure. When sent, the response also carries
+   * `firstCityArrival`: the day the first stay starts given the outbound's
+   * landing date — the optimizer's own rule (firstStayArrival), which a trip
+   * built here (a Browse preset) otherwise never gets.
+   */
+  firstCityDeparture: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD').optional(),
   travelers: z.number().int().positive().default(1),
   // Direction toggles — callers refreshing a single home card search only
   // that leg instead of paying for both flight searches.
@@ -87,7 +94,7 @@ router.post(
   '/home-legs',
   asyncHandler(async (req, res) => {
     const input = homeLegsSchema.parse(req.body);
-    const { buildHomeLeg } = await import('../services/optimizer');
+    const { buildHomeLeg, firstStayArrival } = await import('../services/optimizer');
     // The only trip this route sees: its two ends. Enough for the trip to
     // decide which "Lagos" a Portugal itinerary means.
     const tripCityNames = [input.firstCity, input.lastCity];
@@ -116,7 +123,21 @@ router.post(
         : Promise.resolve(null),
     ]);
 
-    res.json({ outboundLeg, returnLeg });
+    // An overnight outbound lands the day after it leaves: the first stay
+    // starts then, exactly as optimize() dates it. Only when the caller sent
+    // the first city's departure (so the stay can keep a night) and the
+    // flight's landing date is known; otherwise the response is unchanged.
+    const firstCityArrival =
+      outboundLeg?.arriveDate && input.firstCityDeparture
+        ? firstStayArrival({
+            startDate: input.startDate,
+            firstDeparture: input.firstCityDeparture,
+            landed: outboundLeg.arriveDate,
+            city: input.firstCity,
+          })
+        : undefined;
+
+    res.json({ outboundLeg, returnLeg, ...(firstCityArrival ? { firstCityArrival } : {}) });
   }),
 );
 

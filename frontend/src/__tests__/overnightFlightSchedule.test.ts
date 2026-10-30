@@ -134,7 +134,10 @@ describe('overnight outbound — the schedule the traveller actually gets', () =
       tripWith(city, outbound('2026-12-09')),
     );
 
-    expect(schedule['2026-12-08']).toBeUndefined();
+    // Dec 8 is the home departure day (F2): the head-to and the flight, and
+    // nothing in Paris. (B1 had no Dec 8 at all, which lost the departure.)
+    expect(schedule['2026-12-08'].map((e) => e.title)).toEqual(['Head to JFK', 'Flight JFK → PAR']);
+    expect(nonTransport(schedule['2026-12-08'])).toEqual([]);
 
     const dec9 = schedule['2026-12-09'];
     expect(dec9.map((e) => e.title)).toContain('Arrive at PAR');

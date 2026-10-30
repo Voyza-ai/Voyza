@@ -6,7 +6,7 @@ import { createNotification } from '../services/notifications';
 import { fetchPopularTrips } from '../services/popularTrips';
 import { AppError } from '../middleware/error';
 import { parseDurationMinutes } from '../utils/duration';
-import { buildTripFromDb } from '../utils/tripShape';
+import { buildTripFromDb, tripDateRange } from '../utils/tripShape';
 
 const router = Router();
 
@@ -235,7 +235,7 @@ router.get(
     // 1. Trips I own.
     const { data: owned, error } = await supabase
       .from('trips')
-      .select('id, title, status, travelers, total_cost, savings_vs_alternative, created_at, is_public')
+      .select('id, title, status, travelers, total_cost, savings_vs_alternative, created_at, is_public, outbound_leg')
       .eq('user_id', user.id)
       .neq('status', 'archived')
       .order('created_at', { ascending: false });
@@ -255,7 +255,7 @@ router.get(
     const { data: sharedTrips } = sharedIds.length > 0
       ? await supabase
           .from('trips')
-          .select('id, title, status, travelers, total_cost, savings_vs_alternative, created_at, user_id')
+          .select('id, title, status, travelers, total_cost, savings_vs_alternative, created_at, user_id, outbound_leg')
           .in('id', sharedIds)
           .neq('user_id', user.id) // never surface an owned trip as "shared"
           .neq('status', 'archived')
@@ -297,14 +297,14 @@ router.get(
 
     const enrich = (t: any, extra: Record<string, unknown> = {}) => {
       const tc = citiesByTrip[t.id] ?? [];
-      const first = tc[0];
-      const last = tc[tc.length - 1];
+      // outbound_leg is read only to date the trip; the list never sends the
+      // flight itself (it never did).
+      const { outbound_leg, ...row } = t;
       return {
-        ...t,
+        ...row,
         city_count: tc.length,
         cities: tc.map((c: any) => c.name),
-        date_range:
-          first && last ? { start: first.arrival_date, end: last.departure_date } : undefined,
+        date_range: tripDateRange(tc, outbound_leg),
         ...extra,
       };
     };

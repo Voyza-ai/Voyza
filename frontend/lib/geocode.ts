@@ -51,6 +51,29 @@ const normalize = (name: string) => name.trim().toLowerCase();
 let queueTail: Promise<unknown> = Promise.resolve();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Share a lookup already in flight for the same key instead of starting a
+ * second one. The Map tab asks for its pins twice at once (its effect
+ * re-runs), and a name nobody could answer was never cached, so it went to
+ * our resolver twice and to Nominatim twice — the second 1.1 s later in the
+ * queue (integrated run, 2026-10-30: Interlaken, and London and Moscow as
+ * ambiguous home pins). The entry goes when the lookup settles, so a later
+ * call asks again, exactly as before.
+ */
+function shareInFlight<T>(inflight: Map<string, Promise<T>>, key: string, run: () => Promise<T>): Promise<T> {
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const task = run();
+  inflight.set(key, task);
+  const settle = () => {
+    if (inflight.get(key) === task) inflight.delete(key);
+  };
+  task.then(settle, settle);
+  return task;
+}
+
+const geocodesInFlight = new Map<string, Promise<GeoPlace | null>>();
+
 async function fetchFromNominatim(name: string): Promise<GeoPlace | null> {
   const url = `${NOMINATIM}?format=json&limit=1&accept-language=en&q=${encodeURIComponent(name)}`;
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
@@ -83,23 +106,25 @@ export async function geocodeCity(name: string): Promise<GeoPlace | null> {
   const cache = readCache();
   if (cache[key]) return cache[key];
 
-  // Chain onto the queue so parallel callers stay within the rate limit.
-  const task = queueTail.then(async () => {
-    // Another caller may have resolved + cached it while we waited.
-    const fresh = readCache();
-    if (fresh[key]) return fresh[key];
-    const point = await fetchFromNominatim(name).catch(() => null);
-    await sleep(THROTTLE_MS);
-    if (point) {
-      const updated = readCache();
-      updated[key] = point;
-      writeCache(updated);
-    }
-    return point;
+  return shareInFlight(geocodesInFlight, key, () => {
+    // Chain onto the queue so parallel callers stay within the rate limit.
+    const task = queueTail.then(async () => {
+      // Another caller may have resolved + cached it while we waited.
+      const fresh = readCache();
+      if (fresh[key]) return fresh[key];
+      const point = await fetchFromNominatim(name).catch(() => null);
+      await sleep(THROTTLE_MS);
+      if (point) {
+        const updated = readCache();
+        updated[key] = point;
+        writeCache(updated);
+      }
+      return point;
+    });
+    // Keep the chain alive even when a lookup fails.
+    queueTail = task.catch(() => undefined);
+    return task;
   });
-  // Keep the chain alive even when a lookup fails.
-  queueTail = task.catch(() => undefined);
-  return task;
 }
 
 /**
@@ -114,18 +139,21 @@ export async function geocodeCities(names: string[]): Promise<(GeoPlace | null)[
 // Resolver answers already fetched this page load, so re-rendering the map
 // (any trip edit rebuilds its name list) doesn't ask the server again.
 const resolvedThisLoad = new Map<string, GeoPoint>();
+const resolvesInFlight = new Map<string, Promise<GeoPoint | null>>();
 
 async function fromLocationResolver(name: string): Promise<GeoPoint | null> {
   const key = normalize(name);
   const known = resolvedThisLoad.get(key);
   if (known) return known;
-  // Hot set offline, else one in-memory lookup on our own server. Never
-  // throws: a failed request comes back `unknown`.
-  const answer = await resolveLocation(name);
-  if (answer.status !== 'resolved') return null;
-  const point = { lat: answer.place.lat, lon: answer.place.lon };
-  resolvedThisLoad.set(key, point);
-  return point;
+  return shareInFlight(resolvesInFlight, key, async () => {
+    // Hot set offline, else one in-memory lookup on our own server. Never
+    // throws: a failed request comes back `unknown`.
+    const answer = await resolveLocation(name);
+    if (answer.status !== 'resolved') return null;
+    const point = { lat: answer.place.lat, lon: answer.place.lon };
+    resolvedThisLoad.set(key, point);
+    return point;
+  });
 }
 
 /**

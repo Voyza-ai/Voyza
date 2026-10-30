@@ -4,6 +4,7 @@ import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
 import { getStaticIata } from '../data/cityAirports';
 import { resolveDestinationIata } from './location/destinationAirport';
+import { sameAirportArea } from './location/sameAirportArea';
 
 /**
  * Both options are priced as PARTY TOTALS for `travelers` — Duffel quotes
@@ -135,22 +136,35 @@ export async function compareLeg(
   // Trains are searched by city name, not airport, so their rows are kept.
   const flightCacheUsable = !dependsOnTrip(origin) && !dependsOnTrip(destination);
 
-  const [cachedFlight, cachedTrain] = await Promise.all([
+  // Both airports, looked up alongside the cache reads. A leg whose two
+  // cities share an airport — Zurich → Interlaken is ZRH → ZRH, Oxford →
+  // London is LON → LON — has NO flight option: it is ground travel. It is
+  // not searched, a cached flight row for it is not served (a flight between
+  // them cannot exist), and the leg falls to the train, or to "unavailable",
+  // which the optimizer already penalises. A failed lookup is not a shared
+  // airport: the leg behaves exactly as before (cache, else a logged miss).
+  const tripContext = { tripDestinationNames: params.tripCityNames ?? [] };
+  const airportsLookup: Promise<[string, string] | { failed: unknown }> = Promise.all([
+    resolveIata(origin, tripContext),
+    resolveIata(destination, tripContext),
+  ]).catch((failed: unknown) => ({ failed }));
+
+  const [cachedFlightRow, cachedTrain, airports] = await Promise.all([
     flightCacheUsable ? readNewestCached('flight') : Promise.resolve(undefined),
     readNewestCached('train'),
+    airportsLookup,
   ]);
+  const sharedAirport = Array.isArray(airports) && sameAirportArea(airports[0], airports[1]);
+  const cachedFlight = sharedAirport ? undefined : cachedFlightRow;
 
   // Fetch in parallel, catch each independently
   const [flightsResult, trainsResult] = await Promise.all([
-    cachedFlight
-      ? Promise.resolve(null) // skip if cached
+    cachedFlight || sharedAirport
+      ? Promise.resolve(null) // cached, or no flight can exist
       : (async () => {
           try {
-            const tripContext = { tripDestinationNames: params.tripCityNames ?? [] };
-            const [originIata, destIata] = await Promise.all([
-              resolveIata(origin, tripContext),
-              resolveIata(destination, tripContext),
-            ]);
+            if (!Array.isArray(airports)) throw airports.failed;
+            const [originIata, destIata] = airports;
             return await findFlights({
               origin: originIata,
               destination: destIata,

@@ -1,5 +1,7 @@
 import { getAuthHeader, refreshAuthHeader } from './supabase';
 import { rankHotels } from './hotelScore';
+import { tripStartDate } from './tripSpan';
+import { withLiveTotal } from './tripTotals';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -252,8 +254,14 @@ export async function fetchHomeLegs(params: {
   outbound?: boolean;
   /** Search the last-city→home leg (default true). */
   returnToHome?: boolean;
-}): Promise<{ outboundLeg: any | null; returnLeg: any | null }> {
-  return apiFetch<{ outboundLeg: any | null; returnLeg: any | null }>(
+  /**
+   * The first city's departure. When sent, the response says when the first
+   * stay starts given the outbound's landing date (`firstCityArrival`) —
+   * the optimizer's rule, computed by the backend so there is one copy.
+   */
+  firstCityDeparture?: string;
+}): Promise<{ outboundLeg: any | null; returnLeg: any | null; firstCityArrival?: string }> {
+  return apiFetch<{ outboundLeg: any | null; returnLeg: any | null; firstCityArrival?: string }>(
     '/api/flights/home-legs',
     { method: 'POST', body: JSON.stringify(params) },
   );
@@ -417,8 +425,17 @@ export async function editPlan(params: {
   // the refactor lands.
   return apiFetch('/api/plan/chat', {
     method: 'POST',
-    body: JSON.stringify(params),
+    body: JSON.stringify({ ...params, currentTrip: tripForAi(params.currentTrip) }),
   });
+}
+
+/**
+ * Every request that hands the trip to the AI sends it with the LIVE total
+ * (withLiveTotal), not the stored `totalCost`, which a saved trip can carry
+ * stale — the AI quoted a saved preset's $1,344 quote under a $2,693 header.
+ */
+function tripForAi(trip: any): any {
+  return trip && typeof trip === 'object' && Array.isArray(trip.cities) ? withLiveTotal(trip) : trip;
 }
 
 // ─── BlueMurr AI chat ───────────────────────────────────────────
@@ -531,7 +548,7 @@ export async function planChat(params: {
 }): Promise<ChatResponse> {
   return apiFetch<ChatResponse>('/api/plan/chat', {
     method: 'POST',
-    body: JSON.stringify(params),
+    body: JSON.stringify({ ...params, currentTrip: tripForAi(params.currentTrip) }),
   });
 }
 
@@ -540,7 +557,7 @@ export async function planChatSuggestions(params: {
 }): Promise<{ suggestions: string[] }> {
   return apiFetch<{ suggestions: string[] }>('/api/plan/chat-suggestions', {
     method: 'POST',
-    body: JSON.stringify(params),
+    body: JSON.stringify({ ...params, currentTrip: tripForAi(params.currentTrip) }),
   });
 }
 
@@ -672,7 +689,9 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
       budget: trip.budget ?? null,
       budgetPerPerson: trip.budgetPerPerson ?? null,
       vibe: trip.vibe ?? null,
-      startDate: trip.startDate ?? trip.cities?.[0]?.dates?.arrival ?? null,
+      // The day the trip starts — the outbound's departure for an overnight
+      // flight, not the first stay, which begins the day it lands.
+      startDate: trip.startDate ?? (Array.isArray(trip.cities) ? tripStartDate(trip) : undefined) ?? null,
       dateShiftSuggestion: trip.dateShiftSuggestion ?? null,
       // Home anchor — optional. Old trips save with null/empty and just
       // render without a home card on reload (graceful).

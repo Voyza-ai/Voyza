@@ -6,6 +6,7 @@ import { Plane, TrainFront, Moon } from 'lucide-react';
 import { Trip, City, TransportMode } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
+import { homeDepartureDay } from '@/lib/tripSpan';
 import DayPlanner from './DayPlanner';
 
 type CalendarViewProps = {
@@ -44,8 +45,11 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
     );
   }
 
-  // Compute trip span from cities that actually have dates
-  const start = parseLocal(datedCities[0].dates.arrival);
+  // Compute trip span from cities that actually have dates. An overnight
+  // outbound leaves home the day BEFORE the first stay starts (it starts the
+  // day the flight lands); the trip, and the calendar, start on that day.
+  const homeDeparture = homeDepartureDay(trip);
+  const start = parseLocal(homeDeparture ?? datedCities[0].dates.arrival);
   const end = parseLocal(datedCities[datedCities.length - 1].dates.departure);
 
   // Build a map of date -> city
@@ -103,11 +107,16 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
       const cityIndex = match?.index ?? null;
       const city = match?.city ?? null;
       const isArrival = !!city && city.dates.arrival === iso;
-      // Departure day shows the city's departure flight, not the city itself
+      // Departure day shows the city's departure flight, not the city itself.
+      // The home departure day is one too: the outbound leaving home, with
+      // no city on it (the first stay starts the day it lands).
       const departureCity = trip.cities.find((c) => c.dates.departure === iso);
-      const isDeparture = !!departureCity;
-      const departureMode = departureCity?.transportOut.mode ?? null;
-      const departureTime = departureCity?.transportOut.departTime ?? null;
+      const leavesHome = !departureCity && iso === homeDeparture;
+      const isDeparture = !!departureCity || leavesHome;
+      const departureMode = departureCity?.transportOut.mode ?? (leavesHome ? 'flight' : null);
+      const departureTime =
+        departureCity?.transportOut.departTime ??
+        (leavesHome ? trip.origin?.outboundLeg?.departTime ?? null : null);
 
       cells.push({
         date,
@@ -144,6 +153,8 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
     cursor.setMonth(cursor.getMonth() + 1);
   }
 
+  // Nights of the whole TRIP (from `start`, which is the home departure day
+  // for an overnight outbound — that night is part of the trip).
   const totalNights = daysBetween(start, end);
 
   return (
@@ -352,6 +363,8 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
               if (c.dates.departure === selectedDay.iso) depIndex = i;
             });
             if (depIndex !== -1) plannerCityIndex = depIndex;
+            // The home departure day's blocks are kept on the first city.
+            else if (selectedDay.iso === homeDeparture) plannerCityIndex = 0;
           }
           if (plannerCityIndex == null) return null;
           const plannerCity = trip.cities[plannerCityIndex];

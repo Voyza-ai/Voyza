@@ -12,6 +12,7 @@ import {
   type DestinationContext,
   type SuggestedPlace,
 } from './location/destinationAirport';
+import { sameAirportArea } from './location/sameAirportArea';
 import { parseIsoDuration } from '../utils/duration';
 import { elapsedMinutesBetween } from '../utils/localTime';
 
@@ -290,6 +291,10 @@ function cachedSearch(key: string, run: () => Promise<FlightOffer[]>): Promise<F
 
 export async function searchFlights(params: SearchFlightsParams): Promise<FlightOffer[]> {
   const { origin, destination, date, travelers, cabinClass } = params;
+  // A place to itself (ZRH → ZRH, LHR → LON) is not a flight, and never
+  // reaches Duffel. Callers that count outcomes (the optimizer) skip such a
+  // leg before getting here; this is the floor for every other path.
+  if (sameAirportArea(origin, destination)) return [];
   const key = `${origin}|${destination}|${date}|${travelers}|${cabinClass ?? 'economy'}`;
   return cachedSearch(key, () => searchFlightsUncached(params));
 }

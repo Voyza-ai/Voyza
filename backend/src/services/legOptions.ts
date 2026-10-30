@@ -12,6 +12,7 @@
  */
 
 import { searchFlights, getIataCode, FlightOffer } from './flights';
+import { sameAirportArea } from './location/sameAirportArea';
 import { searchTrains, TrainOffer } from './trains';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
@@ -310,22 +311,27 @@ export async function searchLegOptions(
 
         // One searchFlights call per origin airport; results merged.
         // Individual origin failures (e.g. LGA has no offers but JFK does)
-        // are tolerated — we keep whatever returned.
+        // are tolerated — we keep whatever returned. An origin that shares
+        // the destination's airport (Zurich → Interlaken: ZRH → ZRH) has no
+        // flight to search; the leg is ground travel, and the trains below
+        // still answer it.
         const resultsPerOrigin = await Promise.all(
           origins.map((originIata) =>
-            searchFlights({
-              origin: originIata,
-              destination: destIata,
-              date,
-              travelers,
-            }).catch((err) => {
-              logger.warn('searchLegOptions: one origin failed', {
-                origin: originIata,
-                to,
-                message: err?.message,
-              });
-              return [] as FlightOffer[];
-            }),
+            sameAirportArea(originIata, destIata)
+              ? Promise.resolve([] as FlightOffer[])
+              : searchFlights({
+                  origin: originIata,
+                  destination: destIata,
+                  date,
+                  travelers,
+                }).catch((err) => {
+                  logger.warn('searchLegOptions: one origin failed', {
+                    origin: originIata,
+                    to,
+                    message: err?.message,
+                  });
+                  return [] as FlightOffer[];
+                }),
           ),
         );
         return resultsPerOrigin.flat();
