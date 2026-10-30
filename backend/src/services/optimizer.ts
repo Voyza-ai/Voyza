@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
 import { resolveOriginAirports, type OriginCandidate } from './location/originAirports';
+import { sameAirportArea } from './location/sameAirportArea';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
 import { withDuffelRetryBudget } from './duffelBudget';
 import { AppError } from '../middleware/error';
@@ -864,6 +865,10 @@ async function searchHomeFlights(ctx: RunContext, params: {
     originAirports.map(async (homeAirport) => {
       const origin = reverse ? cityIata : homeAirport;
       const destination = reverse ? homeAirport : cityIata;
+      // Home and the trip city share this airport (home Zurich, first stop
+      // Interlaken — both ZRH; home London, first stop Oxford — LHR is in
+      // LON): there is no flight to search from it.
+      if (sameAirportArea(homeAirport, cityIata)) return [];
       try {
         const offers = await ctx.flights({ origin, destination, date, travelers });
         return offers.map((o: any) => ({
