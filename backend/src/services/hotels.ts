@@ -339,9 +339,47 @@ type SearchHotelsParams = {
   checkin: string;
   checkout: string;
   adults: number;
-  rooms: number;
+  /** Rooms to price. Omitted → `roomsFor(adults)`. See there for why. */
+  rooms?: number;
   maxPrice?: number;
 };
+
+/**
+ * Rooms for a party when the caller doesn't say: two adults to a room.
+ *
+ * The default used to be one room, set in the route, and every caller in the
+ * app sends `adults: travelers` and no `rooms` — so a group of six asked
+ * Booking for ONE unit sleeping all six. Booking answered with what fits that:
+ * hostels, apartments, a campsite as Rome's top pick, shown as
+ * "6 travelers · 1 room". It lives here rather than in the route so that every
+ * caller of the service gets it, not only HTTP ones.
+ *
+ * THE PRICE THAT COMES BACK IS ALREADY FOR EVERY ROOM. Measured against
+ * production on 2026-10-29, same city and dates with only the occupancy
+ * changed: `adults:6 rooms:3` against `adults:2 rooms:1` came back at exactly
+ * 3.00x for 13 of 19 Paris hotels and 10 of 15 London hotels (median 3.00x in
+ * both; the rest are different room types, 2.25x-3.65x). So `price` and
+ * `pricePerNight` stay party totals and nothing downstream may multiply them
+ * by a room count again. What DOES change meaning is every absolute price
+ * threshold in this file, which were calibrated on single rooms — see
+ * `perRoom`.
+ */
+export function roomsFor(adults: number): number {
+  return Number.isFinite(adults) && adults > 2 ? Math.ceil(adults / 2) : 1;
+}
+
+/**
+ * A party-total price expressed per room, for comparing against thresholds
+ * that were calibrated on one room.
+ *
+ * The relative rules (tier medians, the search median) don't need this — every
+ * row in one search is priced for the same rooms, so a ratio between two of
+ * them is unchanged — but going through it everywhere keeps the absolute and
+ * relative rules on one scale, and the logged numbers comparable to the
+ * single-room corpus the comments here quote.
+ */
+const perRoom = (amount: number, rooms: number): number =>
+  Number.isFinite(rooms) && rooms > 1 ? amount / rooms : amount;
 
 /**
  * ─── Price plausibility ──────────────────────────────────────────────────────
@@ -486,7 +524,10 @@ const UNRATED_SEARCH_MEDIAN_MULTIPLE = 5;
 const UNDERPRICE_MEDIAN_DIVISOR = 10;
 
 /**
- * Absolute per-night ceiling for a hotel the provider itself calls 1-3 stars.
+ * Absolute per-night ceiling for a hotel the provider itself calls 1-3 stars,
+ * PER ROOM. Every figure below is a single-room price; a search for three rooms
+ * is compared after dividing by three (`perRoom`), or three real $700 rooms
+ * would read as one $2100 glitch.
  *
  * Was $1000, raised to $2000 on measurement. $1000 was not generous at all: the
  * dearest real 1-3 star row in the captured corpus is $860.58 (a Courchevel
@@ -505,7 +546,8 @@ const UNDERPRICE_MEDIAN_DIVISOR = 10;
 const BUDGET_STARS_PRICE_CEILING = 2000;
 
 /**
- * No real room for two adults costs less than this per night.
+ * No real room for two adults costs less than this per night. Per ROOM: a
+ * multi-room price is divided by its room count before it is compared.
  *
  * The floor exists to catch an ABSENT price, not a cheap one. `min_total_price`
  * missing or unparseable becomes 0 (see the mapping in `searchHotels`), and a
@@ -577,16 +619,24 @@ function starClass(h: { stars: number }): number {
  * `price` (the whole stay) is checked as well as `pricePerNight`. They are
  * derived from each other at the mapping, but currency conversion converts
  * them independently, so they can diverge on the way here.
+ *
+ * `rooms` is how many rooms the prices cover; the floor is judged per room.
  */
-export function dropUnusablePrices(hotels: HotelResult[], city: string): HotelResult[] {
+export function dropUnusablePrices(
+  hotels: HotelResult[],
+  city: string,
+  rooms = 1,
+): HotelResult[] {
   const kept = hotels.filter((h) => {
-    const usable = isUsablePrice(h.pricePerNight) && isUsablePrice(h.price);
+    const usable =
+      isUsablePrice(perRoom(h.pricePerNight, rooms)) && isUsablePrice(perRoom(h.price, rooms));
     if (!usable) {
       logger.warn('Hotel dropped — price cannot be a real rate', {
         city,
         hotel: h.name,
         pricePerNight: h.pricePerNight,
         price: h.price,
+        rooms,
         floor: ABSOLUTE_PRICE_FLOOR,
       });
     }
@@ -635,9 +685,19 @@ export function dropUnusablePrices(hotels: HotelResult[], city: string): HotelRe
  * a deliberate fallback (a suspicious price beats an empty city) but it is not
  * protection, and a one-row search is the case it fails at. See
  * UNRATED_SEARCH_MEDIAN_MULTIPLE.
+ *
+ * `rooms` is how many rooms the prices cover. Every rule works on the price
+ * PER ROOM (`nightly` below), because every threshold here was measured on
+ * single rooms; the rows themselves are returned with their party totals
+ * untouched.
  */
-export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelResult[] {
+export function flagSuspectPrices(
+  hotels: HotelResult[],
+  city: string,
+  rooms = 1,
+): HotelResult[] {
   const starsOf = starClass;
+  const nightly = (h: HotelResult) => perRoom(h.pricePerNight, rooms);
 
   // The absolute rule first, because it needs no comparison set — and because
   // its verdicts must be kept OUT of the medians below.
@@ -654,7 +714,7 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
   // manufacture a floor that then flags a legitimately cheap room. There is a
   // test for exactly that.
   const overStarCeilingRaw = (h: HotelResult) =>
-    starsOf(h) >= 1 && starsOf(h) <= 3 && h.pricePerNight > BUDGET_STARS_PRICE_CEILING;
+    starsOf(h) >= 1 && starsOf(h) <= 3 && nightly(h) > BUDGET_STARS_PRICE_CEILING;
 
   // IF THE CEILING CONDEMNS A WHOLE TIER, THE CEILING IS WHAT IS WRONG.
   //
@@ -676,7 +736,7 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
   for (const [stars, tier] of (() => {
     const byStars = new Map<number, HotelResult[]>();
     for (const h of hotels) {
-      if (!isUsablePrice(h.pricePerNight)) continue;
+      if (!isUsablePrice(nightly(h))) continue;
       const k = starsOf(h);
       const t = byStars.get(k);
       if (t) t.push(h);
@@ -690,8 +750,9 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
         city,
         stars,
         tierSize: tier.length,
+        rooms,
         ceiling: BUDGET_STARS_PRICE_CEILING,
-        cheapestInTier: Math.min(...tier.map((h) => h.pricePerNight)),
+        cheapestInTier: Math.min(...tier.map(nightly)),
       });
     }
   }
@@ -702,9 +763,9 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
   const tiers = new Map<number, HotelResult[]>();
   const allPrices: number[] = [];
   for (const h of hotels) {
-    if (!isUsablePrice(h.pricePerNight)) continue;
+    if (!isUsablePrice(nightly(h))) continue;
     if (overStarCeiling(h)) continue;
-    allPrices.push(h.pricePerNight);
+    allPrices.push(nightly(h));
     const tier = tiers.get(starsOf(h));
     if (tier) tier.push(h);
     else tiers.set(starsOf(h), [h]);
@@ -716,7 +777,7 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
     // Too thin to say anything about: the one or two luxury rooms in an
     // otherwise budget market land here, and are exempt by construction.
     if (tier.length < MIN_RESULTS_TO_FILTER) continue;
-    const median = medianOf(tier.map((h) => h.pricePerNight));
+    const median = medianOf(tier.map(nightly));
     if (!Number.isFinite(median) || median <= 0) continue;
     ceilings.set(stars, median * OUTLIER_MEDIAN_MULTIPLE);
 
@@ -745,9 +806,9 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
       : undefined;
 
   const reasonFor = (h: HotelResult): PriceSuspectReason | null => {
-    if (!isUsablePrice(h.pricePerNight)) return null;
+    if (!isUsablePrice(nightly(h))) return null;
     const stars = starsOf(h);
-    const price = h.pricePerNight;
+    const price = nightly(h);
 
     if (overStarCeiling(h)) {
       return 'above-star-ceiling';
@@ -779,6 +840,9 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
       hotel: h.name,
       stars: starsOf(h),
       pricePerNight: h.pricePerNight,
+      // The ceilings, floors and search ceiling below are per room.
+      rooms,
+      pricePerRoomNight: nightly(h),
       reason,
       tierCeiling: ceilings.get(starsOf(h)),
       tierFloor: floors.get(starsOf(h)),
@@ -877,7 +941,8 @@ export function trustedFirst(hotels: HotelResult[]): HotelResult[] {
 }
 
 export async function searchHotels(params: SearchHotelsParams): Promise<HotelResult[]> {
-  const { city, hotelName, checkin, checkout, adults, rooms, maxPrice } = params;
+  const { city, hotelName, checkin, checkout, adults, maxPrice } = params;
+  const rooms = params.rooms ?? roomsFor(adults);
 
   if (!env.RAPIDAPI_KEY) {
     logger.warn('RAPIDAPI_KEY not set — returning empty hotel results');
@@ -975,7 +1040,7 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     // rate for any row" against a currency of USD, which is exactly the
     // investigation this logging is supposed to save. A price that is not a
     // number is not a currency problem, whatever its label.
-    hotels = dropUnusablePrices(hotels, city);
+    hotels = dropUnusablePrices(hotels, city, rooms);
 
     const { convertToUsd } = await import('./currency');
     const converted = await Promise.all(
@@ -1040,8 +1105,8 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
 
     // Drop first, flag second: an unusable price must not be in the set the
     // medians are computed from, or a row of 0s drags every floor down with it.
-    hotels = dropUnusablePrices(hotels, city);
-    hotels = flagSuspectPrices(hotels, city);
+    hotels = dropUnusablePrices(hotels, city, rooms);
+    hotels = flagSuspectPrices(hotels, city, rooms);
 
     if (maxPrice !== undefined) {
       const beforeCap = hotels.length;
