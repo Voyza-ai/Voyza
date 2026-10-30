@@ -5,7 +5,13 @@ import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import {
   applyDateConstraints,
+  isIsoDate,
+  MAX_STAY_NIGHTS,
   mergeConstraints,
+  minDaysProblem,
+  parseMinNights,
+  pinProblem,
+  scheduleProblem,
   TripConstraints,
 } from '../services/constraints';
 import {
@@ -1092,6 +1098,20 @@ ${JSON.stringify(tripSummary, null, 2)}
 
     // --- Date-bearing tools: pin_city_dates, set_min_days. These
     //     compute a new set of city dates + a visual diff.
+    //
+    //     The proposal's reply is the model's own `explanation`, written
+    //     before anything was checked — so a constraint we can't apply
+    //     must NOT become a proposal, or the chat claims it anyway
+    //     ("Giving you three nights in Rome" over an unchanged trip, B10).
+    //     Each failed check answers instead: "I couldn't <attempt>:
+    //     <reason>." That reply is the chat bubble, and the model reads it
+    //     back as history next turn.
+    let attempt = '';
+    let target: any = null;
+    let minNights: number | null = null;
+    const couldnt = (reason: string) =>
+      res.json({ type: 'answer', reply: `I couldn\'t ${attempt}: ${reason}.` });
+
     if (toolName === 'pin_city_dates') {
       const match = (currentTrip.cities ?? []).find(
         (c: any) => c.name.toLowerCase() === String(toolInput.city).toLowerCase(),
@@ -1104,6 +1124,15 @@ ${JSON.stringify(tripSummary, null, 2)}
             .join(', ')}?`,
         });
       }
+      // Name the dates when they are dates: a wrong year the model picked
+      // is then visible to the user in the refusal itself.
+      attempt =
+        isIsoDate(toolInput.arrival) && isIsoDate(toolInput.departure)
+          ? `pin ${match.name} to ${toolInput.arrival} – ${toolInput.departure}`
+          : `pin ${match.name}`;
+      const problem = pinProblem(toolInput.arrival, toolInput.departure);
+      if (problem) return couldnt(problem);
+      target = match;
       constraintUpdate = {
         pinned_cities: [
           { city: match.name, arrival: toolInput.arrival, departure: toolInput.departure },
@@ -1119,8 +1148,17 @@ ${JSON.stringify(tripSummary, null, 2)}
           reply: `I couldn\'t find "${toolInput.city}" in your trip.`,
         });
       }
+      minNights = parseMinNights(toolInput.minNights);
+      if (minNights == null) {
+        attempt = `set a minimum stay for ${match.name}`;
+        return couldnt(
+          `it has to be a whole number of nights from 1 to ${MAX_STAY_NIGHTS}, and I got ${JSON.stringify(toolInput.minNights ?? null)}`,
+        );
+      }
+      attempt = `give ${match.name} at least ${minNights} night${minNights === 1 ? '' : 's'}`;
+      target = match;
       constraintUpdate = {
-        min_days: [{ city: match.name, minNights: Number(toolInput.minNights) }],
+        min_days: [{ city: match.name, minNights }],
       };
     }
 
@@ -1132,6 +1170,24 @@ ${JSON.stringify(tripSummary, null, 2)}
       departure_date: c.dates?.departure ?? c.departure_date ?? null,
     }));
     const { cities: newCities, diff } = applyDateConstraints(dbShapeCities, proposedConstraints);
+
+    if (target) {
+      // Valid on its own can still be impossible in context: a pin that
+      // pushes earlier cities into the past, or two pins with too little
+      // room for the stays between them. Scripted before this check,
+      // Rome pinned Dec 8–12 plus Florence pinned Dec 13–15 proposed
+      // Venice Dec 11–13 — overlapping Rome — with no warning.
+      const schedule = scheduleProblem(dbShapeCities, newCities);
+      if (schedule) return couldnt(schedule);
+      if (minNights != null) {
+        const shortfall = minDaysProblem(
+          newCities[(currentTrip.cities ?? []).indexOf(target)],
+          minNights,
+          proposedConstraints,
+        );
+        if (shortfall) return couldnt(shortfall);
+      }
+    }
 
     const proposedTrip = {
       ...currentTrip,

@@ -284,3 +284,130 @@ describe('searchLegOptions with an unreadable bound', () => {
     expect(r.options.map((o) => o.departTime)).toEqual(['16:00']);
   });
 });
+
+describe('B10 — pin_city_dates', () => {
+  const app = createApp();
+  const pin = (city: string, arrival: any, departure: any) => ({ city, arrival, departure, explanation: 'Pinned it.' });
+
+  it('refuses a pin in the past (it used to move the whole trip to Dec 2024 – Jan 2025)', async () => {
+    const res = await chat(app, 'pin_city_dates', pin('Venice', '2025-01-01', '2025-01-03'));
+    expect(res.body.type).toBe('answer');
+    expect(res.body.proposal).toBeUndefined();
+    expect(res.body.reply).toContain('already passed');
+  });
+
+  it('allows UTC-yesterday: evening in New York is still that day for the user', async () => {
+    // Frozen now is 2026-10-30 15:00Z; 2026-10-29 is "today" nowhere, but a
+    // pin made at 20:00 New York time on the 29th reaches us as 00:xx UTC on
+    // the 30th — so one day of slack is the rule, tested at its boundary.
+    const res = await chat(app, 'pin_city_dates', pin('Rome', '2026-10-29', '2026-10-31'));
+    expect(res.body.type).toBe('proposal');
+    const res2 = await chat(app, 'pin_city_dates', pin('Rome', '2026-10-28', '2026-10-31'));
+    expect(res2.body.type).toBe('answer');
+  });
+
+  it('refuses an inverted or zero-night pin', async () => {
+    const inverted = await chat(app, 'pin_city_dates', pin('Florence', '2026-12-20', '2026-12-18'));
+    expect(inverted.body.type).toBe('answer');
+    expect(inverted.body.reply).toContain('after the arrival');
+    const zero = await chat(app, 'pin_city_dates', pin('Florence', '2026-12-20', '2026-12-20'));
+    expect(zero.body.type).toBe('answer');
+  });
+
+  it.each([
+    ['Dec 9', 'Dec 12'],
+    ['2026-02-30', '2026-03-02'],
+    ['2026-12-9', '2026-12-12'],
+    [null, '2026-12-12'],
+  ])('refuses a non-ISO date %p → %p instead of storing it', async (a, d) => {
+    const res = await chat(app, 'pin_city_dates', pin('Rome', a, d));
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('YYYY-MM-DD');
+  });
+
+  it('refuses a pin that would push an earlier city into the past', async () => {
+    // Florence from Oct 31 leaves Venice Oct 29–31 and Rome Oct 27–29.
+    const res = await chat(app, 'pin_city_dates', pin('Florence', '2026-10-31', '2026-11-02'));
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('Rome');
+    expect(res.body.reply).toContain('2026-10-27');
+  });
+
+  it('refuses a pin whose stays would overlap an existing pin (Venice squeezed between Rome and Florence)', async () => {
+    const res = await chat(app, 'pin_city_dates', pin('Florence', '2026-12-13', '2026-12-15'), romePinnedTrip());
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('overlap');
+    expect(res.body.reply).toContain('Rome');
+    expect(res.body.reply).toContain('Venice');
+  });
+
+  it('refuses a pin that overlaps another pin directly', async () => {
+    const res = await chat(app, 'pin_city_dates', pin('Venice', '2026-12-11', '2026-12-13'), romePinnedTrip());
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('overlap');
+  });
+
+  it('accepts a second pin that leaves exactly enough room (control)', async () => {
+    const res = await chat(app, 'pin_city_dates', pin('Florence', '2026-12-14', '2026-12-16'), romePinnedTrip());
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.reply).toBe('Pinned it.');
+  });
+
+  it('accepts a valid pin and shifts the other cities around it (control)', async () => {
+    const res = await chat(app, 'pin_city_dates', pin('Venice', '2026-12-11', '2026-12-13'));
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.proposedTrip.cities.map((c: any) => [c.dates.arrival, c.dates.departure])).toEqual([
+      ['2026-12-09', '2026-12-11'],
+      ['2026-12-11', '2026-12-13'],
+      ['2026-12-13', '2026-12-15'],
+    ]);
+  });
+});
+
+describe('B10 — set_min_days', () => {
+  const app = createApp();
+  const minDays = (city: string, minNights: any, explanation = 'x') => ({ city, minNights, explanation });
+
+  it.each([400, 61, 0, -2, 2.5, 'three', null])('refuses minNights %p and never claims it was applied', async (n) => {
+    const res = await chat(app, 'set_min_days', minDays('Rome', n, 'Giving you three nights in Rome.'));
+    expect(res.body.type).toBe('answer');
+    expect(res.body.proposal).toBeUndefined();
+    expect(res.body.reply).not.toContain('Giving you');
+    expect(res.body.reply).toContain('1 to 60');
+  });
+
+  it('accepts 60, the upper bound', async () => {
+    const res = await chat(app, 'set_min_days', minDays('Rome', 60));
+    expect(res.body.type).toBe('proposal');
+  });
+
+  it('accepts a whole number sent as a string ("3")', async () => {
+    const res = await chat(app, 'set_min_days', minDays('Rome', '3'));
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.proposedConstraints.min_days).toEqual([{ city: 'Rome', minNights: 3 }]);
+  });
+
+  it('says so when the city is pinned too short, instead of "Giving you six nights"', async () => {
+    const res = await chat(app, 'set_min_days', minDays('Rome', 6, 'Giving you six nights in Rome.'), romePinnedTrip());
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('pinned');
+    expect(res.body.reply).toContain('2026-12-08');
+  });
+
+  it('refuses a minimum that would run into the next pinned city', async () => {
+    const t = romePinnedTrip();
+    t.constraints.pinned_cities.push({ city: 'Florence', arrival: '2026-12-14', departure: '2026-12-16' });
+    const res = await chat(app, 'set_min_days', minDays('Venice', 4, 'Giving you four nights in Venice.'), t);
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('overlap');
+  });
+
+  it('extends the stay and shifts the rest (control)', async () => {
+    const res = await chat(app, 'set_min_days', minDays('Rome', 3, 'Giving you three nights in Rome.'));
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.reply).toBe('Giving you three nights in Rome.');
+    expect(res.body.proposal.proposedTrip.cities.map((c: any) => c.dates.departure)).toEqual([
+      '2026-12-11', '2026-12-13', '2026-12-15',
+    ]);
+  });
+});
