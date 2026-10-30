@@ -182,9 +182,16 @@ const hotelWords = (s: string) =>
 /** Same hotel? Every distinctive word of the preset's hotel name must
  *  appear in the search result's name ("Gracery Shinjuku" matches "Hotel
  *  Gracery Shinjuku Tokyo"). Substring matching wrongly paired short names
- *  with unrelated hotels that happened to contain their letters. */
-export function isSameHotel(presetName: string, resultName: string): boolean {
-  const want = hotelWords(presetName);
+ *  with unrelated hotels that happened to contain their letters.
+ *
+ *  Given the city, its words are not distinctive either: in Krabi, "krabi" is
+ *  in half the hotel names, so "Krabi Resort" matched "Krabi La Playa Resort"
+ *  on that word alone and the preset was repriced from another property. A
+ *  name left with nothing but the town in it cannot be identified, and is
+ *  refused rather than guessed. Without a city the rule is as it was. */
+export function isSameHotel(presetName: string, resultName: string, cityName?: string): boolean {
+  const cityWords = new Set(cityName ? hotelWords(cityName) : []);
+  const want = hotelWords(presetName).filter((w) => !cityWords.has(w));
   if (want.length === 0) return false;
   const got = new Set(hotelWords(resultName));
   return want.every((w) => got.has(w));
@@ -208,7 +215,10 @@ async function getHotelDestination(
   if (!res.ok) return null;
   const list = (await res.json()) as any[];
   const hit = (Array.isArray(list) ? list : []).find(
-    (x) => x?.dest_type === 'hotel' && x?.dest_id && isSameHotel(hotelName, String(x.name ?? '')),
+    (x) =>
+      x?.dest_type === 'hotel' &&
+      x?.dest_id &&
+      isSameHotel(hotelName, String(x.name ?? ''), cityName),
   );
   return hit ? { dest_id: String(hit.dest_id), dest_type: 'hotel' } : null;
 }
