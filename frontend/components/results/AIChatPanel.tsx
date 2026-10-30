@@ -163,26 +163,46 @@ function legOptionToTransport(opt: LegOption, fromCity: string, toCity: string, 
  * Returns a new Trip object (does not mutate the input).
  */
 function applyLegRefreshToTrip(trip: Trip, refresh: LegRefresh): Trip {
+  // The leg is a CONSECUTIVE pair, the same one the backend priced
+  // (plan.ts findTripLeg takes the first i with cities[i] = from and
+  // cities[i+1] = to). Two independent findIndex calls used to pick the
+  // ends separately, so on Rome → Florence → Rome a refresh of
+  // Florence → Rome mirrored the new train onto the FIRST Rome, and a pair
+  // that is no leg at all was patched anyway. Not a leg → change nothing.
+  const from = refresh.fromCity.toLowerCase();
+  const to = refresh.toCity.toLowerCase();
   const fromIdx = trip.cities.findIndex(
-    (c) => c.name.toLowerCase() === refresh.fromCity.toLowerCase(),
+    (c, i) =>
+      i + 1 < trip.cities.length &&
+      c.name.toLowerCase() === from &&
+      trip.cities[i + 1].name.toLowerCase() === to,
   );
-  const toIdx = trip.cities.findIndex(
-    (c) => c.name.toLowerCase() === refresh.toCity.toLowerCase(),
-  );
-  if (fromIdx < 0 || toIdx < 0) return trip;
+  if (fromIdx < 0) return trip;
+  const toIdx = fromIdx + 1;
 
   const [cheapest, ...rest] = refresh.options;
   if (!cheapest) return trip;
 
-  const mainTransport = legOptionToTransport(
-    cheapest,
-    refresh.fromCity,
-    refresh.toCity,
-    refresh.date,
-  );
   const altTransports = rest.map((o) =>
     legOptionToTransport(o, refresh.fromCity, refresh.toCity, refresh.date),
   );
+  // The backend lists the leg's CURRENT transport first, at priceDelta 0
+  // (plan.ts transportToLegOption; isSameLegOption is the same test as
+  // here). Rebuilding it from a LegOption would drop what a LegOption
+  // cannot carry — `noTrainData`, stations, baggage — so when the best
+  // option is the one already on the card, keep the card's own copy and
+  // refresh only its alternatives.
+  const current = trip.cities[fromIdx].transportOut;
+  const isCurrent =
+    !!current &&
+    cheapest.priceDelta === 0 &&
+    cheapest.mode === current.mode &&
+    cheapest.operator === current.operator &&
+    cheapest.departTime === (current.departTime ?? null) &&
+    Math.abs(cheapest.price - current.price) < 0.01;
+  const mainTransport: Transport = isCurrent
+    ? { ...current }
+    : legOptionToTransport(cheapest, refresh.fromCity, refresh.toCity, refresh.date);
   mainTransport.alternatives = altTransports;
 
   const nextCities = trip.cities.map((c, i) => {
