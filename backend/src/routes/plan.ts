@@ -1374,27 +1374,58 @@ router.post(
     const { DEFAULT_MODEL } = require('../services/anthropic');
     const summary = summarizeTripForChat(currentTrip);
 
+    // Which legs have any train in the trip. Rail can come back empty (the
+    // demo triage found it empty in production: no ALLABOARD_API_KEY), and a chip
+    // like "Can we take train Rome→Florence?" then leads straight to a
+    // comparison card reading "Train — No options found" (D-07).
+    const tripCities = currentTrip.cities ?? [];
+    const legs = tripCities.slice(0, -1).map((c: any, i: number) => ({
+      from: c.name,
+      to: tripCities[i + 1].name,
+      mode: c.transportOut?.mode ?? null,
+      trainFound:
+        c.transportOut?.mode === 'train' ||
+        (c.transportOut?.alternatives ?? []).some((a: any) => a?.mode === 'train'),
+    }));
+    const anyTrain = legs.some((l: any) => l.trainFound);
+
     try {
       const response = await anthropic.messages.create({
         model: DEFAULT_MODEL,
         max_tokens: 400,
+        // The chat's tools are listed so suggestions stay inside them: the
+        // old "one enhancement (activity/swap)" asked for things no tool
+        // does — "Add Thames river activity in London?" got "I can't book
+        // activities directly" (D-07).
         system: `You generate 4 short, specific, trip-tailored prompt suggestions that the user could click to start a conversation with BlueMurr AI about their itinerary. Each suggestion:
 - Is under 40 characters
 - References a specific city, leg, or feature of THIS trip (not generic)
 - Is a question or a request the user might realistically have
-- Covers a mix: one "why" question (ordering/pricing), one cost-cutting request, one constraint/timing request, one enhancement (activity/swap)
+- Is something BlueMurr AI can actually do (below)
+
+BlueMurr AI CAN: explain the trip (why this city order, why a price); lock a city to specific dates; give a city more nights; set a departure or arrival time limit on one leg; show cheaper or other flight/train options for one named leg; compare flight vs train for one named leg.
+BlueMurr AI can NOT: book anything, add activities, tours or restaurants, change hotels, or add, remove or swap cities. Never suggest those.
+
+Trains: mention a train only for a leg whose "trainFound" is true in "legs". If no leg has "trainFound": true, do not mention trains at all.
+
+Cover a mix: one "why" question (ordering/pricing), one cheaper-option request naming a specific leg, one dates or time-of-day request, and one more of any kind above.
 
 Return ONLY a JSON array of 4 strings, no prose, no markdown fences.`,
         messages: [
-          { role: 'user', content: `Trip:\n${JSON.stringify(summary, null, 2)}` },
+          { role: 'user', content: `Trip:\n${JSON.stringify({ ...summary, legs }, null, 2)}` },
         ],
       });
 
       const text = response.content?.[0]?.type === 'text' ? (response.content[0] as any).text : '';
       const parsed = extractJson(text);
       if (Array.isArray(parsed) && parsed.every((s) => typeof s === 'string') && parsed.length >= 3) {
-        // Trim to 4, pad with fallback if fewer than 4.
-        const trimmed = parsed.slice(0, 4).map((s: string) => s.slice(0, 60));
+        // The prompt asks; this enforces. Drop any suggestion for something
+        // the chat can't do, and any train suggestion when no leg has a
+        // train — then trim to 4 and pad with fallback as before.
+        const doable = parsed.filter(
+          (s: string) => !CANT_DO_SUGGESTION.test(s) && (anyTrain || !TRAIN_SUGGESTION.test(s)),
+        );
+        const trimmed = doable.slice(0, 4).map((s: string) => s.slice(0, 60));
         while (trimmed.length < 4) trimmed.push(fallback[trimmed.length]);
         return res.json({ suggestions: trimmed });
       }
@@ -1405,6 +1436,12 @@ Return ONLY a JSON array of 4 strings, no prose, no markdown fences.`,
     return res.json({ suggestions: fallback });
   }),
 );
+
+/** Suggestions for things no chat tool does (booking, activities, …). */
+const CANT_DO_SUGGESTION =
+  /\b(activit(?:y|ies)|tours?|restaurants?|book(?:s|ed|ing)?|reserv\w*|tickets?)\b/i;
+/** Suggestions about trains — dropped when no leg of the trip has one. */
+const TRAIN_SUGGESTION = /\b(trains?|rail)\b/i;
 
 /**
  * Rule-based fallback for dynamic prompts when the AI call fails or

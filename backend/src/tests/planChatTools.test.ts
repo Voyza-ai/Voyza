@@ -504,3 +504,32 @@ describe('D-07 — compare_modes reports what was found, not what the model gues
     expect(res.body.reply).toBe('Rome → Venice on 2026-12-10: flight from $95 (4h), train at an unknown price (1h 35m). The train is faster.');
   });
 });
+
+describe('D-07 — chat suggestions only offer what the chat can do', () => {
+  const app = createApp();
+  const suggest = async (model: string[], trip: any = baseTrip()) => {
+    mockCreate.mockResolvedValueOnce({ content: [{ type: 'text', text: JSON.stringify(model) }] });
+    return request(app).post('/api/plan/chat-suggestions').send({ currentTrip: trip });
+  };
+
+  it('drops train suggestions when no leg has a train, and activity/booking suggestions always', async () => {
+    const res = await suggest(['Why Rome before Venice?', 'Can we take train Rome→Venice?', 'Add Thames river activity in London?', 'No flights before 9am to Florence']);
+    expect(res.body.suggestions).toHaveLength(4);
+    expect(res.body.suggestions.slice(0, 2)).toEqual(['Why Rome before Venice?', 'No flights before 9am to Florence']);
+    expect(res.body.suggestions.join(' ')).not.toMatch(/train|activity/i);
+  });
+
+  it('keeps a train suggestion when the trip shows a train on some leg (control)', async () => {
+    const t: any = baseTrip();
+    t.cities[0].transportOut.alternatives = [{ ...t.cities[0].transportOut, mode: 'train', operator: 'Trenitalia' }];
+    const res = await suggest(['Why Rome before Venice?', 'Can we take train Rome→Venice?', 'Give me 3 nights in Venice', 'No flights before 9am to Florence'], t);
+    expect(res.body.suggestions).toEqual(['Why Rome before Venice?', 'Can we take train Rome→Venice?', 'Give me 3 nights in Venice', 'No flights before 9am to Florence']);
+  });
+
+  it('tells the model which legs have trains and what the chat can do', async () => {
+    await suggest(['a', 'b', 'c', 'd']);
+    const req = mockCreate.mock.calls[0][0];
+    expect(req.system).toMatch(/can NOT/i);
+    expect(req.messages[0].content).toContain('"trainFound": false');
+  });
+});
