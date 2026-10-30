@@ -28,7 +28,10 @@ describe('ResultsHeader', () => {
     const trip = buildTrip({ savings: 249 });
     render(<ResultsHeader trip={trip} />);
     expect(screen.getByText(/You can save/i)).toBeInTheDocument();
-    expect(screen.getByText(/vs default routing/i)).toBeInTheDocument();
+    // The optimizer's baseline (savingsVsNaive) is the order the traveller
+    // typed — the same words the AI chat uses for it.
+    expect(screen.getByText('vs your original city order')).toBeInTheDocument();
+    expect(screen.queryByText(/default routing/i)).not.toBeInTheDocument();
   });
 
   it('shows the date-shift savings when it beats routing savings', () => {
@@ -171,16 +174,33 @@ describe('ResultsHeader', () => {
     expect(screen.queryByText('Cheaper start dates')).not.toBeInTheDocument();
   });
 
-  it('says "Best price" instead of "You can save $0" when nothing is cheaper', () => {
-    // Stored total == live total and no date shift → nothing cheaper exists.
+  it('with nothing to save, says the prices are live — never "You can save $0", never an unchecked "Best price"', () => {
+    // Stored total == live total and no date-shift suggestion. That absence
+    // is all the client gets whether the optimizer's date probe found
+    // nothing, skipped (an unpriced leg), failed, or never ran (a saved
+    // Browse preset; any trip after its dates changed) — so the box must
+    // not claim the prices are the best for these dates.
     const base = buildTrip({ savings: 0, dateShiftSuggestion: undefined } as any);
     const { liveTripTotal } = require('@/lib/tripTotals');
     const trip = { ...base, totalCost: liveTripTotal(base) };
     render(<ResultsHeader trip={trip} />);
-    expect(screen.getByText('Best price')).toBeInTheDocument();
+    expect(screen.queryByText('Best price')).not.toBeInTheDocument();
+    expect(screen.getByText('Price check')).toBeInTheDocument();
+    expect(screen.getByText('Live prices')).toBeInTheDocument();
     expect(screen.getByText('for these dates')).toBeInTheDocument();
     expect(screen.queryByText(/You can save/i)).not.toBeInTheDocument();
-    expect(screen.queryByText('vs default routing')).not.toBeInTheDocument();
+  });
+
+  // Harness, saved "Paris Long Weekend" preset (one city): the meta row read
+  // "1 stops".
+  it('counts a one-city trip as "1 stop", more as "N stops"', () => {
+    const base = buildTrip();
+    const { unmount } = render(<ResultsHeader trip={{ ...base, cities: [base.cities[0]] }} />);
+    expect(screen.getByText('1 stop')).toBeInTheDocument();
+    expect(screen.queryByText('1 stops')).not.toBeInTheDocument();
+    unmount();
+    render(<ResultsHeader trip={base} />);
+    expect(screen.getByText('2 stops')).toBeInTheDocument();
   });
 
   it('long AI-route titles cannot wrap the price cluster onto a second row', () => {

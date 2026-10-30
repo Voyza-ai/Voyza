@@ -37,6 +37,7 @@ import { hotelFromResult } from '@/lib/hotelShape';
 import TripNameEditor from '@/components/shared/TripNameEditor';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
+import { outboundSearchDates, tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { summarizeCanvasChanges } from '@/lib/canvasDiff';
 import { Trip } from '@/lib/types';
@@ -188,11 +189,16 @@ function CanvasPageInner() {
   //      race ahead of the membership claim whenever it ran pre-auth, so
   //      arriving via an invite link 403'd once and then worked forever.
   //      The join effect consumes the token and bumps sessionNonce.
+  //   3. Never load signed out: the session route refuses anonymous callers
+  //      (401), so the load could only fail — "Failed to load canvas
+  //      session" over a "Connection lost" banner (D-16). The sign-in modal
+  //      shows instead, and signing in (user id below) runs the load.
   const loadRetriedRef = useRef(false);
   useEffect(() => {
     if (!tripId) return;
     if (authLoading) return;
     if (shareToken) return;
+    if (!user) return;
 
     (async () => {
       setLoading(true);
@@ -320,7 +326,7 @@ function CanvasPageInner() {
         setLoading(false);
       }
     })();
-  }, [tripId, sessionNonce, authLoading, shareToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tripId, sessionNonce, authLoading, shareToken, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync realtime state (from other users). Applies to EVERY role —
   // editors save now, so the owner receives updates too. Two guards:
@@ -440,7 +446,19 @@ function CanvasPageInner() {
   // first matching city that still has no hotels. Matching by name (not
   // index) keeps it correct even if the user reorders while the request is
   // in flight.
-  const enrichCityHotels = async (cityName: string, checkin: string, checkout: string) => {
+  //
+  // `replace`: the city's dates moved (its first night now follows the
+  // outbound's landing day, or an accepted AI date change), so its hotels
+  // were priced for other nights. Re-search for the new dates and replace
+  // them on the visit with exactly those dates — a result for dates the
+  // visit no longer has is dropped — keeping the traveller's pick when the
+  // new list still has it.
+  const enrichCityHotels = async (
+    cityName: string,
+    checkin: string,
+    checkout: string,
+    opts: { replace?: boolean } = {},
+  ) => {
     if (!cityName || !checkin || !checkout) return;
     setHotelLoadingCities((prev) => (prev.includes(cityName) ? prev : [...prev, cityName]));
     try {
@@ -448,7 +466,7 @@ function CanvasPageInner() {
         city: cityName,
         checkin,
         checkout,
-        adults: localState?.trip?.travelers ?? 1,
+        adults: localStateRef.current?.trip?.travelers ?? localState?.trip?.travelers ?? 1,
       });
       if (results.length === 0) return;
       const hotels = results.map(hotelFromResult);
@@ -456,7 +474,17 @@ function CanvasPageInner() {
         if (!prev?.cities) return prev;
         let merged = false;
         const cities = prev.cities.map((c: any) => {
-          if (!merged && c.name === cityName && (!c.hotels || c.hotels.length === 0)) {
+          if (merged || c.name !== cityName) return c;
+          if (opts.replace) {
+            if (c.dates?.arrival !== checkin || c.dates?.departure !== checkout) return c;
+            merged = true;
+            const list = Array.isArray(c.hotels) ? c.hotels : [];
+            const picked = list.length > 1 ? list[c.selectedHotelIndex ?? 0]?.name : undefined;
+            const keep = picked ? hotels.findIndex((h) => h.name === picked) : -1;
+            const sel = keep >= 0 ? keep : 0;
+            return { ...c, hotels, hotel: hotels[sel], selectedHotelIndex: sel };
+          }
+          if (!c.hotels || c.hotels.length === 0) {
             merged = true;
             return { ...c, hotels, hotel: hotels[0], selectedHotelIndex: 0 };
           }
@@ -845,6 +873,35 @@ function CanvasPageInner() {
     }
   };
 
+  // The first stay starts the day the outbound LANDS — the backend's rule,
+  // answered by /home-legs as `firstCityArrival` for the first stay's
+  // departure we sent. An overnight flight starts it the day after the trip
+  // leaves; a same-day one gives that night back; a search that found no
+  // flight dates it from the trip's start, as the optimizer does without
+  // one. Only the stay the search was for, at the dates it was asked about.
+  // A stay whose dates moved has its hotels re-searched for them.
+  const applyOutboundLanding = (
+    searchedFirst: { name: string; dates: { arrival: string; departure: string } },
+    startDate: string,
+    legs: { outboundLeg: any | null; firstCityArrival?: string },
+  ) => {
+    const arrival = legs.outboundLeg ? legs.firstCityArrival : startDate;
+    if (!arrival) return;
+    const sameStay = (c: any) =>
+      !!c && c.name === searchedFirst.name && c.dates?.departure === searchedFirst.dates.departure;
+    const cur = localStateRef.current?.cities?.[0];
+    if (!sameStay(cur) || cur.dates.arrival === arrival) return;
+    setLocalState((prev: any) => {
+      const c0 = prev?.cities?.[0];
+      if (!sameStay(c0)) return prev;
+      return {
+        ...prev,
+        cities: [{ ...c0, dates: { ...c0.dates, arrival } }, ...prev.cities.slice(1)],
+      };
+    });
+    enrichCityHotels(cur.name, arrival, cur.dates.departure, { replace: true });
+  };
+
   // Apply a home-card edit from the popup. The two cards are independent:
   // the outbound card owns city/airports, the back-home card owns
   // returnCity/returnAirports. After updating, the affected direction's
@@ -872,6 +929,13 @@ function CanvasPageInner() {
     const first = tripCities[0];
     const last = tripCities[tripCities.length - 1];
     if (!first || !last || !first.dates?.arrival) return;
+    // The outbound leaves on the trip's START — the old flight's departure
+    // day, which on an overnight trip is the day before the first stay — and
+    // its landing day then dates that stay (see applyOutboundLanding).
+    const span =
+      direction === 'outbound'
+        ? outboundSearchDates({ cities: tripCities, origin: currentOrigin })
+        : null;
 
     setHomeLegLoading(direction);
     try {
@@ -880,8 +944,9 @@ function CanvasPageInner() {
         originCity: updates.city,
         firstCity: first.name,
         lastCity: last.name,
-        startDate: first.dates.arrival,
+        startDate: span?.startDate ?? first.dates.arrival,
         endDate: last.dates?.departure,
+        ...(span?.firstCityDeparture ? { firstCityDeparture: span.firstCityDeparture } : {}),
         travelers: localState?.trip?.travelers ?? 1,
         outbound: direction === 'outbound',
         returnToHome: direction === 'inbound',
@@ -894,6 +959,7 @@ function CanvasPageInner() {
         else o.returnLeg = leg ?? null;
         return { ...prev, trip: { ...prev.trip, origin: o } };
       });
+      if (direction === 'outbound' && span) applyOutboundLanding(first, span.startDate, legs);
       if (!leg) showToast('No flights found for that airport', 'info');
     } catch {
       showToast('Flight search failed — card updated without a flight', 'error');
@@ -977,6 +1043,17 @@ function CanvasPageInner() {
   // constraints serialises exactly as before (unsaved-change detection
   // compares JSON).
   const applyChatTrip = useCallback((updated: Trip) => {
+    // An accepted AI date pin or shift moves stays; what was priced for the
+    // old dates is re-priced for the new ones (see repriceMovedDates).
+    const before = localStateRef.current;
+    if (before?.cities) {
+      const after = {
+        ...before,
+        cities: updated.cities,
+        trip: { ...(before.trip ?? {}), origin: updated.origin ?? before.trip?.origin ?? null },
+      };
+      queueMicrotask(() => repriceMovedDatesRef.current(before, after));
+    }
     setLocalState((prev: any) => {
       const constraints = updated.constraints ?? prev?.trip?.constraints;
       return {
@@ -1123,8 +1200,13 @@ function CanvasPageInner() {
     [],
   );
 
+  // `startDate`: the day the outbound must leave when the trip on screen no
+  // longer says it (an accepted AI date change moved the first stay; the
+  // trip's start moves by the same number of days). Otherwise the trip's
+  // start: the current outbound's departure day — on an overnight trip the
+  // day BEFORE the first stay, which is what this used to search from.
   const refreshHomeLegDirection = useCallback(
-    async (direction: 'outbound' | 'inbound', ls: any) => {
+    async (direction: 'outbound' | 'inbound', ls: any, startOverride?: string) => {
       const o = ls?.trip?.origin;
       const tripCities = ls?.cities ?? [];
       const first = tripCities[0];
@@ -1135,14 +1217,18 @@ function CanvasPageInner() {
           ? (o.returnAirports ?? o.airports ?? [])
           : (o.airports ?? []);
       if (airports.length === 0) return;
+      const span =
+        direction === 'outbound' ? outboundSearchDates({ cities: tripCities, origin: o }) : null;
+      const startDate = startOverride ?? span?.startDate ?? first.dates.arrival;
       setHomeLegLoading(direction);
       try {
         const legs = await fetchHomeLegs({
           originAirports: airports,
           firstCity: first.name,
           lastCity: last?.name ?? first.name,
-          startDate: first.dates.arrival,
+          startDate,
           endDate: last?.dates?.departure,
+          ...(span?.firstCityDeparture ? { firstCityDeparture: span.firstCityDeparture } : {}),
           travelers: ls?.trip?.travelers ?? 1,
           outbound: direction === 'outbound',
           returnToHome: direction === 'inbound',
@@ -1155,6 +1241,7 @@ function CanvasPageInner() {
           else po.returnLeg = leg ?? null;
           return { ...prev, trip: { ...prev.trip, origin: po } };
         });
+        if (direction === 'outbound') applyOutboundLandingRef.current(first, startDate, legs);
       } catch {
         // keep the stale home leg rather than blanking it
       } finally {
@@ -1163,6 +1250,50 @@ function CanvasPageInner() {
     },
     [],
   );
+  // refreshHomeLegDirection is memoised once; read the landing step through
+  // a ref so it always sees this render's state setters and hotel search.
+  const applyOutboundLandingRef = useRef(applyOutboundLanding);
+  applyOutboundLandingRef.current = applyOutboundLanding;
+
+  /**
+   * Dates moved by an accepted AI proposal → re-price what was priced for
+   * the old ones, each with the canvas's own loading state: a leg whose day
+   * changed (connector spinner), a stay whose dates changed (its hotels),
+   * the outbound when the first stay moved (searched from the trip's start
+   * moved by the same days, landing rule applied) and the return when the
+   * last stay's departure moved (home-card spinner).
+   */
+  const repriceMovedDates = (beforeLs: any, afterLs: any) => {
+    const a: any[] = beforeLs?.cities ?? [];
+    const b: any[] = afterLs?.cities ?? [];
+    if (a.length === 0 || a.length !== b.length) return;
+    if (a.some((c, i) => c.name !== b[i].name)) return;
+    const travelers = afterLs?.trip?.travelers ?? beforeLs?.trip?.travelers ?? 1;
+    b.forEach((c, i) => {
+      const p = a[i];
+      if (!p?.dates || !c?.dates) return;
+      if (p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) {
+        enrichCityHotels(c.name, c.dates.arrival, c.dates.departure, { replace: true });
+      }
+      if (i < b.length - 1 && p.dates.departure !== c.dates.departure) {
+        repairLeg(c.name, b[i + 1].name, c.dates.departure, travelers);
+      }
+    });
+    const o = afterLs?.trip?.origin;
+    if (!o?.city) return;
+    const firstShift = daysFrom(a[0].dates.arrival, b[0].dates.arrival);
+    const prevStart = tripStartDate({ cities: a, origin: beforeLs?.trip?.origin ?? undefined });
+    if (firstShift !== 0 && o.outboundLeg && prevStart) {
+      refreshHomeLegDirection('outbound', afterLs, addDaysIso(prevStart, firstShift));
+    }
+    const lastBefore = a[a.length - 1].dates.departure;
+    const lastAfter = b[b.length - 1].dates.departure;
+    if (lastBefore !== lastAfter && o.returnLeg && (afterLs?.trip?.returnToHome ?? false)) {
+      refreshHomeLegDirection('inbound', afterLs);
+    }
+  };
+  const repriceMovedDatesRef = useRef(repriceMovedDates);
+  repriceMovedDatesRef.current = repriceMovedDates;
 
   useEffect(() => {
     if (!canManipulate || !localState?.cities || localState.cities.length === 0) return;
@@ -1247,6 +1378,38 @@ function CanvasPageInner() {
     return (user?.email?.[0] ?? '?').toUpperCase();
   })();
 
+  // ─── Sign-in gate ───
+  // A canvas needs an account: the session route refuses anonymous callers,
+  // and joining by a share link needs one too. Signed out, the existing
+  // sign-in modal shows over the loading screen; signing in loads the canvas
+  // in place (Google returns here through /auth/callback). Dismissing it
+  // without signing in leaves for the hub rather than a canvas that cannot
+  // load. LoginModal calls onClose before onSuccess on a sign-in, so the
+  // close waits a tick to see which it was.
+  const signedInRef = useRef(false);
+  const signInModal = (
+    <LoginModal
+      isOpen={!authLoading && !user}
+      onSuccess={() => {
+        signedInRef.current = true;
+      }}
+      onClose={() => {
+        if (shareToken) {
+          // Bailing out of sign-in drops the pending join.
+          setShareToken(null);
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('share');
+            window.history.replaceState({}, '', url.toString());
+          }
+        }
+        setTimeout(() => {
+          if (!signedInRef.current) router.push('/main');
+        }, 0);
+      }}
+    />
+  );
+
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center" style={{ background: '#f0f4f8' }}>
@@ -1254,6 +1417,7 @@ function CanvasPageInner() {
           <div className="w-8 h-8 border-2 border-[#2563eb] border-t-transparent rounded-full animate-spin" />
           <span className="text-gray-500 text-sm">Loading canvas...</span>
         </div>
+        {signInModal}
       </div>
     );
   }
@@ -1765,20 +1929,8 @@ function CanvasPageInner() {
         </div>
       )}
 
-      {/* ─── Share-link sign-in gate: joining requires an account ─── */}
-      <LoginModal
-        isOpen={!!shareToken && !user && !authLoading}
-        onClose={() => {
-          // Bailing out of sign-in: drop the pending join and load whatever
-          // access (if any) this account-less visitor has.
-          setShareToken(null);
-          if (typeof window !== 'undefined') {
-            const url = new URL(window.location.href);
-            url.searchParams.delete('share');
-            window.history.replaceState({}, '', url.toString());
-          }
-        }}
-      />
+      {/* ─── Sign-in gate (see signInModal) ─── */}
+      {signInModal}
 
       {/* ─── Toast ─── */}
       <AnimatePresence>

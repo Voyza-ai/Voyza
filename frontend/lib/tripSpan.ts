@@ -1,5 +1,5 @@
 import type { Trip } from './types';
-import { daysBetween, parseLocal } from './dateHelpers';
+import { daysBetween, parseLocal, toIso } from './dateHelpers';
 
 /**
  * The trip's overall span — the day the traveller leaves home to the day the
@@ -38,6 +38,64 @@ export function homeDepartureDay(trip: Pick<Trip, 'cities' | 'origin'>): string 
 /** First day of the trip: the home departure day, else the first stay's arrival. */
 export function tripStartDate(trip: Pick<Trip, 'cities' | 'origin'>): string | undefined {
   return homeDepartureDay(trip) ?? trip.cities[0]?.dates?.arrival;
+}
+
+/** `iso` moved by `days` calendar days (YYYY-MM-DD in, YYYY-MM-DD out). */
+export function addDaysIso(iso: string, days: number): string {
+  const d = parseLocal(iso);
+  d.setDate(d.getDate() + days);
+  return toIso(d);
+}
+
+/** Calendar days from `a` to `b` (both YYYY-MM-DD); negative when b < a. */
+export function daysFrom(a: string, b: string): number {
+  return daysBetween(parseLocal(a), parseLocal(b));
+}
+
+/**
+ * What an outbound search needs to keep the landing rule: the day the trip
+ * LEAVES home, and the first stay's departure so the answer can say when the
+ * stay starts (`firstCityArrival` from /api/flights/home-legs).
+ *
+ * The search date is the trip's start, not the first stay's arrival: on an
+ * overnight trip those differ by a day, and searching from the arrival — what
+ * every re-search did — priced a flight leaving the day the traveller should
+ * already be landing (JFK Jan 11 for a trip that leaves Jan 10).
+ */
+export function outboundSearchDates(
+  trip: Pick<Trip, 'cities' | 'origin'>,
+): { startDate: string; firstCityDeparture: string | undefined } | null {
+  const startDate = tripStartDate(trip);
+  if (!startDate) return null;
+  return { startDate, firstCityDeparture: trip.cities[0]?.dates?.departure || undefined };
+}
+
+/**
+ * The day the first stay starts when the outbound lands on `landed`.
+ *
+ * This is the backend's rule (services/optimizer.ts `firstStayArrival`, also
+ * behind /api/flights/home-legs' `firstCityArrival`) for the one case the
+ * client decides without a search: the traveller picks another of the
+ * outbound's listed alternatives, and the leg's own `arriveDate` is all
+ * there is to go on. Everything that searches a flight takes the server's
+ * answer instead. Same cases, same results — see landingRule.test.ts:
+ *   - the stay starts the day the flight lands;
+ *   - never before the trip leaves (`startDate`): a westbound landing that
+ *     reads earlier keeps the start date;
+ *   - never on or after the stay's own departure: the stay keeps at least
+ *     one night;
+ *   - no landing date known → the start date.
+ */
+export function firstStayArrival(params: {
+  startDate: string;
+  firstDeparture: string;
+  landed: string | null | undefined;
+}): string {
+  const { startDate, firstDeparture, landed } = params;
+  if (!landed || !ISO_DATE.test(landed)) return startDate;
+  const latestArrival = addDaysIso(firstDeparture, -1);
+  const arrival = landed < startDate ? startDate : landed > latestArrival ? latestArrival : landed;
+  return arrival < startDate ? startDate : arrival;
 }
 
 /**

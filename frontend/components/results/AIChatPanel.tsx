@@ -417,15 +417,16 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
   };
 
   const acceptProposal = (messageId: number) => {
-    setMessages((prev) => {
-      const msg = prev.find((m) => m.id === messageId);
-      if (!msg?.proposal) return prev;
-      // date_shift is the only proposal kind now — apply the prebuilt trip.
-      applyTrip(msg.proposal.proposedTrip as Trip);
-      return prev.map((m) =>
-        m.id === messageId ? { ...m, proposalState: 'accepted' } : m,
-      );
-    });
+    // Applied here, not inside the setMessages updater: an updater runs
+    // during render (twice under StrictMode), and applying the trip there
+    // updated the page that hosts this panel mid-render.
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg?.proposal || msg.proposalState === 'accepted') return;
+    // date_shift is the only proposal kind now — apply the prebuilt trip.
+    applyTrip(msg.proposal.proposedTrip as Trip);
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, proposalState: 'accepted' } : m)),
+    );
   };
 
   const rejectProposal = (messageId: number) => {

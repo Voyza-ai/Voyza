@@ -21,6 +21,13 @@ import { updateTrip } from '@/lib/api';
 
 type ResultsHeaderProps = {
   trip: Trip;
+  /**
+   * The trip the header PRICES and dates, while the results page re-prices
+   * the one on screen: the last settled trip, so a half-searched trip never
+   * reads as the total or a saving (audit D-09). Actions (rename, Edit in
+   * Canvas) always use `trip`. Defaults to `trip`.
+   */
+  pricedTrip?: Trip;
 };
 
 const formatDate = (iso: string) => {
@@ -29,7 +36,8 @@ const formatDate = (iso: string) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-export default function ResultsHeader({ trip }: ResultsHeaderProps) {
+export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) {
+  const shown = pricedTrip ?? trip;
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const setTrip = useTripStore((s) => s.setTrip);
@@ -130,14 +138,14 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   };
   // The TRIP's span — from the day the outbound leaves home — not the first
   // city's stay, which starts the day an overnight outbound lands.
-  const { start: startDate, end: endDate, nights: totalNights } = tripSpan(trip);
+  const { start: startDate, end: endDate, nights: totalNights } = tripSpan(shown);
 
-  const liveTotal = liveTripTotal(trip);
+  const liveTotal = liveTripTotal(shown);
   const travelers = Math.max(1, trip.travelers);
   // Savings tracks the delta vs the original baseline (totalCost - savings was the
   // pre-optimized baseline). When the user picks a more expensive hotel the
   // savings shrink in lockstep so the comparison stays honest.
-  const baseline = trip.totalCost + trip.savings;
+  const baseline = shown.totalCost + shown.savings;
   // Rounded — raw floats (e.g. $3,213.72) widen the savings pill enough to
   // wrap the whole stats row below the title on narrower viewports.
   const liveSavings = Math.max(0, Math.round(baseline - liveTotal));
@@ -150,8 +158,12 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
   const shiftSavings = trip.dateShiftSuggestion?.savings ?? 0;
   const shiftIsBest = shiftSavings > liveSavings;
   const bestSavings = shiftIsBest ? shiftSavings : liveSavings;
-  // Nothing cheaper exists: neither the routing nor any nearby start date
-  // beats these prices. Say so positively instead of "You can save $0".
+  // Nothing to offer: no routing saving and no date-shift suggestion. Said as
+  // what it is — live prices for these dates — not as "Best price". The
+  // optimizer's date probe returns no suggestion alike when it found nothing,
+  // when it was skipped (an inter-city leg unpriced) or failed, and it never
+  // runs for a saved Browse preset or after the dates change, so "nothing
+  // cheaper" is not something the client can claim. Never "You can save $0".
   const nothingToSave = Math.round(bestSavings) <= 0;
   const shiftDateNice = (() => {
     const iso = trip.dateShiftSuggestion?.newStartDate;
@@ -322,7 +334,9 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
               </span>
             </div>
             <span className="text-gray-400">·</span>
-            <span className="text-gray-500">{trip.cities.length} stops</span>
+            <span className="text-gray-500">
+              {trip.cities.length} {trip.cities.length === 1 ? 'stop' : 'stops'}
+            </span>
           </div>
           <TripNameEditor
             value={trip.title ?? ''}
@@ -431,14 +445,16 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
                 )}
               </div>
               <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
-                {nothingToSave ? 'Best price' : `$${animatedSavings.toLocaleString()}`}
+                {nothingToSave ? 'Live prices' : `$${animatedSavings.toLocaleString()}`}
               </div>
               <div className="text-[#22c088]/50 text-[9px]">
                 {nothingToSave
                   ? 'for these dates'
                   : shiftIsBest
                     ? `by starting ${shiftDateNice}`
-                    : 'vs default routing'}
+                    : // The optimizer's baseline (savingsVsNaive) is the
+                      // order the traveller typed — as the AI chat says it.
+                      'vs your original city order'}
               </div>
             </button>
 
