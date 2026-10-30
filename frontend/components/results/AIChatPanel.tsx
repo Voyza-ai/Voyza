@@ -482,6 +482,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
               {msg.comparison && (
                 <ModeComparisonCard
                   comparison={msg.comparison}
+                  currentMode={legMode(trip, msg.comparison.fromCity, msg.comparison.toCity)}
                   onSwitch={(mode) => {
                     const c = msg.comparison!;
                     handleSend(
@@ -671,10 +672,28 @@ function DateShiftProposalCard({
 // request — the user opts into the actual trip mutation.
 type ModeComparisonCardProps = {
   comparison: ModeComparison;
+  /** The mode the leg uses now — never offered as a switch. Null when the
+   *  leg has no option (or is not found), so either found mode is offered. */
+  currentMode: 'flight' | 'train' | null;
   onSwitch: (mode: 'flight' | 'train') => void;
 };
 
-function ModeComparisonCard({ comparison, onSwitch }: ModeComparisonCardProps) {
+/**
+ * The mode a trip leg uses now: the consecutive pair `from` → `to` (the leg
+ * plan.ts findTripLeg compares). A leg nothing was found for is `unavailable`
+ * and its 'flight' is the empty placeholder's, so it has no mode.
+ */
+function legMode(trip: Trip, from: string, to: string): 'flight' | 'train' | null {
+  const f = from.toLowerCase();
+  const t = to.toLowerCase();
+  const i = trip.cities.findIndex(
+    (c, k) => k + 1 < trip.cities.length && c.name.toLowerCase() === f && trip.cities[k + 1].name.toLowerCase() === t,
+  );
+  const leg = i >= 0 ? trip.cities[i].transportOut : null;
+  return leg && !leg.unavailable ? leg.mode : null;
+}
+
+function ModeComparisonCard({ comparison, currentMode, onSwitch }: ModeComparisonCardProps) {
   const { flight, train, recommendation, cheapest, fastest } = comparison;
 
   return (
@@ -705,6 +724,7 @@ function ModeComparisonCard({ comparison, onSwitch }: ModeComparisonCardProps) {
           isCheapest={cheapest === 'flight'}
           isFastest={fastest === 'flight'}
           isRecommended={recommendation === 'flight'}
+          isCurrent={currentMode === 'flight'}
           onClick={() => onSwitch('flight')}
         />
         <div className="border-l border-gray-100" />
@@ -715,6 +735,7 @@ function ModeComparisonCard({ comparison, onSwitch }: ModeComparisonCardProps) {
           isCheapest={cheapest === 'train'}
           isFastest={fastest === 'train'}
           isRecommended={recommendation === 'train'}
+          isCurrent={currentMode === 'train'}
           onClick={() => onSwitch('train')}
         />
       </div>
@@ -729,6 +750,8 @@ type ModeCellProps = {
   isCheapest: boolean;
   isFastest: boolean;
   isRecommended: boolean;
+  /** The leg already uses this mode: no "Switch to" for it. */
+  isCurrent: boolean;
   onClick: () => void;
 };
 
@@ -739,6 +762,7 @@ function ModeCell({
   isCheapest,
   isFastest,
   isRecommended,
+  isCurrent,
   onClick,
 }: ModeCellProps) {
   if (!option) {
@@ -768,7 +792,8 @@ function ModeCell({
         )}
       </div>
       <div className="text-[14px] font-semibold text-gray-900">
-        ${Math.round(option.price).toLocaleString()}
+        {/* A price the provider did not give is unknown, not $0. */}
+        {option.price > 0 ? `$${Math.round(option.price).toLocaleString()}` : '—'}
         {isCheapest && (
           <span className="ml-1 text-[10px] text-emerald-600 font-medium">cheapest</span>
         )}
@@ -778,17 +803,19 @@ function ModeCell({
         {isFastest && <span className="ml-1 text-emerald-600 font-medium">fastest</span>}
       </div>
       <div className="text-[11px] text-gray-400 truncate w-full">{option.operator}</div>
-      <button
-        onClick={onClick}
-        className="mt-1 text-[11px] font-medium px-2 py-1 rounded-md transition"
-        style={{
-          background: 'rgba(46,107,196,0.08)',
-          color: '#2e6bc4',
-          border: '1px solid rgba(46,107,196,0.2)',
-        }}
-      >
-        Switch to {label.toLowerCase()}
-      </button>
+      {!isCurrent && (
+        <button
+          onClick={onClick}
+          className="mt-1 text-[11px] font-medium px-2 py-1 rounded-md transition"
+          style={{
+            background: 'rgba(46,107,196,0.08)',
+            color: '#2e6bc4',
+            border: '1px solid rgba(46,107,196,0.2)',
+          }}
+        >
+          Switch to {label.toLowerCase()}
+        </button>
+      )}
     </div>
   );
 }
