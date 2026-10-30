@@ -133,13 +133,20 @@ function BrowsePageInner() {
   const COST_MIN = bounds.costMin;
   const COST_MAX = bounds.costMax;
 
-  // Deep link from an SEO landing page: /browse?preset=<slug> opens it.
+  // Deep link from an SEO landing page: /browse?preset=<slug> opens it —
+  // ONCE per slug. `catalog` changes identity when the live catalog replaces
+  // the bundled one a moment after mount; re-running on that re-opened a
+  // modal the user had already closed, reset their party size to the
+  // preset's default and sent a second 'view' beacon (audit E13). A slug
+  // only the live catalog has stays unhandled until that catalog arrives.
   const searchParams = useSearchParams();
+  const deepLinkHandledRef = useRef<string | null>(null);
   useEffect(() => {
     const slug = searchParams?.get('preset');
-    if (!slug) return;
+    if (!slug || deepLinkHandledRef.current === slug) return;
     const p = catalog.find((x) => x.slug === slug);
     if (p) {
+      deepLinkHandledRef.current = slug;
       setSelected(p);
       setTravelers(p.travelers);
     }
