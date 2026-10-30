@@ -42,6 +42,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const catalog = await loadCatalog();
     const category = buildCategoryRows(catalog).find((c) => c.slug === req.params.slug);
+    // The frontend's SEO page (lib/presetsServer.ts) matches this exact
+    // message to tell "no such category" from "no presets API here".
     if (!category) throw new AppError(404, 'Category not found');
     const bySlug = new Map(catalog.map((p) => [p.slug, p]));
     res.json({
