@@ -1,5 +1,6 @@
 import { getAuthHeader, refreshAuthHeader } from './supabase';
 import { rankHotels } from './hotelScore';
+import { tripStartDate } from './tripSpan';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -672,7 +673,9 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
       budget: trip.budget ?? null,
       budgetPerPerson: trip.budgetPerPerson ?? null,
       vibe: trip.vibe ?? null,
-      startDate: trip.startDate ?? trip.cities?.[0]?.dates?.arrival ?? null,
+      // The day the trip starts — the outbound's departure for an overnight
+      // flight, not the first stay, which begins the day it lands.
+      startDate: trip.startDate ?? (Array.isArray(trip.cities) ? tripStartDate(trip) : undefined) ?? null,
       dateShiftSuggestion: trip.dateShiftSuggestion ?? null,
       // Home anchor — optional. Old trips save with null/empty and just
       // render without a home card on reload (graceful).

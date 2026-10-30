@@ -6,6 +6,7 @@ import { Plane, TrainFront, Moon } from 'lucide-react';
 import { Trip, City, TransportMode } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
+import { homeDepartureDay } from '@/lib/tripSpan';
 import DayPlanner from './DayPlanner';
 
 type CalendarViewProps = {
@@ -144,7 +145,10 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
     cursor.setMonth(cursor.getMonth() + 1);
   }
 
-  const totalNights = daysBetween(start, end);
+  // Nights of the whole TRIP: an overnight outbound leaves home the day
+  // before the first stay starts, and that night is part of the trip.
+  const homeDeparture = homeDepartureDay(trip);
+  const totalNights = daysBetween(homeDeparture ? parseLocal(homeDeparture) : start, end);
 
   return (
     <div className="px-8 py-6">
