@@ -494,6 +494,111 @@ function countryGroupedOrderings(cities: CityInput[]): string[][] {
 }
 
 /**
+ * Largest trip the exact search below handles. Its pairwise price matrix is
+ * n × (n − 1) leg searches — 90 at 10 cities, already past Duffel's 60 a
+ * minute — so beyond this the country-grouped heuristic is the cheaper
+ * honest answer.
+ */
+const HELD_KARP_MAX_CITIES = 10;
+
+/**
+ * The k cheapest orderings of n cities under a FIXED cost model, exactly
+ * (Held–Karp dynamic programming over subsets, keeping the k best partial
+ * paths per state). Pure and exported for the brute-force tests.
+ *
+ * cost(order) = out(order[0]) + Σ leg(order[i], order[i+1]) + ret(last).
+ * All costs must be finite; callers fold "unpriceable" into penalties first.
+ *
+ * Country clustering is a constraint, not a filter afterwards: a move to a
+ * city in a different country is allowed only while that country has not
+ * been visited yet, which is exactly "every country's cities are
+ * contiguous". A city with an unknown country (undefined) counts as its own
+ * one-city country: it may go anywhere, but it does sit between its
+ * neighbours (FR, ?, FR is not contiguous France). countryGroupedOrderings
+ * also never splits a known country with an unknown city.
+ *
+ * Complexity O(2^n · n² · k); n ≤ HELD_KARP_MAX_CITIES keeps it at ~0.3M
+ * steps for k = 3.
+ */
+export function bestOrderingsByMatrix(params: {
+  n: number;
+  leg: (from: number, to: number) => number;
+  out: (city: number) => number;
+  ret: (city: number) => number;
+  country: Array<string | undefined>;
+  k: number;
+}): Array<{ order: number[]; cost: number }> {
+  const { n, leg, out, ret, country, k } = params;
+  if (n === 0) return [];
+
+  // Bitmask of the cities in each known country.
+  const membersOf = new Map<string, number>();
+  country.forEach((c, i) => {
+    if (c !== undefined) membersOf.set(c, (membersOf.get(c) ?? 0) | (1 << i));
+  });
+  const canMove = (mask: number, last: number, next: number): boolean => {
+    const c = country[next];
+    if (c === undefined) return true;
+    if (c === country[last]) return true;
+    return (mask & membersOf.get(c)!) === 0; // that country not entered yet
+  };
+
+  // dp[mask * n + last] = up to k best partial paths ending at `last`,
+  // as (cost, previous city, index into the previous state's list).
+  type Entry = { cost: number; prev: number; prevRank: number };
+  const full = (1 << n) - 1;
+  const dp: Entry[][] = new Array((full + 1) * n);
+  const push = (list: Entry[], e: Entry) => {
+    // Small sorted insert; lists never exceed k.
+    let i = list.length;
+    while (i > 0 && list[i - 1].cost > e.cost) i--;
+    if (i >= k) return;
+    list.splice(i, 0, e);
+    if (list.length > k) list.pop();
+  };
+
+  for (let i = 0; i < n; i++) dp[(1 << i) * n + i] = [{ cost: out(i), prev: -1, prevRank: -1 }];
+
+  for (let mask = 1; mask <= full; mask++) {
+    for (let last = 0; last < n; last++) {
+      const here = dp[mask * n + last];
+      if (!here || !(mask & (1 << last))) continue;
+      for (let next = 0; next < n; next++) {
+        if (mask & (1 << next) || !canMove(mask, last, next)) continue;
+        const step = leg(last, next);
+        const slot = (mask | (1 << next)) * n + next;
+        const list = dp[slot] ?? (dp[slot] = []);
+        here.forEach((e, rank) => push(list, { cost: e.cost + step, prev: last, prevRank: rank }));
+      }
+    }
+  }
+
+  // Close each full path with its return leg, keep the k best overall.
+  const finals: Array<{ cost: number; last: number; rank: number }> = [];
+  for (let last = 0; last < n; last++) {
+    (dp[full * n + last] ?? []).forEach((e, rank) =>
+      finals.push({ cost: e.cost + ret(last), last, rank }),
+    );
+  }
+  finals.sort((a, b) => a.cost - b.cost);
+
+  return finals.slice(0, k).map(({ cost, last, rank }) => {
+    const order: number[] = [];
+    let mask = full;
+    let city = last;
+    let r = rank;
+    while (city !== -1) {
+      order.push(city);
+      const e = dp[mask * n + city][r];
+      mask &= ~(1 << city);
+      city = e.prev;
+      r = e.prevRank;
+    }
+    return { order: order.reverse(), cost };
+  });
+}
+
+/**
  * Score a route using per-leg dates (not the same startDate for every leg).
  * The i-th leg happens after the user has spent `nightsPerCity` nights in
  * each preceding city, so pricing reflects the actual travel day.
@@ -1116,6 +1221,85 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     }
   }
 
+  // Orderings for 6+ cities (see Step 2): exact best-3 on a price matrix.
+  const matrixOrderings = async (): Promise<string[][]> => {
+    const names = cities.map((c) => c.name);
+    const n = names.length;
+
+    // One date for the whole matrix: the middle leg's. A pair's real date
+    // depends on where it lands in the ordering, which is what we are
+    // choosing; the top orderings are re-priced at their real dates after.
+    const mid = Math.floor((n - 2) / 2);
+    let offset = 0;
+    for (let j = 0; j <= mid; j++) offset += nightsArray[j] ?? DEFAULT_NIGHTS_PER_CITY;
+    const matrixDate = clampToFuture(addDays(startDate, offset));
+
+    const legCost = new Map<string, number>();
+    const pairs: Array<[number, number]> = [];
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) pairs.push([i, j]);
+
+    const withHome = hasOrigin && resolvedOriginAirports.length > 0;
+    const [, outCosts, retCosts] = await Promise.all([
+      Promise.all(
+        pairs.map(async ([i, j]) => {
+          const from = names[i];
+          const to = names[j];
+          const comparison = await ctx.compare({
+            origin: from,
+            destination: to,
+            date: matrixDate,
+            travelers,
+            originCountry: cityMap.get(from)?.country ?? getCityCountry(from),
+            destinationCountry: cityMap.get(to)?.country ?? getCityCountry(to),
+          });
+          legCost.set(
+            `${i}>${j}`,
+            Math.min(comparison.flightOption?.price ?? Infinity, comparison.trainOption?.price ?? Infinity),
+          );
+        }),
+      ),
+      // Home legs at their REAL dates (start / end are the same for every
+      // ordering), so these are exactly the searches scoring reuses.
+      Promise.all(
+        names.map((name) =>
+          withHome
+            ? estimateHomeLegCost(ctx, {
+                originAirports: resolvedOriginAirports,
+                destinationCity: name,
+                date: clampToFuture(startDate),
+                travelers,
+              })
+            : Promise.resolve(0),
+        ),
+      ),
+      Promise.all(
+        names.map((name) =>
+          withHome && returnToHome
+            ? estimateHomeLegCost(ctx, {
+                originAirports: resolvedOriginAirports,
+                destinationCity: name,
+                date: clampToFuture(addDays(startDate, totalNightsResolved)),
+                travelers,
+                reverse: true,
+              })
+            : Promise.resolve(0),
+        ),
+      ),
+    ]);
+
+    // Same penalties rankCost charges, so the matrix ranks like scoring does.
+    const orPenalty = (cost: number, penalty: number) => (Number.isFinite(cost) ? cost : penalty);
+    const best = bestOrderingsByMatrix({
+      n,
+      leg: (i, j) => orPenalty(legCost.get(`${i}>${j}`) ?? Infinity, UNAVAILABLE_LEG_PENALTY),
+      out: (i) => orPenalty(outCosts[i], UNAVAILABLE_HOME_LEG_PENALTY),
+      ret: (i) => orPenalty(retCosts[i], UNAVAILABLE_HOME_LEG_PENALTY),
+      country: cities.map((c) => countryOf(c)),
+      k: 3,
+    });
+    return best.map(({ order }) => order.map((i) => names[i]));
+  };
+
   // Step 2: generate candidate orderings.
   //
   // When we have a real origin, "first city" is no longer a hack —
@@ -1143,8 +1327,20 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     } else {
       logger.warn('Country clustering filter removed all orderings — falling back');
     }
+  } else if (cities.length <= HELD_KARP_MAX_CITIES) {
+    // Too many cities to price every ordering at its real dates (6 cities =
+    // 720 orderings), so find the best ones on a price MATRIX instead: each
+    // ordered pair priced once, at the trip's middle leg date, plus the real
+    // home legs. bestOrderingsByMatrix is exact for that matrix; its top 3
+    // are then priced at their real dates by the scoring step below, like
+    // every smaller trip.
+    //
+    // The country-grouped heuristic this replaces scored at most three
+    // hand-built orderings and was 23% / 13% / 27% dearer than the best
+    // clustered ordering on 6- / 7- / 8-city trips (harness, geo model).
+    orderings = await matrixOrderings();
   } else {
-    // Too many cities to permute — score a few orderings that are
+    // Past the matrix's budget — score a few orderings that are
     // country-clustered by construction and let real leg prices pick.
     orderings = countryGroupedOrderings(cities);
   }
