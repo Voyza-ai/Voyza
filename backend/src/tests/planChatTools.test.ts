@@ -533,3 +533,46 @@ describe('D-07 — chat suggestions only offer what the chat can do', () => {
     expect(req.messages[0].content).toContain('"trainFound": false');
   });
 });
+
+/**
+ * The model can only resolve "Dec 10" to the right year if it knows today.
+ * The /chat prompt used to omit it, and wrong-year pins were the likely
+ * result (now refused as "already passed"). A scripted model can't show the
+ * resolution itself, so these pin the date into every planner prompt and
+ * check it is computed per request, not frozen at first use.
+ */
+describe("today's date in the planner prompts", () => {
+  const app = createApp();
+  const systemOf = (call: number) => mockCreate.mock.calls[call][0].system as string;
+  afterEach(() => jest.setSystemTime(new Date(FROZEN_NOW)));
+
+  it('/chat tells the model today (UTC) and that a yearless date means its next occurrence', async () => {
+    await chat(app, 'answer_only', { answer: 'ok' });
+    expect(systemOf(0)).toContain('Today is 2026-10-30 (UTC).');
+    expect(systemOf(0)).toContain('next occurrence after today');
+  });
+
+  it('/chat recomputes the date on every request (no cross-day caching)', async () => {
+    await chat(app, 'answer_only', { answer: 'ok' });
+    jest.setSystemTime(new Date('2026-10-31T01:00:00Z'));
+    await chat(app, 'answer_only', { answer: 'ok' });
+    expect(systemOf(0)).toContain('Today is 2026-10-30 (UTC).');
+    expect(systemOf(1)).toContain('Today is 2026-10-31 (UTC).');
+  });
+
+  it('/chat-suggestions tells the model today (UTC)', async () => {
+    mockCreate.mockResolvedValueOnce({ content: [{ type: 'text', text: '["a","b","c","d"]' }] });
+    await request(app).post('/api/plan/chat-suggestions').send({ currentTrip: baseTrip() });
+    expect(systemOf(0)).toContain('Today is 2026-10-30 (UTC).');
+  });
+
+  it('/converse tells the model today (UTC) and that trip dates are in the future', async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: 'tool_use', name: 'respond_to_traveler', input: { reply: 'ok', updates: {}, action: 'ask' } }],
+    });
+    const res = await request(app).post('/api/plan/converse').send({ message: 'Rome Dec 10' });
+    expect(res.status).toBe(200);
+    expect(systemOf(0)).toContain("Today's date: 2026-10-30 (UTC).");
+    expect(systemOf(0)).toContain('next occurrence after today');
+  });
+});
