@@ -280,6 +280,27 @@ describe('results page: an accepted AI date change re-prices legs and hotels', (
     expect(useTripStore.getState().currentTrip!.cities[0].transportOut.price).toBe(0);
   });
 
+  it('the date-shift check priced the old dates: its suggestion and "Best price" are dropped', async () => {
+    const trip = {
+      ...ownerTrip(),
+      dateShiftChecked: true,
+      dateShiftSuggestion: { dayOffset: -1, newStartDate: '2027-01-09', newTotalCost: 4000, savings: 120 },
+    };
+    useTripStore.setState({ currentTrip: trip });
+    mockSearches();
+    render(<ResultsPage />);
+    mockedPlanChat.mockResolvedValueOnce(pinProposal(trip));
+    await sendChat('pin Zurich to 2027-01-14 to 2027-01-16');
+    await act(async () => {
+      fireEvent.click(await screen.findByText('Accept'));
+    });
+    await waitFor(() => {
+      const t = useTripStore.getState().currentTrip!;
+      expect(t.dateShiftChecked).toBe(false);
+      expect(t.dateShiftSuggestion).toBeUndefined();
+    });
+  });
+
   it('an answer that moves no date (a leg refresh) re-prices nothing', async () => {
     const trip = ownerTrip();
     useTripStore.setState({ currentTrip: trip });

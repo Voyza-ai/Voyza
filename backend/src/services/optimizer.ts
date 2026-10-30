@@ -280,6 +280,13 @@ export type OptimizeResult = {
   /** Present only when a nearby date offset saves meaningful money. */
   dateShiftSuggestion?: DateShiftSuggestion;
   /**
+   * True only when nearby start dates were actually priced (at least one
+   * offset) and, if one looked cheaper, its hotels were priced too — so "no
+   * suggestion" means "checked, nothing cheaper", which the results header
+   * may then say. False when the probe was skipped, failed or priced nothing.
+   */
+  dateShiftChecked: boolean;
+  /**
    * Home → first_city transport. Present when `origin` was provided.
    * Null when the first-city search failed (e.g. no flights found from
    * any origin airport — frontend renders the home card but marks the
@@ -685,6 +692,7 @@ async function findDateShiftSuggestion(
   nightsArray: number[],
   home: DateShiftHome | null,
   ctx: RunContext,
+  outcome?: DateShiftOutcome,
 ): Promise<DateShiftSuggestion | undefined> {
   const offsets = [-2, -1, 1, 2];
 
@@ -757,6 +765,7 @@ async function findDateShiftSuggestion(
   const valid = shifted.filter(
     (s): s is { offset: number; startDate: string; cost: number } => s !== null,
   );
+  if (outcome) outcome.offsetsPriced = valid.length;
   return pickDateShiftOptions(valid, baselineCost);
 }
 
@@ -794,6 +803,9 @@ export function pickDateShiftOptions(
 
 /** One hotel stay: a city and the nights the trip spends there. */
 type Stay = { city: string; checkin: string; checkout: string };
+
+/** What the date-shift check actually priced (see OptimizeResult.dateShiftChecked). */
+export type DateShiftOutcome = { offsetsPriced: number; hadCandidate: boolean; hotelsPriced: boolean };
 
 /**
  * What the trip's hotels cost for these stays, the way the planner will
@@ -848,6 +860,7 @@ export async function confirmDateShiftWithHotels(
   transport: DateShiftSuggestion,
   stays: Stay[],
   travelers: number,
+  outcome?: DateShiftOutcome,
 ): Promise<DateShiftSuggestion | undefined> {
   const started = Date.now();
   const offset = transport.dayOffset;
@@ -870,6 +883,7 @@ export async function confirmDateShiftWithHotels(
       });
       return undefined;
     }
+    if (outcome) outcome.hotelsPriced = true;
     const transportBaseline = transport.newTotalCost + transport.savings;
     const result = pickDateShiftOptions(
       [{ offset, startDate: transport.newStartDate, cost: transport.newTotalCost + shifted }],
@@ -1497,6 +1511,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // Step 7: date-shift suggestion — probe a few ±1/±2 day offsets on the
   // winning ordering to see if leaving earlier/later saves meaningful money.
   // Runs in parallel; any failures silently skip this feature.
+  const dateShiftOutcome: DateShiftOutcome = { offsetsPriced: 0, hadCandidate: false, hotelsPriced: false };
   const dateShiftTransportTask = (async (): Promise<DateShiftSuggestion | undefined> => {
     try {
       // Baseline = the winning route's inter-city legs (plus, inside the
@@ -1529,6 +1544,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
             nightsArray,
             home,
             ctx,
+            dateShiftOutcome,
           ),
         );
       }
@@ -1632,6 +1648,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   const dateShiftTask = (async (): Promise<DateShiftSuggestion | undefined> => {
     const transport = await dateShiftTransportTask;
     if (!transport) return undefined;
+    dateShiftOutcome.hadCandidate = true;
     const [outbound] = await homeLegsTask;
     const planned = stayDates(bestOrdering, startDate, nightsArray, outbound);
     const stays = bestOrdering.map((city) => ({
@@ -1639,7 +1656,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       checkin: planned[city].arrival,
       checkout: planned[city].departure,
     }));
-    return confirmDateShiftWithHotels(transport, stays, travelers);
+    return confirmDateShiftWithHotels(transport, stays, travelers, dateShiftOutcome);
   })();
 
   const [dateShiftSuggestion, , [outboundLeg, returnLeg]] = await Promise.all([
@@ -1682,6 +1699,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     iataCodes,
     dates,
     dateShiftSuggestion,
+    dateShiftChecked:
+      dateShiftOutcome.offsetsPriced > 0 && (!dateShiftOutcome.hadCandidate || dateShiftOutcome.hotelsPriced),
     outboundLeg,
     returnLeg,
     // Only present when the origin had more than one real reading. The legs

@@ -287,6 +287,58 @@ describe('quota: one candidate, searched exactly as the planner will search it',
  * frontend's own function returns for these lists (run against it directly;
  * 5,000 random lists with zero, negative, NaN and flagged rows agreed too).
  */
+/**
+ * `dateShiftChecked` lets the results header say "Best price for these dates"
+ * only when nearby dates were really priced and nothing cheaper held up. A
+ * missing suggestion alone can't say that: it is also what a skipped, failed
+ * or unpriceable probe returns.
+ */
+describe('dateShiftChecked: true only when nearby dates were really priced', () => {
+  it('flights priced on the nearby dates, nothing cheaper: checked', async () => {
+    mockedFlights.mockImplementation(async () => [offer(100)]);
+    priceHotels(() => 100);
+    const result = await optimize(oneCityTrip);
+    expect(result.dateShiftSuggestion).toBeUndefined();
+    expect(result.dateShiftChecked).toBe(true);
+  }, 30000);
+
+  it('a cheaper shift that the hotels cancel out: checked (nothing cheaper held up)', async () => {
+    cheaperTwoDaysEarly();
+    priceHotels((_c, checkin) => (checkin === '2030-06-08' ? 250 : 100));
+    const result = await optimize(oneCityTrip);
+    expect(result.dateShiftSuggestion).toBeUndefined();
+    expect(result.dateShiftChecked).toBe(true);
+  }, 30000);
+
+  it('a cheaper shift whose hotels could not be priced: NOT checked', async () => {
+    cheaperTwoDaysEarly();
+    mockedHotels.mockRejectedValue(new Error('Booking down'));
+    const result = await optimize(oneCityTrip);
+    expect(result.dateShiftSuggestion).toBeUndefined();
+    expect(result.dateShiftChecked).toBe(false);
+  }, 30000);
+
+  it('no nearby date could be priced: NOT checked', async () => {
+    // The requested dates price; every shifted date fails.
+    mockedFlights.mockImplementation(async ({ date }: any) => {
+      if (['2030-06-08', '2030-06-09', '2030-06-11', '2030-06-12'].includes(date)) throw new Error('Duffel down');
+      return [offer(100)];
+    });
+    priceHotels(() => 100);
+    const result = await optimize(oneCityTrip);
+    expect(result.dateShiftSuggestion).toBeUndefined();
+    expect(result.dateShiftChecked).toBe(false);
+  }, 30000);
+
+  it('a suggestion that held up: checked', async () => {
+    cheaperTwoDaysEarly();
+    priceHotels((_c, checkin) => (checkin === '2030-06-08' ? 80 : 100));
+    const result = await optimize(oneCityTrip);
+    expect(result.dateShiftSuggestion).toBeDefined();
+    expect(result.dateShiftChecked).toBe(true);
+  }, 30000);
+});
+
 describe('plannerHotelPick picks what the planner picks', () => {
   const { plannerHotelPick } = jest.requireActual('../services/hotels') as typeof import('../services/hotels');
   const h = (name: string, rating: number, pricePerNight: number, extra: Partial<HotelResult> = {}) =>

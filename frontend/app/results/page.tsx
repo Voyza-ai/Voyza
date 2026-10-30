@@ -539,6 +539,9 @@ function ResultsPageInner() {
       },
       // The choice has been made; stop asking.
       originClarification: undefined,
+      // The date-shift check priced the other reading's home flights.
+      dateShiftSuggestion: undefined,
+      dateShiftChecked: false,
     });
   };
 
@@ -604,8 +607,14 @@ function ResultsPageInner() {
         // Run after this store update has finished notifying (the jobs write
         // to the store themselves).
         queueMicrotask(() => {
-          const cur = useTripStore.getState().currentTrip;
+          let cur = useTripStore.getState().currentTrip;
           if (!cur) return;
+          // The date-shift check priced the OLD dates: its suggestion ("start
+          // a day earlier and save $X") and its "Best price" no longer apply.
+          if (cur.dateShiftSuggestion || cur.dateShiftChecked) {
+            cur = { ...cur, dateShiftSuggestion: undefined, dateShiftChecked: false };
+            setTrip(cur);
+          }
           for (const i of work.legs) {
             const from = cur.cities[i];
             const to = cur.cities[i + 1];

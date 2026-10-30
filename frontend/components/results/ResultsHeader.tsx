@@ -158,13 +158,15 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
   const shiftSavings = trip.dateShiftSuggestion?.savings ?? 0;
   const shiftIsBest = shiftSavings > liveSavings;
   const bestSavings = shiftIsBest ? shiftSavings : liveSavings;
-  // Nothing to offer: no routing saving and no date-shift suggestion. Said as
-  // what it is — live prices for these dates — not as "Best price". The
-  // optimizer's date probe returns no suggestion alike when it found nothing,
-  // when it was skipped (an inter-city leg unpriced) or failed, and it never
-  // runs for a saved Browse preset or after the dates change, so "nothing
-  // cheaper" is not something the client can claim. Never "You can save $0".
+  // Nothing to offer: no routing saving and no date-shift suggestion. Never
+  // "You can save $0". "Best price for these dates" is said only when the
+  // optimizer reports it really priced nearby dates and nothing cheaper held
+  // up (`dateShiftChecked`). No suggestion alone can't say that: it is also
+  // what a skipped or failed probe returns, and the probe never runs for a
+  // saved Browse preset or after the dates change. Unchecked, the box makes
+  // no claim at all — it isn't shown.
   const nothingToSave = Math.round(bestSavings) <= 0;
+  const showPriceBox = !nothingToSave || trip.dateShiftChecked === true;
   const shiftDateNice = (() => {
     const iso = trip.dateShiftSuggestion?.newStartDate;
     if (!iso) return '';
@@ -416,6 +418,7 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
           {/* Savings — clickable when date-shift options exist: opens a
               menu of alternative start dates with their real, re-priced
               savings (the optimizer scored each shifted date already). */}
+          {showPriceBox && (
           <div className="relative" ref={shiftMenuRef}>
             <button
               type="button"
@@ -445,7 +448,7 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
                 )}
               </div>
               <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
-                {nothingToSave ? 'Live prices' : `$${animatedSavings.toLocaleString()}`}
+                {nothingToSave ? 'Best price' : `$${animatedSavings.toLocaleString()}`}
               </div>
               <div className="text-[#22c088]/50 text-[9px]">
                 {nothingToSave
@@ -500,6 +503,7 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
               </div>
             )}
           </div>
+          )}
 
           {/* Edit in Canvas — saves the trip first if needed and then
               opens the canvas. Replaces the standalone Save Trip button

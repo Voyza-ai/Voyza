@@ -174,20 +174,30 @@ describe('ResultsHeader', () => {
     expect(screen.queryByText('Cheaper start dates')).not.toBeInTheDocument();
   });
 
-  it('with nothing to save, says the prices are live — never "You can save $0", never an unchecked "Best price"', () => {
-    // Stored total == live total and no date-shift suggestion. That absence
-    // is all the client gets whether the optimizer's date probe found
-    // nothing, skipped (an unpriced leg), failed, or never ran (a saved
-    // Browse preset; any trip after its dates changed) — so the box must
-    // not claim the prices are the best for these dates.
-    const base = buildTrip({ savings: 0, dateShiftSuggestion: undefined } as any);
+  // Stored total == live total and no date-shift suggestion. That absence
+  // alone is what the optimizer's probe returns whether it found nothing,
+  // was skipped (an unpriced leg), failed, or never ran (a saved Browse
+  // preset; any trip after its dates changed) — so "Best price" needs the
+  // optimizer's own word that it priced nearby dates (`dateShiftChecked`).
+  const nothingToSaveTrip = (over: Record<string, unknown> = {}) => {
+    const base = buildTrip({ savings: 0, dateShiftSuggestion: undefined, ...over } as any);
     const { liveTripTotal } = require('@/lib/tripTotals');
-    const trip = { ...base, totalCost: liveTripTotal(base) };
-    render(<ResultsHeader trip={trip} />);
-    expect(screen.queryByText('Best price')).not.toBeInTheDocument();
+    return { ...base, totalCost: liveTripTotal(base) };
+  };
+
+  it('nothing to save and nearby dates checked: "Best price for these dates"', () => {
+    render(<ResultsHeader trip={nothingToSaveTrip({ dateShiftChecked: true })} />);
     expect(screen.getByText('Price check')).toBeInTheDocument();
-    expect(screen.getByText('Live prices')).toBeInTheDocument();
+    expect(screen.getByText('Best price')).toBeInTheDocument();
     expect(screen.getByText('for these dates')).toBeInTheDocument();
+    expect(screen.queryByText(/You can save/i)).not.toBeInTheDocument();
+  });
+
+  it('nothing to save and nothing checked: the box makes no claim at all — never "You can save $0"', () => {
+    render(<ResultsHeader trip={nothingToSaveTrip()} />);
+    expect(screen.queryByText('Price check')).not.toBeInTheDocument();
+    expect(screen.queryByText('Best price')).not.toBeInTheDocument();
+    expect(screen.queryByText('Live prices')).not.toBeInTheDocument();
     expect(screen.queryByText(/You can save/i)).not.toBeInTheDocument();
   });
 

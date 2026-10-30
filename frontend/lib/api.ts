@@ -182,6 +182,8 @@ export type OptimizeResult = {
   dates: Record<string, { arrival: string; departure: string }>;
   /** Present when shifting the trip by ±1 or ±2 days saves meaningful money. */
   dateShiftSuggestion?: DateShiftSuggestion;
+  /** Nearby start dates were really priced (see the optimizer's OptimizeResult). */
+  dateShiftChecked?: boolean;
   /** Home anchor legs. Present when `origin` was passed to the request. */
   outboundLeg?: import('./types').HomeLeg | null;
   returnLeg?: import('./types').HomeLeg | null;

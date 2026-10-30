@@ -1012,6 +1012,7 @@ function CanvasPageInner() {
         // refuses a pin that contradicts one), so it must see them.
         constraints: ls.trip?.constraints,
         dateShiftSuggestion: undefined,
+        dateShiftChecked: false,
       } as Trip;
     },
     [tripId, storeTrip?.travelers],

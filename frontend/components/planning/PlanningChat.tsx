@@ -1152,6 +1152,7 @@ export default function PlanningChat() {
       cities,
       savingsTips: [],
       dateShiftSuggestion: result.dateShiftSuggestion,
+      dateShiftChecked: result.dateShiftChecked === true,
       origin,
       returnToHome: answers.returnToHome ?? true,
       // Carried through so the results page can say which reading of an
