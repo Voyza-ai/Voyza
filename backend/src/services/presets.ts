@@ -18,6 +18,7 @@ import { sameAirportArea } from './location/sameAirportArea';
 import curated from '../data/presets/curated.json';
 import generated from '../data/presets/generated.json';
 import editorial from '../data/presets/editorial.json';
+import { formatDurationMinutes } from '../utils/duration';
 
 /**
  * Browse catalog: curated + AI-generated preset trips.
@@ -602,7 +603,7 @@ async function repricePreset(
       // whoever sold that one fare — under a test token, "Duffel
       // Airways". A refresh updates prices, never the route.
       operator: prev.operator || (option.operator ?? option.carrier ?? ''),
-      duration: mins ? `${Math.floor(mins / 60)}h ${mins % 60}m` : prev.duration,
+      duration: mins ? formatDurationMinutes(mins) : prev.duration,
       price: Math.round(price),
     };
     out.live++;

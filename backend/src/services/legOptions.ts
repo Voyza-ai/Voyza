@@ -13,6 +13,7 @@
 
 import { searchFlights, getIataCode, FlightOffer } from './flights';
 import { sameAirportArea } from './location/sameAirportArea';
+import { formatDurationMinutes } from '../utils/duration';
 import { searchTrains, TrainOffer } from './trains';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
@@ -165,12 +166,7 @@ function formatHHMM(s: string | null | undefined): string | null {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-function formatDuration(mins: number): string {
-  if (!mins || mins < 0) return '';
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return `${h}h ${m}m`;
-}
+const formatDuration = formatDurationMinutes;
 
 /**
  * Does a given option satisfy the window? All bounds are HH:MM in local
