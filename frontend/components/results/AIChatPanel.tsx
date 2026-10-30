@@ -14,6 +14,7 @@ import {
   ModeComparison,
 } from '@/lib/api';
 import { useTripStore } from '@/store/tripStore';
+import { displayAmount } from '@/lib/tripTotals';
 
 type Message = {
   id: number;
@@ -25,7 +26,28 @@ type Message = {
   proposalState?: 'pending' | 'accepted' | 'rejected';
   /** Present on AI messages that carry an inline flight-vs-train comparison. */
   comparison?: ModeComparison;
+  /**
+   * The opening lines. Their amounts are group totals fixed when the panel
+   * opened, and are worded at render time (`messageText`) so they read in
+   * the unit the Total / Per person toggle shows, like every other price.
+   */
+  intro?: { kind: 'greeting'; cities: number; savings: number } | { kind: 'shiftTip'; text: string; savings: number };
 };
+
+/**
+ * What a message says, in the unit the price toggle shows. The greeting's
+ * baseline is the optimizer's: the cities in the order they were given
+ * (optimizer.ts savingsVsNaive), not a "most common routing".
+ */
+function messageText(m: Message, priceMode: 'total' | 'perPerson', travelers: number): string {
+  if (!m.intro) return m.content;
+  const perPerson = priceMode === 'perPerson' && travelers > 1;
+  const amount = `$${displayAmount(m.intro.savings, priceMode, travelers).toLocaleString()}${perPerson ? ' per person' : ''}`;
+  if (m.intro.kind === 'shiftTip') return `${m.intro.text} would save about ${amount}.`;
+  return m.intro.savings > 0
+    ? `I built this ${m.intro.cities}-city trip to save you ${amount} vs your original city order. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`
+    : `You're working on a ${m.intro.cities}-city trip. Ask me anything — swap transports, shift dates, rework a city, or ask why things are ordered this way.`;
+}
 
 type AIChatPanelProps = {
   trip: Trip;
@@ -248,10 +270,8 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
       {
         id: 0,
         role: 'ai',
-        content:
-          trip.savings > 0
-            ? `I built this ${trip.cities.length}-city trip to save you $${trip.savings} vs the most common routing. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`
-            : `You're working on a ${trip.cities.length}-city trip. Ask me anything — swap transports, shift dates, rework a city, or ask why things are ordered this way.`,
+        content: '',
+        intro: { kind: 'greeting', cities: trip.cities.length, savings: trip.savings },
       },
     ];
     // Date-shift savings tip — used to be a page banner above the flowchart;
@@ -270,11 +290,13 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
       initial.push({
         id: 1,
         role: 'ai',
-        content: `💡 Heads up — starting ${n} day${n === 1 ? '' : 's'} ${dir} (${nice}) would save about $${Math.round(shift.savings)}.`,
+        content: '',
+        intro: { kind: 'shiftTip', text: `💡 Heads up — starting ${n} day${n === 1 ? '' : 's'} ${dir} (${nice})`, savings: shift.savings },
       });
     }
     return initial;
   });
+  const priceMode = useTripStore((s) => s.priceMode);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>(fallbackSuggestions(trip));
@@ -324,7 +346,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     // Build history from current text messages only (proposal cards are UI state).
     const history: ChatTurn[] = messages
       .filter((m) => !m.proposal)
-      .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
+      .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: messageText(m, priceMode, trip.travelers) }));
 
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
@@ -387,7 +409,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     } finally {
       setIsTyping(false);
     }
-  }, [isTyping, trip, messages, applyTrip, latestTrip]);
+  }, [isTyping, trip, messages, applyTrip, latestTrip, priceMode]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -461,7 +483,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
                   border: msg.role === 'user' ? '1px solid rgba(46,107,196,0.2)' : '1px solid rgba(0,0,0,0.06)',
                 }}
               >
-                {msg.content}
+                {messageText(msg, priceMode, trip.travelers)}
               </div>
 
               {/* Proposal card — only for date_shift (pin/min-days).
@@ -482,6 +504,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
               {msg.comparison && (
                 <ModeComparisonCard
                   comparison={msg.comparison}
+                  currentMode={legMode(trip, msg.comparison.fromCity, msg.comparison.toCity)}
                   onSwitch={(mode) => {
                     const c = msg.comparison!;
                     handleSend(
@@ -671,10 +694,28 @@ function DateShiftProposalCard({
 // request — the user opts into the actual trip mutation.
 type ModeComparisonCardProps = {
   comparison: ModeComparison;
+  /** The mode the leg uses now — never offered as a switch. Null when the
+   *  leg has no option (or is not found), so either found mode is offered. */
+  currentMode: 'flight' | 'train' | null;
   onSwitch: (mode: 'flight' | 'train') => void;
 };
 
-function ModeComparisonCard({ comparison, onSwitch }: ModeComparisonCardProps) {
+/**
+ * The mode a trip leg uses now: the consecutive pair `from` → `to` (the leg
+ * plan.ts findTripLeg compares). A leg nothing was found for is `unavailable`
+ * and its 'flight' is the empty placeholder's, so it has no mode.
+ */
+function legMode(trip: Trip, from: string, to: string): 'flight' | 'train' | null {
+  const f = from.toLowerCase();
+  const t = to.toLowerCase();
+  const i = trip.cities.findIndex(
+    (c, k) => k + 1 < trip.cities.length && c.name.toLowerCase() === f && trip.cities[k + 1].name.toLowerCase() === t,
+  );
+  const leg = i >= 0 ? trip.cities[i].transportOut : null;
+  return leg && !leg.unavailable ? leg.mode : null;
+}
+
+function ModeComparisonCard({ comparison, currentMode, onSwitch }: ModeComparisonCardProps) {
   const { flight, train, recommendation, cheapest, fastest } = comparison;
 
   return (
@@ -705,6 +746,7 @@ function ModeComparisonCard({ comparison, onSwitch }: ModeComparisonCardProps) {
           isCheapest={cheapest === 'flight'}
           isFastest={fastest === 'flight'}
           isRecommended={recommendation === 'flight'}
+          isCurrent={currentMode === 'flight'}
           onClick={() => onSwitch('flight')}
         />
         <div className="border-l border-gray-100" />
@@ -715,6 +757,7 @@ function ModeComparisonCard({ comparison, onSwitch }: ModeComparisonCardProps) {
           isCheapest={cheapest === 'train'}
           isFastest={fastest === 'train'}
           isRecommended={recommendation === 'train'}
+          isCurrent={currentMode === 'train'}
           onClick={() => onSwitch('train')}
         />
       </div>
@@ -729,6 +772,8 @@ type ModeCellProps = {
   isCheapest: boolean;
   isFastest: boolean;
   isRecommended: boolean;
+  /** The leg already uses this mode: no "Switch to" for it. */
+  isCurrent: boolean;
   onClick: () => void;
 };
 
@@ -739,6 +784,7 @@ function ModeCell({
   isCheapest,
   isFastest,
   isRecommended,
+  isCurrent,
   onClick,
 }: ModeCellProps) {
   if (!option) {
@@ -768,7 +814,8 @@ function ModeCell({
         )}
       </div>
       <div className="text-[14px] font-semibold text-gray-900">
-        ${Math.round(option.price).toLocaleString()}
+        {/* A price the provider did not give is unknown, not $0. */}
+        {option.price > 0 ? `$${Math.round(option.price).toLocaleString()}` : '—'}
         {isCheapest && (
           <span className="ml-1 text-[10px] text-emerald-600 font-medium">cheapest</span>
         )}
@@ -778,17 +825,19 @@ function ModeCell({
         {isFastest && <span className="ml-1 text-emerald-600 font-medium">fastest</span>}
       </div>
       <div className="text-[11px] text-gray-400 truncate w-full">{option.operator}</div>
-      <button
-        onClick={onClick}
-        className="mt-1 text-[11px] font-medium px-2 py-1 rounded-md transition"
-        style={{
-          background: 'rgba(46,107,196,0.08)',
-          color: '#2e6bc4',
-          border: '1px solid rgba(46,107,196,0.2)',
-        }}
-      >
-        Switch to {label.toLowerCase()}
-      </button>
+      {!isCurrent && (
+        <button
+          onClick={onClick}
+          className="mt-1 text-[11px] font-medium px-2 py-1 rounded-md transition"
+          style={{
+            background: 'rgba(46,107,196,0.08)',
+            color: '#2e6bc4',
+            border: '1px solid rgba(46,107,196,0.2)',
+          }}
+        >
+          Switch to {label.toLowerCase()}
+        </button>
+      )}
     </div>
   );
 }
