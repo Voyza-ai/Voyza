@@ -671,6 +671,54 @@ function summarizeTripForChat(trip: any): any {
   };
 }
 
+type TripLegLookup =
+  | { kind: 'leg'; fromCity: any; toCity: any }
+  | { kind: 'unknown_city' }
+  | { kind: 'not_a_leg'; fromName: string; toName: string };
+
+/**
+ * Resolve the `from → to` the model named to a leg of THIS trip — two
+ * CONSECUTIVE cities in trip order. Both cities merely being in the trip is
+ * not enough (B9). Scans pairs rather than taking each city's first match,
+ * so a repeat visit (Rome → Florence → Rome) still finds Florence → Rome.
+ */
+function findTripLeg(cities: any[], from: unknown, to: unknown): TripLegLookup {
+  const fromLower = String(from).toLowerCase();
+  const toLower = String(to).toLowerCase();
+  for (let i = 0; i + 1 < cities.length; i++) {
+    if (
+      cities[i].name.toLowerCase() === fromLower &&
+      cities[i + 1].name.toLowerCase() === toLower
+    ) {
+      return { kind: 'leg', fromCity: cities[i], toCity: cities[i + 1] };
+    }
+  }
+  const fromCity = cities.find((c: any) => c.name.toLowerCase() === fromLower);
+  const toCity = cities.find((c: any) => c.name.toLowerCase() === toLower);
+  if (!fromCity || !toCity) return { kind: 'unknown_city' };
+  return { kind: 'not_a_leg', fromName: fromCity.name, toName: toCity.name };
+}
+
+/**
+ * The reply for a non-leg: names the trip's real legs so the user (and the
+ * model, which reads this back as history next turn) can pick one.
+ */
+function notALegReply(
+  cities: any[],
+  lookup: { fromName: string; toName: string },
+): string {
+  const asked = `${lookup.fromName} → ${lookup.toName}`;
+  const legs = cities.slice(1).map((c: any, i: number) => `${cities[i].name} → ${c.name}`);
+  if (legs.length === 0) {
+    return `${asked} isn't a leg of this trip — it has no travel between cities.`;
+  }
+  if (legs.length === 1) {
+    return `${asked} isn't a leg of this trip — its only leg is ${legs[0]}. Did you mean that one?`;
+  }
+  const listed = `${legs.slice(0, -1).join(', ')} and ${legs[legs.length - 1]}`;
+  return `${asked} isn't a leg of this trip — its legs are ${listed}. Which one did you mean?`;
+}
+
 router.post(
   '/chat',
   asyncHandler(async (req, res) => {
@@ -783,20 +831,21 @@ ${JSON.stringify(tripSummary, null, 2)}
     //     to switch (which routes through show_transport_options) or
     //     accept the current pick.
     if (toolName === 'compare_modes') {
-      const fromLower = String(toolInput.from).toLowerCase();
-      const toLower = String(toolInput.to).toLowerCase();
-      const fromCity = (currentTrip.cities ?? []).find(
-        (c: any) => c.name.toLowerCase() === fromLower,
-      );
-      const toCity = (currentTrip.cities ?? []).find(
-        (c: any) => c.name.toLowerCase() === toLower,
-      );
-      if (!fromCity || !toCity) {
+      const lookup = findTripLeg(currentTrip.cities ?? [], toolInput.from, toolInput.to);
+      if (lookup.kind === 'unknown_city') {
         return res.json({
           type: 'answer',
           reply: `I couldn\'t find a ${toolInput.from} → ${toolInput.to} leg in your trip.`,
         });
       }
+      // Same rule as the leg-refresh tools below: a comparison for a
+      // non-leg would be priced on the wrong day (the from-city's departure
+      // to a DIFFERENT next city), and its "Switch" button asks for that
+      // non-leg as a refresh next.
+      if (lookup.kind === 'not_a_leg') {
+        return res.json({ type: 'answer', reply: notALegReply(currentTrip.cities, lookup) });
+      }
+      const { fromCity, toCity } = lookup;
 
       const travelDate =
         fromCity.dates?.departure ?? fromCity.departure_date ?? null;
@@ -883,20 +932,25 @@ ${JSON.stringify(tripSummary, null, 2)}
     //     set_transport_window ALSO persists the constraint so future
     //     re-optimizations honor the time bound.
     if (toolName === 'set_transport_window' || toolName === 'show_transport_options') {
-      const fromLower = String(toolInput.from).toLowerCase();
-      const toLower = String(toolInput.to).toLowerCase();
-      const fromCity = (currentTrip.cities ?? []).find(
-        (c: any) => c.name.toLowerCase() === fromLower,
-      );
-      const toCity = (currentTrip.cities ?? []).find(
-        (c: any) => c.name.toLowerCase() === toLower,
-      );
-      if (!fromCity || !toCity) {
+      const lookup = findTripLeg(currentTrip.cities ?? [], toolInput.from, toolInput.to);
+      if (lookup.kind === 'unknown_city') {
         return res.json({
           type: 'answer',
           reply: `I couldn\'t find a ${toolInput.from} → ${toolInput.to} flight or train in your trip.`,
         });
       }
+      // Both cities exist but aren't consecutive: there is no such leg to
+      // refresh. The frontend applies a refresh by city NAME — it sets the
+      // from-city's transportOut and the to-city's transportIn — so on
+      // Rome → Venice → Florence a "Rome → Florence" refresh overwrote
+      // Rome's real Rome → Venice leg with a $95 Rome → Florence flight
+      // while Venice still showed Rome → Venice inbound, and "Florence →
+      // Rome" overwrote Rome's inbound home flight (B9, scripted on this
+      // route). Answer instead, naming the legs that do exist.
+      if (lookup.kind === 'not_a_leg') {
+        return res.json({ type: 'answer', reply: notALegReply(currentTrip.cities, lookup) });
+      }
+      const { fromCity, toCity } = lookup;
 
       const travelDate =
         fromCity.dates?.departure ?? fromCity.departure_date ?? null;
