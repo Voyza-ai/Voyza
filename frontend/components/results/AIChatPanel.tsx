@@ -68,6 +68,59 @@ function fallbackSuggestions(trip: Trip): string[] {
   ];
 }
 
+/**
+ * The chips for a trip, kept for this tab so a reload doesn't buy them again.
+ *
+ * Each set costs an AI call and a slot of the 30-per-15-minutes limit on
+ * /api/plan. Once the results page survives a reload (restoreTripSession),
+ * asking again on that mount would pay twice for the four chips that were
+ * already on screen, out of a rate limit a demo shares with everything else.
+ *
+ * Read back ONLY for a trip restored after a reload; every other mount asks,
+ * exactly as it always has. Keyed by what the chips are written about ("Why
+ * Hotel Levell for Amsterdam?"): the party, home, each stop with its dates,
+ * chosen stay and onward mode, so a restored trip that differs in any of
+ * those still asks. Only an answer is kept (the server's own fallback list
+ * counts, since the client cannot tell it apart); a failed request leaves
+ * nothing behind. sessionStorage, so it ends with the tab.
+ */
+const SUGGESTIONS_STORAGE_KEY = 'bluemurr-chat-suggestions';
+
+function suggestionsKey(trip: Trip): string {
+  return JSON.stringify([
+    trip.travelers,
+    trip.origin?.city ?? null,
+    trip.cities.map((c) => [
+      c.name,
+      c.dates?.arrival ?? null,
+      c.dates?.departure ?? null,
+      c.customHotel?.name ?? c.hotel?.name ?? null,
+      c.transportOut?.mode ?? null,
+    ]),
+  ]);
+}
+
+function readCachedSuggestions(key: string): string[] | null {
+  try {
+    const raw = window.sessionStorage.getItem(SUGGESTIONS_STORAGE_KEY);
+    const saved = raw ? JSON.parse(raw) : null;
+    const list = saved?.key === key ? saved.suggestions : null;
+    return Array.isArray(list) && list.length > 0 && list.every((s) => typeof s === 'string')
+      ? list
+      : null;
+  } catch {
+    return null; // storage blocked or unreadable — ask the server, as before
+  }
+}
+
+function cacheSuggestions(key: string, suggestions: string[]) {
+  try {
+    window.sessionStorage.setItem(SUGGESTIONS_STORAGE_KEY, JSON.stringify({ key, suggestions }));
+  } catch {
+    // Full or blocked — the next mount simply asks again.
+  }
+}
+
 /** Short date like "Mar 5" from YYYY-MM-DD. */
 function fmt(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -210,12 +263,20 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const key = suggestionsKey(trip);
+    const cached = useTripStore.getState().restoredFromSession ? readCachedSuggestions(key) : null;
+    if (cached) {
+      setSuggestions(cached);
+      setSuggestionsLoaded(true);
+      return;
+    }
     let cancelled = false;
     planChatSuggestions({ currentTrip: trip })
       .then((res) => {
         if (cancelled) return;
         if (Array.isArray(res.suggestions) && res.suggestions.length > 0) {
           setSuggestions(res.suggestions);
+          cacheSuggestions(key, res.suggestions);
         }
         setSuggestionsLoaded(true);
       })

@@ -1,6 +1,6 @@
 'use client';
 
-import { useTripStore } from '@/store/tripStore';
+import { useTripStore, restoreTripSession } from '@/store/tripStore';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, Suspense } from 'react';
 import Navbar from '@/components/shared/Navbar';
@@ -52,6 +52,13 @@ function ResultsPageInner() {
   const fetchedRef = useRef(false);
 
   useEffect(() => {
+    // A reload of a trip that was never saved: this tab's own copy is the
+    // only one there is (see restoreTripSession). Restored before the auth
+    // wait because it needs no auth, and it lands before the backfills below
+    // see a trip, so their data guards (hotels already listed, home legs
+    // already found) hold and the reload buys nothing a second time.
+    if (!tripId && !useTripStore.getState().currentTrip && restoreTripSession()) return;
+
     // Wait for auth to be ready before fetching protected routes
     if (isAuthLoading) return;
 
