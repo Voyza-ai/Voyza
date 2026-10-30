@@ -39,6 +39,8 @@ jest.mock('../services/duffel', () => {
   const mockDuffel = { offerRequests: { create: jest.fn() }, suggestions: { list: jest.fn() } };
   return { getDuffel: () => mockDuffel, __mockDuffel: mockDuffel };
 });
+// Not what this file is about, and it builds the whole location index.
+jest.mock('../services/location/sameAirportArea', () => ({ sameAirportArea: () => false }));
 
 import * as flights from '../services/flights';
 import { searchFlights } from '../services/flights';

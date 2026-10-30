@@ -36,6 +36,8 @@ jest.mock('../services/duffel', () => {
     __mockDuffel: mockDuffel,
   };
 });
+// Not what this file is about, and it builds the whole location index.
+jest.mock('../services/location/sameAirportArea', () => ({ sameAirportArea: () => false }));
 
 import { searchFlights, getIataCode, sliceDurationMinutes, retryDelayFromHeaders } from '../services/flights';
 
