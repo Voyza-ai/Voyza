@@ -5,6 +5,7 @@ import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
 import { resolveOriginAirports, type OriginCandidate } from './location/originAirports';
 import { sameAirportArea } from './location/sameAirportArea';
+import { NO_AIRLINE_SERVICE } from '../data/noAirlineService';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
 import { withDuffelRetryBudget } from './duffelBudget';
 import { AppError } from '../middleware/error';
@@ -976,7 +977,9 @@ type HomeFlightOffer = {
 /**
  * Normalize, dedupe and cap a caller-supplied origin airport list. Every
  * home-leg search goes through this, so the cap holds for /api/optimize
- * and /api/flights/home-legs alike.
+ * and /api/flights/home-legs alike. A field with no airline service
+ * (NO_AIRLINE_SERVICE: Boston's Hanscom, Miami's Opa-locka…) is dropped
+ * while any other airport remains.
  */
 function homeAirportsFor(originAirports: string[]): string[] {
   const codes = new Set<string>();
@@ -986,7 +989,9 @@ function homeAirportsFor(originAirports: string[]): string[] {
     codes.add(iata);
     if (codes.size >= MAX_HOME_AIRPORTS) break;
   }
-  return [...codes];
+  const all = [...codes];
+  const airline = all.filter((iata) => !NO_AIRLINE_SERVICE.has(iata));
+  return airline.length > 0 ? airline : all;
 }
 
 async function searchHomeFlights(ctx: RunContext, params: {
