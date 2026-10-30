@@ -26,6 +26,10 @@
 -- Column order, constraint names, defaults and index definitions below are
 -- verbatim from the live database, so `supabase db diff` against a DB built
 -- from this file reports nothing.
+--
+-- The RPC that writes preset_events, record_preset_event(), is in
+-- 014_record_preset_event.sql. Both are rehearsed together by
+-- ../dry-runs/013-014_preset_marketplace.dry-run.sql.
 -- ============================================================================
 
 -- ── 1. preset_trips ─────────────────────────────────────────────────────────
@@ -161,16 +165,11 @@ end $$;
 -- ============================================================================
 -- REVERSAL
 -- ============================================================================
--- ⚠️  DATA-DESTRUCTIVE. preset_trips holds the curated itineraries the Browse
---     tab serves and preset_events holds their engagement history; dropping
---     the tables deletes both, and the ON DELETE CASCADE means dropping
---     preset_trips alone takes preset_events' rows with it. There is no
---     backup of this content in the repo. Do not run this to "undo 013" —
---     013 did not create these tables in production, it only recorded them.
---     Only useful for tearing down a local from-scratch build.
---
--- drop table if exists public.preset_events;
--- drop table if exists public.preset_trips;
+-- There is no "undo 013" that drops the tables: 013 did not create them in
+-- production, it only recorded them, and they hold live data — the curated
+-- itineraries Browse serves and their engagement history (ON DELETE CASCADE
+-- takes preset_events with preset_trips), with no backup in the repo. Those
+-- statements were removed from this file on purpose.
 --
 -- To drop only what a from-scratch run of this file added, leaving the tables:
 -- drop policy if exists preset_trips_public_read on public.preset_trips;

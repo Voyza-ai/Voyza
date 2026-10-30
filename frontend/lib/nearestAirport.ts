@@ -185,7 +185,19 @@ export type DetectResult =
        */
       coords: { lat: number; lon: number };
     }
-  | { ok: false; reason: 'unsupported' | 'denied' | 'nomatch' };
+  | { ok: false; reason: 'unsupported' | 'denied' | 'nomatch' | 'timeout' };
+
+/**
+ * Upper bound on the WHOLE detection, the browser's permission prompt
+ * included. getCurrentPosition's own `timeout` only starts once permission
+ * is granted, so a prompt the user ignores or dismisses never called back at
+ * all — and "Save" / "Plan a similar trip" on /browse (and "use my location"
+ * in both planners) spun indefinitely: over 90 s measured in a headless
+ * browser (audit D-13). Long enough to read the prompt and allow it plus a
+ * typical position fix; past it, callers take their no-location path exactly
+ * as for a denial.
+ */
+export const DETECT_TIMEOUT_MS = 10_000;
 
 /**
  * Browser-side detection: geolocation permission prompt → nearest airport
@@ -198,19 +210,31 @@ export type DetectResult =
  * Anything that would put them in a request body or a query string breaks
  * this promise, and the "use my location" affordance rests on it.
  */
-export function detectNearestAirportCity(): Promise<DetectResult> {
+export function detectNearestAirportCity(
+  timeoutMs: number = DETECT_TIMEOUT_MS,
+): Promise<DetectResult> {
   return new Promise((resolve) => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       resolve({ ok: false, reason: 'unsupported' });
       return;
     }
+    // First answer wins. A position that arrives after the bound is dropped
+    // here, so it can never replace the fallback a caller already acted on.
+    let settled = false;
+    const settle = (result: DetectResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(bound);
+      resolve(result);
+    };
+    const bound = setTimeout(() => settle({ ok: false, reason: 'timeout' }), timeoutMs);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
         const city = findNearestAirportCity(coords.lat, coords.lon);
-        resolve(city ? { ok: true, city, coords } : { ok: false, reason: 'nomatch' });
+        settle(city ? { ok: true, city, coords } : { ok: false, reason: 'nomatch' });
       },
-      () => resolve({ ok: false, reason: 'denied' }),
+      () => settle({ ok: false, reason: 'denied' }),
       { timeout: 8000, maximumAge: 300000 },
     );
   });
