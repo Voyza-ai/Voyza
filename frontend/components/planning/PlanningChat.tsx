@@ -9,8 +9,9 @@ import Link from 'next/link';
 import { interpretPlan, optimizeTrip, searchHotels, searchActivities, searchRestaurants, suggestDestinations, OptimizeResult, ActivitySuggestion, RestaurantSuggestion } from '@/lib/api';
 import { Trip, City, Transport, Restaurant, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
 import { hotelFromResult } from '@/lib/hotelShape';
+import { liveTripTotal } from '@/lib/tripTotals';
 import { suggestDestinationsForVibe } from '@/lib/api';
-import { parseDateInput } from '@/lib/parseDate';
+import { parseDateInput, parseDateRangeInput } from '@/lib/parseDate';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { vibesFromAnswer } from '@/lib/vibeMap';
@@ -142,6 +143,34 @@ type Message = {
   stepId?: string;
 };
 
+/**
+ * The guided planner's conversation, kept for "Adjust trip".
+ *
+ * "Adjust trip" on the results page goes to /plan?resume=1, promising "your
+ * trip loaded — change anything and search again". The AI chat could keep
+ * that promise because its conversation lives in the store (`chatHistory`).
+ * The guided planner's lives in this component's state, which is gone once it
+ * unmounts on the way to /results — so a guided traveller came back to a blank
+ * "What kind of trip are you planning?" with their answers still in the store
+ * and nothing on screen to show or change them.
+ *
+ * Module scope gives it exactly the store's lifetime: it survives client-side
+ * navigation, not a reload, the same as the answers it describes. Written when
+ * a guided search lands on /results; cleared by a fresh visit (alongside the
+ * store reset) and by a search from anywhere else, so it only ever describes
+ * the session the store holds.
+ */
+type GuidedSnapshot = {
+  intent: 'place' | 'vibe' | 'budget';
+  steps: Step[];
+  currentStepIndex: number;
+  messages: Message[];
+  isComplete: boolean;
+  vibe: string | null;
+  msgCounter: number;
+};
+let guidedSession: GuidedSnapshot | null = null;
+
 export default function PlanningChat() {
   const router = useRouter();
   // Landing-page hero seed — handed to the conversational planner on mount.
@@ -164,6 +193,11 @@ export default function PlanningChat() {
   const msgCounter = useRef(0);
 
   const nextId = () => `msg-${++msgCounter.current}`;
+
+  // Latest guided state, read when a search lands — the search's own closure
+  // is from the render that started it and can miss bubbles added since.
+  const guidedStateRef = useRef({ intent, steps, currentStepIndex, messages, isComplete, vibe });
+  guidedStateRef.current = { intent, steps, currentStepIndex, messages, isComplete, vibe };
 
   // Show a one-time warning bubble if the backend returned a mock AI response
   // (Anthropic key missing or SDK error). Without this the user sees garbled
@@ -235,11 +269,32 @@ export default function PlanningChat() {
       const heroSeed = useTripStore.getState().answers.rawInput;
       useTripStore.getState().resetPlanning();
       if (heroSeed) useTripStore.getState().setAnswer('rawInput', heroSeed);
+      guidedSession = null; // the conversation goes with the answers
     }
 
     // Read through the store rather than the render closure: `answers` was
     // captured before the reset above, so it can be a trip behind.
     const snapshotRawInput = useTripStore.getState().answers.rawInput;
+
+    // A staged one-click replan owns the screen (see the autorun effects
+    // below); it must not come back to an old guided transcript. Both of its
+    // signals are checked, for the reason given there: the URL can be stale
+    // during a client-side navigation, the sessionStorage snapshot is not.
+    const autorunStaged = (() => {
+      if (new URLSearchParams(window.location.search).get('autorun') === '1') return true;
+      try {
+        return sessionStorage.getItem('bluemurr-autorun') !== null;
+      } catch {
+        return false;
+      }
+    })();
+    const guided =
+      resume &&
+      !autorunStaged &&
+      guidedSession &&
+      validateTripInputs(useTripStore.getState().answers).length === 0
+        ? guidedSession
+        : null;
 
     if (snapshotRawInput) {
       // Hero-input seed → straight into the AI conversation; it parses the
@@ -248,6 +303,16 @@ export default function PlanningChat() {
       setAnswer('rawInput', undefined);
       setAnswer('planningMode', 'destination');
       setIntent('chat');
+    } else if (guided) {
+      // Resumed guided session ("Adjust trip") — the same screen the search
+      // left from: the conversation, and Find my trip ready to run again.
+      msgCounter.current = guided.msgCounter;
+      setIntent(guided.intent);
+      setSteps(guided.steps);
+      setCurrentStepIndex(guided.currentStepIndex);
+      setMessages(guided.messages);
+      setIsComplete(guided.isComplete);
+      setVibe(guided.vibe);
     } else if (useTripStore.getState().chatHistory.length > 0) {
       // Resumed session (back from results to replan) — rejoin the
       // conversation where it left off.
@@ -1360,6 +1425,15 @@ export default function PlanningChat() {
         totalNights: totalNightsForOptimize,
       });
 
+      // The user may have left /plan while that ran. The search outlives the
+      // page, and used to finish regardless: search hotels and AI picks,
+      // overwrite `currentTrip` and push /results over whatever they had
+      // gone on to look at. `mountedRef` is cleared only on a real unmount
+      // (StrictMode's remount sets it back), so this stops the search at
+      // each await — before spending more rate-limited calls, and before
+      // touching the store or the URL.
+      if (!mountedRef.current) return;
+
       trip = buildTripFromOptimize(result, travelers);
 
       // Compute a per-night hotel cap from the total budget.
@@ -1381,64 +1455,20 @@ export default function PlanningChat() {
           ? Math.max(40, Math.floor((totalBudget * 0.4) / totalNights))
           : undefined;
 
-      // Step 3: Fetch hotels for each city. Booking.com (via RapidAPI free
-      // tier) rate-limits parallel calls — 4 simultaneous requests often
-      // have one or two come back empty, causing the UI to render "$0/night".
-      // We throttle to HOTEL_CONCURRENCY requests at a time. Combined with
-      // the backend's 429-retry, this prevents silent empty hotels for
-      // multi-city trips.
-      setFindTripStatus('Finding hotels...');
-      const HOTEL_CONCURRENCY = 2;
-
-      const fetchOne = async (city: (typeof trip.cities)[number]) => {
-        try {
-          const results = await searchHotels({
-            city: city.name,
-            checkin: city.dates.arrival,
-            checkout: city.dates.departure,
-            adults: travelers,
-            // maxPrice in searchHotels is total-stay not per-night — compute
-            // nights-for-this-city × nightly cap as the stay cap.
-            ...(hotelNightlyCap !== undefined
-              ? {
-                  maxPrice:
-                    hotelNightlyCap *
-                    Math.max(
-                      1,
-                      Math.round(
-                        (new Date(city.dates.departure).getTime() -
-                          new Date(city.dates.arrival).getTime()) /
-                          (1000 * 60 * 60 * 24),
-                      ),
-                    ),
-                }
-              : {}),
-          });
-          if (results.length > 0) {
-            const hotels = results.map(hotelFromResult);
-            return { hotels, hotel: hotels[0], selectedHotelIndex: 0 };
-          }
-        } catch {
-          // Hotel search failure is non-fatal
-        }
-        return null;
-      };
-
-      // Simple concurrency limiter: walk cities in fixed-size batches.
-      const hotelResults: Array<Awaited<ReturnType<typeof fetchOne>>> = [];
-      for (let i = 0; i < trip.cities.length; i += HOTEL_CONCURRENCY) {
-        const batch = trip.cities.slice(i, i + HOTEL_CONCURRENCY);
-        const batchResults = await Promise.all(batch.map(fetchOne));
-        hotelResults.push(...batchResults);
-      }
-      hotelResults.forEach((hotelResult, idx) => {
-        if (hotelResult) {
-          trip.cities[idx] = { ...trip.cities[idx], ...hotelResult };
-        }
-      });
-
-      // Step 4: fetch AI-picked activities AND restaurants per city in parallel
-      setFindTripStatus('Finding things to do & places to eat...');
+      // Step 4's AI-picked activities AND restaurants, per city, started
+      // BEFORE the hotel searches rather than after them.
+      //
+      // They need only the city, its nights and the user's answers — nothing
+      // from the hotels — but they used to wait for every hotel batch, which
+      // put the whole hotel phase (~2.3s for 3 cities, ~3.3s for 5, measured)
+      // in front of the slowest part of the search (6.9-8.4s per call). Each
+      // call already swallows its own failure into [], so this promise cannot
+      // reject and is safe to hold while the hotels run.
+      //
+      // Not started before the optimizer, although restaurants could be:
+      // activities need the nights the optimizer assigns and take as long, so
+      // restaurants starting earlier would not shorten the search — and if the
+      // optimizer failed, they would be rate-limited calls spent on nothing.
       const perCityPromises = trip.cities.map(async (city) => {
         const nights = Math.max(
           1,
@@ -1462,7 +1492,95 @@ export default function PlanningChat() {
         return { activities: activitiesResult, restaurants: restaurantsResult };
       });
 
+      // Step 3: Fetch hotels for each city. Booking.com (via RapidAPI free
+      // tier) rate-limits parallel calls — 4 simultaneous requests often
+      // have one or two come back empty, causing the UI to render "$0/night".
+      // We throttle to HOTEL_CONCURRENCY requests at a time. Combined with
+      // the backend's 429-retry, this prevents silent empty hotels for
+      // multi-city trips.
+      setFindTripStatus('Finding hotels...');
+      const HOTEL_CONCURRENCY = 2;
+
+      const fetchOne = async (city: (typeof trip.cities)[number]) => {
+        try {
+          const stay = {
+            city: city.name,
+            checkin: city.dates.arrival,
+            checkout: city.dates.departure,
+            adults: travelers,
+          };
+          let results = await searchHotels({
+            ...stay,
+            // maxPrice in searchHotels is total-stay not per-night — compute
+            // nights-for-this-city × nightly cap as the stay cap.
+            ...(hotelNightlyCap !== undefined
+              ? {
+                  maxPrice:
+                    hotelNightlyCap *
+                    Math.max(
+                      1,
+                      Math.round(
+                        (new Date(city.dates.departure).getTime() -
+                          new Date(city.dates.arrival).getTime()) /
+                          (1000 * 60 * 60 * 24),
+                      ),
+                    ),
+                }
+              : {}),
+          });
+          // Nothing under the budget cap: ask once more without it. An empty
+          // search leaves the city on `buildTripFromOptimize`'s placeholder,
+          // a nameless "$0/night" hotel that adds $0 to the total — and the
+          // cap is a rule of thumb (40% of the budget), not the traveller's
+          // own limit. A real hotel over it is an answer the budget banner can
+          // speak to; $0 is not. Only when a cap was applied: an uncapped
+          // search asked again is the same request.
+          if (results.length === 0 && hotelNightlyCap !== undefined) {
+            results = await searchHotels(stay);
+          }
+          if (results.length > 0) {
+            const hotels = results.map(hotelFromResult);
+            return { hotels, hotel: hotels[0], selectedHotelIndex: 0 };
+          }
+        } catch {
+          // Hotel search failure is non-fatal
+        }
+        return null;
+      };
+
+      // Simple concurrency limiter: walk cities in fixed-size batches.
+      const hotelResults: Array<Awaited<ReturnType<typeof fetchOne>>> = [];
+      for (let i = 0; i < trip.cities.length; i += HOTEL_CONCURRENCY) {
+        const batch = trip.cities.slice(i, i + HOTEL_CONCURRENCY);
+        const batchResults = await Promise.all(batch.map(fetchOne));
+        if (!mountedRef.current) return; // left /plan — see after optimizeTrip
+        hotelResults.push(...batchResults);
+      }
+      hotelResults.forEach((hotelResult, idx) => {
+        if (hotelResult) {
+          trip.cities[idx] = { ...trip.cities[idx], ...hotelResult };
+        }
+      });
+
+      // The trip's total, now that every price in it is known.
+      //
+      // `buildTripFromOptimize` can only set `totalCost` from the route, which
+      // is transport alone — hotels don't exist yet there — and it used to stay
+      // that way. Everything that reads it takes it as the whole trip:
+      // ResultsHeader's savings baseline (`totalCost + savings` against
+      // `liveTripTotal`, which has hotels, so the saving clamped to 0 and every
+      // fresh trip said "Best price" while the AI quoted the routing saving),
+      // BudgetOverBanner, and the AI's trip summary. A saved trip already
+      // stores `liveTripTotal` (ResultsHeader's save payload), so a fresh trip
+      // and the same trip reloaded now agree.
+      trip.totalCost = liveTripTotal(trip);
+
+      // Step 4: the AI picks, already in flight since before step 3. The
+      // status still changes only now, so the user reads the same two phases
+      // in the same order as when these calls waited for the hotels.
+      setFindTripStatus('Finding things to do & places to eat...');
       const perCityResults = await Promise.all(perCityPromises);
+      if (!mountedRef.current) return; // left /plan — see after optimizeTrip
       perCityResults.forEach(({ activities, restaurants }, idx) => {
         if (activities.length > 0) {
           trip.cities[idx].activities = activities.map((s) => s.name);
@@ -1509,6 +1627,14 @@ export default function PlanningChat() {
       if (parsed.vibeTierUp) {
         trip.vibeTierUp = parsed.vibeTierUp;
       }
+
+      // Keep the guided conversation for "Adjust trip" (see GuidedSnapshot);
+      // a search from the AI chat or a one-click replan clears it instead.
+      const g = guidedStateRef.current;
+      guidedSession =
+        g.intent === 'place' || g.intent === 'vibe' || g.intent === 'budget'
+          ? { ...g, intent: g.intent, msgCounter: msgCounter.current }
+          : null;
 
       setTrip(trip);
       router.push('/results');
@@ -1594,6 +1720,9 @@ export default function PlanningChat() {
           tripType: answers.returnToHome === false ? 'one-way' : 'round-trip',
           extras: answers.extraNotes,
         });
+        // Left /plan meanwhile: don't write this pick into the planning
+        // answers, which may already belong to a new session.
+        if (!mountedRef.current) return;
 
         // No suggestions — Claude ran + fallback empty (non-Adventure
         // vibe). Surface the reasoning_summary as the user-visible
@@ -1662,6 +1791,7 @@ export default function PlanningChat() {
         rawInput,
         userLocation: 'unknown',
       });
+      if (!mountedRef.current) return; // left /plan — see runOptimizeAndBuild
       warnIfMock(parsed);
 
       // If countries were detected (e.g. user typed "Japan"), show city picker —
@@ -1832,8 +1962,22 @@ export default function PlanningChat() {
         // YYYY-MM-DD format the backend expects. Without this, typing
         // something like "Next month" in the chat bar would be stored
         // verbatim and later rejected by the optimize endpoint's zod schema.
-        const isoStart = parseDateInput(value);
-        handleDatesSelect(isoStart, isoStart, true);
+        //
+        // A whole typed range ("Jan 10 to Jan 17, 2027") is kept as a range:
+        // `parseDateInput` returns one date, so this used to store
+        // `{ start, end: start }` as flexible — the end date silently dropped,
+        // and a skipped nights question then left the trip with no length at
+        // all. (The nights question is still asked after a range:
+        // `advanceToNextStep` reads `answers` from this render's closure and
+        // cannot see what `handleDatesSelect` just stored.) Anything that
+        // isn't a clean range takes the single-date path exactly as before.
+        const range = parseDateRangeInput(value);
+        if (range) {
+          handleDatesSelect(range.start, range.end, false);
+        } else {
+          const isoStart = parseDateInput(value);
+          handleDatesSelect(isoStart, isoStart, true);
+        }
         setTextInput('');
         return;
       }

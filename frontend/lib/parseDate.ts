@@ -152,3 +152,113 @@ export function parseDateInput(raw: string | undefined | null): string {
 
   return defaultFallback();
 }
+
+// ─── Ranges ─────────────────────────────────────────────────────────────────
+
+const MONTH_RE = `(${Object.keys(MONTHS).sort((a, b) => b.length - a.length).join('|')})\\.?`;
+const DAY_RE = '(\\d{1,2})(?:st|nd|rd|th)?';
+const YEAR_RE = '(?:,?\\s*(\\d{4}))?';
+const SEP_RE = '\\s*(?:-|–|—|to|through|thru|until|till|til)\\s*';
+
+/** "Jan 10[, 2027] to Jan 17[, 2027]" */
+const MD_MD = new RegExp(`^${MONTH_RE}\\s+${DAY_RE}${YEAR_RE}${SEP_RE}${MONTH_RE}\\s+${DAY_RE}${YEAR_RE}$`);
+/** "Jan 10-17[, 2027]" */
+const MD_D = new RegExp(`^${MONTH_RE}\\s+${DAY_RE}${SEP_RE}${DAY_RE}${YEAR_RE}$`);
+/** "10 Jan[ 2027] to 17 Jan[ 2027]" */
+const DM_DM = new RegExp(`^${DAY_RE}\\s+${MONTH_RE}${YEAR_RE}${SEP_RE}${DAY_RE}\\s+${MONTH_RE}${YEAR_RE}$`);
+/** "10-17 Jan[ 2027]" */
+const D_DM = new RegExp(`^${DAY_RE}${SEP_RE}${DAY_RE}\\s+${MONTH_RE}${YEAR_RE}$`);
+/** "2027-01-10 to 2027-01-17" */
+const ISO_ISO = new RegExp(`^(\\d{4})-(\\d{2})-(\\d{2})${SEP_RE}(\\d{4})-(\\d{2})-(\\d{2})$`);
+
+/** A real calendar day, or null — `new Date(2027, 1, 30)` silently becomes 2 March. */
+const calendarDay = (y: number, m: number, d: number): Date | null => {
+  const date = new Date(y, m, d);
+  return date.getFullYear() === y && date.getMonth() === m && date.getDate() === d ? date : null;
+};
+
+/**
+ * Parse a typed date RANGE into two YYYY-MM-DD strings, or null if the text is
+ * not a whole, unambiguous range.
+ *
+ * `parseDateInput` returns one date, so the planner's typed-dates path stored
+ * "Jan 10 to Jan 17, 2027" as a flexible trip starting Jan 10 with no end —
+ * the end date silently dropped, and the year with it (the start was "the next
+ * Jan 10", so "…, 2028" also started in 2027).
+ *
+ * Deliberately strict: the WHOLE input must be a range, so a window plus a
+ * length ("April 7-30, one week") or anything else is left to the existing
+ * single-date path exactly as before. A year given once applies to both ends;
+ * written at the end of a range that crosses New Year ("Dec 28 to Jan 4, 2027")
+ * it belongs to the end date. With no year, the start is its next occurrence
+ * (the rule `parseDateInput` uses) and the end the first date after it. A range
+ * that is backwards, empty or names a day that doesn't exist is not a range.
+ */
+export function parseDateRangeInput(
+  raw: string | undefined | null,
+): { start: string; end: string } | null {
+  const input = (raw ?? '').trim().toLowerCase().replace(/^from\s+/, '');
+  if (!input) return null;
+
+  let parts:
+    | { m1: number; d1: number; y1?: number; m2: number; d2: number; y2?: number }
+    | null = null;
+  let m: RegExpMatchArray | null;
+  const year = (s: string | undefined) => (s ? parseInt(s, 10) : undefined);
+
+  if ((m = input.match(ISO_ISO))) {
+    parts = {
+      y1: +m[1], m1: +m[2] - 1, d1: +m[3],
+      y2: +m[4], m2: +m[5] - 1, d2: +m[6],
+    };
+  } else if ((m = input.match(MD_MD))) {
+    parts = {
+      m1: MONTHS[m[1]], d1: +m[2], y1: year(m[3]),
+      m2: MONTHS[m[4]], d2: +m[5], y2: year(m[6]),
+    };
+  } else if ((m = input.match(MD_D))) {
+    parts = { m1: MONTHS[m[1]], d1: +m[2], m2: MONTHS[m[1]], d2: +m[3], y2: year(m[4]) };
+  } else if ((m = input.match(DM_DM))) {
+    parts = {
+      d1: +m[1], m1: MONTHS[m[2]], y1: year(m[3]),
+      d2: +m[4], m2: MONTHS[m[5]], y2: year(m[6]),
+    };
+  } else if ((m = input.match(D_DM))) {
+    parts = { d1: +m[1], m1: MONTHS[m[3]], d2: +m[2], m2: MONTHS[m[3]], y2: year(m[4]) };
+  }
+  if (!parts || parts.m1 === undefined || parts.m2 === undefined) return null;
+  const { m1, d1, m2, d2 } = parts;
+
+  // Which ends carry a year decides the other's. Only an earlier MONTH reads
+  // as crossing New Year; "Jan 17 to Jan 10" is backwards, not 358 nights.
+  const endBeforeStartInYear = m2 < m1;
+  let y1: number;
+  let y2: number;
+  if (parts.y1 !== undefined && parts.y2 !== undefined) {
+    y1 = parts.y1;
+    y2 = parts.y2;
+  } else if (parts.y2 !== undefined) {
+    y2 = parts.y2;
+    y1 = endBeforeStartInYear ? y2 - 1 : y2;
+  } else if (parts.y1 !== undefined) {
+    y1 = parts.y1;
+    y2 = endBeforeStartInYear ? y1 + 1 : y1;
+  } else {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    y1 = today.getFullYear();
+    const next = calendarDay(y1, m1, d1);
+    if (next && next < today) y1 += 1;
+    y2 = endBeforeStartInYear ? y1 + 1 : y1;
+  }
+
+  const start = calendarDay(y1, m1, d1);
+  const end = calendarDay(y2, m2, d2);
+  if (!start || !end || end <= start) return null;
+  // The planner clamps a typed night count to 90 (PlanningChat's nights
+  // step); a "range" longer than that is a typo, not a trip.
+  if (Math.round((end.getTime() - start.getTime()) / 86_400_000) > MAX_RANGE_NIGHTS) return null;
+  return { start: toISO(start), end: toISO(end) };
+}
+
+const MAX_RANGE_NIGHTS = 90;

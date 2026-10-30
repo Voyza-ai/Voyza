@@ -10,7 +10,10 @@ const searchSchema = z.object({
   checkin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'),
   checkout: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'),
   adults: z.number().int().positive().default(2),
-  rooms: z.number().int().positive().default(1),
+  // No default here: an omitted room count is decided by `searchHotels`
+  // (two adults to a room), so the canvas route and anything else that calls
+  // the service directly get the same answer as this endpoint.
+  rooms: z.number().int().positive().optional(),
   maxPrice: z.number().positive().optional(),
 });
 
