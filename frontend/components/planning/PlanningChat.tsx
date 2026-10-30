@@ -143,6 +143,34 @@ type Message = {
   stepId?: string;
 };
 
+/**
+ * The guided planner's conversation, kept for "Adjust trip".
+ *
+ * "Adjust trip" on the results page goes to /plan?resume=1, promising "your
+ * trip loaded — change anything and search again". The AI chat could keep
+ * that promise because its conversation lives in the store (`chatHistory`).
+ * The guided planner's lives in this component's state, which is gone once it
+ * unmounts on the way to /results — so a guided traveller came back to a blank
+ * "What kind of trip are you planning?" with their answers still in the store
+ * and nothing on screen to show or change them.
+ *
+ * Module scope gives it exactly the store's lifetime: it survives client-side
+ * navigation, not a reload, the same as the answers it describes. Written when
+ * a guided search lands on /results; cleared by a fresh visit (alongside the
+ * store reset) and by a search from anywhere else, so it only ever describes
+ * the session the store holds.
+ */
+type GuidedSnapshot = {
+  intent: 'place' | 'vibe' | 'budget';
+  steps: Step[];
+  currentStepIndex: number;
+  messages: Message[];
+  isComplete: boolean;
+  vibe: string | null;
+  msgCounter: number;
+};
+let guidedSession: GuidedSnapshot | null = null;
+
 export default function PlanningChat() {
   const router = useRouter();
   // Landing-page hero seed — handed to the conversational planner on mount.
@@ -165,6 +193,11 @@ export default function PlanningChat() {
   const msgCounter = useRef(0);
 
   const nextId = () => `msg-${++msgCounter.current}`;
+
+  // Latest guided state, read when a search lands — the search's own closure
+  // is from the render that started it and can miss bubbles added since.
+  const guidedStateRef = useRef({ intent, steps, currentStepIndex, messages, isComplete, vibe });
+  guidedStateRef.current = { intent, steps, currentStepIndex, messages, isComplete, vibe };
 
   // Show a one-time warning bubble if the backend returned a mock AI response
   // (Anthropic key missing or SDK error). Without this the user sees garbled
@@ -236,11 +269,32 @@ export default function PlanningChat() {
       const heroSeed = useTripStore.getState().answers.rawInput;
       useTripStore.getState().resetPlanning();
       if (heroSeed) useTripStore.getState().setAnswer('rawInput', heroSeed);
+      guidedSession = null; // the conversation goes with the answers
     }
 
     // Read through the store rather than the render closure: `answers` was
     // captured before the reset above, so it can be a trip behind.
     const snapshotRawInput = useTripStore.getState().answers.rawInput;
+
+    // A staged one-click replan owns the screen (see the autorun effects
+    // below); it must not come back to an old guided transcript. Both of its
+    // signals are checked, for the reason given there: the URL can be stale
+    // during a client-side navigation, the sessionStorage snapshot is not.
+    const autorunStaged = (() => {
+      if (new URLSearchParams(window.location.search).get('autorun') === '1') return true;
+      try {
+        return sessionStorage.getItem('bluemurr-autorun') !== null;
+      } catch {
+        return false;
+      }
+    })();
+    const guided =
+      resume &&
+      !autorunStaged &&
+      guidedSession &&
+      validateTripInputs(useTripStore.getState().answers).length === 0
+        ? guidedSession
+        : null;
 
     if (snapshotRawInput) {
       // Hero-input seed → straight into the AI conversation; it parses the
@@ -249,6 +303,16 @@ export default function PlanningChat() {
       setAnswer('rawInput', undefined);
       setAnswer('planningMode', 'destination');
       setIntent('chat');
+    } else if (guided) {
+      // Resumed guided session ("Adjust trip") — the same screen the search
+      // left from: the conversation, and Find my trip ready to run again.
+      msgCounter.current = guided.msgCounter;
+      setIntent(guided.intent);
+      setSteps(guided.steps);
+      setCurrentStepIndex(guided.currentStepIndex);
+      setMessages(guided.messages);
+      setIsComplete(guided.isComplete);
+      setVibe(guided.vibe);
     } else if (useTripStore.getState().chatHistory.length > 0) {
       // Resumed session (back from results to replan) — rejoin the
       // conversation where it left off.
@@ -1563,6 +1627,14 @@ export default function PlanningChat() {
       if (parsed.vibeTierUp) {
         trip.vibeTierUp = parsed.vibeTierUp;
       }
+
+      // Keep the guided conversation for "Adjust trip" (see GuidedSnapshot);
+      // a search from the AI chat or a one-click replan clears it instead.
+      const g = guidedStateRef.current;
+      guidedSession =
+        g.intent === 'place' || g.intent === 'vibe' || g.intent === 'budget'
+          ? { ...g, intent: g.intent, msgCounter: msgCounter.current }
+          : null;
 
       setTrip(trip);
       router.push('/results');
