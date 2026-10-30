@@ -38,7 +38,7 @@ function knownDuration(minutes: unknown): number | null {
     : null;
 }
 
-type CompareLegParams = {
+export type CompareLegParams = {
   origin: string;
   destination: string;
   date: string;
@@ -47,8 +47,25 @@ type CompareLegParams = {
   destinationCountry?: string;
 };
 
-export async function compareLeg(params: CompareLegParams): Promise<LegComparison> {
+/**
+ * Where compareLeg gets airport codes and flight offers. Defaults to
+ * flights.ts. The optimizer passes per-run wrappers instead: a memo of
+ * getIataCode (a 5-city run otherwise looks the same 5 cities up hundreds
+ * of times) and a searchFlights that counts outcomes, so a run can tell a
+ * Duffel outage from routes nobody flies.
+ */
+export type CompareLegDeps = {
+  getIataCode?: (cityName: string) => Promise<string>;
+  searchFlights?: typeof searchFlights;
+};
+
+export async function compareLeg(
+  params: CompareLegParams,
+  deps: CompareLegDeps = {},
+): Promise<LegComparison> {
   const { origin, destination, date, travelers, originCountry, destinationCountry } = params;
+  const resolveIata = deps.getIataCode ?? getIataCode;
+  const findFlights = deps.searchFlights ?? searchFlights;
 
   // Check cache first.
   //
@@ -101,10 +118,10 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
       : (async () => {
           try {
             const [originIata, destIata] = await Promise.all([
-              getIataCode(origin),
-              getIataCode(destination),
+              resolveIata(origin),
+              resolveIata(destination),
             ]);
-            return await searchFlights({
+            return await findFlights({
               origin: originIata,
               destination: destIata,
               date,

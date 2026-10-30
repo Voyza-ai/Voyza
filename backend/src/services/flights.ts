@@ -1,4 +1,5 @@
 import { getDuffel } from './duffel';
+import { currentDuffelRetryBudget } from './duffelBudget';
 import { getSupabase } from './supabase';
 import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
@@ -69,6 +70,11 @@ async function withSearchSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
   activeSearches++;
   try {
+    // A call can queue here for a while; if Duffel rate-limited us in the
+    // meantime, don't spend a request finding that out. withRetry waits
+    // the pause out (or gives up, within its budget).
+    const paused = duffelPausedUntil - Date.now();
+    if (paused > 0) throw rateLimitedError(paused);
     return await fn();
   } finally {
     activeSearches--;
@@ -150,8 +156,58 @@ export function retryDelayFromHeaders(err: any): number | null {
   return null;
 }
 
+/**
+ * Most time ONE Duffel call may spend waiting to retry, across all its
+ * attempts. Duffel's limit is 60 requests per 60-second window per token
+ * (docs, errors page: `ratelimit-reset` is when the window resets), so 65s
+ * is "wait for the next window once, never longer".
+ *
+ * Without a total, each of 3 retries could sleep up to MAX_RETRY_DELAY_MS
+ * (2 minutes), so one search could stall for six — and the gate below meant
+ * six such sleepers stalled every search behind them. A call that would
+ * have to wait past its budget fails now instead: its leg comes back
+ * unpriced (the optimizer already ranks and displays that honestly) and the
+ * plan finishes.
+ */
+const MAX_TOTAL_RETRY_WAIT_MS = 65_000;
+
+/**
+ * When Duffel said "rate limited until T", every request sent before T is
+ * refused too — and may count against the next window. So the first 429
+ * that carries a reset time pauses ALL Duffel calls from this process until
+ * then, instead of each in-flight call discovering it separately and
+ * burning an attempt. Epoch ms; 0 = not paused.
+ */
+let duffelPausedUntil = 0;
+
+/** Exposed for tests: forget any rate-limit pause. */
+export function resetDuffelRateLimitPause(): void {
+  duffelPausedUntil = 0;
+}
+
+function rateLimitedError(waitMs: number): Error {
+  // Same shape a DuffelError 429 has, so callers' handling is unchanged.
+  const err: any = new Error(
+    `Duffel rate limit: next window in ${Math.ceil(waitMs / 1000)}s, past this search's retry budget`,
+  );
+  err.meta = { status: 429 };
+  return err;
+}
+
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
+  // A caller doing optional work may cap it lower (see duffelBudget.ts).
+  const budget = Math.min(MAX_TOTAL_RETRY_WAIT_MS, currentDuffelRetryBudget() ?? Infinity);
+  let waited = 0;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Honour a pause another call already learned about — before sending.
+    const paused = duffelPausedUntil - Date.now();
+    if (paused > 0) {
+      // A little spread so every paused call doesn't fire on the same ms.
+      const wait = paused + Math.round(Math.random() * 1000);
+      if (waited + wait > budget) throw rateLimitedError(paused);
+      await sleep(wait);
+      waited += wait;
+    }
     try {
       return await fn();
     } catch (err: any) {
@@ -161,11 +217,19 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
         // Prefer the server-declared reset time; otherwise jittered
         // exponential backoff (synchronized retries just re-collide).
         const headerDelay = retryDelayFromHeaders(err);
+        if (status === 429 && headerDelay != null && headerDelay > 0) {
+          duffelPausedUntil = Math.max(duffelPausedUntil, Date.now() + headerDelay);
+        }
         const base = Math.pow(2, attempt) * 1000;
         const jittered = Math.round(base * (0.5 + Math.random()));
+        const pausedFor = duffelPausedUntil - Date.now();
         const delay = headerDelay != null
           ? headerDelay + Math.round(Math.random() * 1000)
-          : jittered;
+          : status === 429 && pausedFor > 0
+            ? pausedFor + Math.round(Math.random() * 1000) // stopped by the shared pause
+            : jittered;
+        // Out of budget: fail this one call now rather than sleep past it.
+        if (waited + delay > budget) throw err;
         logger.warn('Duffel retryable error — backing off', {
           status,
           attempt,
@@ -173,6 +237,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
           fromHeader: headerDelay != null,
         });
         await sleep(delay);
+        waited += delay;
         continue;
       }
       throw err;
@@ -271,8 +336,12 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
   const duffel = getDuffel();
 
   try {
-    const offerRequest = await withSearchSlot(() =>
-      withRetry(() =>
+    // Retry OUTSIDE the slot: a call sleeping on a backoff or a rate-limit
+    // pause used to keep its slot for the whole sleep, so six sleepers froze
+    // every other search. Each attempt now takes a slot only while it is
+    // actually talking to Duffel.
+    const offerRequest = await withRetry(() =>
+      withSearchSlot(() =>
         duffel.offerRequests.create({
           slices: [
             {
