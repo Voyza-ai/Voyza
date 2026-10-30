@@ -79,11 +79,14 @@ function withRequestDeadline(duffel: Duffel, ms: number): Duffel {
     return duffel;
   }
   inner.request = (args) => {
+    // Call first, arm the timer second: if the call ever threw synchronously,
+    // there must be no timer left behind to reject into nothing later.
+    const call = original.call(inner, args);
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new DuffelTimeoutError(args.method, args.path, ms)), ms);
     });
-    return Promise.race([original.call(inner, args), deadline]).finally(() => clearTimeout(timer));
+    return Promise.race([call, deadline]).finally(() => clearTimeout(timer));
   };
   return duffel;
 }
