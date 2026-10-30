@@ -10,6 +10,7 @@ import request from 'supertest';
  *
  *  - a missing leg re-priced for ONE traveller on a multi-person trip, so
  *    trips.total_cost counted that leg once (640 where 680 is right);
+ *  - a hotel-less city searched with `rooms: 1` whatever the party size;
  */
 
 jest.mock('../config/env', () => ({
@@ -191,5 +192,38 @@ describe('re-pricing a missing leg prices the whole party', () => {
     expect(res.status).toBe(200);
     expect(mockCompareLeg).not.toHaveBeenCalled();
     expect(tripsUpdate()?.payload.total_cost).toBe(690);
+  });
+});
+
+describe('a city saved without hotels is searched with the party in enough rooms', () => {
+  const hotellessState = (travelers: number) => {
+    const state = twoCityState({ title: 't', travelers });
+    (state.cities[1] as any).hotels = [];
+    delete (state.cities[1] as any).hotel;
+    return state;
+  };
+
+  it.each([
+    [1, 1],
+    [2, 1],
+    [3, 2],
+    [5, 3],
+    [6, 3],
+  ])('%i travellers → %i room(s)', async (travelers, rooms) => {
+    const res = await save(hotellessState(travelers));
+    expect(res.status).toBe(200);
+    expect(mockSearchHotels).toHaveBeenCalledTimes(1);
+    expect(mockSearchHotels.mock.calls[0][0]).toMatchObject({
+      city: 'Florence',
+      checkin: '2027-05-04',
+      checkout: '2027-05-07',
+      adults: travelers,
+      rooms,
+    });
+  });
+
+  it('never sends Booking an undefined room count', async () => {
+    await save(hotellessState(4));
+    expect(Number.isInteger(mockSearchHotels.mock.calls[0][0].rooms)).toBe(true);
   });
 });

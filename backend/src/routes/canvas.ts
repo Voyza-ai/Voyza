@@ -356,7 +356,14 @@ router.post(
               checkin: city.dates.arrival,
               checkout: city.dates.departure,
               adults: travelers,
-              rooms: 1,
+              // Was a hard-coded 1: six adults priced into one room. Two
+              // per room is the occupancy rule the hotel service applies
+              // when a caller gives none. Stated here rather than omitted
+              // because a service that predates that default still
+              // requires `rooms` (tsc fails without it) and would send
+              // Booking `room_number=undefined`. Same value either way;
+              // this line can go once the service default has landed.
+              rooms: Math.ceil(travelers / 2),
             })
               .then((results) => {
                 if (results.length > 0) {
