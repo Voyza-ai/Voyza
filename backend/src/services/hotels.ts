@@ -991,6 +991,55 @@ export function trustedFirst(hotels: HotelResult[]): HotelResult[] {
   return [...trusted, ...suspect];
 }
 
+/**
+ * Short-TTL cache of vetted search results, mirroring the flight search cache
+ * in flights.ts.
+ *
+ * Re-running a trip used to pay the whole hotel phase again — ~10.7s measured
+ * for a re-run with nothing changed — and spent metered RapidAPI quota on an
+ * answer we had just been given. Concurrent duplicates share one in-flight
+ * request.
+ *
+ * Keyed by EVERY request parameter, rooms included (resolved, so an omitted
+ * count and the same count passed explicitly are one search). `maxPrice` is in
+ * the key although Booking never sees it, so no request is ever answered from
+ * a search that was asked something else; but the cap itself is applied after
+ * the cache, on a copy, so a search the cap empties still keeps the provider's
+ * rows and its repeat is still free.
+ *
+ * An empty answer is never kept. It is how every failure below reports itself
+ * — 429s exhausted, a provider error, a timeout, an unresolvable destination —
+ * so caching it would cache the outage for ten minutes.
+ */
+const HOTEL_SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
+const hotelSearchCache = new Map<string, { at: number; promise: Promise<HotelResult[]> }>();
+
+function cachedHotelSearch(
+  key: string,
+  run: () => Promise<HotelResult[]>,
+): Promise<HotelResult[]> {
+  const hit = hotelSearchCache.get(key);
+  if (hit && Date.now() - hit.at < HOTEL_SEARCH_CACHE_TTL_MS) return hit.promise;
+
+  const promise = run();
+  hotelSearchCache.set(key, { at: Date.now(), promise });
+  const evict = () => {
+    if (hotelSearchCache.get(key)?.promise === promise) hotelSearchCache.delete(key);
+  };
+  promise.then((rows) => {
+    if (rows.length === 0) evict();
+  }, evict);
+
+  // Opportunistic sweep so a long-running process doesn't accumulate entries.
+  if (hotelSearchCache.size > 500) {
+    const cutoff = Date.now() - HOTEL_SEARCH_CACHE_TTL_MS;
+    for (const [k, v] of hotelSearchCache) {
+      if (v.at < cutoff) hotelSearchCache.delete(k);
+    }
+  }
+  return promise;
+}
+
 export async function searchHotels(params: SearchHotelsParams): Promise<HotelResult[]> {
   const { city, hotelName, checkin, checkout, adults, maxPrice } = params;
   const rooms = params.rooms ?? roomsFor(adults);
@@ -999,6 +1048,78 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     logger.warn('RAPIDAPI_KEY not set — returning empty hotel results');
     return [];
   }
+
+  const key = JSON.stringify([
+    city,
+    hotelName ?? null,
+    checkin,
+    checkout,
+    adults,
+    rooms,
+    maxPrice ?? null,
+  ]);
+  const vetted = await cachedHotelSearch(key, () =>
+    searchVettedHotels({ city, hotelName, checkin, checkout, adults, rooms }),
+  );
+  // Copies, so no caller can edit the rows the next caller will be served.
+  let hotels = vetted.map((h) => ({ ...h }));
+
+  if (maxPrice !== undefined) {
+    const beforeCap = hotels.length;
+    hotels = hotels.filter((h) => h.price <= maxPrice);
+
+    // The one remaining filter that could clear a city in silence. It is the
+    // user's own budget so an empty result is a legitimate answer, but it
+    // must be distinguishable from the city having no hotels at all —
+    // otherwise "no hotels in Florence" and "no hotels under your cap" look
+    // the same in the logs and to anyone debugging a blank city.
+    if (hotels.length === 0 && beforeCap > 0) {
+      logger.warn('Hotel search emptied — every row was over the price cap', {
+        city,
+        maxPrice,
+        rows: beforeCap,
+      });
+    }
+  }
+
+  // A search this thin disables every relative rule in `flagSuspectPrices`
+  // (they all require MIN_RESULTS_TO_FILTER rows), and at one row
+  // `rankHotels` has nothing to demote anything below either — so hotels[0]
+  // is whatever the provider said, unchecked. That is the Val d'Isère case,
+  // and it is structural rather than fixable with a threshold: covering it
+  // needs a reference from outside the search. Until there is one, make it
+  // visible — ordinary searches return 17-20 rows, so this is rare.
+  if (hotels.length > 0 && hotels.length < MIN_RESULTS_TO_FILTER) {
+    logger.warn('Hotel search too thin to price-check — hotels[0] is unverified', {
+      city,
+      rows: hotels.length,
+      needed: MIN_RESULTS_TO_FILTER,
+    });
+  }
+
+  // Last, so it also covers the case a price cap leaves only flagged rows:
+  // an under-priced glitch is the one row guaranteed to survive a budget
+  // filter, and the legitimate rows the ones guaranteed not to.
+  return trustedFirst(hotels);
+}
+
+/**
+ * One provider search, mapped, converted to USD and price-checked — everything
+ * that depends only on what was asked of Booking. Never throws: any failure is
+ * logged and comes back as no rows.
+ */
+async function searchVettedHotels(params: {
+  city: string;
+  hotelName?: string;
+  checkin: string;
+  checkout: string;
+  adults: number;
+  rooms: number;
+}): Promise<HotelResult[]> {
+  const { city, hotelName, checkin, checkout, adults, rooms } = params;
+  // Checked by the caller; captured again so the narrowing reaches the fetch.
+  const apiKey = env.RAPIDAPI_KEY;
+  if (!apiKey) return [];
 
   try {
     const dest = hotelName ? await getHotelDestination(hotelName, city) : await getDestinationId(city);
@@ -1029,7 +1150,7 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
       // A fresh signal per attempt: a 429 retry gets its own full window.
       res = await fetch(url, {
         headers: {
-          'X-RapidAPI-Key': env.RAPIDAPI_KEY,
+          'X-RapidAPI-Key': apiKey,
           'X-RapidAPI-Host': 'booking-com.p.rapidapi.com',
         },
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
@@ -1162,45 +1283,9 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     // Drop first, flag second: an unusable price must not be in the set the
     // medians are computed from, or a row of 0s drags every floor down with it.
     hotels = dropUnusablePrices(hotels, city, rooms);
-    hotels = flagSuspectPrices(hotels, city, rooms);
-
-    if (maxPrice !== undefined) {
-      const beforeCap = hotels.length;
-      hotels = hotels.filter((h) => h.price <= maxPrice);
-
-      // The one remaining filter that could clear a city in silence. It is the
-      // user's own budget so an empty result is a legitimate answer, but it
-      // must be distinguishable from the city having no hotels at all —
-      // otherwise "no hotels in Florence" and "no hotels under your cap" look
-      // the same in the logs and to anyone debugging a blank city.
-      if (hotels.length === 0 && beforeCap > 0) {
-        logger.warn('Hotel search emptied — every row was over the price cap', {
-          city,
-          maxPrice,
-          rows: beforeCap,
-        });
-      }
-    }
-
-    // A search this thin disables every relative rule in `flagSuspectPrices`
-    // (they all require MIN_RESULTS_TO_FILTER rows), and at one row
-    // `rankHotels` has nothing to demote anything below either — so hotels[0]
-    // is whatever the provider said, unchecked. That is the Val d'Isère case,
-    // and it is structural rather than fixable with a threshold: covering it
-    // needs a reference from outside the search. Until there is one, make it
-    // visible — ordinary searches return 17-20 rows, so this is rare.
-    if (hotels.length > 0 && hotels.length < MIN_RESULTS_TO_FILTER) {
-      logger.warn('Hotel search too thin to price-check — hotels[0] is unverified', {
-        city,
-        rows: hotels.length,
-        needed: MIN_RESULTS_TO_FILTER,
-      });
-    }
-
-    // Last, so it also covers the case a price cap leaves only flagged rows:
-    // an under-priced glitch is the one row guaranteed to survive a budget
-    // filter, and the legitimate rows the ones guaranteed not to.
-    return trustedFirst(hotels);
+    // The price cap, the thin-search warning and `trustedFirst` run in
+    // `searchHotels`, per call, on what this returns.
+    return flagSuspectPrices(hotels, city, rooms);
   } catch (err: any) {
     logger.warn('Hotel search failed (non-fatal)', { message: err?.message, city });
     return [];
