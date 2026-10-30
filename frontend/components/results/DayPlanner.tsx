@@ -18,6 +18,7 @@ import { Trip, City, ScheduledEvent } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
 import { useTripStore } from '@/store/tripStore';
+import { homeDepartureDay } from '@/lib/tripSpan';
 
 type DayPlannerProps = {
   trip: Trip;
@@ -127,6 +128,11 @@ export default function DayPlanner({
   const [dragEdge, setDragEdge] = useState<'top' | 'bottom' | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
+  // The day an overnight outbound leaves home opens on the first city, which
+  // holds its blocks, but the traveller is not there yet: it is a travel day,
+  // as the Schedule's own card for it says.
+  const placeLabel = date === homeDepartureDay(trip) ? 'Travel day' : city.name;
+
   const dayLabel = new Date(
     ...date.split('-').map((v, i) => (i === 1 ? Number(v) - 1 : Number(v))) as [number, number, number]
   ).toLocaleDateString('en-US', {
@@ -224,7 +230,7 @@ export default function DayPlanner({
               className="text-[11px] uppercase tracking-[0.18em] font-semibold mb-1"
               style={{ color: `${accent}aa` }}
             >
-              Day Planner · {city.name}
+              Day Planner · {placeLabel}
             </div>
             <h2 className="text-2xl font-semibold" style={{ color: accent }}>
               {dayLabel}
