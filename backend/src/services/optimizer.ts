@@ -1,4 +1,4 @@
-import { compareLeg, LegComparison } from './compareLeg';
+import { compareLeg, LegComparison, type CompareLegParams } from './compareLeg';
 import { getIataCode, searchFlights } from './flights';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
@@ -6,6 +6,65 @@ import { searchLegOptions, LegOption } from './legOptions';
 import { resolveOriginAirports, type OriginCandidate } from './location/originAirports';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
 import { withDuffelRetryBudget } from './duffelBudget';
+
+/**
+ * Lookups shared by everything ONE optimize() run does (B8).
+ *
+ * Every candidate ordering re-asks for the legs it shares with the others:
+ * a 5-city trip scores 120 orderings × 4 legs = 480 compareLeg calls for
+ * 80 distinct legs. Duffel itself was already deduped (flights.ts caches
+ * the in-flight search), but each compareLeg call still did 2 Supabase
+ * reads and an upsert — 992 reads and 496 leg_price_cache upserts per run,
+ * measured — and getIataCode hit airport_codes again for every leg of
+ * every ordering (251 calls for ONE city on that trip).
+ *
+ * Scoped to the run, not the process: a module-level memo would keep a
+ * stale leg price across runs, which leg_price_cache (2h) and flights.ts
+ * (10 min) already decide deliberately. A rejected lookup stays rejected
+ * for the rest of the run — the same answer every caller would have got.
+ *
+ * WS2 note: `iata` is the ONE place this run resolves a city to an airport
+ * (compareLeg and the home-leg searches go through it), so a trip-context
+ * argument to getIataCode belongs in createRunContext.
+ */
+type RunContext = {
+  iata: (cityName: string) => Promise<string>;
+  compare: (params: CompareLegParams) => Promise<LegComparison>;
+};
+
+function createRunContext(): RunContext {
+  const iataMemo = new Map<string, Promise<string>>();
+  const iata = (cityName: string): Promise<string> => {
+    let hit = iataMemo.get(cityName);
+    if (!hit) {
+      hit = getIataCode(cityName);
+      iataMemo.set(cityName, hit);
+    }
+    return hit;
+  };
+
+  const compareMemo = new Map<string, Promise<LegComparison>>();
+  const compare = (params: CompareLegParams): Promise<LegComparison> => {
+    // Every input compareLeg reads — a memo must never merge two travel
+    // days, party sizes or country hints.
+    const key = [
+      params.origin,
+      params.destination,
+      params.date,
+      params.travelers,
+      params.originCountry ?? '',
+      params.destinationCountry ?? '',
+    ].join('|');
+    let hit = compareMemo.get(key);
+    if (!hit) {
+      hit = compareLeg(params, { getIataCode: iata });
+      compareMemo.set(key, hit);
+    }
+    return hit;
+  };
+
+  return { iata, compare };
+}
 
 type CityInput = {
   name: string;
@@ -420,7 +479,8 @@ async function scoreRoute(
    * behavior for callers (date-shift probe, naive route) that haven't
    * been updated to thread the user's totalNights through.
    */
-  nightsArray?: number[],
+  nightsArray: number[] | undefined,
+  ctx: RunContext,
 ): Promise<ScoredRoute> {
   const nights = nightsArray ?? distributeNights(undefined, ordering.length);
   const legPromises = [];
@@ -439,7 +499,7 @@ async function scoreRoute(
     const legDate = clampToFuture(addDays(startDate, offset));
 
     legPromises.push(
-      compareLeg({
+      ctx.compare({
         origin: from,
         destination: to,
         date: legDate,
@@ -502,6 +562,7 @@ type HomeFlightsPrice = {
  * is searched from; by default both use all of `home.originAirports`.
  */
 async function homeFlightsCost(
+  ctx: RunContext,
   home: DateShiftHome,
   bestOrdering: string[],
   start: string,
@@ -513,14 +574,14 @@ async function homeFlightsCost(
 ): Promise<HomeFlightsPrice> {
   // Independent searches — run them together, not one after the other.
   const [outbound, ret] = await Promise.all([
-    estimateHomeLeg({
+    estimateHomeLeg(ctx, {
       originAirports: airports.outbound,
       destinationCity: bestOrdering[0],
       date: clampToFuture(start),
       travelers,
     }),
     home.returnToHome
-      ? estimateHomeLeg({
+      ? estimateHomeLeg(ctx, {
           originAirports: airports.ret,
           destinationCity: bestOrdering[bestOrdering.length - 1],
           date: clampToFuture(addDays(start, home.totalNights)),
@@ -557,6 +618,7 @@ async function findDateShiftSuggestion(
   cityMap: Map<string, CityInput>,
   nightsArray: number[],
   home: DateShiftHome | null,
+  ctx: RunContext,
 ): Promise<DateShiftSuggestion | undefined> {
   const offsets = [-2, -1, 1, 2];
 
@@ -578,7 +640,7 @@ async function findDateShiftSuggestion(
   // airport would be exact but costs (airports - 1) × 2 × 4 more Duffel
   // searches on every run.
   const baselineHome = home
-    ? await homeFlightsCost(home, bestOrdering, requestedStartDate, travelers)
+    ? await homeFlightsCost(ctx, home, bestOrdering, requestedStartDate, travelers)
     : null;
   const baselineHomeCost = baselineHome?.cost ?? null;
   const includeHome = home !== null && baselineHomeCost !== null;
@@ -604,10 +666,10 @@ async function findDateShiftSuggestion(
         const hasLegs = bestOrdering.length > 1;
         const [route, priced] = await Promise.all([
           hasLegs
-            ? scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsArray)
+            ? scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsArray, ctx)
             : Promise.resolve(null),
           includeHome
-            ? homeFlightsCost(home as DateShiftHome, bestOrdering, startDate, travelers, shiftedAirports)
+            ? homeFlightsCost(ctx, home as DateShiftHome, bestOrdering, startDate, travelers, shiftedAirports)
             : Promise.resolve(null),
         ]);
         if (route && !route.legs.every((leg) => leg.cost !== Infinity)) return null;
@@ -712,7 +774,7 @@ function homeAirportsFor(originAirports: string[]): string[] {
   return [...codes];
 }
 
-async function searchHomeFlights(params: {
+async function searchHomeFlights(ctx: RunContext, params: {
   originAirports: string[];
   tripCity: string;
   date: string;
@@ -729,7 +791,7 @@ async function searchHomeFlights(params: {
 
   let cityIata: string;
   try {
-    cityIata = await getIataCode(tripCity);
+    cityIata = await ctx.iata(tripCity);
   } catch {
     return [];
   }
@@ -822,7 +884,7 @@ type HomeEstimate = {
  * nonexistent home flight as FREE, so the "cheapest" ordering was often
  * the one whose outbound doesn't exist.
  */
-async function estimateHomeLeg(params: {
+async function estimateHomeLeg(ctx: RunContext, params: {
   originAirports: string[];
   destinationCity: string;
   date: string;
@@ -830,7 +892,7 @@ async function estimateHomeLeg(params: {
   reverse?: boolean;
 }): Promise<HomeEstimate> {
   const reverse = params.reverse ?? false;
-  const found = await searchHomeFlights({
+  const found = await searchHomeFlights(ctx, {
     originAirports: params.originAirports,
     tripCity: params.destinationCity,
     date: params.date,
@@ -843,8 +905,11 @@ async function estimateHomeLeg(params: {
   return { cost: best.price, homeAirport: reverse ? best.destAirport : best.originAirport };
 }
 
-async function estimateHomeLegCost(params: Parameters<typeof estimateHomeLeg>[0]): Promise<number> {
-  return (await estimateHomeLeg(params)).cost;
+async function estimateHomeLegCost(
+  ctx: RunContext,
+  params: Parameters<typeof estimateHomeLeg>[1],
+): Promise<number> {
+  return (await estimateHomeLeg(ctx, params)).cost;
 }
 
 /**
@@ -862,10 +927,10 @@ export async function buildHomeLeg(params: {
    *  the specific airports return offers (e.g. EWR alone comes back empty
    *  but the NYC metro code has plenty). */
   originCity?: string;
-}): Promise<HomeLeg | null> {
+}, ctx: RunContext = createRunContext()): Promise<HomeLeg | null> {
   // Pull top 4 — first becomes the main leg, rest go into alternatives
   // so the user can swap to another carrier/time without a new search.
-  let offers = await searchHomeFlights({
+  let offers = await searchHomeFlights(ctx, {
     originAirports: params.originAirports,
     tripCity: params.destinationCity,
     date: params.date,
@@ -878,11 +943,11 @@ export async function buildHomeLeg(params: {
   // origin city's metro/primary code, which covers all its airports.
   if (offers.length === 0 && params.originCity) {
     try {
-      const metro = await getIataCode(params.originCity);
+      const metro = await ctx.iata(params.originCity);
       // Compare against the capped list — with a longer array the metro
       // code could sit past the cap, i.e. never actually searched.
       if (metro && !homeAirportsFor(params.originAirports).includes(metro.toUpperCase())) {
-        offers = await searchHomeFlights({
+        offers = await searchHomeFlights(ctx, {
           originAirports: [metro],
           tripCity: params.destinationCity,
           date: params.date,
@@ -947,12 +1012,15 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     throw new Error('Need at least 2 cities, or 1 city with an origin set');
   }
 
+  // One memo of airport codes and leg prices for this whole run (B8).
+  const ctx = createRunContext();
+
   // Step 1: resolve IATA codes in parallel
   const iataCodes: Record<string, string> = {};
   await Promise.all(
     cities.map(async (city) => {
       try {
-        iataCodes[city.name] = await getIataCode(city.name);
+        iataCodes[city.name] = await ctx.iata(city.name);
       } catch {
         logger.warn('Could not resolve IATA for', { city: city.name });
       }
@@ -1009,7 +1077,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       resolvedOriginAirports = resolution.airports;
     } else {
       try {
-        const single = await getIataCode(origin!);
+        const single = await ctx.iata(origin!);
         resolvedOriginAirports = [single];
       } catch {
         logger.warn('Could not resolve origin IATA', { origin });
@@ -1063,7 +1131,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // the subtraction that produces savingsVsNaive compares two different
   // things.
   const scoreOrderingWithHomeLegs = async (ordering: string[]): Promise<ScoredRoute> => {
-    const basePromise = scoreRoute(ordering, startDate, travelers, cityMap, nightsArray);
+    const basePromise = scoreRoute(ordering, startDate, travelers, cityMap, nightsArray, ctx);
     if (!hasOrigin || resolvedOriginAirports.length === 0) return basePromise;
 
     // The inter-city legs and both home legs are independent searches, so
@@ -1074,7 +1142,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     const [baseRoute, ...homeCosts] = await Promise.all([
       basePromise,
       // Outbound leg: home → first destination, on the trip's start date.
-      estimateHomeLegCost({
+      estimateHomeLegCost(ctx, {
         originAirports: resolvedOriginAirports,
         destinationCity: ordering[0],
         date: clampToFuture(startDate),
@@ -1084,7 +1152,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       // the last city (when they'd be leaving it to go home).
       ...(returnToHome
         ? [
-            estimateHomeLegCost({
+            estimateHomeLegCost(ctx, {
               originAirports: resolvedOriginAirports,
               destinationCity: ordering[lastIdx],
               date: clampToFuture(addDays(startDate, totalNightsResolved)),
@@ -1192,6 +1260,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
             cityMap,
             nightsArray,
             home,
+            ctx,
           ),
         );
       }
@@ -1256,24 +1325,30 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   const homeLegsTask: Promise<[HomeLeg | null, HomeLeg | null]> =
     hasOrigin && resolvedOriginAirports.length > 0
       ? Promise.all([
-          buildHomeLeg({
-            originAirports: resolvedOriginAirports,
-            destinationCity: bestOrdering[0],
-            date: clampToFuture(startDate),
-            travelers,
-            originCity: origin,
-          }),
+          buildHomeLeg(
+            {
+              originAirports: resolvedOriginAirports,
+              destinationCity: bestOrdering[0],
+              date: clampToFuture(startDate),
+              travelers,
+              originCity: origin,
+            },
+            ctx,
+          ),
           returnToHome
             ? // Return leg departs after spending all the trip's nights —
               // cumulative sum of the per-city nights array.
-              buildHomeLeg({
-                originAirports: resolvedOriginAirports,
-                destinationCity: bestOrdering[bestOrdering.length - 1],
-                date: clampToFuture(addDays(startDate, totalNightsResolved)),
-                travelers,
-                reverse: true,
-                originCity: origin,
-              })
+              buildHomeLeg(
+                {
+                  originAirports: resolvedOriginAirports,
+                  destinationCity: bestOrdering[bestOrdering.length - 1],
+                  date: clampToFuture(addDays(startDate, totalNightsResolved)),
+                  travelers,
+                  reverse: true,
+                  originCity: origin,
+                },
+                ctx,
+              )
             : Promise.resolve(null),
         ])
       : Promise.resolve([null, null]);
