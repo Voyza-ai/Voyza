@@ -38,6 +38,16 @@ type CityDetailPanelProps = {
   onNext: () => void;
 };
 
+/**
+ * Rooms the stay is priced for — the backend's rule (services/hotels.ts
+ * `roomsFor`): two adults to a room, one room for a party of 1–2. The app
+ * sends no room count, so the backend always applies it, and the hotel's
+ * price covers every one of these rooms.
+ */
+export function roomsFor(adults: number): number {
+  return Number.isFinite(adults) && adults > 2 ? Math.ceil(adults / 2) : 1;
+}
+
 const formatDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', {
@@ -799,6 +809,7 @@ function HotelDetail({
   const room = displayAmount(roomGroup, priceMode, travelers);
   const total = displayAmount(totalGroup, priceMode, travelers);
   const perNight = displayAmount(hotel.pricePerNight, priceMode, travelers);
+  const rooms = roomsFor(travelers);
   // The explanatory "per person" footer is only useful when the main figures
   // are group totals — when the toggle is already in per-person mode, hide it.
   const perPerson =
@@ -877,13 +888,8 @@ function HotelDetail({
             {travelers} {travelers === 1 ? 'traveler' : 'travelers'}
           </div>
           <div className="text-[11px]" style={{ color: `${accent}80` }}>
-            {/* Rendered unchanged from when this came from the dead
-                `maxGuests` branch, which always resolved to one room. The
-                price is now for ceil(travelers / 2) rooms, so this copy is
-                stale for groups of 3+; correcting it is a copy change and
-                waits for the owner's approval. */}
             {nights} {nights === 1 ? 'night' : 'nights'} ·{' '}
-            {'1 room'}
+            {rooms} {rooms === 1 ? 'room' : 'rooms'}
           </div>
         </div>
       </div>
