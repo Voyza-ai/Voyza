@@ -24,6 +24,14 @@ jest.mock('../config/env', () => ({
 jest.mock('../services/presets', () => ({
   ...jest.requireActual('../services/presets'),
   startPresetRefreshScheduler: jest.fn(() => () => {}),
+  warmPresetChecks: jest.fn(),
+}));
+// The boot warm-up (location index, then the preset checks: ~2 s of CPU) is
+// bootWarmup.test.ts's subject, not this file's, and no request here resolves
+// a place.
+jest.mock('../services/location/originAirports', () => ({
+  ...jest.requireActual('../services/location/originAirports'),
+  originIndex: jest.fn(),
 }));
 jest.mock('morgan', () => () => (_req: unknown, _res: unknown, next: () => void) => next());
 
@@ -33,11 +41,6 @@ import { server } from '../index';
 
 beforeAll(async () => {
   if (!server.listening) await once(server, 'listening');
-  // Boot is not over at 'listening': index.ts builds the location index in a
-  // setImmediate queued by its listen callback, and that build holds the
-  // event loop (~0.4 s; 6.5 s measured on a container at load ~30). Queue
-  // behind it so no test's clock starts while the app is still booting.
-  await new Promise((r) => setImmediate(r));
 });
 afterAll(async () => {
   await new Promise((r) => server.close(r));
