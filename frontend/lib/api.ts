@@ -253,8 +253,14 @@ export async function fetchHomeLegs(params: {
   outbound?: boolean;
   /** Search the last-city→home leg (default true). */
   returnToHome?: boolean;
-}): Promise<{ outboundLeg: any | null; returnLeg: any | null }> {
-  return apiFetch<{ outboundLeg: any | null; returnLeg: any | null }>(
+  /**
+   * The first city's departure. When sent, the response says when the first
+   * stay starts given the outbound's landing date (`firstCityArrival`) —
+   * the optimizer's rule, computed by the backend so there is one copy.
+   */
+  firstCityDeparture?: string;
+}): Promise<{ outboundLeg: any | null; returnLeg: any | null; firstCityArrival?: string }> {
+  return apiFetch<{ outboundLeg: any | null; returnLeg: any | null; firstCityArrival?: string }>(
     '/api/flights/home-legs',
     { method: 'POST', body: JSON.stringify(params) },
   );

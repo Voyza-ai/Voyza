@@ -1063,6 +1063,55 @@ export async function buildHomeLeg(params: {
   };
 }
 
+/**
+ * The day the first stay starts: the day the outbound LANDS, not the day it
+ * leaves. An evening flight to Europe arrives the next morning: JFK 19:25
+ * Dec 8 → Paris 12:00 Dec 9 used to put Paris's arrival on Dec 8, so the
+ * hotel search checked in on Dec 8 (a $362-405 night spent on the plane on
+ * the owner's trip) and the schedule planned a Paris lunch and evening while
+ * the traveller was still at JFK.
+ *
+ * Decided default (owner can override): the trip's return date and every
+ * inter-city leg date stay as priced; city 0 simply gets fewer nights.
+ * Clamped to keep it at least ONE night: a 0-night stay would send the hotel
+ * search checkin === checkout and break every reader that assumes arrival <
+ * departure. In that narrow case (city 0 had a single night, or the flight
+ * lands 2+ days later and eats all of them) the stay keeps its last night,
+ * which can still overlap the flight — the price of keeping every priced leg
+ * date and the return date as they are. A landing before the start date
+ * (westbound over the date line) keeps the start date. No landing date
+ * (Duffel gave no arrival) keeps the start date.
+ *
+ * The ONE copy of this rule: optimize() applies it to the trips it builds,
+ * and /api/flights/home-legs to the ones it does not (Browse presets), so a
+ * saved preset and a planned trip agree on when the first stay starts.
+ *
+ * `startDate` is the day the outbound leaves (city 0's arrival before this
+ * rule), `firstDeparture` city 0's departure; all YYYY-MM-DD.
+ */
+export function firstStayArrival(params: {
+  startDate: string;
+  firstDeparture: string;
+  landed: string | null | undefined;
+  /** For the log line only. */
+  city?: string;
+}): string {
+  const { startDate, firstDeparture, landed } = params;
+  if (!landed) return startDate;
+  const latestArrival = addDays(firstDeparture, -1);
+  if (landed > latestArrival) {
+    logger.warn('Outbound lands too late to give the first city a full night', {
+      city: params.city,
+      landed,
+      departure: firstDeparture,
+    });
+  }
+  const arrival = landed < startDate ? startDate : landed > latestArrival ? latestArrival : landed;
+  // max(startDate, …) as well: latestArrival can only fall before the start
+  // date if city 0 had zero nights, which the request schemas reject.
+  return arrival < startDate ? startDate : arrival;
+}
+
 export async function optimize(params: OptimizeParams): Promise<OptimizeResult> {
   const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights } = params;
 
@@ -1455,37 +1504,19 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     cursor = departure;
   });
 
-  // The first stay starts the day the outbound LANDS, not the day it
-  // leaves. An evening flight to Europe arrives the next morning: JFK 19:25
-  // Dec 8 → Paris 12:00 Dec 9 used to put Paris's arrival on Dec 8, so the
-  // hotel search checked in on Dec 8 (a $362-405 night spent on the plane
-  // on the owner's trip) and the schedule planned a Paris lunch and evening
-  // while the traveller was still at JFK.
-  //
-  // Decided default (owner can override): the trip's return date and every
-  // inter-city leg date stay as priced; city 0 simply gets fewer nights.
-  // Clamped to keep it at least ONE night: a 0-night stay would send the
-  // hotel search checkin === checkout and break every reader that assumes
-  // arrival < departure. In that narrow case (city 0 had a single night, or
-  // the flight lands 2+ days later and eats all of them) the stay keeps its
-  // last night, which can still overlap the flight — the price of keeping
-  // every priced leg date and the return date as they are. A landing before
-  // the start date (westbound over the date line) keeps the start date.
+  // The first stay starts the day the outbound LANDS (firstStayArrival).
   const firstCity = bestOrdering[0];
   const landed = outboundLeg?.arriveDate;
   if (firstCity && landed && dates[firstCity]) {
-    const latestArrival = addDays(dates[firstCity].departure, -1);
-    if (landed > latestArrival) {
-      logger.warn('Outbound lands too late to give the first city a full night', {
-        city: firstCity,
+    dates[firstCity] = {
+      ...dates[firstCity],
+      arrival: firstStayArrival({
+        startDate,
+        firstDeparture: dates[firstCity].departure,
         landed,
-        departure: dates[firstCity].departure,
-      });
-    }
-    const arrival = landed < startDate ? startDate : landed > latestArrival ? latestArrival : landed;
-    // max(startDate, …) as well: latestArrival can only fall before the
-    // start date if city 0 had zero nights, which the request schema rejects.
-    dates[firstCity] = { ...dates[firstCity], arrival: arrival < startDate ? startDate : arrival };
+        city: firstCity,
+      }),
+    };
   }
 
   // Every flight search failed and nothing else priced the trip (B14): this
