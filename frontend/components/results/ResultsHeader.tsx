@@ -322,7 +322,9 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
               </span>
             </div>
             <span className="text-gray-400">·</span>
-            <span className="text-gray-500">{trip.cities.length} stops</span>
+            <span className="text-gray-500">
+              {trip.cities.length} {trip.cities.length === 1 ? 'stop' : 'stops'}
+            </span>
           </div>
           <TripNameEditor
             value={trip.title ?? ''}

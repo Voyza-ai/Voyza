@@ -183,6 +183,18 @@ describe('ResultsHeader', () => {
     expect(screen.queryByText('vs default routing')).not.toBeInTheDocument();
   });
 
+  // Harness, saved "Paris Long Weekend" preset (one city): the meta row read
+  // "1 stops".
+  it('counts a one-city trip as "1 stop", more as "N stops"', () => {
+    const base = buildTrip();
+    const { unmount } = render(<ResultsHeader trip={{ ...base, cities: [base.cities[0]] }} />);
+    expect(screen.getByText('1 stop')).toBeInTheDocument();
+    expect(screen.queryByText('1 stops')).not.toBeInTheDocument();
+    unmount();
+    render(<ResultsHeader trip={base} />);
+    expect(screen.getByText('2 stops')).toBeInTheDocument();
+  });
+
   it('long AI-route titles cannot wrap the price cluster onto a second row', () => {
     // Describe-chat trips are titled with the full route ("Berlin → Florence
     // → Barcelona → Madrid"), which used to widen the left column until the
