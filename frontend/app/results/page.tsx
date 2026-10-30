@@ -25,6 +25,7 @@ import { liveTripTotal } from '@/lib/tripTotals';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 import { originAirportsForCity } from '@/lib/locationResolver';
 import { Hotel, City, Transport, Trip } from '@/lib/types';
+import { tripStartDate } from '@/lib/tripSpan';
 import { useAuthStore } from '@/store/authStore';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
@@ -302,7 +303,12 @@ function ResultsPageInner() {
             c.dates.departure === visit.departure,
         );
         if (idx < 0) return;
-        updateCity(idx, { hotels, hotel: hotels[0], selectedHotelIndex: 0 });
+        // A re-search keeps the traveller's pick when the new list still has it.
+        const city = cities[idx];
+        const picked = city.hotels.length > 1 ? city.hotels[city.selectedHotelIndex]?.name : undefined;
+        const keep = picked ? hotels.findIndex((h) => h.name === picked) : -1;
+        const sel = keep >= 0 ? keep : 0;
+        updateCity(idx, { hotels, hotel: hotels[sel], selectedHotelIndex: sel });
       }),
     );
 
@@ -332,8 +338,27 @@ function ResultsPageInner() {
   // backfill only ever runs once per trip.
   const homeLegsFetchedRef = useRef<string | null>(null);
   const [homeLegSearch, setHomeLegSearch] = useState({ outbound: false, return: false });
+  /**
+   * The day the next outbound search must leave on, when the trip on screen
+   * no longer says it. Clearing an overnight outbound (to re-search it) loses
+   * the trip's start: without the leg, `tripStartDate` falls back to the first
+   * stay's arrival, which is the LANDING day — and the search went out a day
+   * late (Jan 11 for a trip leaving Jan 10).
+   */
+  const outboundStartRef = useRef<string | null>(null);
 
-  /** Search the home legs a trip is missing and merge what comes back. */
+  /**
+   * Search the home legs a trip is missing and merge what comes back.
+   *
+   * The outbound is searched on the trip's start and sends the first stay's
+   * departure, so the answer carries `firstCityArrival` — the backend's
+   * landing rule — and the first stay is re-dated to the day the chosen
+   * flight lands (a same-day flight gives the night back; an overnight one
+   * takes it). A search that answered with no flight dates the stay from the
+   * start, as the optimizer does without one. The dates change through the
+   * store, so the re-pricing subscription below re-searches that city's
+   * hotels for them.
+   */
   const searchHomeLegs = (
     trip: Trip,
     need: { outbound: boolean; return: boolean },
@@ -360,6 +385,7 @@ function ResultsPageInner() {
     setHomeLegSearch({ outbound: need.outbound, return: need.return });
 
     if (need.outbound && outAirports.length > 0) {
+      const firstCityDeparture = first.dates?.departure || undefined;
       jobs.push(
         track(
           fetchHomeLegs({
@@ -369,6 +395,7 @@ function ResultsPageInner() {
             lastCity: last.name,
             startDate,
             endDate: last.dates?.departure,
+            firstCityDeparture,
             travelers: trip.travelers ?? 1,
             outbound: true,
             returnToHome: false,
@@ -376,7 +403,21 @@ function ResultsPageInner() {
             .then((r) => {
               const cur = useTripStore.getState().currentTrip;
               if (!cur?.origin) return;
-              setTrip({ ...cur, origin: { ...cur.origin, outboundLeg: r.outboundLeg ?? null } });
+              const leg = r.outboundLeg ?? null;
+              const stay = cur.cities[0];
+              // Re-date only the stay the search was for, at the dates it
+              // was asked about.
+              const arrival =
+                stay && stay.name === first.name && stay.dates.departure === firstCityDeparture
+                  ? leg
+                    ? r.firstCityArrival
+                    : startDate
+                  : undefined;
+              const cities =
+                arrival && arrival !== stay.dates.arrival
+                  ? [{ ...stay, dates: { ...stay.dates, arrival } }, ...cur.cities.slice(1)]
+                  : cur.cities;
+              setTrip({ ...cur, cities, origin: { ...cur.origin, outboundLeg: leg } });
             })
             .finally(() => setHomeLegSearch((s) => ({ ...s, outbound: false }))),
         ),
@@ -447,6 +488,9 @@ function ResultsPageInner() {
     // "Portland". Labels are built name-first, so the leading segment is it.
     const shortName = choice.label.split(',')[0]?.trim() || trip.origin.city;
     homeLegsFetchedRef.current = null;
+    // The new outbound leaves the day the old one did — the trip's start —
+    // whichever day it then lands.
+    outboundStartRef.current = tripStartDate(trip) ?? null;
     freeze(trip);
     setTrip({
       ...trip,
@@ -474,7 +518,8 @@ function ResultsPageInner() {
     if (!needOutbound && !needReturn) return;
     homeLegsFetchedRef.current = key;
 
-    const startDate = trip.cities[0].dates?.arrival;
+    const startDate = outboundStartRef.current ?? tripStartDate(trip);
+    outboundStartRef.current = null;
     if (!startDate) return;
 
     freeze(trip);
@@ -490,6 +535,36 @@ function ResultsPageInner() {
     currentTrip?.origin?.city,
     currentTrip?.origin?.airports?.join(','),
   ]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Dates moved on the trip on screen → re-price what was priced for the old
+   * ones: a stay whose dates changed has its hotels searched for the new
+   * dates. One rule for every source of a date change — an outbound swap that
+   * lands on another day, a re-searched outbound's landing day. The header
+   * holds the last settled total until the search has landed.
+   */
+  useEffect(
+    () =>
+      useTripStore.subscribe((state, prevState) => {
+        const next = state.currentTrip;
+        const prev = prevState.currentTrip;
+        if (!next || !prev || next === prev) return;
+        const work = datedWork(prev, next);
+        if (!work) return;
+        freeze(prev);
+        // Run after this store update has finished notifying (the jobs write
+        // to the store themselves).
+        queueMicrotask(() => {
+          const cur = useTripStore.getState().currentTrip;
+          if (!cur) return;
+          for (const i of work.hotels) {
+            const c = cur.cities[i];
+            if (c) searchVisitHotels({ name: c.name, arrival: c.dates.arrival, departure: c.dates.departure }, cur.travelers);
+          }
+        });
+      }),
+    [], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   if (loading) {
     return (
@@ -630,4 +705,27 @@ function ResultsPageInner() {
       </div>
     </main>
   );
+}
+
+/** What a date change on the trip on screen leaves to re-price (see the subscription above). */
+type DatedWork = {
+  /** Stays whose dates moved — their hotels are searched for the new ones. */
+  hotels: number[];
+};
+
+function datedWork(prev: Trip, next: Trip): DatedWork | null {
+  // Only the same itinerary moving in time. Another trip, or stops added,
+  // removed or reordered, is a different trip, priced where it was built.
+  if ((prev.id ?? null) !== (next.id ?? null)) return null;
+  if (prev.cities.length !== next.cities.length || next.cities.length === 0) return null;
+  if (prev.cities.some((c, i) => c.name !== next.cities[i].name)) return null;
+
+  const hotels: number[] = [];
+  next.cities.forEach((c, i) => {
+    const p = prev.cities[i];
+    if (!p.dates || !c.dates) return;
+    if (p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) hotels.push(i);
+  });
+  if (hotels.length === 0) return null;
+  return { hotels };
 }

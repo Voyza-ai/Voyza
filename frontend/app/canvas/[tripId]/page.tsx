@@ -37,6 +37,7 @@ import { hotelFromResult } from '@/lib/hotelShape';
 import TripNameEditor from '@/components/shared/TripNameEditor';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
+import { outboundSearchDates } from '@/lib/tripSpan';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { summarizeCanvasChanges } from '@/lib/canvasDiff';
 import { Trip } from '@/lib/types';
@@ -440,7 +441,19 @@ function CanvasPageInner() {
   // first matching city that still has no hotels. Matching by name (not
   // index) keeps it correct even if the user reorders while the request is
   // in flight.
-  const enrichCityHotels = async (cityName: string, checkin: string, checkout: string) => {
+  //
+  // `replace`: the city's dates moved (its first night now follows the
+  // outbound's landing day, or an accepted AI date change), so its hotels
+  // were priced for other nights. Re-search for the new dates and replace
+  // them on the visit with exactly those dates — a result for dates the
+  // visit no longer has is dropped — keeping the traveller's pick when the
+  // new list still has it.
+  const enrichCityHotels = async (
+    cityName: string,
+    checkin: string,
+    checkout: string,
+    opts: { replace?: boolean } = {},
+  ) => {
     if (!cityName || !checkin || !checkout) return;
     setHotelLoadingCities((prev) => (prev.includes(cityName) ? prev : [...prev, cityName]));
     try {
@@ -448,7 +461,7 @@ function CanvasPageInner() {
         city: cityName,
         checkin,
         checkout,
-        adults: localState?.trip?.travelers ?? 1,
+        adults: localStateRef.current?.trip?.travelers ?? localState?.trip?.travelers ?? 1,
       });
       if (results.length === 0) return;
       const hotels = results.map(hotelFromResult);
@@ -456,7 +469,17 @@ function CanvasPageInner() {
         if (!prev?.cities) return prev;
         let merged = false;
         const cities = prev.cities.map((c: any) => {
-          if (!merged && c.name === cityName && (!c.hotels || c.hotels.length === 0)) {
+          if (merged || c.name !== cityName) return c;
+          if (opts.replace) {
+            if (c.dates?.arrival !== checkin || c.dates?.departure !== checkout) return c;
+            merged = true;
+            const list = Array.isArray(c.hotels) ? c.hotels : [];
+            const picked = list.length > 1 ? list[c.selectedHotelIndex ?? 0]?.name : undefined;
+            const keep = picked ? hotels.findIndex((h) => h.name === picked) : -1;
+            const sel = keep >= 0 ? keep : 0;
+            return { ...c, hotels, hotel: hotels[sel], selectedHotelIndex: sel };
+          }
+          if (!c.hotels || c.hotels.length === 0) {
             merged = true;
             return { ...c, hotels, hotel: hotels[0], selectedHotelIndex: 0 };
           }
@@ -845,6 +868,35 @@ function CanvasPageInner() {
     }
   };
 
+  // The first stay starts the day the outbound LANDS — the backend's rule,
+  // answered by /home-legs as `firstCityArrival` for the first stay's
+  // departure we sent. An overnight flight starts it the day after the trip
+  // leaves; a same-day one gives that night back; a search that found no
+  // flight dates it from the trip's start, as the optimizer does without
+  // one. Only the stay the search was for, at the dates it was asked about.
+  // A stay whose dates moved has its hotels re-searched for them.
+  const applyOutboundLanding = (
+    searchedFirst: { name: string; dates: { arrival: string; departure: string } },
+    startDate: string,
+    legs: { outboundLeg: any | null; firstCityArrival?: string },
+  ) => {
+    const arrival = legs.outboundLeg ? legs.firstCityArrival : startDate;
+    if (!arrival) return;
+    const sameStay = (c: any) =>
+      !!c && c.name === searchedFirst.name && c.dates?.departure === searchedFirst.dates.departure;
+    const cur = localStateRef.current?.cities?.[0];
+    if (!sameStay(cur) || cur.dates.arrival === arrival) return;
+    setLocalState((prev: any) => {
+      const c0 = prev?.cities?.[0];
+      if (!sameStay(c0)) return prev;
+      return {
+        ...prev,
+        cities: [{ ...c0, dates: { ...c0.dates, arrival } }, ...prev.cities.slice(1)],
+      };
+    });
+    enrichCityHotels(cur.name, arrival, cur.dates.departure, { replace: true });
+  };
+
   // Apply a home-card edit from the popup. The two cards are independent:
   // the outbound card owns city/airports, the back-home card owns
   // returnCity/returnAirports. After updating, the affected direction's
@@ -872,6 +924,13 @@ function CanvasPageInner() {
     const first = tripCities[0];
     const last = tripCities[tripCities.length - 1];
     if (!first || !last || !first.dates?.arrival) return;
+    // The outbound leaves on the trip's START — the old flight's departure
+    // day, which on an overnight trip is the day before the first stay — and
+    // its landing day then dates that stay (see applyOutboundLanding).
+    const span =
+      direction === 'outbound'
+        ? outboundSearchDates({ cities: tripCities, origin: currentOrigin })
+        : null;
 
     setHomeLegLoading(direction);
     try {
@@ -880,8 +939,9 @@ function CanvasPageInner() {
         originCity: updates.city,
         firstCity: first.name,
         lastCity: last.name,
-        startDate: first.dates.arrival,
+        startDate: span?.startDate ?? first.dates.arrival,
         endDate: last.dates?.departure,
+        ...(span?.firstCityDeparture ? { firstCityDeparture: span.firstCityDeparture } : {}),
         travelers: localState?.trip?.travelers ?? 1,
         outbound: direction === 'outbound',
         returnToHome: direction === 'inbound',
@@ -894,6 +954,7 @@ function CanvasPageInner() {
         else o.returnLeg = leg ?? null;
         return { ...prev, trip: { ...prev.trip, origin: o } };
       });
+      if (direction === 'outbound' && span) applyOutboundLanding(first, span.startDate, legs);
       if (!leg) showToast('No flights found for that airport', 'info');
     } catch {
       showToast('Flight search failed — card updated without a flight', 'error');
@@ -1123,6 +1184,9 @@ function CanvasPageInner() {
     [],
   );
 
+  // The outbound is searched from the trip's start: the current outbound's
+  // departure day — on an overnight trip the day BEFORE the first stay, not
+  // the first stay's arrival this used to search from.
   const refreshHomeLegDirection = useCallback(
     async (direction: 'outbound' | 'inbound', ls: any) => {
       const o = ls?.trip?.origin;
@@ -1135,14 +1199,18 @@ function CanvasPageInner() {
           ? (o.returnAirports ?? o.airports ?? [])
           : (o.airports ?? []);
       if (airports.length === 0) return;
+      const span =
+        direction === 'outbound' ? outboundSearchDates({ cities: tripCities, origin: o }) : null;
+      const startDate = span?.startDate ?? first.dates.arrival;
       setHomeLegLoading(direction);
       try {
         const legs = await fetchHomeLegs({
           originAirports: airports,
           firstCity: first.name,
           lastCity: last?.name ?? first.name,
-          startDate: first.dates.arrival,
+          startDate,
           endDate: last?.dates?.departure,
+          ...(span?.firstCityDeparture ? { firstCityDeparture: span.firstCityDeparture } : {}),
           travelers: ls?.trip?.travelers ?? 1,
           outbound: direction === 'outbound',
           returnToHome: direction === 'inbound',
@@ -1155,6 +1223,7 @@ function CanvasPageInner() {
           else po.returnLeg = leg ?? null;
           return { ...prev, trip: { ...prev.trip, origin: po } };
         });
+        if (direction === 'outbound') applyOutboundLandingRef.current(first, startDate, legs);
       } catch {
         // keep the stale home leg rather than blanking it
       } finally {
@@ -1163,6 +1232,10 @@ function CanvasPageInner() {
     },
     [],
   );
+  // refreshHomeLegDirection is memoised once; read the landing step through
+  // a ref so it always sees this render's state setters and hotel search.
+  const applyOutboundLandingRef = useRef(applyOutboundLanding);
+  applyOutboundLandingRef.current = applyOutboundLanding;
 
   useEffect(() => {
     if (!canManipulate || !localState?.cities || localState.cities.length === 0) return;
