@@ -11,7 +11,7 @@ import { Trip, City, Transport, Restaurant, PlanningAnswers, VibeDestinationSugg
 import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { suggestDestinationsForVibe } from '@/lib/api';
-import { parseDateInput } from '@/lib/parseDate';
+import { parseDateInput, parseDateRangeInput } from '@/lib/parseDate';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { vibesFromAnswer } from '@/lib/vibeMap';
@@ -1890,8 +1890,19 @@ export default function PlanningChat() {
         // YYYY-MM-DD format the backend expects. Without this, typing
         // something like "Next month" in the chat bar would be stored
         // verbatim and later rejected by the optimize endpoint's zod schema.
-        const isoStart = parseDateInput(value);
-        handleDatesSelect(isoStart, isoStart, true);
+        //
+        // A whole typed range ("Jan 10 to Jan 17, 2027") is kept as a range:
+        // `parseDateInput` returns one date, so this used to store
+        // `{ start, end: start }` as flexible — the end date silently dropped,
+        // and the nights question asked again. Anything that isn't a clean
+        // range takes the single-date path exactly as before.
+        const range = parseDateRangeInput(value);
+        if (range) {
+          handleDatesSelect(range.start, range.end, false);
+        } else {
+          const isoStart = parseDateInput(value);
+          handleDatesSelect(isoStart, isoStart, true);
+        }
         setTextInput('');
         return;
       }
