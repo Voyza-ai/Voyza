@@ -50,6 +50,22 @@ jest.mock('../services/trains', () => ({
   ]),
 }));
 
+// A date shift is now held to the whole trip, hotels included
+// (optimizerDateShiftHotels.test.ts). Here hotels are the same price on every
+// date — $100 a night — so the shift is decided by the flights alone.
+jest.mock('../services/hotels', () => ({
+  ...jest.requireActual('../services/hotels'),
+  searchHotels: jest.fn(async ({ checkin, checkout }: { checkin: string; checkout: string }) => {
+    const nights = Math.round((Date.parse(checkout) - Date.parse(checkin)) / 864e5);
+    return [
+      {
+        id: 'h1', name: 'Flat Hotel', price: 100 * nights, pricePerNight: 100, currency: 'USD',
+        rating: 8.5, reviewCount: 500, stars: 3, thumbnail: '', bookingUrl: '', amenities: [],
+      },
+    ];
+  }),
+}));
+
 import { optimize } from '../services/optimizer';
 import { searchFlights } from '../services/flights';
 
@@ -171,9 +187,10 @@ describe('optimize — home legs and savings', () => {
     expect(s).toBeDefined();
     expect(s!.dayOffset).toBe(-2);
     expect(s!.newStartDate).toBe('2030-06-08');
-    // Whole trip: (600 out + 100 back) → (300 out + 100 back) = $300 saved.
+    // Whole trip: (600 out + 100 back + 3 × $100 hotel) → (300 out + 100
+    // back + the same hotel) = $300 saved.
     expect(s!.savings).toBe(300);
-    expect(s!.newTotalCost).toBe(400);
+    expect(s!.newTotalCost).toBe(700);
   }, 30000);
 
   it('never offers a date whose home flight cannot be priced', async () => {

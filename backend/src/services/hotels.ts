@@ -1076,6 +1076,41 @@ export function excludedChargesTotal(
   return extra >= 0 ? extra : undefined;
 }
 
+/**
+ * The hotel the planner will put in the trip for one search: the first row of
+ * `rankHotels` in frontend/lib/hotelScore.ts, which lib/api.ts applies to
+ * every search before PlanningChat takes `hotels[0]`.
+ *
+ * Mirrored because the backend cannot import the frontend, and needed because
+ * the optimizer's date-shift check must price the SAME stay the traveller will
+ * be shown — before and after the shift — or its "save $X" describes some
+ * other trip. Keep the two in step: score = effectiveRating^2.8 × 100 /
+ * pricePerNight, the rating shrunk toward the search's mean rating by
+ * reviewCount / (reviewCount + 50) and never raised by it, and a flagged row
+ * or a score that is not positive sorts below every other row. Ties keep
+ * provider order, as Array.prototype.sort does there.
+ */
+export function plannerHotelPick(rows: HotelResult[]): HotelResult | undefined {
+  const ratings = rows.map((h) => h.rating).filter((r) => Number.isFinite(r));
+  const prior = ratings.length ? ratings.reduce((s, r) => s + r, 0) / ratings.length : undefined;
+  const effectiveRating = (h: HotelResult): number => {
+    const v = h.reviewCount;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return h.rating;
+    if (prior === undefined || !Number.isFinite(prior)) return h.rating;
+    return Math.min(h.rating, (v * h.rating + 50 * prior) / (v + 50));
+  };
+  const score = (h: HotelResult): number => {
+    if (!Number.isFinite(h.pricePerNight) || h.pricePerNight <= 0) return 0;
+    const s = Math.pow(effectiveRating(h), 2.8) * (100 / h.pricePerNight);
+    return Number.isFinite(s) ? s : 0;
+  };
+  const scored = rows.map((h) => ({ h, s: score(h) }));
+  const demoted = (x: { h: HotelResult; s: number }) =>
+    x.h.priceSuspect === true || !Number.isFinite(x.s) || x.s <= 0 ? 1 : 0;
+  scored.sort((a, b) => demoted(a) - demoted(b) || (a.s === b.s ? 0 : b.s > a.s ? 1 : -1));
+  return scored[0]?.h;
+}
+
 export function trustedFirst(hotels: HotelResult[]): HotelResult[] {
   const trusted: HotelResult[] = [];
   const suspect: HotelResult[] = [];

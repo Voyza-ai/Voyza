@@ -8,6 +8,7 @@ import { sameAirportArea } from './location/sameAirportArea';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
 import { withDuffelRetryBudget } from './duffelBudget';
 import { AppError } from '../middleware/error';
+import { searchHotels, plannerHotelPick } from './hotels';
 
 /**
  * Lookups shared by everything ONE optimize() run does (B8).
@@ -186,26 +187,26 @@ export type DateShiftOption = {
   /** ISO date after applying the offset. */
   newStartDate: string;
   /**
-   * Inter-city leg total with the shifted dates. Home flights are NOT
-   * included — see `savings`.
+   * What the trip costs with the shifted dates: inter-city legs, home flights
+   * (when they could be priced at the requested dates too) and every hotel
+   * stay, moved by the same offset.
    */
   newTotalCost: number;
   /**
-   * USD saved on the inter-city legs compared to the user's requested start
-   * date. Both sides of that subtraction are the same legs on the same
-   * per-city night schedule, so it is a like-for-like number. Home flights
-   * are deliberately left out of both sides: re-pricing them for four extra
-   * start dates is eight more Duffel searches right before buildHomeLeg
-   * needs the rate-limit window.
+   * USD saved against the requested start date, like for like: the same
+   * legs, home flights and stays — same cities, nights, party and rooms, the
+   * planner's own hotel pick per city — on both sides. A shift moves every
+   * hotel night, so hotels are in both sides (see confirmDateShiftWithHotels).
    */
   savings: number;
 };
 
 /**
  * Headline fields describe the single best shift (kept flat for backward
- * compatibility with saved trips and older clients); `options` lists every
- * shift that clears the savings thresholds, best first — the results
- * header shows these as a "pick your dates" menu.
+ * compatibility with saved trips and older clients); `options` lists the
+ * shifts offered, best first — the results header shows these as a "pick your
+ * dates" menu. Since hotels are counted, only the best transport candidate is
+ * re-priced (RapidAPI quota), so `options` holds that one shift.
  */
 export type DateShiftSuggestion = DateShiftOption & {
   options?: DateShiftOption[];
@@ -671,6 +672,9 @@ async function homeFlightsCost(
  * comparison falls back to inter-city legs only (still like with like).
  * A shifted date whose legs or home flights can't all be priced is never
  * offered — a missing fare must not read as a saving.
+ *
+ * Transport only: the best candidate this returns is then held to the whole
+ * trip, hotels included, by confirmDateShiftWithHotels before anyone sees it.
  */
 async function findDateShiftSuggestion(
   bestOrdering: string[],
@@ -786,6 +790,141 @@ export function pickDateShiftOptions(
 
   if (options.length === 0) return undefined;
   return { ...options[0], options };
+}
+
+/** One hotel stay: a city and the nights the trip spends there. */
+type Stay = { city: string; checkin: string; checkout: string };
+
+/**
+ * What the trip's hotels cost for these stays, the way the planner will
+ * price them: per city, the hotel it auto-selects (`plannerHotelPick`) at its
+ * room rate plus Booking's excluded charges, times the nights — the sum the
+ * trip total (`effectiveHotel`) is built from. Prices are party totals for
+ * every room already. Null when any stay cannot be priced: a city with no
+ * hotel would read as a hotel saved.
+ *
+ * Every stay is searched at once (they are independent), and each with
+ * exactly the request PlanningChat sends — city, dates, `adults: travelers`,
+ * no rooms (so `roomsFor` decides, as for the planner) and no price cap — so
+ * the planned-date searches are the very ones the planner makes next, and it
+ * is served them from the 10-minute hotel search cache.
+ */
+async function hotelStaysCost(stays: Stay[], travelers: number): Promise<number | null> {
+  const costs = await Promise.all(
+    stays.map(async ({ city, checkin, checkout }) => {
+      const pick = plannerHotelPick(await searchHotels({ city, checkin, checkout, adults: travelers }));
+      if (!pick) return null;
+      const nights = Math.round((Date.parse(`${checkout}T00:00:00Z`) - Date.parse(`${checkin}T00:00:00Z`)) / 86_400_000);
+      const taxes = Number.isFinite(pick.taxesPerNight) ? (pick.taxesPerNight as number) : 0;
+      const cost = (pick.pricePerNight + taxes) * nights;
+      return Number.isFinite(cost) && cost > 0 ? cost : null;
+    }),
+  );
+  if (costs.some((c) => c === null)) return null;
+  return (costs as number[]).reduce((sum, c) => sum + c, 0);
+}
+
+/**
+ * Hold the best transport-only date shift to the whole trip: re-price every
+ * hotel stay at the requested dates and at the shifted ones, and offer the
+ * shift only if transport + hotels still clears `pickDateShiftOptions`'
+ * thresholds against transport + hotels as planned.
+ *
+ * The probe used to price flights and legs alone, but a shift moves every
+ * hotel night — into a weekend, a holiday, a trade fair — so "start a day
+ * earlier and save $652" could describe a trip that costs more.
+ *
+ * Only the BEST candidate is re-priced: each stay is two searches on our
+ * RapidAPI quota, and the planned-date half is shared with the planner's own
+ * searches through the cache. So only that one shift can be offered, and the
+ * runners-up are dropped rather than shown with a transport-only number.
+ *
+ * Shifted stays are the planned stays moved by the offset — same cities, same
+ * nights — which is the trip a "start N days earlier" replan builds. Any
+ * failure (a search that comes back empty or throws) means no suggestion: no
+ * suggestion is better than a wrong one.
+ */
+export async function confirmDateShiftWithHotels(
+  transport: DateShiftSuggestion,
+  stays: Stay[],
+  travelers: number,
+): Promise<DateShiftSuggestion | undefined> {
+  const started = Date.now();
+  const offset = transport.dayOffset;
+  const shiftedStays = stays.map((s) => ({
+    city: s.city,
+    checkin: addDays(s.checkin, offset),
+    checkout: addDays(s.checkout, offset),
+  }));
+  try {
+    const [planned, shifted] = await Promise.all([
+      hotelStaysCost(stays, travelers),
+      hotelStaysCost(shiftedStays, travelers),
+    ]);
+    if (planned === null || shifted === null) {
+      logger.warn('Date shift not offered — its hotels could not be priced', {
+        dayOffset: offset,
+        plannedPriced: planned !== null,
+        shiftedPriced: shifted !== null,
+        ms: Date.now() - started,
+      });
+      return undefined;
+    }
+    const transportBaseline = transport.newTotalCost + transport.savings;
+    const result = pickDateShiftOptions(
+      [{ offset, startDate: transport.newStartDate, cost: transport.newTotalCost + shifted }],
+      transportBaseline + planned,
+    );
+    logger.info('Date shift checked against hotels', {
+      dayOffset: offset,
+      transportSavings: transport.savings,
+      hotelsPlanned: Math.round(planned * 100) / 100,
+      hotelsShifted: Math.round(shifted * 100) / 100,
+      offered: result ? result.savings : null,
+      ms: Date.now() - started,
+    });
+    return result;
+  } catch (err: any) {
+    logger.warn('Date shift not offered — hotel re-pricing failed', { dayOffset: offset, message: err?.message });
+    return undefined;
+  }
+}
+
+/**
+ * Each city's stay for the winning ordering: back to back from `startDate`
+ * with the per-city nights, the first one starting when the outbound LANDS
+ * (firstStayArrival). These are the dates the trip shows and the planner
+ * searches hotels for.
+ */
+function stayDates(
+  ordering: string[],
+  startDate: string,
+  nightsArray: number[],
+  outboundLeg: HomeLeg | null | undefined,
+): Record<string, { arrival: string; departure: string }> {
+  const dates: Record<string, { arrival: string; departure: string }> = {};
+  let cursor = startDate;
+  ordering.forEach((cityName, i) => {
+    const arrival = cursor;
+    const departure = addDays(cursor, nightsArray[i] ?? DEFAULT_NIGHTS_PER_CITY);
+    dates[cityName] = { arrival, departure };
+    cursor = departure;
+  });
+
+  const firstCity = ordering[0];
+  const landed = outboundLeg?.arriveDate;
+  if (firstCity && landed && dates[firstCity]) {
+    dates[firstCity] = {
+      ...dates[firstCity],
+      arrival: firstStayArrival({
+        startDate,
+        firstDeparture: dates[firstCity].departure,
+        landed,
+        city: firstCity,
+      }),
+    };
+  }
+  return dates;
 }
 
 /**
@@ -1358,7 +1497,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // Step 7: date-shift suggestion — probe a few ±1/±2 day offsets on the
   // winning ordering to see if leaving earlier/later saves meaningful money.
   // Runs in parallel; any failures silently skip this feature.
-  const dateShiftTask = (async (): Promise<DateShiftSuggestion | undefined> => {
+  const dateShiftTransportTask = (async (): Promise<DateShiftSuggestion | undefined> => {
     try {
       // Baseline = the winning route's inter-city legs (plus, inside the
       // probe, the home flights) at the requested dates — exactly what each
@@ -1484,6 +1623,25 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         ])
       : Promise.resolve([null, null]);
 
+  // Step 7b: hold the best transport-only shift to the whole trip by
+  // re-pricing its hotels at both dates (confirmDateShiftWithHotels). It
+  // needs the trip's stays, which need the built outbound (the first stay
+  // starts when it lands), so it starts as soon as the probe and the home
+  // legs are both in — alongside the enrichment rather than after it. No
+  // transport candidate, no hotel searches.
+  const dateShiftTask = (async (): Promise<DateShiftSuggestion | undefined> => {
+    const transport = await dateShiftTransportTask;
+    if (!transport) return undefined;
+    const [outbound] = await homeLegsTask;
+    const planned = stayDates(bestOrdering, startDate, nightsArray, outbound);
+    const stays = bestOrdering.map((city) => ({
+      city,
+      checkin: planned[city].arrival,
+      checkout: planned[city].departure,
+    }));
+    return confirmDateShiftWithHotels(transport, stays, travelers);
+  })();
+
   const [dateShiftSuggestion, , [outboundLeg, returnLeg]] = await Promise.all([
     dateShiftTask,
     enrichTask,
@@ -1493,31 +1651,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // Step 6: assign arrival/departure dates for the best ordering using
   // the per-city nights array. This keeps the displayed calendar
   // aligned with the dates we actually queried during scoring. (Computed
-  // after the tail: it needs the built outbound flight.)
-  const dates: Record<string, { arrival: string; departure: string }> = {};
-  let cursor = startDate;
-
-  bestOrdering.forEach((cityName, i) => {
-    const arrival = cursor;
-    const departure = addDays(cursor, nightsArray[i] ?? DEFAULT_NIGHTS_PER_CITY);
-    dates[cityName] = { arrival, departure };
-    cursor = departure;
-  });
-
-  // The first stay starts the day the outbound LANDS (firstStayArrival).
-  const firstCity = bestOrdering[0];
-  const landed = outboundLeg?.arriveDate;
-  if (firstCity && landed && dates[firstCity]) {
-    dates[firstCity] = {
-      ...dates[firstCity],
-      arrival: firstStayArrival({
-        startDate,
-        firstDeparture: dates[firstCity].departure,
-        landed,
-        city: firstCity,
-      }),
-    };
-  }
+  // after the tail: it needs the built outbound flight.) The first stay
+  // starts the day the outbound LANDS (firstStayArrival).
+  const dates = stayDates(bestOrdering, startDate, nightsArray, outboundLeg);
 
   // Every flight search failed and nothing else priced the trip (B14): this
   // is an outage, not a trip. It used to return 200 with every leg
