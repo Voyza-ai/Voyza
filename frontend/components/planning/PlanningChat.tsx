@@ -25,6 +25,7 @@ import { originAirportsForCity, type LocationAnswer } from '@/lib/locationResolv
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
+import { humanDay, humanDayRange } from '@/lib/dateHelpers';
 import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
@@ -80,24 +81,9 @@ function originAirportsForOrigin(query: string, answer: LocationAnswer): string[
 // ── Copy the planner says back (D-19, D-11/E14) ─────────────────────────
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-const monthDay = (iso: string) => {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
-
-/** "Jan 10, 2027": the results header's "Jan 10", with its year. */
-export function humanDay(iso: string): string {
-  return ISO_DAY.test(iso) ? `${monthDay(iso)}, ${iso.slice(0, 4)}` : iso;
-}
-
-/** "Jan 10 – Jan 17, 2027" — both ends, the year once, or on each end
- *  when they differ ("Dec 28, 2026 – Jan 4, 2027"). */
-export function humanDayRange(start: string, end: string): string {
-  if (!ISO_DAY.test(start) || !ISO_DAY.test(end)) return start;
-  return start.slice(0, 4) === end.slice(0, 4)
-    ? `${monthDay(start)} – ${monthDay(end)}, ${end.slice(0, 4)}`
-    : `${humanDay(start)} – ${humanDay(end)}`;
-}
+// Dates in words ("Jan 10 – Jan 17, 2027") — shared with the conversational
+// planner's recap, so they live in lib/dateHelpers.
+export { humanDay, humanDayRange };
 
 const CONNECTION_FAILED = "I couldn't reach the travel service. Check your connection and try again.";
 const UNREADABLE_ANSWER = "I couldn't make sense of one of your answers. Try rephrasing the dates or budget?";

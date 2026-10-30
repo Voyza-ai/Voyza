@@ -30,3 +30,24 @@ export const toIso = (d: Date): string => {
 /** Whole calendar days between two dates (b - a). Negative if b < a. */
 export const daysBetween = (a: Date, b: Date): number =>
   Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+const monthDay = (iso: string) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+/** "Jan 10, 2027": the results header's "Jan 10", with its year. */
+export function humanDay(iso: string): string {
+  return ISO_DAY.test(iso) ? `${monthDay(iso)}, ${iso.slice(0, 4)}` : iso;
+}
+
+/** "Jan 10 – Jan 17, 2027" — both ends, the year once, or on each end
+ *  when they differ ("Dec 28, 2026 – Jan 4, 2027"). */
+export function humanDayRange(start: string, end: string): string {
+  if (!ISO_DAY.test(start) || !ISO_DAY.test(end)) return start;
+  return start.slice(0, 4) === end.slice(0, 4)
+    ? `${monthDay(start)} – ${monthDay(end)}, ${end.slice(0, 4)}`
+    : `${humanDay(start)} – ${humanDay(end)}`;
+}
