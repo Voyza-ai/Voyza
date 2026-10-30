@@ -25,7 +25,7 @@ import { originAirportsForCity, type LocationAnswer } from '@/lib/locationResolv
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
-import { humanDay, humanDayRange } from '@/lib/dateHelpers';
+import { formatMinutes, humanDay, humanDayRange } from '@/lib/dateHelpers';
 import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
@@ -1038,11 +1038,7 @@ export default function PlanningChat() {
 
       const mode: 'flight' | 'train' = useFlight ? 'flight' : 'train';
       const durationMin = picked.durationMinutes ?? 0;
-      const hours = Math.floor(durationMin / 60);
-      const mins = durationMin % 60;
-      const durationStr = hours > 0
-        ? `${hours}h ${mins > 0 ? `${mins}m` : ''}`
-        : `${mins}m`;
+      const durationStr = formatMinutes(durationMin);
       const departIso = picked.departure ?? '';
       const arriveIso = picked.arrival ?? '';
       const departTime = departIso
@@ -1059,14 +1055,12 @@ export default function PlanningChat() {
       if (other && other.price != null) {
         const otherMode: 'flight' | 'train' = useFlight ? 'train' : 'flight';
         const otherDur = other.durationMinutes ?? 0;
-        const oH = Math.floor(otherDur / 60);
-        const oM = otherDur % 60;
         const otherDepartIso = other.departure ?? '';
         const otherArriveIso = other.arrival ?? '';
         alternatives.push({
           mode: otherMode,
           operator: otherMode === 'flight' ? (other.carrier ?? '') : (other.operator ?? ''),
-          duration: oH > 0 ? `${oH}h ${oM > 0 ? `${oM}m` : ''}` : `${oM}m`,
+          duration: formatMinutes(otherDur),
           price: other.price ?? 0,
           from: fromCity,
           to: toCity,

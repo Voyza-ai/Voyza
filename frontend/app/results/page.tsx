@@ -26,6 +26,7 @@ import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 import { originAirportsForCity } from '@/lib/locationResolver';
 import { Hotel, City, Transport, HomeLeg, Trip } from '@/lib/types';
 import { tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
+import { formatMinutes } from '@/lib/dateHelpers';
 import { useAuthStore } from '@/store/authStore';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
@@ -178,7 +179,7 @@ function ResultsPageInner() {
             const transport: Transport = {
               mode: (t.mode ?? 'flight') as 'flight' | 'train',
               operator: t.operator ?? '',
-              duration: mins ? `${Math.floor(mins / 60)}h ${mins % 60}m` : '',
+              duration: mins ? formatMinutes(mins) : '',
               price: t.price ?? 0,
               from: fromIdx >= 0 ? cities[fromIdx].name : '',
               to: toIdx >= 0 ? cities[toIdx].name : '',
@@ -869,7 +870,7 @@ function comparisonToTransport(
   date: string,
 ): Transport {
   const hhmm = (iso?: string | null) => (iso ? iso.split('T')[1]?.slice(0, 5) : undefined);
-  const duration = (mins: number) => `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`;
+  const duration = formatMinutes;
   const flight = result?.flightOption ?? null;
   const train = result?.trainOption ?? null;
   const asTransport = (mode: 'flight' | 'train'): Transport | null => {

@@ -51,3 +51,16 @@ export function humanDayRange(start: string, end: string): string {
     ? `${monthDay(start)} – ${monthDay(end)}, ${end.slice(0, 4)}`
     : `${humanDay(start)} – ${humanDay(end)}`;
 }
+
+/**
+ * A trip duration in minutes as people write it: "53m", "2h", "2h 5m".
+ * Never "0h 53m" (leg pills after a re-price used to read that) and never a
+ * trailing space.
+ */
+export function formatMinutes(mins: number): string {
+  const total = Math.max(0, Math.round(mins));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m}m`;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}

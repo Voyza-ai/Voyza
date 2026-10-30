@@ -38,6 +38,7 @@ import TripNameEditor from '@/components/shared/TripNameEditor';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
 import { outboundSearchDates, tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
+import { formatMinutes } from '@/lib/dateHelpers';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { summarizeCanvasChanges } from '@/lib/canvasDiff';
 import { Trip } from '@/lib/types';
@@ -1144,8 +1145,7 @@ function CanvasPageInner() {
   // deliberately NOT part of the signature, so applying a leg never re-arms it.
   const lastRepairSigRef = useRef<string>('');
 
-  const fmtDuration = (mins: number) =>
-    `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`;
+  const fmtDuration = formatMinutes;
   const fmtTime = (iso?: string | null) => {
     if (!iso) return undefined;
     const hhmm = iso.split('T')[1]?.slice(0, 5);
@@ -1703,7 +1703,7 @@ function CanvasPageInner() {
                   mode: 'flight',
                   price: origin.outboundLeg.price ?? 0,
                   duration: origin.outboundLeg.durationMinutes
-                    ? `${Math.floor(origin.outboundLeg.durationMinutes / 60)}h ${origin.outboundLeg.durationMinutes % 60}m`
+                    ? formatMinutes(origin.outboundLeg.durationMinutes)
                     : '',
                   operator: origin.outboundLeg.operator ?? '',
                 } : null}
@@ -1777,7 +1777,7 @@ function CanvasPageInner() {
                   mode: 'flight',
                   price: origin.returnLeg.price ?? 0,
                   duration: origin.returnLeg.durationMinutes
-                    ? `${Math.floor(origin.returnLeg.durationMinutes / 60)}h ${origin.returnLeg.durationMinutes % 60}m`
+                    ? formatMinutes(origin.returnLeg.durationMinutes)
                     : '',
                   operator: origin.returnLeg.operator ?? '',
                 } : null}
