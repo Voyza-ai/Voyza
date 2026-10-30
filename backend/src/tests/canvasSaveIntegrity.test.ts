@@ -11,6 +11,9 @@ import request from 'supertest';
  *  - a missing leg re-priced for ONE traveller on a multi-person trip, so
  *    trips.total_cost counted that leg once (640 where 680 is right);
  *  - a hotel-less city searched with `rooms: 1` whatever the party size;
+ *  - the canvas session written BEFORE the trip tables, so a failed graph
+ *    write answered 500 while the session already held the new state;
+ *  - a failed session write or trips update still answering { saved: true }.
  */
 
 jest.mock('../config/env', () => ({
@@ -225,5 +228,105 @@ describe('a city saved without hotels is searched with the party in enough rooms
   it('never sends Booking an undefined room count', async () => {
     await save(hotellessState(4));
     expect(Number.isInteger(mockSearchHotels.mock.calls[0][0].rooms)).toBe(true);
+  });
+});
+
+describe('write order and honest failure', () => {
+  const order = () => mockWrites.map((w) => `${w.table}:${w.op}`);
+  const sessionWrites = () => mockWrites.filter((w) => w.table === 'canvas_sessions');
+
+  it('writes the trip graph, then the trip row, then the canvas session', async () => {
+    const res = await save(twoCityState());
+    expect(res.status).toBe(200);
+    expect(res.body.saved).toBe(true);
+    const seq = order();
+    expect(seq.indexOf('rpc:canvas_replace_trip_graph:insert')).toBe(0);
+    expect(seq.indexOf('trips:update')).toBeGreaterThan(0);
+    expect(seq.indexOf('canvas_sessions:update')).toBeGreaterThan(seq.indexOf('trips:update'));
+    const session = sessionWrites().find((w) => w.op === 'update');
+    expect(session?.payload.state.trip.title).toBe('My edited trip');
+  });
+
+  it('a failed graph write leaves the canvas session untouched (it used to hold the new state)', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: 'XX000', message: 'deadlock detected' } });
+    const res = await save(twoCityState());
+    expect(res.status).toBe(500);
+    expect(res.body.saved).toBeUndefined();
+    expect(res.body.error).toMatch(/Could not save the trip: deadlock detected/);
+    expect(sessionWrites()).toEqual([]);
+    expect(order()).not.toContain('trips:update');
+  });
+
+  it('a failed session update is a failed save', async () => {
+    mockTables.canvas_sessions = (op) =>
+      op === 'select'
+        ? { data: { id: 'session-1' }, error: null }
+        : { data: null, error: { message: 'canvas_sessions: permission denied' } };
+    const res = await save(twoCityState());
+    expect(res.status).toBe(500);
+    expect(res.body.saved).toBeUndefined();
+    expect(res.body.error).toMatch(/Could not save the canvas: canvas_sessions: permission denied/);
+  });
+
+  it('a failed session insert (no session yet) is a failed save', async () => {
+    mockTables.canvas_sessions = (op) =>
+      op === 'select'
+        ? { data: null, error: { code: 'PGRST116', message: 'no rows' } }
+        : { data: null, error: { message: 'insert refused' } };
+    const res = await save(twoCityState());
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/Could not save the canvas: insert refused/);
+    expect(sessionWrites().map((w) => w.op)).toEqual(['insert']);
+  });
+
+  it('a failed trips update is a failed save, and the session is not advanced past it', async () => {
+    mockTables.trips = (op) =>
+      op === 'update'
+        ? { data: null, error: { message: 'trips: statement timeout' } }
+        : { data: { id: 'trip-1', user_id: 'owner-user-id' }, error: null };
+    const res = await save(twoCityState());
+    expect(res.status).toBe(500);
+    expect(res.body.saved).toBeUndefined();
+    expect(res.body.error).toMatch(/Could not save the trip's details: trips: statement timeout/);
+    expect(sessionWrites()).toEqual([]);
+  });
+
+  describe('without the return-anchor columns (migration 003 not applied)', () => {
+    const missingColumn = { message: "Could not find the 'return_city' column of 'trips' in the schema cache" };
+    const withOpenJaw = () => {
+      const state = twoCityState();
+      (state.trip as any).origin = {
+        city: 'New York',
+        airports: ['JFK'],
+        returnCity: 'Boston',
+        returnAirports: ['BOS'],
+      };
+      return state;
+    };
+
+    it('retries without them and saves', async () => {
+      let calls = 0;
+      mockTables.trips = (op) => {
+        if (op !== 'update') return { data: { id: 'trip-1', user_id: 'owner-user-id' }, error: null };
+        calls += 1;
+        return calls === 1 ? { data: null, error: missingColumn } : { data: null, error: null };
+      };
+      const res = await save(withOpenJaw());
+      expect(res.status).toBe(200);
+      const updates = mockWrites.filter((w) => w.table === 'trips' && w.op === 'update');
+      expect(updates).toHaveLength(2);
+      expect(updates[1].payload.return_city).toBeUndefined();
+      expect(updates[1].payload.origin_city).toBe('New York');
+    });
+
+    it('reports the retry failing instead of answering saved', async () => {
+      mockTables.trips = (op) =>
+        op === 'update'
+          ? { data: null, error: missingColumn }
+          : { data: { id: 'trip-1', user_id: 'owner-user-id' }, error: null };
+      const res = await save(withOpenJaw());
+      expect(res.status).toBe(500);
+      expect(sessionWrites()).toEqual([]);
+    });
   });
 });
