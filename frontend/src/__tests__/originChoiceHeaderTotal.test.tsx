@@ -105,13 +105,14 @@ describe('the header while home legs are re-priced for another origin', () => {
     expect(screen.getByText('Best price')).toBeInTheDocument();
     expect(screen.queryByText('You can save')).not.toBeInTheDocument();
 
-    // One direction lands: the header takes the new fare for it, keeps the
-    // old one for the direction still searching.
+    // One direction lands: the header still holds the last settled total. It
+    // moves once, when every search has landed — a total half Maine, half
+    // Oregon is not a price anyone can book.
     await act(async () => {
       out.resolve({ outboundLeg: MAINE_OUT });
     });
-    const halfway = { ...cleared, origin: { ...cleared.origin!, outboundLeg: MAINE_OUT, returnLeg: OREGON_BACK } };
-    await waitFor(() => expect(perPersonLine()).toBe(perPerson(halfway)));
+    expect(perPersonLine()).toBe(perPerson(trip));
+    expect(screen.queryByText('You can save')).not.toBeInTheDocument();
 
     await act(async () => {
       back.resolve({ returnLeg: MAINE_BACK });
@@ -119,6 +120,34 @@ describe('the header while home legs are re-priced for another origin', () => {
     const settled = useTripStore.getState().currentTrip!;
     expect(settled.origin?.returnLeg).toEqual(MAINE_BACK);
     await waitFor(() => expect(perPersonLine()).toBe(perPerson(settled)));
+  });
+
+  it('cheaper fares from the chosen reading are a new price, not a saving', async () => {
+    // Harness, Portland → "Portland, Maine" with Maine fares cheaper than
+    // Oregon's: the header settled on "YOU CAN SAVE $1,950 vs default
+    // routing" — the stored total still described the Oregon trip, and the
+    // saving is stored total − live total.
+    const trip = portlandTrip();
+    useTripStore.setState({ currentTrip: trip });
+    const out = deferred<any>();
+    const back = deferred<any>();
+    mockedFetchHomeLegs.mockImplementation((p: any) => (p.outbound ? out.promise : back.promise));
+
+    render(<ResultsPage />);
+    await chooseMaine();
+    await waitFor(() => expect(mockedFetchHomeLegs).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      out.resolve({ outboundLeg: { ...MAINE_OUT, price: 300 } });
+      back.resolve({ returnLeg: { ...MAINE_BACK, price: 280 } });
+    });
+
+    const settled = useTripStore.getState().currentTrip!;
+    await waitFor(() => expect(perPersonLine()).toBe(perPerson(settled)));
+    expect(liveTripTotal(settled)).toBeLessThan(liveTripTotal(trip));
+    expect(screen.queryByText('You can save')).not.toBeInTheDocument();
+    expect(screen.getByText('Best price')).toBeInTheDocument();
+    // The stored total follows the live one, so the baseline moved with it.
+    expect(settled.totalCost).toBe(liveTripTotal(settled));
   });
 
   it('when the new search fails, the header shows the trip as it really is', async () => {

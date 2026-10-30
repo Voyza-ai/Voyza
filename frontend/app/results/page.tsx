@@ -20,11 +20,11 @@ import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
-import { searchHotels, getTrip, fetchHomeLegs, updateTrip } from '@/lib/api';
+import { searchHotels, fetchHomeLegs, updateTrip } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 import { originAirportsForCity } from '@/lib/locationResolver';
-import { Hotel, City, Transport, HomeLeg } from '@/lib/types';
+import { Hotel, City, Transport, Trip } from '@/lib/types';
 import { useAuthStore } from '@/store/authStore';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
@@ -217,49 +217,113 @@ function ResultsPageInner() {
     router.push('/plan');
   }, [tripId, isAuthLoading, currentTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Enrich cities with real hotel data if hotels[] is empty
   const updateCity = useTripStore((s) => s.updateCity);
+
+  // ─── Re-pricing ───────────────────────────────────────────────────────
+  //
+  // Anything that changes what the trip costs AFTER it is on screen — the
+  // other reading of an ambiguous origin, an outbound swap that moves the
+  // landing day, a date change accepted from the AI chat, a saved preset's
+  // first hotel search — runs as tracked jobs, and while any job is in
+  // flight the header prices the trip as it last stood (`frozenTrip`).
+  //
+  // Audit D-09: choosing the other Portland cleared both home legs and the
+  // header priced the half-cleared trip — $1,991 fell to $1,063 with "You can
+  // save $320" for the ~4 s the search took. Pricing the last settled trip
+  // means the header moves once, from one real total to the next, and never
+  // reads a missing price as money saved.
+  //
+  // When the last job lands, the stored total follows the live one. Its
+  // baseline moves with it: the header's saving is
+  // totalCost + savings − live total, so a re-price that left the old
+  // baseline behind turned "the Maine fares are cheaper" into "You can save
+  // $1,950 vs default routing".
+  const [frozenTrip, setFrozenTrip] = useState<Trip | null>(null);
+  const frozenRef = useRef<Trip | null>(null);
+  const pendingRef = useRef(0);
+
+  /** Hold the header on `trip` until the re-price settles. The first hold wins. */
+  const freeze = (trip: Trip | null | undefined) => {
+    if (!trip || frozenRef.current) return;
+    frozenRef.current = trip;
+    setFrozenTrip(trip);
+  };
+
+  const settle = () => {
+    if (!frozenRef.current) return;
+    frozenRef.current = null;
+    setFrozenTrip(null);
+    const cur = useTripStore.getState().currentTrip;
+    if (!cur) return;
+    const live = liveTripTotal(cur);
+    if (!Number.isFinite(live) || live === cur.totalCost) return;
+    setTrip({ ...cur, totalCost: live });
+  };
+
+  /** Count a re-price job in flight; the last one to finish settles the header. */
+  const track = <T,>(job: Promise<T>): Promise<T | void> => {
+    pendingRef.current += 1;
+    return job
+      .catch(() => {})
+      .finally(() => {
+        pendingRef.current -= 1;
+        if (pendingRef.current === 0) settle();
+      });
+  };
+
+  /**
+   * Search one visit's hotels and put them on the trip — the path every
+   * hotel search on this page takes (first load, a preset's first search, a
+   * re-search after the visit's dates moved). Priced for the party: the
+   * backend books ceil(travelers / 2) rooms for `adults`.
+   */
+  const searchVisitHotels = (
+    visit: { name: string; arrival: string; departure: string },
+    travelers: number,
+  ) =>
+    track(
+      searchHotels({
+        city: visit.name,
+        checkin: visit.arrival,
+        checkout: visit.departure,
+        adults: travelers,
+      }).then((results) => {
+        if (results.length === 0) return;
+        const hotels: Hotel[] = results.map(hotelFromResult);
+        // Identify the visit, not its position: the search resolves seconds
+        // later, and by then a drag-reorder or another date change may have
+        // moved this city. A result for dates the visit no longer has is
+        // stale and dropped (a newer search is already on its way).
+        const cities = useTripStore.getState().currentTrip?.cities ?? [];
+        const idx = cities.findIndex(
+          (c) =>
+            c.name === visit.name &&
+            c.dates.arrival === visit.arrival &&
+            c.dates.departure === visit.departure,
+        );
+        if (idx < 0) return;
+        updateCity(idx, { hotels, hotel: hotels[0], selectedHotelIndex: 0 });
+      }),
+    );
+
+  // Enrich cities with real hotel data if hotels[] is empty
   const hotelsFetchedRef = useRef(false);
 
   useEffect(() => {
     if (!currentTrip || hotelsFetchedRef.current) return;
     hotelsFetchedRef.current = true;
 
-    currentTrip.cities.forEach((city) => {
-      // Skip if city already has hotels populated (e.g. from backend optimizer)
-      if (city.hotels.length > 1) return;
-
-      // Identify the visit, not its position: the search resolves seconds
-      // later, and by then the optimizer or a drag-reorder may have moved
-      // this city. A repeat visit (Paris → Rome → Paris) shares a name but
-      // never an arrival date, so name + arrival is the stable key.
-      const visitName = city.name;
-      const visitArrival = city.dates.arrival;
-
-      searchHotels({
-        city: city.name,
-        checkin: city.dates.arrival,
-        checkout: city.dates.departure,
-        adults: currentTrip.travelers,
-      })
-        .then((results) => {
-          if (results.length === 0) return;
-          const hotels: Hotel[] = results.map(hotelFromResult);
-          const idx = useTripStore
-            .getState()
-            .currentTrip?.cities.findIndex(
-              (c) => c.name === visitName && c.dates.arrival === visitArrival,
-            ) ?? -1;
-          if (idx < 0) return; // visit removed while the search was in flight
-          updateCity(idx, {
-            hotels,
-            hotel: hotels[0],
-            selectedHotelIndex: 0,
-          });
-        })
-        .catch(() => {});
-    });
-  }, [currentTrip, updateCity]);
+    // Skip cities that already have hotels populated (e.g. from the planner).
+    const needed = currentTrip.cities.filter((city) => city.hotels.length <= 1);
+    if (needed.length === 0) return;
+    freeze(currentTrip);
+    for (const city of needed) {
+      searchVisitHotels(
+        { name: city.name, arrival: city.dates.arrival, departure: city.dates.departure },
+        currentTrip.travelers,
+      );
+    }
+  }, [currentTrip, updateCity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Backfill missing home-leg flights so the flowchart ALWAYS shows the
   // home↔trip flights when a home anchor exists. Covers trips saved before
@@ -269,25 +333,97 @@ function ResultsPageInner() {
   const homeLegsFetchedRef = useRef<string | null>(null);
   const [homeLegSearch, setHomeLegSearch] = useState({ outbound: false, return: false });
 
-  /**
-   * The legs a re-search is replacing, kept for the HEADER's arithmetic only
-   * until their replacements land (audit D-09).
-   *
-   * chooseOrigin clears the home legs so the flowchart shows its searching
-   * pill, but the header prices the trip from the same object: for the ~4 s
-   * the search took, the total dropped by both flights and the savings pill
-   * read the gap as money saved. Measured on the other-Portland choice: total
-   * $1,991 → $1,063 with "You can save $320", then $1,645 once the Maine
-   * fares arrived. The header now keeps pricing the previous legs until each
-   * direction's search settles, so it moves once, from one real total to the
-   * next. The flowchart and the store see the cleared legs exactly as before.
-   */
-  const [legsBeingReplaced, setLegsBeingReplaced] = useState<{
-    outbound: HomeLeg | null;
-    return: HomeLeg | null;
-  } | null>(null);
-  const settleReplacedLeg = (dir: 'outbound' | 'return') =>
-    setLegsBeingReplaced((r) => (r && r[dir] ? { ...r, [dir]: null } : r));
+  /** Search the home legs a trip is missing and merge what comes back. */
+  const searchHomeLegs = (
+    trip: Trip,
+    need: { outbound: boolean; return: boolean },
+    startDate: string,
+  ) => {
+    const origin = trip.origin;
+    const first = trip.cities[0];
+    const last = trip.cities[trip.cities.length - 1];
+    if (!origin || !first || !last) return;
+
+    // Airports may be empty on older trips — fall back to the known-airports
+    // lookup for the home city. Synchronous and offline on purpose: this runs
+    // inside an effect that must not become a loading state, and a trip saved
+    // before the resolver existed has to degrade to today's behaviour, which
+    // is a best-effort list or none at all (the `.length > 0` guards below).
+    //
+    // TODO(location-phase-4): no question is possible here — nobody is looking
+    // at a prompt during a backfill. If the owner wants one it belongs on the
+    // home card, from the persisted `origin_place_id`, not in this effect.
+    const outAirports = origin.airports?.length ? origin.airports : originAirportsForCity(origin.city);
+    const retAirports = origin.returnAirports?.length ? origin.returnAirports : outAirports;
+
+    const jobs: Promise<unknown>[] = [];
+    setHomeLegSearch({ outbound: need.outbound, return: need.return });
+
+    if (need.outbound && outAirports.length > 0) {
+      jobs.push(
+        track(
+          fetchHomeLegs({
+            originAirports: outAirports,
+            originCity: origin.city,
+            firstCity: first.name,
+            lastCity: last.name,
+            startDate,
+            endDate: last.dates?.departure,
+            travelers: trip.travelers ?? 1,
+            outbound: true,
+            returnToHome: false,
+          })
+            .then((r) => {
+              const cur = useTripStore.getState().currentTrip;
+              if (!cur?.origin) return;
+              setTrip({ ...cur, origin: { ...cur.origin, outboundLeg: r.outboundLeg ?? null } });
+            })
+            .finally(() => setHomeLegSearch((s) => ({ ...s, outbound: false }))),
+        ),
+      );
+    } else {
+      setHomeLegSearch((s) => ({ ...s, outbound: false }));
+    }
+
+    if (need.return && retAirports.length > 0) {
+      jobs.push(
+        track(
+          fetchHomeLegs({
+            originAirports: retAirports,
+            originCity: origin.returnCity ?? origin.city,
+            firstCity: first.name,
+            lastCity: last.name,
+            startDate,
+            endDate: last.dates?.departure,
+            travelers: trip.travelers ?? 1,
+            outbound: false,
+            returnToHome: true,
+          })
+            .then((r) => {
+              const cur = useTripStore.getState().currentTrip;
+              if (!cur?.origin) return;
+              setTrip({ ...cur, origin: { ...cur.origin, returnLeg: r.returnLeg ?? null } });
+            })
+            .finally(() => setHomeLegSearch((s) => ({ ...s, return: false }))),
+        ),
+      );
+    } else {
+      setHomeLegSearch((s) => ({ ...s, return: false }));
+    }
+
+    // Persist whatever was found so the next load doesn't re-search.
+    if (jobs.length > 0) {
+      Promise.allSettled(jobs).then(() => {
+        const cur = useTripStore.getState().currentTrip;
+        if (!cur?.id || cur.id.startsWith('mock') || !cur.origin) return;
+        if (!cur.origin.outboundLeg && !cur.origin.returnLeg) return;
+        updateTrip(cur.id, {
+          outboundLeg: cur.origin.outboundLeg ?? null,
+          returnLeg: cur.origin.returnLeg ?? null,
+        }).catch(() => {});
+      });
+    }
+  };
 
   /**
    * The traveller picked a different reading of an ambiguous origin.
@@ -311,10 +447,7 @@ function ResultsPageInner() {
     // "Portland". Labels are built name-first, so the leading segment is it.
     const shortName = choice.label.split(',')[0]?.trim() || trip.origin.city;
     homeLegsFetchedRef.current = null;
-    setLegsBeingReplaced({
-      outbound: trip.origin.outboundLeg ?? null,
-      return: trip.origin.returnLeg ?? null,
-    });
+    freeze(trip);
     setTrip({
       ...trip,
       origin: {
@@ -332,123 +465,20 @@ function ResultsPageInner() {
 
   useEffect(() => {
     const trip = currentTrip;
-    // No search will run, so nothing is coming to replace the header's legs.
-    const noReplacement = () => setLegsBeingReplaced((r) => (r ? null : r));
-    if (!trip?.origin?.city || trip.cities.length === 0) {
-      noReplacement();
-      return;
-    }
+    if (!trip?.origin?.city || trip.cities.length === 0) return;
     const key = trip.id ?? 'store-trip';
     if (homeLegsFetchedRef.current === key) return;
 
     const needOutbound = !trip.origin.outboundLeg;
     const needReturn = (trip.returnToHome ?? true) && !trip.origin.returnLeg;
-    if (!needOutbound && !needReturn) {
-      noReplacement();
-      return;
-    }
+    if (!needOutbound && !needReturn) return;
     homeLegsFetchedRef.current = key;
 
-    const first = trip.cities[0];
-    const last = trip.cities[trip.cities.length - 1];
-    if (!first?.dates?.arrival) {
-      noReplacement();
-      return;
-    }
+    const startDate = trip.cities[0].dates?.arrival;
+    if (!startDate) return;
 
-    // Airports may be empty on older trips — fall back to the known-airports
-    // lookup for the home city. Synchronous and offline on purpose: this runs
-    // inside an effect that must not become a loading state, and a trip saved
-    // before the resolver existed has to degrade to today's behaviour, which
-    // is a best-effort list or none at all (the `.length > 0` guards below).
-    //
-    // TODO(location-phase-4): no question is possible here — nobody is looking
-    // at a prompt during a backfill. If the owner wants one it belongs on the
-    // home card, from the persisted `origin_place_id`, not in this effect.
-    const outAirports = trip.origin.airports?.length
-      ? trip.origin.airports
-      : originAirportsForCity(trip.origin.city);
-    const retAirports = trip.origin.returnAirports?.length
-      ? trip.origin.returnAirports
-      : outAirports;
-
-    const jobs: Promise<void>[] = [];
-    setHomeLegSearch({ outbound: needOutbound, return: needReturn });
-
-    const merge = (dir: 'outbound' | 'return', leg: any) => {
-      const cur = useTripStore.getState().currentTrip;
-      if (!cur?.origin) return;
-      setTrip({
-        ...cur,
-        origin: {
-          ...cur.origin,
-          ...(dir === 'outbound' ? { outboundLeg: leg } : { returnLeg: leg }),
-        },
-      });
-    };
-
-    if (needOutbound && outAirports.length > 0) {
-      jobs.push(
-        fetchHomeLegs({
-          originAirports: outAirports,
-          originCity: trip.origin.city,
-          firstCity: first.name,
-          lastCity: last.name,
-          startDate: first.dates.arrival,
-          endDate: last.dates?.departure,
-          travelers: trip.travelers ?? 1,
-          outbound: true,
-          returnToHome: false,
-        })
-          .then((r) => merge('outbound', r.outboundLeg ?? null))
-          .catch(() => {})
-          .finally(() => {
-            setHomeLegSearch((s) => ({ ...s, outbound: false }));
-            settleReplacedLeg('outbound');
-          }),
-      );
-    } else {
-      setHomeLegSearch((s) => ({ ...s, outbound: false }));
-      settleReplacedLeg('outbound');
-    }
-
-    if (needReturn && retAirports.length > 0) {
-      jobs.push(
-        fetchHomeLegs({
-          originAirports: retAirports,
-          originCity: trip.origin.returnCity ?? trip.origin.city,
-          firstCity: first.name,
-          lastCity: last.name,
-          startDate: first.dates.arrival,
-          endDate: last.dates?.departure,
-          travelers: trip.travelers ?? 1,
-          outbound: false,
-          returnToHome: true,
-        })
-          .then((r) => merge('return', r.returnLeg ?? null))
-          .catch(() => {})
-          .finally(() => {
-            setHomeLegSearch((s) => ({ ...s, return: false }));
-            settleReplacedLeg('return');
-          }),
-      );
-    } else {
-      setHomeLegSearch((s) => ({ ...s, return: false }));
-      settleReplacedLeg('return');
-    }
-
-    // Persist whatever was found so the next load doesn't re-search.
-    if (jobs.length > 0) {
-      Promise.allSettled(jobs).then(() => {
-        const cur = useTripStore.getState().currentTrip;
-        if (!cur?.id || cur.id.startsWith('mock') || !cur.origin) return;
-        if (!cur.origin.outboundLeg && !cur.origin.returnLeg) return;
-        updateTrip(cur.id, {
-          outboundLeg: cur.origin.outboundLeg ?? null,
-          returnLeg: cur.origin.returnLeg ?? null,
-        }).catch(() => {});
-      });
-    }
+    freeze(trip);
+    searchHomeLegs(trip, { outbound: needOutbound, return: needReturn }, startDate);
     // The AIRPORTS belong in here, not just the city name. This effect prices
     // legs from `origin.airports`, and the ambiguous-origin case changes the
     // airports while leaving the city string identical — Portland, Oregon and
@@ -487,23 +517,9 @@ function ResultsPageInner() {
 
   if (!currentTrip) return null;
 
-  // What the header prices: the trip, with any leg still being re-searched
-  // standing in for itself until it lands (see legsBeingReplaced).
-  const origin = currentTrip.origin;
-  const headerTrip =
-    origin &&
-    legsBeingReplaced &&
-    ((!origin.outboundLeg && legsBeingReplaced.outbound) ||
-      (!origin.returnLeg && legsBeingReplaced.return))
-      ? {
-          ...currentTrip,
-          origin: {
-            ...origin,
-            outboundLeg: origin.outboundLeg ?? legsBeingReplaced.outbound,
-            returnLeg: origin.returnLeg ?? legsBeingReplaced.return,
-          },
-        }
-      : currentTrip;
+  // What the header prices: the trip as it last stood while a re-price is in
+  // flight (see frozenTrip), else the trip itself.
+  const pricedTrip = frozenTrip ?? currentTrip;
 
   const handleCityClick = (cityIndex: number) => {
     setOpenCityIndex(cityIndex);
@@ -529,12 +545,12 @@ function ResultsPageInner() {
       <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 px-2 pb-2 pt-[3rem] w-full">
         {/* Main column — header pinned, cards fill the rest */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
-          <ResultsHeader trip={headerTrip} />
+          <ResultsHeader trip={currentTrip} pricedTrip={frozenTrip ?? undefined} />
           {typeof currentTrip.budget === 'number' && (
             // The total the header shows, not the stored totalCost: that is
             // set once (at creation, or a preset's quote on save) and does
             // not follow a hotel or transport swap.
-            <BudgetOverBanner budget={currentTrip.budget} totalCost={liveTripTotal(headerTrip)} />
+            <BudgetOverBanner budget={currentTrip.budget} totalCost={liveTripTotal(pricedTrip)} />
           )}
           {currentTrip.vibeTierUp && (
             <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
