@@ -5,6 +5,7 @@ import { AnimatePresence } from 'framer-motion';
 import { Trip, City, TransportMode } from '@/lib/types';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
 import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
+import { homeDepartureDay } from '@/lib/tripSpan';
 import { useTripStore } from '@/store/tripStore';
 import DayCard from './DayCard';
 import DayPlanner from './DayPlanner';
@@ -25,7 +26,8 @@ import DayPlanner from './DayPlanner';
  * existing `DayPlanner` modal for that day. No focus / two-step.
  *
  * Days are derived from the trip's date span (first city arrival →
- * last city departure). `dateToCity` maps each ISO date to the city
+ * last city departure; for an overnight outbound, from the day it leaves
+ * home, which has a travel-day card of its own). `dateToCity` maps each ISO date to the city
  * occupying it, mirroring `CalendarView`'s logic so a city occupies
  * arrival up to (but not including) departure — the departure day
  * belongs to the outbound flight, not the city you're leaving.
@@ -58,15 +60,21 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
   // precedence over arrival when both fall on the same day (transit
   // days where you fly out of city A and into city B) — the outbound
   // mode is the more salient travel event for that morning.
-  const { isoDates, dateToCity, travelByDate } = useMemo(() => {
+  const { isoDates, dateToCity, travelByDate, homeDeparture } = useMemo(() => {
+    // The day an overnight outbound leaves home, before the first stay
+    // starts (it starts the day the flight lands). Null otherwise.
+    const homeDeparture = homeDepartureDay(trip);
     if (datedCities.length === 0) {
       return {
         isoDates: [] as string[],
         dateToCity: new Map<string, { city: City; index: number }>(),
         travelByDate: new Map<string, TransportMode>(),
+        homeDeparture: null,
       };
     }
-    const start = parseLocal(datedCities[0].dates.arrival);
+    // The span starts on the day the traveller leaves home: that day has
+    // a card of its own (head to the airport, the flight).
+    const start = parseLocal(homeDeparture ?? datedCities[0].dates.arrival);
     const end = parseLocal(datedCities[datedCities.length - 1].dates.departure);
     const map = new Map<string, { city: City; index: number }>();
     trip.cities.forEach((city, index) => {
@@ -129,8 +137,9 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
         travel.set(city.dates.departure, city.transportOut.mode);
       }
     });
+    if (homeDeparture) travel.set(homeDeparture, 'flight');
 
-    return { isoDates: dates, dateToCity: map, travelByDate: travel };
+    return { isoDates: dates, dateToCity: map, travelByDate: travel, homeDeparture };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trip]);
 
@@ -144,10 +153,19 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
   // to a different trip object will re-trigger the build for the new
   // trip's days. The skip-if-already-populated check inside the loop
   // makes re-runs idempotent.
+  // Whose schedule holds a day. The home departure day is not part of any
+  // stay, but its blocks (head to the airport, the flight) are kept on the
+  // FIRST city — the way the fly-home day's are kept on the last — so the
+  // planner has a city to read and write them through.
+  const scheduleOwner = (iso: string): { city: City; index: number } | undefined =>
+    iso === homeDeparture && trip.cities[0]
+      ? { city: trip.cities[0], index: 0 }
+      : dateToCity.get(iso);
+
   const setDaySchedule = useTripStore((s) => s.setDaySchedule);
   useEffect(() => {
     isoDates.forEach((iso) => {
-      const match = dateToCity.get(iso);
+      const match = scheduleOwner(iso);
       if (!match) return; // travel-only day with no city mapping
       const existing = match.city.schedule?.[iso];
       if (existing && existing.length > 0) return; // user already has events here
@@ -169,11 +187,9 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
 
   // Resolve the city + cityIndex for the open modal. Travel-only days
   // (no city mapping) can't open the editor because DayPlanner needs a
-  // city for its header / colour theme.
-  const editorCity =
-    editorDate && dateToCity.get(editorDate)
-      ? dateToCity.get(editorDate)!
-      : null;
+  // city for its header / colour theme. The home departure day opens on
+  // the first city, which holds its blocks.
+  const editorCity = editorDate ? scheduleOwner(editorDate) ?? null : null;
 
   return (
     <div className="h-full min-h-0 flex flex-col">
@@ -192,7 +208,9 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
           // Pull the day's events live from the trip object — focusing on
           // a card mustn't read stale data, and the parent re-renders any
           // time the trip mutates (Zustand subscription up the tree).
-          const events = city?.schedule?.[iso] ?? [];
+          // The home departure day is a travel day (no city banner: the
+          // traveller is not there yet); its blocks live on the first city.
+          const events = scheduleOwner(iso)?.city.schedule?.[iso] ?? [];
           return (
             <DayCard
               key={iso}

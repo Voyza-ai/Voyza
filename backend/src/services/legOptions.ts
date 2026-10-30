@@ -12,6 +12,7 @@
  */
 
 import { searchFlights, getIataCode, FlightOffer } from './flights';
+import { sameAirportArea } from './location/sameAirportArea';
 import { searchTrains, TrainOffer } from './trains';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
@@ -64,6 +65,13 @@ type SearchParams = {
    * destination side for now).
    */
   fromAirports?: string[];
+  /**
+   * Every city on the trip, so a name with more than one reading resolves
+   * to the one this trip means (getIataCode's `tripDestinationNames`):
+   * "Lagos" on a Lisbon + Porto trip is FAO, not LOS. Optional — without it
+   * each name gets its no-context answer, as before.
+   */
+  tripCityNames?: string[];
 };
 
 /**
@@ -78,6 +86,75 @@ function toMinutesOfDay(s: string | null | undefined): number | null {
   const [h, m] = hhmm.split(':').map(Number);
   if (isNaN(h) || isNaN(m)) return null;
   return h * 60 + m;
+}
+
+/**
+ * Read a clock time the AI chat passed as a window bound and return it as
+ * 24-hour HH:MM, or null when it isn't a time we can read.
+ *
+ * The tool schema asks for HH:MM, but the model also sends "5pm". That
+ * used to reach toMinutesOfDay(), parse to NaN → null, and the bound was
+ * dropped without a word: scripted on /api/plan/chat, "no flights before
+ * 5pm" returned the 07:15 and 16:00 Rome → Venice flights under a reply
+ * saying "departing after 5pm" (B10). Accepts "17:00", "7:05", "17:00:00",
+ * "5pm", "5 PM", "5:30pm", "5 p.m." and "noon". A bare hour ("5" — morning
+ * or evening?), an out-of-range one ("25:00", "13pm") or a word
+ * ("evening") is null, so the caller can say it couldn't apply it.
+ */
+export function normalizeTimeOfDay(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim().toLowerCase();
+  const hhmm = (h: number, m: number) =>
+    `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+  if (s === 'noon' || s === '12 noon' || s === 'midday') return '12:00';
+
+  const h24 = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(s);
+  if (h24) {
+    const h = Number(h24[1]);
+    const m = Number(h24[2]);
+    return h <= 23 && m <= 59 ? hhmm(h, m) : null;
+  }
+
+  const h12 = /^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?$/.exec(s);
+  if (h12) {
+    const h = Number(h12[1]);
+    const m = h12[2] ? Number(h12[2]) : 0;
+    if (h < 1 || h > 12 || m > 59) return null;
+    return hhmm((h % 12) + (h12[3] === 'p' ? 12 : 0), m);
+  }
+
+  return null;
+}
+
+const WINDOW_BOUNDS = ['earliestDepart', 'latestDepart', 'earliestArrive', 'latestArrive'] as const;
+
+/** A TimeWindow whose every bound is HH:MM or null. */
+export type NormalizedTimeWindow = Record<(typeof WINDOW_BOUNDS)[number], string | null>;
+
+/**
+ * Normalise every bound of a time window to HH:MM (unset/blank → null).
+ * Returns the first bound that can't be read instead of dropping it, so a
+ * caller never filters — or tells the user it filtered — on a bound that
+ * was silently ignored.
+ */
+export function normalizeTimeWindow(
+  window: TimeWindow,
+):
+  | { ok: true; window: NormalizedTimeWindow }
+  | { ok: false; bound: (typeof WINDOW_BOUNDS)[number]; raw: unknown } {
+  const out = {} as NormalizedTimeWindow;
+  for (const bound of WINDOW_BOUNDS) {
+    const raw = window[bound];
+    if (raw == null || (typeof raw === 'string' && raw.trim() === '')) {
+      out[bound] = null;
+      continue;
+    }
+    const value = normalizeTimeOfDay(raw);
+    if (value == null) return { ok: false, bound, raw };
+    out[bound] = value;
+  }
+  return { ok: true, window: out };
 }
 
 function formatHHMM(s: string | null | undefined): string | null {
@@ -191,11 +268,27 @@ export async function searchLegOptions(
     travelers,
     fromCountry,
     toCountry,
-    window,
     currentPrice = 0,
     limit = 5,
     fromAirports,
+    tripCityNames,
   } = params;
+
+  // Read every bound up front. One we can't read is an error, not a
+  // no-op: filtering on the rest would return options that break the
+  // user's bound under a reply that claims it (the "5pm" bug above).
+  // /api/plan/chat normalises first and answers the user itself, so this
+  // only fires for a caller that skipped that.
+  let window: TimeWindow | undefined;
+  if (params.window) {
+    const normalized = normalizeTimeWindow(params.window);
+    if (!normalized.ok) {
+      throw new Error(
+        `searchLegOptions: unreadable ${normalized.bound} ${JSON.stringify(normalized.raw)}`,
+      );
+    }
+    window = normalized.window;
+  }
 
   // Kick both API calls off in parallel; tolerate each failing
   // independently so a flight outage doesn't eat the train results.
@@ -208,30 +301,37 @@ export async function searchLegOptions(
   const [flights, trains] = await Promise.all([
     (async () => {
       try {
-        const destIata = await getIataCode(to);
+        // The trip decides which reading of a shared name it means.
+        const tripContext = { tripDestinationNames: tripCityNames ?? [] };
+        const destIata = await getIataCode(to, tripContext);
         const origins =
           fromAirports && fromAirports.length > 0
             ? fromAirports
-            : [await getIataCode(from)];
+            : [await getIataCode(from, tripContext)];
 
         // One searchFlights call per origin airport; results merged.
         // Individual origin failures (e.g. LGA has no offers but JFK does)
-        // are tolerated — we keep whatever returned.
+        // are tolerated — we keep whatever returned. An origin that shares
+        // the destination's airport (Zurich → Interlaken: ZRH → ZRH) has no
+        // flight to search; the leg is ground travel, and the trains below
+        // still answer it.
         const resultsPerOrigin = await Promise.all(
           origins.map((originIata) =>
-            searchFlights({
-              origin: originIata,
-              destination: destIata,
-              date,
-              travelers,
-            }).catch((err) => {
-              logger.warn('searchLegOptions: one origin failed', {
-                origin: originIata,
-                to,
-                message: err?.message,
-              });
-              return [] as FlightOffer[];
-            }),
+            sameAirportArea(originIata, destIata)
+              ? Promise.resolve([] as FlightOffer[])
+              : searchFlights({
+                  origin: originIata,
+                  destination: destIata,
+                  date,
+                  travelers,
+                }).catch((err) => {
+                  logger.warn('searchLegOptions: one origin failed', {
+                    origin: originIata,
+                    to,
+                    message: err?.message,
+                  });
+                  return [] as FlightOffer[];
+                }),
           ),
         );
         return resultsPerOrigin.flat();

@@ -28,6 +28,23 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
  * pricing for 24 hours.
  */
 const FALLBACK_TTL_MS = 5 * 60 * 1000; // 5m
+/**
+ * How long the rate fetch may take — headers AND body — before we give up on
+ * it and use the fallback table.
+ *
+ * There was no limit. A provider that accepted the connection and never
+ * answered held the fetch until undici's own headersTimeout, 300 s, and
+ * because every non-USD conversion waits on the ONE shared in-flight fetch
+ * below, that stalled every flight, hotel and train price in the process for
+ * five minutes, not just one request's.
+ *
+ * The endpoint answers its 3 KB in 0.12–0.34 s (five sequential calls,
+ * 2026-10-30), so 10 s is ~30× the slowest observed: a slow answer still
+ * lands, and a dead one costs the requests waiting on it seconds rather than
+ * minutes. Hitting it fails nothing — conversions carry on with the fallback
+ * table, retried after FALLBACK_TTL_MS like any other failed fetch.
+ */
+const FX_FETCH_TIMEOUT_MS = 10_000;
 let cache: RateCache | null = null;
 let inflightFetch: Promise<RateCache> | null = null;
 
@@ -211,7 +228,11 @@ export const FALLBACK_RATES: Record<string, number> = (() => {
 
 async function fetchRates(): Promise<RateCache> {
   try {
-    const res = await fetch('https://open.er-api.com/v6/latest/USD');
+    // The signal also covers `res.json()` — undici errors the body stream when
+    // it fires — so a server that sends headers and then stalls is cut off too.
+    const res = await fetch('https://open.er-api.com/v6/latest/USD', {
+      signal: AbortSignal.timeout(FX_FETCH_TIMEOUT_MS),
+    });
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data: any = await res.json();
     if (data.result !== 'success' || !data.rates) {
@@ -239,11 +260,19 @@ async function getRates(): Promise<RateCache> {
   if (cache && Date.now() - cache.fetchedAt < cache.ttlMs) return cache;
   if (inflightFetch) return inflightFetch;
 
-  inflightFetch = fetchRates().then((fresh) => {
-    cache = fresh;
-    inflightFetch = null;
-    return fresh;
-  });
+  // Cleared in `finally`, not in the success handler: a fetch that settles any
+  // way at all must stop being the promise new callers are handed. fetchRates
+  // turns every failure it can see into the fallback table, so this only
+  // matters if something it can't see throws — and then the next caller gets a
+  // fresh attempt instead of the same dead promise forever.
+  inflightFetch = fetchRates()
+    .then((fresh) => {
+      cache = fresh;
+      return fresh;
+    })
+    .finally(() => {
+      inflightFetch = null;
+    });
   return inflightFetch;
 }
 

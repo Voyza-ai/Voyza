@@ -1,6 +1,6 @@
 {
  "schemaVersion": 5,
- "generatedAt": "2026-10-26T02:41:35.391Z",
+ "generatedAt": "2026-10-27T05:14:42.078Z",
  "basis": "ourairports-type-ordinal",
  "ranks": {
   "AAA": 2,
@@ -4070,6 +4070,9 @@
   "adm:QA.01": [
    "DOH"
   ],
+  "adm:RO.10": [
+   "OTP"
+  ],
   "adm:RU.48": [
    "SVO"
   ],
@@ -5127,6 +5130,10 @@
    "LIN",
    "BGY"
   ],
+  "gn:3413829": [
+   "KEF",
+   "RKV"
+  ],
   "gn:3435910": [
    "EZE",
    "AEP"
@@ -5198,6 +5205,10 @@
   "gn:6167865": [
    "YYZ",
    "YTZ"
+  ],
+  "gn:683506": [
+   "OTP",
+   "BBU"
   ],
   "gn:745044": [
    "IST",

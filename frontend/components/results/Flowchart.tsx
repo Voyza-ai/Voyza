@@ -12,7 +12,7 @@ import CityCard from './CityCard';
 import CityActivitiesCard from './CityActivitiesCard';
 import Connector from './Connector';
 import { useTripStore } from '@/store/tripStore';
-import { getAirportName } from '@/lib/airportNames';
+import { useAirportNames } from '@/lib/airportNames';
 
 /**
  * Kept as a constant because some downstream calculations use it,
@@ -492,7 +492,11 @@ function HomeCard({
     (direction === 'outbound' ? leg?.originAirport : leg?.destAirport) ||
     airports[0] ||
     '';
-  const airportName = getAirportName(iata);
+  // Generated from OurAirports, so any of the 4,008 scheduled IATA airports
+  // the resolver can return has a name — not just the ~100 a hand-written
+  // table used to carry. The table is a deferred chunk, so this is null on
+  // first paint and the card shows the bare code until it lands.
+  const airportName = useAirportNames()(iata);
 
   const dateIso = leg?.departDate;
   const dateLabel = dateIso ? formatHomeDate(dateIso) : null;

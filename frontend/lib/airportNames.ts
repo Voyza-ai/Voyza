@@ -1,161 +1,164 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+
 /**
- * IATA code → human-readable airport name.
+ * IATA code -> human-readable airport name, from the generated pipeline.
  *
- * Covers the airports listed in `originAirports.ts` plus a handful of
- * major destination airports that show up in home legs. Kept frontend-
- * only for now — terminal info isn't here because our current flight
- * data source doesn't return it. If we move to Amadeus/Duffel later,
- * we should pull airport + terminal from the API response instead.
+ * ── What this replaced, and why it had to go ────────────────────────────────
  *
- * Lookups are case-insensitive. Returns an object with `name` (short
- * marketing name, e.g. "John F. Kennedy") and `full` (formal name,
- * e.g. "John F. Kennedy International Airport").
+ * This file used to be a hand-written table of ~100 codes whose own header
+ * said it covered "the airports listed in `originAirports.ts`" — a file phase
+ * 5 deleted. The resolver that replaced it can return any of 4,008 scheduled
+ * IATA airports, so every code outside that ~100 rendered as a bare code with
+ * no name above it. The reproducible case: choose a different reading of an
+ * ambiguous origin in the clarification banner, the home card re-points from
+ * PDX to PWM, and the name vanishes — because `PWM` was never in the table.
+ *
+ * The names are now generated from the same OurAirports dump the airports
+ * themselves come from (`backend/scripts/location-data/build.ts`, whose
+ * `deriveAirportDisplayName` holds the shortening rules and their reasons),
+ * emitted to `backend/src/data/generated/airportNames.json` and copied here
+ * byte-for-byte by `npm run build:location-hotset`. Nothing in this file is
+ * hand-maintained; `airportNames.test.ts` in both packages asserts that.
+ *
+ * ── One name per code, not the old short/full pair ──────────────────────────
+ *
+ * The table this replaced carried both a short `name` ("Portland Intl.") and a
+ * `full` one ("Portland International Airport"). Checked against what actually
+ * renders: all three consumers — `Flowchart`'s `HomeCard`, `CanvasHomeCard`,
+ * and a chip tooltip in `HomeEditModal` — read only the short form, and
+ * `getAirportFullName` had no callers at all. Shipping both measures +16.1 KiB
+ * gzipped on a payload the budget note below is already the hard part of, for
+ * a field nothing reads, so only the short form is generated and the dead
+ * export is gone. If a formal name is ever needed, the generator has the raw
+ * column and emitting a second field is a few lines — the decision is
+ * recorded, not closed off.
+ *
+ * ── Why the lookup is lazy, which is the one awkward part ───────────────────
+ *
+ * The table is 4,008 codes: 105.7 KiB raw, 44.5 KiB gzipped. That cannot go
+ * into the browser hot set — the hot set is 59.5 KiB of a 60 KiB gzipped
+ * budget, so it has 487 bytes of headroom, and even names for just the 188
+ * codes in its own `iata` index would put it 1.8 KiB over. The measurement,
+ * and the two alternatives it rejected, are recorded in
+ * `backend/scripts/build-location-hotset.ts`.
+ *
+ * So the table is a DEFERRED CHUNK, reached by `import()` the first time
+ * something asks for a name. A visitor who never sees an airport card never
+ * downloads it. The cost is that the first render has no names yet, which is
+ * why the API below is shaped the way it is:
+ *
+ *   getAirportName(iata)  synchronous, `null` until the chunk has landed.
+ *                         Safe to call from a render body; never throws, never
+ *                         returns a placeholder.
+ *   useAirportNames()     the same lookup, plus the load and a re-render when
+ *                         it arrives. This is what a component should use.
+ *
+ * `null` is deliberate, in both. A caller that wants to fall back to the bare
+ * code already has the code, and a lookup that invents "undefined" or
+ * "Unknown Airport" is exactly how a missing name reaches a traveller as
+ * text. Every consumer renders the code and treats the name as an optional
+ * line above it, so a miss — unknown code, chunk not loaded yet, chunk failed
+ * to load — degrades to the code and nothing else changes.
  */
 
-type AirportInfo = {
-  name: string;
-  full: string;
+/** The emitted file's shape. Mirrors `GeneratedAirportNames` in the backend. */
+type AirportNameTable = {
+  schemaVersion: number;
+  generatedAt: string;
+  basis: string;
+  names: Record<string, string>;
 };
 
-const AIRPORTS: Record<string, AirportInfo> = {
-  // United States
-  JFK: { name: 'John F. Kennedy', full: 'John F. Kennedy International Airport' },
-  LGA: { name: 'LaGuardia', full: 'LaGuardia Airport' },
-  EWR: { name: 'Newark Liberty', full: 'Newark Liberty International Airport' },
-  LAX: { name: 'Los Angeles Intl.', full: 'Los Angeles International Airport' },
-  BUR: { name: 'Hollywood Burbank', full: 'Hollywood Burbank Airport' },
-  LGB: { name: 'Long Beach', full: 'Long Beach Airport' },
-  SFO: { name: 'San Francisco Intl.', full: 'San Francisco International Airport' },
-  OAK: { name: 'Oakland Intl.', full: 'Oakland International Airport' },
-  SJC: { name: 'San José', full: 'Norman Y. Mineta San José International Airport' },
-  ORD: { name: "O'Hare", full: "O'Hare International Airport" },
-  MDW: { name: 'Midway', full: 'Chicago Midway International Airport' },
-  IAD: { name: 'Dulles', full: 'Washington Dulles International Airport' },
-  DCA: { name: 'Reagan National', full: 'Ronald Reagan Washington National Airport' },
-  BWI: { name: 'BWI Marshall', full: 'Baltimore/Washington International Thurgood Marshall Airport' },
-  MIA: { name: 'Miami Intl.', full: 'Miami International Airport' },
-  FLL: { name: 'Fort Lauderdale', full: 'Fort Lauderdale-Hollywood International Airport' },
-  IAH: { name: 'George Bush Intercontinental', full: 'George Bush Intercontinental Airport' },
-  HOU: { name: 'William P. Hobby', full: 'William P. Hobby Airport' },
-  DFW: { name: 'DFW', full: 'Dallas/Fort Worth International Airport' },
-  DAL: { name: 'Dallas Love Field', full: 'Dallas Love Field' },
-  SEA: { name: 'Seattle-Tacoma', full: 'Seattle-Tacoma International Airport' },
-  BOS: { name: 'Boston Logan', full: 'Boston Logan International Airport' },
-  DEN: { name: 'Denver Intl.', full: 'Denver International Airport' },
-  ATL: { name: 'Hartsfield-Jackson', full: 'Hartsfield-Jackson Atlanta International Airport' },
-  PHL: { name: 'Philadelphia Intl.', full: 'Philadelphia International Airport' },
-  PHX: { name: 'Phoenix Sky Harbor', full: 'Phoenix Sky Harbor International Airport' },
-  LAS: { name: 'Harry Reid', full: 'Harry Reid International Airport' },
-  SLC: { name: 'Salt Lake City Intl.', full: 'Salt Lake City International Airport' },
-  MSP: { name: 'Minneapolis-Saint Paul', full: 'Minneapolis-Saint Paul International Airport' },
-  DTW: { name: 'Detroit Metro', full: 'Detroit Metropolitan Wayne County Airport' },
-  PDX: { name: 'Portland Intl.', full: 'Portland International Airport' },
-  HNL: { name: 'Daniel K. Inouye', full: 'Daniel K. Inouye International Airport' },
-  PVD: { name: 'T. F. Green', full: 'Rhode Island T. F. Green International Airport' },
-  BDL: { name: 'Bradley', full: 'Bradley International Airport' },
-  BTV: { name: 'Burlington Intl.', full: 'Patrick Leahy Burlington International Airport' },
+/** `null` until the chunk lands, and still `null` if it never does. */
+let names: Record<string, string> | null = null;
+let inFlight: Promise<Record<string, string>> | null = null;
 
-  // Canada
-  YYZ: { name: 'Toronto Pearson', full: 'Toronto Pearson International Airport' },
-  YTZ: { name: 'Billy Bishop', full: 'Billy Bishop Toronto City Airport' },
-  YUL: { name: 'Montréal-Trudeau', full: 'Montréal-Pierre Elliott Trudeau International Airport' },
-  YVR: { name: 'Vancouver Intl.', full: 'Vancouver International Airport' },
+/** Hooks waiting for the chunk, so one load re-renders every card. */
+const waiting = new Set<() => void>();
 
-  // Mexico
-  MEX: { name: 'Mexico City Intl.', full: 'Mexico City International Airport' },
-  NLU: { name: 'Felipe Ángeles', full: 'Felipe Ángeles International Airport' },
-
-  // UK & Ireland
-  LHR: { name: 'Heathrow', full: 'London Heathrow Airport' },
-  LGW: { name: 'Gatwick', full: 'London Gatwick Airport' },
-  STN: { name: 'Stansted', full: 'London Stansted Airport' },
-  DUB: { name: 'Dublin', full: 'Dublin Airport' },
-
-  // Europe
-  CDG: { name: 'Charles de Gaulle', full: 'Paris Charles de Gaulle Airport' },
-  ORY: { name: 'Orly', full: 'Paris Orly Airport' },
-  MXP: { name: 'Malpensa', full: 'Milan Malpensa Airport' },
-  LIN: { name: 'Linate', full: 'Milan Linate Airport' },
-  FCO: { name: 'Fiumicino', full: 'Leonardo da Vinci–Fiumicino Airport' },
-  CIA: { name: 'Ciampino', full: 'Rome Ciampino Airport' },
-  BER: { name: 'Berlin Brandenburg', full: 'Berlin Brandenburg Airport' },
-  MAD: { name: 'Madrid-Barajas', full: 'Adolfo Suárez Madrid–Barajas Airport' },
-  BCN: { name: 'Barcelona-El Prat', full: 'Josep Tarradellas Barcelona-El Prat Airport' },
-  AMS: { name: 'Schiphol', full: 'Amsterdam Airport Schiphol' },
-  FRA: { name: 'Frankfurt', full: 'Frankfurt Airport' },
-  MUC: { name: 'Munich', full: 'Munich Airport' },
-  ZRH: { name: 'Zurich', full: 'Zurich Airport' },
-  VIE: { name: 'Vienna', full: 'Vienna International Airport' },
-  LIS: { name: 'Lisbon Humberto Delgado', full: 'Humberto Delgado Airport' },
-  ARN: { name: 'Stockholm Arlanda', full: 'Stockholm Arlanda Airport' },
-  BMA: { name: 'Bromma', full: 'Stockholm Bromma Airport' },
-  FLR: { name: 'Florence', full: 'Florence Airport, Peretola' },
-  PSA: { name: 'Pisa', full: 'Pisa International Airport' },
-
-  // Russia / Turkey
-  SVO: { name: 'Sheremetyevo', full: 'Sheremetyevo International Airport' },
-  DME: { name: 'Domodedovo', full: 'Domodedovo International Airport' },
-  VKO: { name: 'Vnukovo', full: 'Vnukovo International Airport' },
-  IST: { name: 'Istanbul', full: 'Istanbul Airport' },
-  SAW: { name: 'Sabiha Gökçen', full: 'Istanbul Sabiha Gökçen International Airport' },
-
-  // Asia
-  HND: { name: 'Haneda', full: 'Tokyo Haneda Airport' },
-  NRT: { name: 'Narita', full: 'Narita International Airport' },
-  KIX: { name: 'Kansai', full: 'Kansai International Airport' },
-  ITM: { name: 'Itami', full: 'Osaka International Airport (Itami)' },
-  ICN: { name: 'Incheon', full: 'Incheon International Airport' },
-  GMP: { name: 'Gimpo', full: 'Gimpo International Airport' },
-  PEK: { name: 'Beijing Capital', full: 'Beijing Capital International Airport' },
-  PKX: { name: 'Daxing', full: 'Beijing Daxing International Airport' },
-  PVG: { name: 'Pudong', full: 'Shanghai Pudong International Airport' },
-  SHA: { name: 'Hongqiao', full: 'Shanghai Hongqiao International Airport' },
-  HKG: { name: 'Hong Kong Intl.', full: 'Hong Kong International Airport' },
-  TPE: { name: 'Taoyuan', full: 'Taiwan Taoyuan International Airport' },
-  TSA: { name: 'Taipei Songshan', full: 'Taipei Songshan Airport' },
-  SIN: { name: 'Changi', full: 'Singapore Changi Airport' },
-  BKK: { name: 'Suvarnabhumi', full: 'Suvarnabhumi Airport' },
-  DMK: { name: 'Don Mueang', full: 'Don Mueang International Airport' },
-  KUL: { name: 'Kuala Lumpur Intl.', full: 'Kuala Lumpur International Airport' },
-  CGK: { name: 'Soekarno-Hatta', full: 'Soekarno-Hatta International Airport' },
-  HLP: { name: 'Halim', full: 'Halim Perdanakusuma International Airport' },
-  MNL: { name: 'Ninoy Aquino', full: 'Ninoy Aquino International Airport' },
-  DEL: { name: 'Indira Gandhi', full: 'Indira Gandhi International Airport' },
-  BOM: { name: 'Chhatrapati Shivaji', full: 'Chhatrapati Shivaji Maharaj International Airport' },
-
-  // Oceania
-  SYD: { name: 'Sydney Kingsford Smith', full: 'Sydney Kingsford Smith Airport' },
-  MEL: { name: 'Melbourne', full: 'Melbourne Airport' },
-
-  // Middle East / Africa
-  DXB: { name: 'Dubai Intl.', full: 'Dubai International Airport' },
-  DWC: { name: 'Al Maktoum', full: 'Al Maktoum International Airport' },
-  AUH: { name: 'Zayed Intl.', full: 'Zayed International Airport' },
-  DOH: { name: 'Hamad Intl.', full: 'Hamad International Airport' },
-  JNB: { name: 'OR Tambo', full: 'O. R. Tambo International Airport' },
-  CPT: { name: 'Cape Town Intl.', full: 'Cape Town International Airport' },
-  CAI: { name: 'Cairo Intl.', full: 'Cairo International Airport' },
-
-  // South America
-  GRU: { name: 'São Paulo-Guarulhos', full: 'São Paulo/Guarulhos International Airport' },
-  CGH: { name: 'Congonhas', full: 'São Paulo/Congonhas Airport' },
-  GIG: { name: 'Galeão', full: 'Rio de Janeiro/Galeão International Airport' },
-  SDU: { name: 'Santos Dumont', full: 'Santos Dumont Airport' },
-  EZE: { name: 'Ezeiza', full: 'Ministro Pistarini International Airport' },
-  AEP: { name: 'Aeroparque', full: 'Jorge Newbery Airfield' },
-  SCL: { name: 'Arturo Merino Benítez', full: 'Arturo Merino Benítez International Airport' },
-  LIM: { name: 'Jorge Chávez', full: 'Jorge Chávez International Airport' },
-  BOG: { name: 'El Dorado', full: 'El Dorado International Airport' },
-};
-
+/**
+ * An airport's name, or `null`.
+ *
+ * Synchronous and total: an unknown code, a code from a trip saved before any
+ * of this existed, and a chunk that has not arrived yet all give `null`.
+ */
 export function getAirportName(iata: string): string | null {
-  if (!iata) return null;
-  const info = AIRPORTS[iata.toUpperCase()];
-  return info ? info.name : null;
+  if (!iata || !names) return null;
+  return names[iata.toUpperCase()] ?? null;
 }
 
-export function getAirportFullName(iata: string): string | null {
-  if (!iata) return null;
-  const info = AIRPORTS[iata.toUpperCase()];
-  return info ? info.full : null;
+/**
+ * Fetch the table, once per page.
+ *
+ * Exported so a caller that knows it is about to show airports can warm the
+ * chunk (a route transition, say) rather than waiting for first paint.
+ */
+export function preloadAirportNames(): Promise<Record<string, string>> {
+  if (names) return Promise.resolve(names);
+  if (!inFlight) {
+    inFlight = import('./generated/airportNames.json')
+      .then((module) => {
+        const table = ((module as { default?: AirportNameTable }).default ??
+          module) as AirportNameTable;
+        names = table.names ?? {};
+        // `forEach` rather than `for..of`: the frontend tsconfig targets ES5
+        // and will not iterate a Set without --downlevelIteration. It is also
+        // the safe shape here — a listener that unsubscribes while this runs
+        // is simply not visited, and no listener adds another.
+        waiting.forEach((notify) => notify());
+        return names;
+      })
+      .catch(() => {
+        // A chunk that fails to load must not take the card with it. Clearing
+        // `inFlight` lets the next mount try again; until one succeeds every
+        // lookup returns null and every card shows its bare code.
+        inFlight = null;
+        return {};
+      });
+  }
+  return inFlight;
+}
+
+/**
+ * The lookup, with the chunk loaded and a re-render when it arrives.
+ *
+ * Returns a FUNCTION rather than one name so a component can look up several
+ * codes — `HomeEditModal` maps over a list of airport chips — without calling
+ * a hook per item.
+ */
+export function useAirportNames(): (iata: string) => string | null {
+  // Only a version counter: the names live in the module, shared by every
+  // card on the page, so there is nothing per-component to hold.
+  const [, bump] = useState(0);
+
+  useEffect(() => {
+    if (names) return;
+    let mounted = true;
+    const notify = () => {
+      if (mounted) bump((version) => version + 1);
+    };
+    waiting.add(notify);
+    void preloadAirportNames();
+    return () => {
+      mounted = false;
+      waiting.delete(notify);
+    };
+  }, []);
+
+  return getAirportName;
+}
+
+/**
+ * Test seam: forget the loaded table.
+ *
+ * Exported so a test can exercise the not-yet-loaded state, which is a real
+ * state every first render passes through and the one that has to degrade to
+ * a bare code.
+ */
+export function resetAirportNamesForTests(): void {
+  names = null;
+  inFlight = null;
+  waiting.clear();
 }

@@ -105,36 +105,74 @@ function candidateOf(candidate: Candidate, max: number): OriginCandidate {
 }
 
 /**
- * One card per READING, not one per GeoNames row.
+ * Kinds that name a POINT a traveller can stand in, as against an area.
  *
- * `San Juan` returned eight candidates of which four were doubles — "San Juan,
- * Argentina" twice and "San Juan, Puerto Rico" twice — because the upstream
- * dump carries the same city as two rows. 110 city groups share a
- * name+country+admin that way, 114 rows in all; the clear ones are identical
- * down to the population (San Juan PR is 418,140 on both).
+ * A city and the region around it routinely share a label, and when they do
+ * the city is the better answer: it is what a traveller means, it is what
+ * carries a metro code, and its airport order is measured against one centre
+ * rather than an arbitrary interior point.
+ */
+const POINT_LIKE: ReadonlySet<string> = new Set(['city', 'metro']);
+
+/**
+ * One entry per READING, preferring the place rather than the area it sits in.
  *
- * Collapsing on the LABEL rather than on place identity is deliberate. The
- * label is the entire basis on which a traveller chooses, so two candidates
- * printing the same string are the same choice to them whether or not the rows
- * are truly one place — offering both is asking a question with two identical
- * answers. Keeping the FIRST is what makes it safe: candidates arrive ranked,
- * so the survivor is the more prominent row, and where the rows differ it is
- * the better-attached one (San Juan PR's leading row carries eight airports
- * against the other's six).
+ * Two jobs in one pass, because they are the same question.
+ *
+ * DEDUPE. `San Juan` returned eight candidates of which four were doubles —
+ * "San Juan, Argentina" twice and "San Juan, Puerto Rico" twice — because the
+ * upstream dump carries those cities as two rows. 110 city groups share a
+ * name+country+admin that way. The results page renders one button per
+ * candidate, so that was two identical buttons pointing at different ids: a
+ * question with two identical answers. Collapsing on the printed LABEL is
+ * deliberate, because the label is the entire basis on which a traveller
+ * chooses.
+ *
+ * PREFERENCE. Which of a colliding pair survives is not arbitrary, and
+ * keeping the first was wrong. `Moscow` resolves to the federal-city REGION
+ * (adm:RU.48, population 11,100,779) ahead of the CITY (gn:524901,
+ * 10,381,222) on population alone, and both print "Moscow, Russia". The
+ * region carries no metro code and orders its airports against a centroid, so
+ * the answer was SVO with VKO and ZIA behind it. The city carries metro MOW
+ * and orders SVO, DME, VKO — Domodedovo, Russia's second airport, ahead of
+ * Zhukovsky. Measured: this restores exactly the triple the retired
+ * hand-written table gave for `moscow`.
+ *
+ * This reorders rather than only filtering, because `fromResolution` takes
+ * its answer from `candidates[0]`. A dedupe that merely dropped the loser
+ * would still have answered from the region.
+ *
  *
  * Deliberately not fixed in the pipeline: deduping there would need a rule for
  * which row wins, and two cities CAN legitimately share a name inside one
  * admin region with different populations (Changzhi, CN: 1,214,940 and
  * 699,514). Here the ranking has already made that call.
+ *
+ * It CANNOT touch Moscow, Idaho, which is the reason this is the right fix
+ * and a curated `moscow` alias was not. Idaho's label is "Moscow, Idaho,
+ * United States" — a different string, so no collision, so the rule never
+ * applies and PUW at 9 km still wins there. A curated alias would have
+ * pointed every `moscow` at Russia and broken the exact case `servesPlace`
+ * was added to rescue.
  */
-function dedupeByLabel(candidates: OriginCandidate[]): OriginCandidate[] {
-  const seen = new Set<string>();
-  return candidates.filter((candidate) => {
+function dedupePreferringPlaces(candidates: Candidate[]): Candidate[] {
+  const bestByLabel = new Map<string, Candidate>();
+  const order: string[] = [];
+  for (const candidate of candidates) {
     const key = candidate.label.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+    const held = bestByLabel.get(key);
+    if (!held) {
+      bestByLabel.set(key, candidate);
+      order.push(key);
+      continue;
+    }
+    // Only a point-like candidate may displace an area-like one. Two cities
+    // sharing a label keep the first, which is the more prominent row.
+    if (!POINT_LIKE.has(held.place.kind) && POINT_LIKE.has(candidate.place.kind)) {
+      bestByLabel.set(key, candidate);
+    }
+  }
+  return order.map((key) => bestByLabel.get(key)!);
 }
 
 /**
@@ -155,14 +193,17 @@ export function fromResolution(result: Resolution, max = DEFAULT_MAX_AIRPORTS): 
     // Best effort is the resolver's own top candidate: the list is already
     // ranked, grouped and pruned, so "the first one" is the most prominent
     // real reading rather than whatever the data happened to emit first.
-    const [best] = result.candidates;
+    // Deduped BEFORE the answer is taken, not after: the preference inside
+    // decides which of a colliding pair leads, and the lead is the answer.
+    const ranked = dedupePreferringPlaces(result.candidates);
+    const [best] = ranked;
     if (!best) return EMPTY;
     return {
       airports: airportsOf(best.place, max),
       placeId: best.place.id,
       needsClarification: {
         reason: result.reason,
-        candidates: dedupeByLabel(result.candidates.map((candidate) => candidateOf(candidate, max))),
+        candidates: ranked.map((candidate) => candidateOf(candidate, max)),
       },
     };
   }
@@ -176,7 +217,7 @@ export function fromResolution(result: Resolution, max = DEFAULT_MAX_AIRPORTS): 
     placeId: null,
     needsClarification: {
       reason: 'not-found',
-      candidates: dedupeByLabel(result.suggestions.map((candidate) => candidateOf(candidate, max))),
+      candidates: dedupePreferringPlaces(result.suggestions).map((c) => candidateOf(c, max)),
     },
   };
 }

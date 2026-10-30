@@ -1,7 +1,10 @@
-import { searchFlights, getIataCode, FlightOffer } from './flights';
+import { searchFlights, getIataCode, FlightOffer, type IataLookupContext } from './flights';
 import { searchTrains, TrainOffer } from './trains';
 import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
+import { getStaticIata } from '../data/cityAirports';
+import { resolveDestinationIata } from './location/destinationAirport';
+import { sameAirportArea } from './location/sameAirportArea';
 
 /**
  * Both options are priced as PARTY TOTALS for `travelers` — Duffel quotes
@@ -38,17 +41,45 @@ function knownDuration(minutes: unknown): number | null {
     : null;
 }
 
-type CompareLegParams = {
+export type CompareLegParams = {
   origin: string;
   destination: string;
   date: string;
   travelers: number;
   originCountry?: string;
   destinationCountry?: string;
+  /**
+   * Every city on the trip, handed to getIataCode as `tripDestinationNames`
+   * so a name with more than one reading resolves to the one this trip
+   * means: "Lagos" on a Lisbon + Porto trip is FAO, bare it is LOS.
+   */
+  tripCityNames?: string[];
 };
 
-export async function compareLeg(params: CompareLegParams): Promise<LegComparison> {
+/**
+ * Where compareLeg gets airport codes and flight offers. Defaults to
+ * flights.ts. The optimizer passes per-run wrappers instead: a memo of
+ * getIataCode (a 5-city run otherwise looks the same 5 cities up hundreds
+ * of times) and a searchFlights that counts outcomes, so a run can tell a
+ * Duffel outage from routes nobody flies.
+ */
+export type CompareLegDeps = {
+  getIataCode?: (cityName: string, context?: IataLookupContext) => Promise<string>;
+  searchFlights?: typeof searchFlights;
+};
+
+export async function compareLeg(
+  params: CompareLegParams,
+  deps: CompareLegDeps = {},
+): Promise<LegComparison> {
   const { origin, destination, date, travelers, originCountry, destinationCountry } = params;
+  const resolveIata = deps.getIataCode ?? getIataCode;
+  const findFlights = deps.searchFlights ?? searchFlights;
+  const tripNames = params.tripCityNames ?? [];
+  const dependsOnTrip = (name: string): boolean =>
+    tripNames.length > 0 &&
+    !getStaticIata(name) &&
+    resolveDestinationIata(name, { tripDestinationNames: tripNames }) !== resolveDestinationIata(name);
 
   // Check cache first.
   //
@@ -89,22 +120,52 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
     return data?.[0];
   };
 
-  const [cachedFlight, cachedTrain] = await Promise.all([
-    readNewestCached('flight'),
+  // The flight row is keyed by city NAME, but with trip context one name can
+  // mean two airports: Porto -> Lagos is OPO -> FAO on a Portugal trip and
+  // OPO -> LOS bare. Whichever wrote the row first would be served to the
+  // other for two hours — a Portugal trip paying Nigeria's fare, or the
+  // reverse. So a leg whose airports this trip changes neither reads nor
+  // writes the shared flight row; it is searched every time (the in-process
+  // Duffel cache in flights.ts is keyed by airport, so it still dedupes).
+  //
+  // "Changes" = getIataCode would answer differently with this trip than
+  // without: no curated row (those beat context) and the location artifact
+  // reads the name differently. In-memory, no network. Not caught: a name
+  // the artifact cannot answer either way, where the trip only changes which
+  // Duffel suggestion is believed — rare, and no worse than before.
+  // Trains are searched by city name, not airport, so their rows are kept.
+  const flightCacheUsable = !dependsOnTrip(origin) && !dependsOnTrip(destination);
+
+  // Both airports, looked up alongside the cache reads. A leg whose two
+  // cities share an airport — Zurich → Interlaken is ZRH → ZRH, Oxford →
+  // London is LON → LON — has NO flight option: it is ground travel. It is
+  // not searched, a cached flight row for it is not served (a flight between
+  // them cannot exist), and the leg falls to the train, or to "unavailable",
+  // which the optimizer already penalises. A failed lookup is not a shared
+  // airport: the leg behaves exactly as before (cache, else a logged miss).
+  const tripContext = { tripDestinationNames: params.tripCityNames ?? [] };
+  const airportsLookup: Promise<[string, string] | { failed: unknown }> = Promise.all([
+    resolveIata(origin, tripContext),
+    resolveIata(destination, tripContext),
+  ]).catch((failed: unknown) => ({ failed }));
+
+  const [cachedFlightRow, cachedTrain, airports] = await Promise.all([
+    flightCacheUsable ? readNewestCached('flight') : Promise.resolve(undefined),
     readNewestCached('train'),
+    airportsLookup,
   ]);
+  const sharedAirport = Array.isArray(airports) && sameAirportArea(airports[0], airports[1]);
+  const cachedFlight = sharedAirport ? undefined : cachedFlightRow;
 
   // Fetch in parallel, catch each independently
   const [flightsResult, trainsResult] = await Promise.all([
-    cachedFlight
-      ? Promise.resolve(null) // skip if cached
+    cachedFlight || sharedAirport
+      ? Promise.resolve(null) // cached, or no flight can exist
       : (async () => {
           try {
-            const [originIata, destIata] = await Promise.all([
-              getIataCode(origin),
-              getIataCode(destination),
-            ]);
-            return await searchFlights({
+            if (!Array.isArray(airports)) throw airports.failed;
+            const [originIata, destIata] = airports;
+            return await findFlights({
               origin: originIata,
               destination: destIata,
               date,
@@ -264,7 +325,7 @@ export async function compareLeg(params: CompareLegParams): Promise<LegCompariso
   const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
 
   const cacheRows: any[] = [];
-  if (bestFlight && !cachedFlight) {
+  if (bestFlight && !cachedFlight && flightCacheUsable) {
     cacheRows.push({
       origin: origin.toLowerCase(),
       destination: destination.toLowerCase(),

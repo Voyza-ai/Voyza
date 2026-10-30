@@ -1,0 +1,1220 @@
+[
+  {
+    "slug": "new-zealand-nature-odyssey",
+    "title": "New Zealand Nature Odyssey",
+    "tagline": "Experience the dramatic fjords, glaciers, and alpine beauty of New Zealand's South Island over twelve unforgettable days.",
+    "description": "This journey takes you through New Zealand's most stunning natural landscapes, from the adventure capital of Queenstown to the majestic Milford Sound and the glacier-carved wilderness of the Southern Alps. Hike through pristine national parks, cruise past towering waterfalls, and immerse yourself in some of the most breathtaking scenery on Earth. Perfect for nature lovers seeking both adventure and tranquility in one of the world's last great wilderness destinations.",
+    "searchTags": [
+      "new zealand",
+      "nature",
+      "south island",
+      "fjords",
+      "glaciers",
+      "hiking",
+      "queenstown",
+      "milford sound",
+      "adventure",
+      "mountains",
+      "combo:nature|oceania|two-weeks|$$$"
+    ],
+    "coverGradient": "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+    "flags": "🇳🇿",
+    "scope": "One country",
+    "travelers": 2,
+    "cities": [
+      {
+        "name": "Queenstown",
+        "country": "New Zealand",
+        "nights": 4,
+        "hotel": {
+          "name": "Scenic Suites Queenstown",
+          "rating": 4.5,
+          "pricePerNight": 280,
+          "area": "Queenstown Hill"
+        },
+        "activities": [
+          "Take the Skyline Gondola to Bob's Peak for panoramic views of Lake Wakatipu and the Remarkables",
+          "Cruise Milford Sound to see waterfalls, dolphins, and dramatic fjord landscapes",
+          "Hike the Ben Lomond Track for alpine vistas",
+          "Explore the Queenstown Gardens along the lake shore",
+          "Visit Glenorchy and walk to the Head of Lake Wakatipu"
+        ],
+        "restaurants": [
+          {
+            "name": "Rata",
+            "cuisine": "Contemporary New Zealand",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "Fergburger",
+            "cuisine": "Burgers",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Botswana Butchery",
+            "cuisine": "Steakhouse",
+            "priceRange": "$$$"
+          }
+        ],
+        "vibes": [
+          "nature",
+          "city",
+          "romance"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "Air New Zealand",
+          "duration": "1h 10m",
+          "price": 145
+        }
+      },
+      {
+        "name": "Mount Cook Village",
+        "country": "New Zealand",
+        "nights": 3,
+        "hotel": {
+          "name": "The Hermitage Hotel",
+          "rating": 4,
+          "pricePerNight": 320,
+          "area": "Aoraki/Mount Cook National Park"
+        },
+        "activities": [
+          "Hike the Hooker Valley Track to Hooker Lake with glacier views",
+          "Walk the Tasman Glacier Lake trail and see icebergs up close",
+          "Stargaze at the Aoraki Mackenzie International Dark Sky Reserve",
+          "Take a scenic helicopter flight over the glaciers and Mount Cook"
+        ],
+        "restaurants": [
+          {
+            "name": "Alpine Restaurant at The Hermitage",
+            "cuisine": "Contemporary New Zealand",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "Old Mountaineers Cafe Bar",
+            "cuisine": "Cafe",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "nature",
+          "romance"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "Air New Zealand",
+          "duration": "1h 45m",
+          "price": 180
+        }
+      },
+      {
+        "name": "Wellington",
+        "country": "New Zealand",
+        "nights": 5,
+        "hotel": {
+          "name": "QT Museum Wellington",
+          "rating": 4.5,
+          "pricePerNight": 265,
+          "area": "Cable Street Waterfront"
+        },
+        "activities": [
+          "Explore Zealandia wildlife sanctuary and see native birds like kākā and tuatara",
+          "Ride the historic Wellington Cable Car to the Botanic Garden",
+          "Walk the Southern Walkway coastal trail from the city to Island Bay",
+          "Visit Te Papa Tongarewa, New Zealand's national museum",
+          "Hike Mount Victoria for 360-degree views of the harbor and city"
+        ],
+        "restaurants": [
+          {
+            "name": "Logan Brown",
+            "cuisine": "Fine Dining New Zealand",
+            "priceRange": "$$$$"
+          },
+          {
+            "name": "Ortega Fish Shack",
+            "cuisine": "Seafood",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "Loretta",
+            "cuisine": "Contemporary",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "nature",
+          "city",
+          "art",
+          "food"
+        ]
+      }
+    ],
+    "budgetEstimate": 2450,
+    "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Milford_Sound_%28New_Zealand%29.JPG/1280px-Milford_Sound_%28New_Zealand%29.JPG"
+  },
+  {
+    "slug": "caribbean-beach-bliss",
+    "title": "Caribbean Beach Bliss",
+    "tagline": "Escape to turquoise waters and white sand beaches across Mexico's stunning Caribbean coast.",
+    "description": "Discover the perfect blend of relaxation and adventure on Mexico's Riviera Maya. From the vibrant beaches of Playa del Carmen to the laid-back island paradise of Cozumel, this beach-focused getaway offers crystal-clear waters, fresh seafood, and endless sunshine. Perfect for a long weekend escape from the Northeast winter.",
+    "searchTags": [
+      "beach",
+      "mexico",
+      "caribbean",
+      "riviera maya",
+      "playa del carmen",
+      "cozumel",
+      "weekend getaway",
+      "tropical",
+      "snorkeling",
+      "relaxation",
+      "combo:beach|americas|weekend|$$"
+    ],
+    "coverGradient": "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+    "flags": "🇲🇽",
+    "scope": "One country",
+    "travelers": 2,
+    "cities": [
+      {
+        "name": "Playa del Carmen",
+        "country": "Mexico",
+        "nights": 2,
+        "hotel": {
+          "name": "Mahekal Beach Resort",
+          "rating": 4.5,
+          "pricePerNight": 185,
+          "area": "Beachfront"
+        },
+        "activities": [
+          "Relax on Mamitas Beach Club",
+          "Snorkel at Akumal Bay with sea turtles",
+          "Visit the ancient Mayan ruins of Tulum",
+          "Stroll down Fifth Avenue (Quinta Avenida) for shopping"
+        ],
+        "restaurants": [
+          {
+            "name": "El Fogon",
+            "cuisine": "Mexican tacos",
+            "priceRange": "$"
+          },
+          {
+            "name": "Alux Restaurant",
+            "cuisine": "International (cave restaurant)",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "La Perla Pixan Cuisine & Mezcal Store",
+            "cuisine": "Contemporary Mexican",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "beach",
+          "food",
+          "nightlife",
+          "city"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "Mayair",
+          "duration": "25m",
+          "price": 95
+        }
+      },
+      {
+        "name": "Cozumel",
+        "country": "Mexico",
+        "nights": 2,
+        "hotel": {
+          "name": "Cozumel Palace",
+          "rating": 4,
+          "pricePerNight": 220,
+          "area": "Zona Hotelera Norte"
+        },
+        "activities": [
+          "Dive or snorkel at Palancar Reef",
+          "Relax at Playa Palancar beach",
+          "Explore Chankanaab Beach Adventure Park",
+          "Visit San Gervasio Mayan archaeological site",
+          "Rent a scooter and explore the island's east coast"
+        ],
+        "restaurants": [
+          {
+            "name": "Kinta Mexican Bistro",
+            "cuisine": "Modern Mexican",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "Pepe's Grill",
+            "cuisine": "Steakhouse",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "Kondesa Restaurant",
+            "cuisine": "Seafood",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "beach",
+          "nature",
+          "food",
+          "romance"
+        ]
+      }
+    ],
+    "budgetEstimate": 950,
+    "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Tulum_2.jpg/1280px-Tulum_2.jpg"
+  },
+  {
+    "slug": "costa-rica-wild-escape",
+    "title": "Costa Rica Wild Escape",
+    "tagline": "Explore rainforests, volcanoes, and cloud forests in one of the world's most biodiverse countries.",
+    "description": "This 7-night Costa Rica adventure takes you from the misty cloud forests of Monteverde to the volcanic hot springs of La Fortuna and the pristine beaches of Manuel Antonio. Perfect for nature lovers seeking wildlife encounters, thrilling canopy tours, and stunning natural beauty in a country where \"Pura Vida\" is more than a saying—it's a way of life.",
+    "searchTags": [
+      "costa rica",
+      "nature",
+      "rainforest",
+      "wildlife",
+      "volcano",
+      "cloud forest",
+      "adventure",
+      "beach",
+      "monteverde",
+      "arenal",
+      "combo:nature|americas|one-week|$$"
+    ],
+    "coverGradient": "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+    "flags": "🇨🇷",
+    "scope": "One country",
+    "travelers": 2,
+    "cities": [
+      {
+        "name": "Monteverde",
+        "country": "Costa Rica",
+        "nights": 2,
+        "hotel": {
+          "name": "Hotel Belmar",
+          "rating": 4.5,
+          "pricePerNight": 145,
+          "area": "Monteverde Cloud Forest"
+        },
+        "activities": [
+          "Monteverde Cloud Forest Reserve hiking and wildlife watching",
+          "Sky Walk hanging bridges tour through the canopy",
+          "Night walk to spot nocturnal wildlife",
+          "Visit the Monteverde Butterfly Garden and hummingbird gallery"
+        ],
+        "restaurants": [
+          {
+            "name": "Tico y Rico",
+            "cuisine": "Costa Rican",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Tree House Restaurant & Cafe",
+            "cuisine": "International",
+            "priceRange": "$$$"
+          }
+        ],
+        "vibes": [
+          "nature",
+          "food"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "SANSA Regional",
+          "duration": "30m",
+          "price": 95
+        }
+      },
+      {
+        "name": "La Fortuna",
+        "country": "Costa Rica",
+        "nights": 3,
+        "hotel": {
+          "name": "Arenal Springs Resort",
+          "rating": 4,
+          "pricePerNight": 165,
+          "area": "Near Arenal Volcano"
+        },
+        "activities": [
+          "Hike Arenal Volcano National Park trails with volcano views",
+          "Soak in Tabacon Hot Springs surrounded by rainforest",
+          "La Fortuna Waterfall hike and swim",
+          "Rio Celeste day trip to see the brilliant turquoise river",
+          "Mistico Arenal Hanging Bridges Park walk"
+        ],
+        "restaurants": [
+          {
+            "name": "Don Rufino",
+            "cuisine": "Costa Rican Fusion",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "Soda Viquez",
+            "cuisine": "Traditional Costa Rican",
+            "priceRange": "$"
+          },
+          {
+            "name": "Cafe Mediterraneo",
+            "cuisine": "Mediterranean",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "nature",
+          "food",
+          "romance"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "SANSA Regional",
+          "duration": "35m",
+          "price": 110
+        }
+      },
+      {
+        "name": "Manuel Antonio",
+        "country": "Costa Rica",
+        "nights": 2,
+        "hotel": {
+          "name": "Tulemar Bungalows & Villas",
+          "rating": 4.5,
+          "pricePerNight": 195,
+          "area": "Manuel Antonio Beach"
+        },
+        "activities": [
+          "Manuel Antonio National Park guided wildlife tour (monkeys, sloths, tropical birds)",
+          "Kayaking and snorkeling in Biesanz Bay",
+          "Sunset catamaran cruise along the Pacific coast",
+          "Beach time at Playa Espadilla"
+        ],
+        "restaurants": [
+          {
+            "name": "El Avion",
+            "cuisine": "Seafood",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "Cafe Milagro",
+            "cuisine": "International",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "nature",
+          "beach",
+          "food",
+          "romance"
+        ]
+      }
+    ],
+    "budgetEstimate": 1280,
+    "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Arenal_volcano_%2870785p%29_%28cropped%29.jpg/1280px-Arenal_volcano_%2870785p%29_%28cropped%29.jpg"
+  },
+  {
+    "slug": "belgrade-bucharest-nightlife-rush",
+    "title": "Belgrade Bucharest Nightlife Rush",
+    "tagline": "Party through the Balkans with two of Eastern Europe's most electric nightlife scenes in one unforgettable weekend.",
+    "description": "Start in Belgrade, where floating river clubs and underground bars pulse until dawn, then continue to Bucharest for its eclectic mix of bohemian pubs and massive mega-clubs. This budget-friendly circuit combines affordable accommodations, authentic local dining, and two cities that know how to throw a party without breaking the bank.",
+    "searchTags": [
+      "nightlife",
+      "eastern europe",
+      "balkans",
+      "belgrade",
+      "bucharest",
+      "party",
+      "budget",
+      "weekend",
+      "clubs",
+      "bars",
+      "combo:nightlife|europe|weekend|$"
+    ],
+    "coverGradient": "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+    "flags": "🇷🇸 🇷🇴",
+    "scope": "2 countries",
+    "travelers": 2,
+    "cities": [
+      {
+        "name": "Belgrade",
+        "country": "Serbia",
+        "nights": 2,
+        "hotel": {
+          "name": "Envoy Hostel",
+          "rating": 4.5,
+          "pricePerNight": 85,
+          "area": "Dorćol"
+        },
+        "activities": [
+          "Explore Belgrade Fortress and Kalemegdan Park with panoramic city views",
+          "Walk down Knez Mihailova Street for shopping and street performers",
+          "Visit the Temple of Saint Sava, one of the world's largest Orthodox churches",
+          "Experience splavovi (floating river clubs) on the Sava and Danube rivers",
+          "Discover the bohemian quarter of Skadarlija with cobblestone streets"
+        ],
+        "restaurants": [
+          {
+            "name": "Dva Jelena",
+            "cuisine": "Serbian",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Smokvica",
+            "cuisine": "Balkan",
+            "priceRange": "$"
+          },
+          {
+            "name": "Lorenzo & Kakalamba",
+            "cuisine": "Italian-Serbian Fusion",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "nightlife",
+          "city",
+          "history",
+          "food"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "Air Serbia",
+          "duration": "1h 10m",
+          "price": 95
+        }
+      },
+      {
+        "name": "Bucharest",
+        "country": "Romania",
+        "nights": 2,
+        "hotel": {
+          "name": "Little Bucharest Old Town Hostel",
+          "rating": 4.3,
+          "pricePerNight": 90,
+          "area": "Old Town"
+        },
+        "activities": [
+          "Tour the colossal Palace of the Parliament, second-largest building in the world",
+          "Party in the Old Town (Lipscani) with its maze of bars and clubs",
+          "Stroll through Cișmigiu Gardens, Bucharest's oldest public park",
+          "Visit the Village Museum showcasing traditional Romanian architecture",
+          "Experience the nightlife at Control Club or Guesthouse"
+        ],
+        "restaurants": [
+          {
+            "name": "Caru' cu Bere",
+            "cuisine": "Romanian",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Lacrimi și Sfinți",
+            "cuisine": "Traditional Romanian",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Hanu' lui Manuc",
+            "cuisine": "Romanian",
+            "priceRange": "$"
+          }
+        ],
+        "vibes": [
+          "nightlife",
+          "city",
+          "history",
+          "food"
+        ]
+      }
+    ],
+    "budgetEstimate": 520,
+    "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/70/Hram_svetog_save_beograd_0005_%28edited%29.jpg/1280px-Hram_svetog_save_beograd_0005_%28edited%29.jpg"
+  },
+  {
+    "slug": "norwegian-fjords-and-mountains",
+    "title": "Norwegian Fjords & Mountains",
+    "tagline": "Discover Norway's dramatic landscapes, from Oslo's urban fjord setting to the breathtaking mountain vistas of Bergen and the iconic Sognefjord.",
+    "description": "This week-long journey takes you through Norway's most stunning natural wonders, combining easy city exploration with unforgettable fjord and mountain experiences. Starting in Oslo, you'll travel by scenic train through the mountains to Bergen, gateway to the world-famous fjords, then venture into the heart of Sognefjord country. Perfect for nature lovers seeking hiking, waterfalls, glaciers, and some of Europe's most dramatic scenery.",
+    "searchTags": [
+      "norway",
+      "fjords",
+      "nature",
+      "mountains",
+      "bergen",
+      "oslo",
+      "scandinavia",
+      "hiking",
+      "scenic trains",
+      "europe",
+      "combo:nature|europe|one-week|$$"
+    ],
+    "coverGradient": "linear-gradient(135deg, #fa709a 0%, #fee140 100%)",
+    "flags": "🇳🇴",
+    "scope": "One country",
+    "travelers": 2,
+    "cities": [
+      {
+        "name": "Oslo",
+        "country": "Norway",
+        "nights": 2,
+        "hotel": {
+          "name": "Thon Hotel Oslo Panorama",
+          "rating": 4,
+          "pricePerNight": 145,
+          "area": "City Centre"
+        },
+        "activities": [
+          "Explore Vigeland Sculpture Park with 200+ bronze and granite sculptures",
+          "Visit the Viking Ship Museum to see authentic 9th-century Viking vessels",
+          "Walk along the Oslo Fjord waterfront and Aker Brygge harbor district",
+          "Tour the Oslo Opera House with its iconic slanted roof walkway"
+        ],
+        "restaurants": [
+          {
+            "name": "Mathallen Food Hall",
+            "cuisine": "International Market",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Fiskeriet Youngstorget",
+            "cuisine": "Seafood",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Illegal Burger",
+            "cuisine": "Burgers",
+            "priceRange": "$"
+          }
+        ],
+        "vibes": [
+          "nature",
+          "city",
+          "art",
+          "history"
+        ],
+        "transportOut": {
+          "mode": "train",
+          "operator": "Vy (Bergen Railway)",
+          "duration": "6h 30m",
+          "price": 95
+        }
+      },
+      {
+        "name": "Bergen",
+        "country": "Norway",
+        "nights": 3,
+        "hotel": {
+          "name": "Thon Hotel Bergen Airport",
+          "rating": 3.5,
+          "pricePerNight": 135,
+          "area": "Bergen"
+        },
+        "activities": [
+          "Ride the Fløibanen funicular to Mount Fløyen for panoramic city and fjord views",
+          "Explore Bryggen UNESCO World Heritage wharf with colorful Hanseatic buildings",
+          "Visit the Fish Market for fresh seafood and local specialties",
+          "Hike to Stoltzekleiven or other nearby mountain trails",
+          "Day trip to Hardangerfjord or nearby waterfalls"
+        ],
+        "restaurants": [
+          {
+            "name": "Bryggeloftet & Stuene",
+            "cuisine": "Traditional Norwegian",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Ping Pong",
+            "cuisine": "Asian Fusion",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Bare Vestland",
+            "cuisine": "Norwegian",
+            "priceRange": "$$$"
+          }
+        ],
+        "vibes": [
+          "nature",
+          "history",
+          "city",
+          "food"
+        ],
+        "transportOut": {
+          "mode": "train",
+          "operator": "Vy",
+          "duration": "2h 15m",
+          "price": 45
+        }
+      },
+      {
+        "name": "Flåm",
+        "country": "Norway",
+        "nights": 2,
+        "hotel": {
+          "name": "Flåm Marina & Apartments",
+          "rating": 3.5,
+          "pricePerNight": 165,
+          "area": "Flåm Village"
+        },
+        "activities": [
+          "Ride the Flåm Railway, one of the world's steepest standard-gauge railway lines",
+          "Cruise the UNESCO-listed Nærøyfjord and Aurlandsfjord",
+          "Hike to Stegastein viewpoint for dramatic fjord panoramas",
+          "Visit Otternes Farmyard Museum, a preserved mountain farm village"
+        ],
+        "restaurants": [
+          {
+            "name": "Ægir BrewPub",
+            "cuisine": "Norwegian Pub Food",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Flåm Marina Restaurant",
+            "cuisine": "Seafood",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "nature",
+          "romance"
+        ]
+      }
+    ],
+    "budgetEstimate": 1285,
+    "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/Sognefjord%2C_Norway.jpg/1280px-Sognefjord%2C_Norway.jpg"
+  },
+  {
+    "slug": "mexico-city-and-guadalajara",
+    "title": "Mexico City & Guadalajara",
+    "tagline": "Two vibrant Mexican metropolises packed with culture, street food, and colonial charm.",
+    "description": "Discover Mexico's dynamic heart with a whirlwind tour of its two most exciting cities. Start in Mexico City, where ancient Aztec ruins meet world-class museums and taco stands on every corner. Then fly west to Guadalajara, the birthplace of mariachi and tequila, where tree-lined plazas and colorful markets offer an authentic taste of Mexican urban life.",
+    "searchTags": [
+      "mexico",
+      "city",
+      "food",
+      "culture",
+      "tacos",
+      "museums",
+      "guadalajara",
+      "mexico city",
+      "street food",
+      "history",
+      "combo:city|americas|weekend|$"
+    ],
+    "coverGradient": "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+    "flags": "🇲🇽",
+    "scope": "One country",
+    "travelers": 2,
+    "cities": [
+      {
+        "name": "Mexico City",
+        "country": "Mexico",
+        "nights": 2,
+        "hotel": {
+          "name": "Hotel Marlowe",
+          "rating": 4,
+          "pricePerNight": 65,
+          "area": "Centro Histórico"
+        },
+        "activities": [
+          "Explore the Zócalo and Metropolitan Cathedral",
+          "Visit the National Museum of Anthropology",
+          "Wander through Chapultepec Park and Castle",
+          "Tour Frida Kahlo Museum (Casa Azul) in Coyoacán",
+          "Walk down Paseo de la Reforma to see the Angel of Independence"
+        ],
+        "restaurants": [
+          {
+            "name": "El Cardenal",
+            "cuisine": "Traditional Mexican",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Tacos El Güero",
+            "cuisine": "Street Tacos",
+            "priceRange": "$"
+          },
+          {
+            "name": "Azul Histórico",
+            "cuisine": "Contemporary Mexican",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "city",
+          "food",
+          "history",
+          "art"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "Volaris",
+          "duration": "1h 20m",
+          "price": 75
+        }
+      },
+      {
+        "name": "Guadalajara",
+        "country": "Mexico",
+        "nights": 2,
+        "hotel": {
+          "name": "Hotel Morales Historical & Colonial",
+          "rating": 4,
+          "pricePerNight": 70,
+          "area": "Centro Histórico"
+        },
+        "activities": [
+          "Visit the Hospicio Cabañas UNESCO World Heritage site",
+          "Stroll through the historic center and Guadalajara Cathedral",
+          "Explore Tlaquepaque arts district and craft markets",
+          "Take a day trip to Tequila town for distillery tours",
+          "Experience mariachi at Plaza de los Mariachis"
+        ],
+        "restaurants": [
+          {
+            "name": "La Chata",
+            "cuisine": "Traditional Jaliscan",
+            "priceRange": "$"
+          },
+          {
+            "name": "Birriería Las 9 Esquinas",
+            "cuisine": "Birria",
+            "priceRange": "$"
+          },
+          {
+            "name": "I Latina",
+            "cuisine": "Contemporary Mexican",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "city",
+          "food",
+          "history",
+          "art"
+        ]
+      }
+    ],
+    "budgetEstimate": 285,
+    "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/97/Bellas_Artes_01.jpg/1280px-Bellas_Artes_01.jpg"
+  },
+  {
+    "slug": "ancient-egypt-explorer",
+    "title": "Ancient Egypt Explorer",
+    "tagline": "Journey through millennia of pharaonic splendor from Cairo's pyramids to Luxor's magnificent temples.",
+    "description": "Discover the cradle of civilization on this unforgettable Egyptian adventure. Walk among the Great Pyramids of Giza, explore the treasures of the Egyptian Museum, and cruise through history along the Nile. From Cairo's bustling streets to Luxor's ancient wonders, experience the timeless magic of one of the world's greatest civilizations.",
+    "searchTags": [
+      "egypt",
+      "history",
+      "pyramids",
+      "cairo",
+      "luxor",
+      "ancient civilization",
+      "nile",
+      "middle east",
+      "archaeology",
+      "pharaohs",
+      "combo:history|africa-middle-east|one-week|$$"
+    ],
+    "coverGradient": "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+    "flags": "🇪🇬",
+    "scope": "One country",
+    "travelers": 2,
+    "cities": [
+      {
+        "name": "Cairo",
+        "country": "Egypt",
+        "nights": 4,
+        "hotel": {
+          "name": "Steigenberger Hotel El Tahrir",
+          "rating": 4.5,
+          "pricePerNight": 110,
+          "area": "Downtown Cairo"
+        },
+        "activities": [
+          "Great Pyramids of Giza and Sphinx",
+          "Egyptian Museum and Tutankhamun treasures",
+          "Khan el-Khalili Bazaar",
+          "Citadel of Saladin and Mohamed Ali Mosque",
+          "Old Cairo: Coptic Museum and Hanging Church"
+        ],
+        "restaurants": [
+          {
+            "name": "Abou El Sid",
+            "cuisine": "Egyptian",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Sequoia",
+            "cuisine": "Mediterranean",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "Felfela",
+            "cuisine": "Egyptian",
+            "priceRange": "$"
+          }
+        ],
+        "vibes": [
+          "history",
+          "city",
+          "food"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "EgyptAir",
+          "duration": "1h 10m",
+          "price": 150
+        }
+      },
+      {
+        "name": "Luxor",
+        "country": "Egypt",
+        "nights": 3,
+        "hotel": {
+          "name": "Sofitel Winter Palace Luxor",
+          "rating": 4.5,
+          "pricePerNight": 180,
+          "area": "Nile Corniche"
+        },
+        "activities": [
+          "Valley of the Kings and Tutankhamun's Tomb",
+          "Karnak Temple Complex",
+          "Luxor Temple",
+          "Temple of Hatshepsut",
+          "Hot air balloon ride over the West Bank"
+        ],
+        "restaurants": [
+          {
+            "name": "Sofra Restaurant",
+            "cuisine": "Egyptian",
+            "priceRange": "$$"
+          },
+          {
+            "name": "1886 Restaurant",
+            "cuisine": "French-Egyptian",
+            "priceRange": "$$$"
+          },
+          {
+            "name": "Al-Sahaby Lane Restaurant",
+            "cuisine": "Egyptian",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "history",
+          "romance",
+          "nature"
+        ]
+      }
+    ],
+    "budgetEstimate": 1085,
+    "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/Great_Pyramid_of_Giza_-_Pyramid_of_Khufu.jpg/1280px-Great_Pyramid_of_Giza_-_Pyramid_of_Khufu.jpg"
+  },
+  {
+    "slug": "thailand-beach-hideaway",
+    "title": "Thailand Beach Hideaway",
+    "tagline": "Escape to Thailand's pristine islands for turquoise waters, white sand beaches, and laid-back tropical vibes.",
+    "description": "Discover the best of southern Thailand's beach paradise with this island-hopping adventure. Start in vibrant Phuket with its famous beaches and nightlife, then ferry to the stunning Phi Phi Islands for world-class snorkeling and dramatic limestone cliffs. End your journey in peaceful Krabi, where you'll find secluded beaches, rock climbing, and breathtaking coastal scenery.",
+    "searchTags": [
+      "beach",
+      "thailand",
+      "asia",
+      "islands",
+      "tropical",
+      "phuket",
+      "phi phi",
+      "krabi",
+      "snorkeling",
+      "paradise",
+      "combo:beach|asia|one-week|$$"
+    ],
+    "coverGradient": "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+    "flags": "🇹🇭",
+    "scope": "One country",
+    "travelers": 2,
+    "cities": [
+      {
+        "name": "Phuket",
+        "country": "Thailand",
+        "nights": 3,
+        "hotel": {
+          "name": "The Charm Resort Phuket",
+          "rating": 4.2,
+          "pricePerNight": 85,
+          "area": "Patong Beach"
+        },
+        "activities": [
+          "Relax on Patong Beach and swim in the Andaman Sea",
+          "Visit the Big Buddha statue overlooking the island",
+          "Explore Old Phuket Town's colorful Sino-Portuguese architecture",
+          "Watch the sunset at Promthep Cape viewpoint"
+        ],
+        "restaurants": [
+          {
+            "name": "Baan Rim Pa",
+            "cuisine": "Thai",
+            "priceRange": "$$"
+          },
+          {
+            "name": "La Gritta",
+            "cuisine": "Italian",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Kan Eang@Pier",
+            "cuisine": "Seafood",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "beach",
+          "nightlife",
+          "food",
+          "nature"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "Bangkok Airways",
+          "duration": "45 minutes",
+          "price": 95
+        }
+      },
+      {
+        "name": "Koh Phi Phi",
+        "country": "Thailand",
+        "nights": 2,
+        "hotel": {
+          "name": "Phi Phi Island Village Beach Resort",
+          "rating": 4.3,
+          "pricePerNight": 140,
+          "area": "Loh Bagao Bay"
+        },
+        "activities": [
+          "Snorkel at Maya Bay and Pileh Lagoon",
+          "Hike to Phi Phi Viewpoint for panoramic island views",
+          "Kayak around the dramatic limestone cliffs",
+          "Swim and sunbathe at Long Beach"
+        ],
+        "restaurants": [
+          {
+            "name": "Anna's Restaurant",
+            "cuisine": "Thai",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Cosmic Restaurant",
+            "cuisine": "International",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "beach",
+          "nature",
+          "romance"
+        ],
+        "transportOut": {
+          "mode": "flight",
+          "operator": "Ferry + Transfer",
+          "duration": "2 hours",
+          "price": 45
+        }
+      },
+      {
+        "name": "Krabi",
+        "country": "Thailand",
+        "nights": 2,
+        "hotel": {
+          "name": "Krabi Resort",
+          "rating": 4.1,
+          "pricePerNight": 95,
+          "area": "Ao Nang Beach"
+        },
+        "activities": [
+          "Take a longtail boat to Railay Beach's stunning karst cliffs",
+          "Visit the Emerald Pool and Blue Pool in the jungle",
+          "Rock climb at Railay's famous limestone walls",
+          "Explore Ao Nang Beach and shop at the night market",
+          "Island hop to the Four Islands by speedboat"
+        ],
+        "restaurants": [
+          {
+            "name": "Lae Lay Grill",
+            "cuisine": "Seafood",
+            "priceRange": "$$"
+          },
+          {
+            "name": "The Hilltop",
+            "cuisine": "Thai",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Jenna's Bistro",
+            "cuisine": "International",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "beach",
+          "nature",
+          "food",
+          "romance"
+        ]
+      }
+    ],
+    "budgetEstimate": 982,
+    "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/KohPhiPhi.JPG/1280px-KohPhiPhi.JPG"
+  },
+  {
+    "slug": "taiwan-food-odyssey",
+    "title": "Taiwan Food Odyssey",
+    "tagline": "Dive into one of Asia's most celebrated food cultures, from bustling night markets to Michelin-starred dim sum.",
+    "description": "Taiwan is a paradise for food lovers, where Chinese culinary traditions meet Japanese influences and indigenous flavors. This week-long journey takes you from Taipei's iconic night markets to Taichung's modern food scene and Tainan's historic streets, where every meal tells a story. Expect world-class street food, traditional teahouses, and some of the freshest seafood in Asia.",
+    "searchTags": [
+      "taiwan",
+      "food",
+      "night markets",
+      "street food",
+      "asia",
+      "taipei",
+      "taichung",
+      "tainan",
+      "culinary",
+      "foodie",
+      "combo:food|asia|one-week|$$"
+    ],
+    "coverGradient": "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+    "flags": "🇹🇼",
+    "scope": "One country",
+    "travelers": 2,
+    "cities": [
+      {
+        "name": "Taipei",
+        "country": "Taiwan",
+        "nights": 3,
+        "hotel": {
+          "name": "Meander Taipei Hostel",
+          "rating": 4.5,
+          "pricePerNight": 85,
+          "area": "Ximending"
+        },
+        "activities": [
+          "Explore the vibrant Shilin Night Market for street food classics",
+          "Visit Chiang Kai-shek Memorial Hall and witness the changing of the guard",
+          "Ride the gondola to Maokong for mountain tea houses and city views",
+          "Wander through the historic alleys of Jiufen Old Street",
+          "Tour the National Palace Museum's incredible Chinese art collection"
+        ],
+        "restaurants": [
+          {
+            "name": "Din Tai Fung (Xinyi)",
+            "cuisine": "Taiwanese dim sum",
+            "priceRange": "$$"
+          },
+          {
+            "name": "Yong Kang Beef Noodles",
+            "cuisine": "Beef noodle soup",
+            "priceRange": "$"
+          },
+          {
+            "name": "Addiction Aquatic Development",
+            "cuisine": "Seafood market restaurant",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "food",
+          "city",
+          "history",
+          "nightlife"
+        ],
+        "transportOut": {
+          "mode": "train",
+          "operator": "Taiwan High Speed Rail",
+          "duration": "1h 5m",
+          "price": 45
+        }
+      },
+      {
+        "name": "Taichung",
+        "country": "Taiwan",
+        "nights": 2,
+        "hotel": {
+          "name": "Hotel 7 Taichung",
+          "rating": 4,
+          "pricePerNight": 72,
+          "area": "Central District"
+        },
+        "activities": [
+          "Browse the creative shops and cafes of Miyahara ice cream parlor and dessert house",
+          "Stroll through Rainbow Village, covered in colorful street art",
+          "Experience Fengjia Night Market, Taiwan's largest night market",
+          "Visit the National Taiwan Museum of Fine Arts"
+        ],
+        "restaurants": [
+          {
+            "name": "Chun Shui Tang (Founding Location)",
+            "cuisine": "Bubble tea and Taiwanese",
+            "priceRange": "$"
+          },
+          {
+            "name": "The Wang Steak",
+            "cuisine": "Taiwanese steakhouse",
+            "priceRange": "$$"
+          }
+        ],
+        "vibes": [
+          "food",
+          "city",
+          "art",
+          "nightlife"
+        ],
+        "transportOut": {
+          "mode": "train",
+          "operator": "Taiwan High Speed Rail",
+          "duration": "50m",
+          "price": 28
+        }
+      },
+      {
+        "name": "Tainan",
+        "country": "Taiwan",
+        "nights": 2,
+        "hotel": {
+          "name": "Hotel A",
+          "rating": 4.2,
+          "pricePerNight": 68,
+          "area": "West Central District"
+        },
+        "activities": [
+          "Visit Anping Old Fort, the oldest fortress in Taiwan",
+          "Explore the Temple Street area and Confucius Temple",
+          "Taste traditional snacks at Tainan Flower Night Market",
+          "Walk the historic Shennong Street lined with tea houses"
+        ],
+        "restaurants": [
+          {
+            "name": "Du Hsiao Yueh Danzai Noodles",
+            "cuisine": "Traditional Tainan noodles",
+            "priceRange": "$"
+          },
+          {
+            "name": "Chou's Shrimp Rolls",
+            "cuisine": "Taiwanese seafood",
+            "priceRange": "$"
+          },
+          {
+            "name": "A-Sha Tainan Tan-tsu-mian",
+            "cuisine": "Eel noodles",
+            "priceRange": "$"
+          }
+        ],
+        "vibes": [
+          "food",
+          "history",
+          "city"
+        ]
+      }
+    ],
+    "budgetEstimate": 1194,
+    "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d2/Chiang_Kai-shek_memorial_amk.jpg/1280px-Chiang_Kai-shek_memorial_amk.jpg"
+  }
+]

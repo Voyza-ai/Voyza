@@ -40,6 +40,23 @@ export type HotelResult = {
 const LOCATION_CACHE_TIMEOUT_MS = 1500;
 
 /**
+ * How long any one Booking.com request may take before we give up on it.
+ *
+ * These fetches had no bound at all, so a provider that accepted the
+ * connection and never answered held the search for undici's defaults (five
+ * minutes for headers, five more for the body) while the planner sat on
+ * "Finding hotels..." — and the canvas save route awaits this service inline.
+ *
+ * Sized from production, not from a guess: the whole `/api/hotels/search`
+ * round trip measured 0.86-1.70s across nine calls on 2026-10-29 (median
+ * ~1.1s), and that includes the locations lookup, the search AND currency
+ * conversion. 10s per request is ~6x the slowest whole call, so it should only
+ * ever fire on a request that has stopped. A timed-out search is caught like
+ * any other failure and returns no hotels, which the planner already handles.
+ */
+const BOOKING_FETCH_TIMEOUT_MS = 10_000;
+
+/**
  * PostgREST's "no rows matched" code from `.single()`.
  *
  * This is an ordinary cache miss on a city we haven't looked up yet — the
@@ -151,6 +168,61 @@ export function pickDestination(
   };
 }
 
+// Words too generic to identify a hotel on their own.
+const GENERIC_HOTEL_WORDS = new Set(['hotel', 'hotels', 'the', 'and', 'by', 'resort', 'spa', 'a', 'of', 'de', 'la', 'le']);
+
+const hotelWords = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !GENERIC_HOTEL_WORDS.has(w));
+
+/** Same hotel? Every distinctive word of the preset's hotel name must
+ *  appear in the search result's name ("Gracery Shinjuku" matches "Hotel
+ *  Gracery Shinjuku Tokyo"). Substring matching wrongly paired short names
+ *  with unrelated hotels that happened to contain their letters.
+ *
+ *  Given the city, its words are not distinctive either: in Krabi, "krabi" is
+ *  in half the hotel names, so "Krabi Resort" matched "Krabi La Playa Resort"
+ *  on that word alone and the preset was repriced from another property. A
+ *  name left with nothing but the town in it cannot be identified, and is
+ *  refused rather than guessed. Without a city the rule is as it was. */
+export function isSameHotel(presetName: string, resultName: string, cityName?: string): boolean {
+  const cityWords = new Set(cityName ? hotelWords(cityName) : []);
+  const want = hotelWords(presetName).filter((w) => !cityWords.has(w));
+  if (want.length === 0) return false;
+  const got = new Set(hotelWords(resultName));
+  return want.every((w) => got.has(w));
+}
+
+/** Booking destination for one specific hotel ("hotel" type), or null when
+ *  the name doesn't resolve to that exact hotel in that city. Not cached:
+ *  only the weekly preset refresh uses it. */
+async function getHotelDestination(
+  hotelName: string,
+  cityName: string,
+): Promise<{ dest_id: string; dest_type: string } | null> {
+  if (!env.RAPIDAPI_KEY) return null;
+  const url = `https://booking-com.p.rapidapi.com/v1/hotels/locations?name=${encodeURIComponent(
+    `${hotelName} ${cityName}`,
+  )}&locale=en-gb`;
+  const res = await fetch(url, {
+    headers: { 'X-RapidAPI-Key': env.RAPIDAPI_KEY, 'X-RapidAPI-Host': 'booking-com.p.rapidapi.com' },
+    signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) return null;
+  const list = (await res.json()) as any[];
+  const hit = (Array.isArray(list) ? list : []).find(
+    (x) =>
+      x?.dest_type === 'hotel' &&
+      x?.dest_id &&
+      isSameHotel(hotelName, String(x.name ?? ''), cityName),
+  );
+  return hit ? { dest_id: String(hit.dest_id), dest_type: 'hotel' } : null;
+}
+
 async function getDestinationId(
   cityName: string,
 ): Promise<{ dest_id: string; dest_type: string }> {
@@ -209,6 +281,7 @@ async function getDestinationId(
         'X-RapidAPI-Key': apiKey,
         'X-RapidAPI-Host': 'booking-com.p.rapidapi.com',
       },
+      signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
       throw new Error(`Booking.com locations API returned ${res.status}`);
@@ -289,12 +362,53 @@ async function getDestinationId(
 
 type SearchHotelsParams = {
   city: string;
+  /** Price ONE specific hotel: resolved by name via Booking's location
+   *  search (dest_type 'hotel') instead of searching the whole city. */
+  hotelName?: string;
   checkin: string;
   checkout: string;
   adults: number;
-  rooms: number;
+  /** Rooms to price. Omitted → `roomsFor(adults)`. See there for why. */
+  rooms?: number;
   maxPrice?: number;
 };
+
+/**
+ * Rooms for a party when the caller doesn't say: two adults to a room.
+ *
+ * The default used to be one room, set in the route, and every caller in the
+ * app sends `adults: travelers` and no `rooms` — so a group of six asked
+ * Booking for ONE unit sleeping all six. Booking answered with what fits that:
+ * hostels, apartments, a campsite as Rome's top pick, shown as
+ * "6 travelers · 1 room". It lives here rather than in the route so that every
+ * caller of the service gets it, not only HTTP ones.
+ *
+ * THE PRICE THAT COMES BACK IS ALREADY FOR EVERY ROOM. Measured against
+ * production on 2026-10-29, same city and dates with only the occupancy
+ * changed: `adults:6 rooms:3` against `adults:2 rooms:1` came back at exactly
+ * 3.00x for 13 of 19 Paris hotels and 10 of 15 London hotels (median 3.00x in
+ * both; the rest are different room types, 2.25x-3.65x). So `price` and
+ * `pricePerNight` stay party totals and nothing downstream may multiply them
+ * by a room count again. What DOES change meaning is every absolute price
+ * threshold in this file, which were calibrated on single rooms — see
+ * `perRoom`.
+ */
+export function roomsFor(adults: number): number {
+  return Number.isFinite(adults) && adults > 2 ? Math.ceil(adults / 2) : 1;
+}
+
+/**
+ * A party-total price expressed per room, for comparing against thresholds
+ * that were calibrated on one room.
+ *
+ * The relative rules (tier medians, the search median) don't need this — every
+ * row in one search is priced for the same rooms, so a ratio between two of
+ * them is unchanged — but going through it everywhere keeps the absolute and
+ * relative rules on one scale, and the logged numbers comparable to the
+ * single-room corpus the comments here quote.
+ */
+const perRoom = (amount: number, rooms: number): number =>
+  Number.isFinite(rooms) && rooms > 1 ? amount / rooms : amount;
 
 /**
  * ─── Price plausibility ──────────────────────────────────────────────────────
@@ -439,7 +553,10 @@ const UNRATED_SEARCH_MEDIAN_MULTIPLE = 5;
 const UNDERPRICE_MEDIAN_DIVISOR = 10;
 
 /**
- * Absolute per-night ceiling for a hotel the provider itself calls 1-3 stars.
+ * Absolute per-night ceiling for a hotel the provider itself calls 1-3 stars,
+ * PER ROOM. Every figure below is a single-room price; a search for three rooms
+ * is compared after dividing by three (`perRoom`), or three real $700 rooms
+ * would read as one $2100 glitch.
  *
  * Was $1000, raised to $2000 on measurement. $1000 was not generous at all: the
  * dearest real 1-3 star row in the captured corpus is $860.58 (a Courchevel
@@ -458,7 +575,8 @@ const UNDERPRICE_MEDIAN_DIVISOR = 10;
 const BUDGET_STARS_PRICE_CEILING = 2000;
 
 /**
- * No real room for two adults costs less than this per night.
+ * No real room for two adults costs less than this per night. Per ROOM: a
+ * multi-room price is divided by its room count before it is compared.
  *
  * The floor exists to catch an ABSENT price, not a cheap one. `min_total_price`
  * missing or unparseable becomes 0 (see the mapping in `searchHotels`), and a
@@ -530,16 +648,24 @@ function starClass(h: { stars: number }): number {
  * `price` (the whole stay) is checked as well as `pricePerNight`. They are
  * derived from each other at the mapping, but currency conversion converts
  * them independently, so they can diverge on the way here.
+ *
+ * `rooms` is how many rooms the prices cover; the floor is judged per room.
  */
-export function dropUnusablePrices(hotels: HotelResult[], city: string): HotelResult[] {
+export function dropUnusablePrices(
+  hotels: HotelResult[],
+  city: string,
+  rooms = 1,
+): HotelResult[] {
   const kept = hotels.filter((h) => {
-    const usable = isUsablePrice(h.pricePerNight) && isUsablePrice(h.price);
+    const usable =
+      isUsablePrice(perRoom(h.pricePerNight, rooms)) && isUsablePrice(perRoom(h.price, rooms));
     if (!usable) {
       logger.warn('Hotel dropped — price cannot be a real rate', {
         city,
         hotel: h.name,
         pricePerNight: h.pricePerNight,
         price: h.price,
+        rooms,
         floor: ABSOLUTE_PRICE_FLOOR,
       });
     }
@@ -588,9 +714,19 @@ export function dropUnusablePrices(hotels: HotelResult[], city: string): HotelRe
  * a deliberate fallback (a suspicious price beats an empty city) but it is not
  * protection, and a one-row search is the case it fails at. See
  * UNRATED_SEARCH_MEDIAN_MULTIPLE.
+ *
+ * `rooms` is how many rooms the prices cover. Every rule works on the price
+ * PER ROOM (`nightly` below), because every threshold here was measured on
+ * single rooms; the rows themselves are returned with their party totals
+ * untouched.
  */
-export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelResult[] {
+export function flagSuspectPrices(
+  hotels: HotelResult[],
+  city: string,
+  rooms = 1,
+): HotelResult[] {
   const starsOf = starClass;
+  const nightly = (h: HotelResult) => perRoom(h.pricePerNight, rooms);
 
   // The absolute rule first, because it needs no comparison set — and because
   // its verdicts must be kept OUT of the medians below.
@@ -607,7 +743,7 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
   // manufacture a floor that then flags a legitimately cheap room. There is a
   // test for exactly that.
   const overStarCeilingRaw = (h: HotelResult) =>
-    starsOf(h) >= 1 && starsOf(h) <= 3 && h.pricePerNight > BUDGET_STARS_PRICE_CEILING;
+    starsOf(h) >= 1 && starsOf(h) <= 3 && nightly(h) > BUDGET_STARS_PRICE_CEILING;
 
   // IF THE CEILING CONDEMNS A WHOLE TIER, THE CEILING IS WHAT IS WRONG.
   //
@@ -629,7 +765,7 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
   for (const [stars, tier] of (() => {
     const byStars = new Map<number, HotelResult[]>();
     for (const h of hotels) {
-      if (!isUsablePrice(h.pricePerNight)) continue;
+      if (!isUsablePrice(nightly(h))) continue;
       const k = starsOf(h);
       const t = byStars.get(k);
       if (t) t.push(h);
@@ -643,8 +779,9 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
         city,
         stars,
         tierSize: tier.length,
+        rooms,
         ceiling: BUDGET_STARS_PRICE_CEILING,
-        cheapestInTier: Math.min(...tier.map((h) => h.pricePerNight)),
+        cheapestInTier: Math.min(...tier.map(nightly)),
       });
     }
   }
@@ -655,9 +792,9 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
   const tiers = new Map<number, HotelResult[]>();
   const allPrices: number[] = [];
   for (const h of hotels) {
-    if (!isUsablePrice(h.pricePerNight)) continue;
+    if (!isUsablePrice(nightly(h))) continue;
     if (overStarCeiling(h)) continue;
-    allPrices.push(h.pricePerNight);
+    allPrices.push(nightly(h));
     const tier = tiers.get(starsOf(h));
     if (tier) tier.push(h);
     else tiers.set(starsOf(h), [h]);
@@ -669,7 +806,7 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
     // Too thin to say anything about: the one or two luxury rooms in an
     // otherwise budget market land here, and are exempt by construction.
     if (tier.length < MIN_RESULTS_TO_FILTER) continue;
-    const median = medianOf(tier.map((h) => h.pricePerNight));
+    const median = medianOf(tier.map(nightly));
     if (!Number.isFinite(median) || median <= 0) continue;
     ceilings.set(stars, median * OUTLIER_MEDIAN_MULTIPLE);
 
@@ -698,9 +835,9 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
       : undefined;
 
   const reasonFor = (h: HotelResult): PriceSuspectReason | null => {
-    if (!isUsablePrice(h.pricePerNight)) return null;
+    if (!isUsablePrice(nightly(h))) return null;
     const stars = starsOf(h);
-    const price = h.pricePerNight;
+    const price = nightly(h);
 
     if (overStarCeiling(h)) {
       return 'above-star-ceiling';
@@ -732,6 +869,9 @@ export function flagSuspectPrices(hotels: HotelResult[], city: string): HotelRes
       hotel: h.name,
       stars: starsOf(h),
       pricePerNight: h.pricePerNight,
+      // The ceilings, floors and search ceiling below are per room.
+      rooms,
+      pricePerRoomNight: nightly(h),
       reason,
       tierCeiling: ceilings.get(starsOf(h)),
       tierFloor: floors.get(starsOf(h)),
@@ -822,6 +962,38 @@ export function pickByRating(rows: HotelResult[], city: string): HotelResult[] {
  * row is flagged the order is unchanged and index 0 is flagged, because a
  * suspicious price still beats an empty city.
  */
+/**
+ * The provider's property link, opened on the stay we priced.
+ *
+ * Booking returns a bare property page (`/hotel/fr/<slug>.html`), and that is
+ * what the "Book" button opened: no dates, and Booking's own default party of
+ * two in one room. So the traveller landed on a different price from the one
+ * in their trip, for a stay they had not asked about — for a group, a very
+ * different one, since the trip's price covers every room.
+ *
+ * These are the parameter names Booking's own search links use. Set rather
+ * than appended, so a provider URL that already carries one is corrected
+ * instead of duplicated, and anything else on it (affiliate ids, labels) is
+ * kept. A URL that does not parse is returned as it came: a link without the
+ * stay is the old behaviour, a broken link is worse.
+ */
+export function bookingUrlForStay(
+  raw: string,
+  stay: { checkin: string; checkout: string; adults: number; rooms: number },
+): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return raw;
+  }
+  url.searchParams.set('checkin', stay.checkin);
+  url.searchParams.set('checkout', stay.checkout);
+  url.searchParams.set('group_adults', String(stay.adults));
+  url.searchParams.set('no_rooms', String(stay.rooms));
+  return url.toString();
+}
+
 export function trustedFirst(hotels: HotelResult[]): HotelResult[] {
   const trusted: HotelResult[] = [];
   const suspect: HotelResult[] = [];
@@ -829,16 +1001,140 @@ export function trustedFirst(hotels: HotelResult[]): HotelResult[] {
   return [...trusted, ...suspect];
 }
 
+/**
+ * Short-TTL cache of vetted search results, mirroring the flight search cache
+ * in flights.ts.
+ *
+ * Re-running a trip used to pay the whole hotel phase again — ~10.7s measured
+ * for a re-run with nothing changed — and spent metered RapidAPI quota on an
+ * answer we had just been given. Concurrent duplicates share one in-flight
+ * request.
+ *
+ * Keyed by EVERY request parameter, rooms included (resolved, so an omitted
+ * count and the same count passed explicitly are one search). `maxPrice` is in
+ * the key although Booking never sees it, so no request is ever answered from
+ * a search that was asked something else; but the cap itself is applied after
+ * the cache, on a copy, so a search the cap empties still keeps the provider's
+ * rows and its repeat is still free.
+ *
+ * An empty answer is never kept. It is how every failure below reports itself
+ * — 429s exhausted, a provider error, a timeout, an unresolvable destination —
+ * so caching it would cache the outage for ten minutes.
+ */
+const HOTEL_SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
+const hotelSearchCache = new Map<string, { at: number; promise: Promise<HotelResult[]> }>();
+
+function cachedHotelSearch(
+  key: string,
+  run: () => Promise<HotelResult[]>,
+): Promise<HotelResult[]> {
+  const hit = hotelSearchCache.get(key);
+  if (hit && Date.now() - hit.at < HOTEL_SEARCH_CACHE_TTL_MS) return hit.promise;
+
+  const promise = run();
+  hotelSearchCache.set(key, { at: Date.now(), promise });
+  const evict = () => {
+    if (hotelSearchCache.get(key)?.promise === promise) hotelSearchCache.delete(key);
+  };
+  promise.then((rows) => {
+    if (rows.length === 0) evict();
+  }, evict);
+
+  // Opportunistic sweep so a long-running process doesn't accumulate entries.
+  if (hotelSearchCache.size > 500) {
+    const cutoff = Date.now() - HOTEL_SEARCH_CACHE_TTL_MS;
+    for (const [k, v] of hotelSearchCache) {
+      if (v.at < cutoff) hotelSearchCache.delete(k);
+    }
+  }
+  return promise;
+}
+
 export async function searchHotels(params: SearchHotelsParams): Promise<HotelResult[]> {
-  const { city, checkin, checkout, adults, rooms, maxPrice } = params;
+  const { city, hotelName, checkin, checkout, adults, maxPrice } = params;
+  const rooms = params.rooms ?? roomsFor(adults);
 
   if (!env.RAPIDAPI_KEY) {
     logger.warn('RAPIDAPI_KEY not set — returning empty hotel results');
     return [];
   }
 
+  const key = JSON.stringify([
+    city,
+    hotelName ?? null,
+    checkin,
+    checkout,
+    adults,
+    rooms,
+    maxPrice ?? null,
+  ]);
+  const vetted = await cachedHotelSearch(key, () =>
+    searchVettedHotels({ city, hotelName, checkin, checkout, adults, rooms }),
+  );
+  // Copies, so no caller can edit the rows the next caller will be served.
+  let hotels = vetted.map((h) => ({ ...h }));
+
+  if (maxPrice !== undefined) {
+    const beforeCap = hotels.length;
+    hotels = hotels.filter((h) => h.price <= maxPrice);
+
+    // The one remaining filter that could clear a city in silence. It is the
+    // user's own budget so an empty result is a legitimate answer, but it
+    // must be distinguishable from the city having no hotels at all —
+    // otherwise "no hotels in Florence" and "no hotels under your cap" look
+    // the same in the logs and to anyone debugging a blank city.
+    if (hotels.length === 0 && beforeCap > 0) {
+      logger.warn('Hotel search emptied — every row was over the price cap', {
+        city,
+        maxPrice,
+        rows: beforeCap,
+      });
+    }
+  }
+
+  // A search this thin disables every relative rule in `flagSuspectPrices`
+  // (they all require MIN_RESULTS_TO_FILTER rows), and at one row
+  // `rankHotels` has nothing to demote anything below either — so hotels[0]
+  // is whatever the provider said, unchecked. That is the Val d'Isère case,
+  // and it is structural rather than fixable with a threshold: covering it
+  // needs a reference from outside the search. Until there is one, make it
+  // visible — ordinary searches return 17-20 rows, so this is rare.
+  if (hotels.length > 0 && hotels.length < MIN_RESULTS_TO_FILTER) {
+    logger.warn('Hotel search too thin to price-check — hotels[0] is unverified', {
+      city,
+      rows: hotels.length,
+      needed: MIN_RESULTS_TO_FILTER,
+    });
+  }
+
+  // Last, so it also covers the case a price cap leaves only flagged rows:
+  // an under-priced glitch is the one row guaranteed to survive a budget
+  // filter, and the legitimate rows the ones guaranteed not to.
+  return trustedFirst(hotels);
+}
+
+/**
+ * One provider search, mapped, converted to USD and price-checked — everything
+ * that depends only on what was asked of Booking. Never throws: any failure is
+ * logged and comes back as no rows.
+ */
+async function searchVettedHotels(params: {
+  city: string;
+  hotelName?: string;
+  checkin: string;
+  checkout: string;
+  adults: number;
+  rooms: number;
+}): Promise<HotelResult[]> {
+  const { city, hotelName, checkin, checkout, adults, rooms } = params;
+  // Checked by the caller; captured again so the narrowing reaches the fetch.
+  const apiKey = env.RAPIDAPI_KEY;
+  if (!apiKey) return [];
+
   try {
-    const { dest_id, dest_type } = await getDestinationId(city);
+    const dest = hotelName ? await getHotelDestination(hotelName, city) : await getDestinationId(city);
+    if (!dest) return [];
+    const { dest_id, dest_type } = dest;
 
     const searchParams = new URLSearchParams({
       dest_id,
@@ -861,11 +1157,13 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     // throttled moment — surfacing as "$0/night, ★0" in the UI.
     let res: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
+      // A fresh signal per attempt: a 429 retry gets its own full window.
       res = await fetch(url, {
         headers: {
-          'X-RapidAPI-Key': env.RAPIDAPI_KEY,
+          'X-RapidAPI-Key': apiKey,
           'X-RapidAPI-Host': 'booking-com.p.rapidapi.com',
         },
+        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
       if (res.status !== 429) break;
       const delay = 300 * Math.pow(2, attempt); // 300ms, 600ms, 1200ms
@@ -901,7 +1199,10 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
         reviewCount: parseInt(h.review_nr ?? h.review_score_word ?? '0', 10) || 0,
         stars: parseInt(h.class ?? '0', 10) || 0,
         thumbnail: h.main_photo_url ?? h.max_photo_url ?? '',
-        bookingUrl: h.url ?? `https://www.booking.com/hotel/${h.hotel_id ?? ''}.html`,
+        bookingUrl: bookingUrlForStay(
+          h.url ?? `https://www.booking.com/hotel/${h.hotel_id ?? ''}.html`,
+          { checkin, checkout, adults, rooms },
+        ),
         amenities: [] as string[],
       };
     };
@@ -926,7 +1227,7 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     // rate for any row" against a currency of USD, which is exactly the
     // investigation this logging is supposed to save. A price that is not a
     // number is not a currency problem, whatever its label.
-    hotels = dropUnusablePrices(hotels, city);
+    hotels = dropUnusablePrices(hotels, city, rooms);
 
     const { convertToUsd } = await import('./currency');
     const converted = await Promise.all(
@@ -991,46 +1292,10 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
 
     // Drop first, flag second: an unusable price must not be in the set the
     // medians are computed from, or a row of 0s drags every floor down with it.
-    hotels = dropUnusablePrices(hotels, city);
-    hotels = flagSuspectPrices(hotels, city);
-
-    if (maxPrice !== undefined) {
-      const beforeCap = hotels.length;
-      hotels = hotels.filter((h) => h.price <= maxPrice);
-
-      // The one remaining filter that could clear a city in silence. It is the
-      // user's own budget so an empty result is a legitimate answer, but it
-      // must be distinguishable from the city having no hotels at all —
-      // otherwise "no hotels in Florence" and "no hotels under your cap" look
-      // the same in the logs and to anyone debugging a blank city.
-      if (hotels.length === 0 && beforeCap > 0) {
-        logger.warn('Hotel search emptied — every row was over the price cap', {
-          city,
-          maxPrice,
-          rows: beforeCap,
-        });
-      }
-    }
-
-    // A search this thin disables every relative rule in `flagSuspectPrices`
-    // (they all require MIN_RESULTS_TO_FILTER rows), and at one row
-    // `rankHotels` has nothing to demote anything below either — so hotels[0]
-    // is whatever the provider said, unchecked. That is the Val d'Isère case,
-    // and it is structural rather than fixable with a threshold: covering it
-    // needs a reference from outside the search. Until there is one, make it
-    // visible — ordinary searches return 17-20 rows, so this is rare.
-    if (hotels.length > 0 && hotels.length < MIN_RESULTS_TO_FILTER) {
-      logger.warn('Hotel search too thin to price-check — hotels[0] is unverified', {
-        city,
-        rows: hotels.length,
-        needed: MIN_RESULTS_TO_FILTER,
-      });
-    }
-
-    // Last, so it also covers the case a price cap leaves only flagged rows:
-    // an under-priced glitch is the one row guaranteed to survive a budget
-    // filter, and the legitimate rows the ones guaranteed not to.
-    return trustedFirst(hotels);
+    hotels = dropUnusablePrices(hotels, city, rooms);
+    // The price cap, the thin-search warning and `trustedFirst` run in
+    // `searchHotels`, per call, on what this returns.
+    return flagSuspectPrices(hotels, city, rooms);
   } catch (err: any) {
     logger.warn('Hotel search failed (non-fatal)', { message: err?.message, city });
     return [];

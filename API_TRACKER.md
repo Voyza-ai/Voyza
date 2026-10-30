@@ -13,9 +13,9 @@ dates (2026-07-20), never "last week"._
 
 | Provider | Status | Sent |
 |---|---|---|
-| All Aboard | 🔑 **INTEGRATED** — live in searchTrains (test env) | 2026-07-29 |
+| All Aboard | 🔑 **INTEGRATED** — live in searchTrains (test env); catch-up sent | 2026-10-26 |
 | Omio | 🔁 follow-up sent | 2026-07-27 |
-| Junction | ⏸️ stalled — his 07-29 call offer went unanswered; with Gohil | 2026-07-31 |
+| Junction | 📅 **call booked** — Hervé replied to the 10-26 reconnect; Zoom 2026-10-29 6:30 am | 2026-10-26 |
 | Trainline Partner API | 📤 awaiting reply | _[ask friend]_ |
 | Rail Europe | ❌ parked (needs EIN) | — |
 | Trainline affiliate | 🔲 not started | — |
@@ -69,16 +69,20 @@ dates (2026-07-20), never "last week"._
   returns a URL (a hosted payment page). Docs:
   docs.allaboard.eu/tickets/book-tickets · docs.allaboard.eu/payments. He offered
   to trace the stray link if we send him the link or session id.
-- **Next:** reply to Carl's 2026-09-03 mail — **unanswered as of 2026-10-23**:
-  send him the stray link / session id to trace, and move our booking path onto
-  `createBooking` → `createOrder` → `createPayment`. Then book his integration
-  call (his link) to review + ask about offer-pricing latency (cold
-  getJourneyOffer can exceed 30s; their cache warms after).
 - **Model note for pricing later:** displayed rail prices will sit slightly
   above operator sites (their 1% + €2 + our service fee). Keep our fee
   small; the value is one-app multi-leg booking.
 - **Note:** best odds of the bunch — developer-first company, public docs.
   First provider breakthrough; prioritize this thread.
+- **2026-10-26: catch-up reply sent** (same thread) — placeholder link
+  removed, integration running on test gateway (planner + weekly preset
+  re-pricing), booking flow next via hosted payment page + our service fee.
+  Asked how test-key renewal / production key works and what they need
+  before go-live. Said prototype ready by mid-November.
+- **Next:** await reply; renew/upgrade the key before it lapses at year end
+  (validity was given as mid-November to year end). Book his integration
+  call and ask about offer-pricing latency (cold getJourneyOffer can exceed
+  30s; their cache warms after).
 
 ### Distribusion  📤
 - **For:** bus, rail, ferry AND airport transfers in one Retailer API —
@@ -124,6 +128,13 @@ dates (2026-07-20), never "last week"._
   whether the 08-07 note went out, and note that the thing to apologise
   for is the ignored 07-29 call offer, not general slowness. Warm welcome
   if he ever revives the thread; call prep notes preserved below.
+- **2026-10-26: reconnect note sent** (same thread, ~3 months after the
+  07-31 nudge) — rail fares in the planner, prototype ready by mid-November,
+  still keen on a call re flights + routes beyond Europe. Note: the email
+  said "live fares"; they are test-gateway / sandbox fares — correct this
+  on the call.
+- **2026-10-27: Hervé replied** proposing a call; Gohil accepted and sent a
+  Zoom invite for **2026-10-29 6:30 am**.
 - Prep (if call happens): volume story (~200 bookings, study-abroad
   students), service-fee model (post-Carl), All Aboard integration story,
   what we need (sandbox, EU rail coverage), their pricing/terms.
@@ -211,6 +222,14 @@ dates (2026-07-20), never "last week"._
 
 _Append a line whenever anything happens, newest first._
 
+- 2026-10-27 — **Junction (Hervé) replied** to the reconnect note; Zoom
+  call booked for 2026-10-29 6:30 am (Gohil sent the invite).
+
+- 2026-10-26 — Catch-up emails sent (Gohil, same threads): **All Aboard**
+  (Carl) — progress update, asked about key renewal / production key and
+  go-live needs, prototype by mid-November. **Junction** (Hervé) — reconnect
+  note, asked for a call time.
+
 - 2026-10-24 — **Automated follow-up routine live**
   (`trig_01EBCw2fjwpuMxZjfEMLzfr5`, claude.ai/code/routines). Fires daily at
   07:47 UTC but only sends when the last message in a thread is 4+ days
@@ -240,7 +259,7 @@ _Append a line whenever anything happens, newest first._
   `createPayment`, which is the only call that returns a URL (a hosted payment
   page). Docs: docs.allaboard.eu/tickets/book-tickets · docs.allaboard.eu/payments.
   He offered to trace the stray link if we send him the link or session id.
-  **Still unanswered as of 2026-10-23.**
+  **Answered 2026-10-26** (catch-up reply in the same thread).
 
 - 2026-08-03 — Junction: silent since the 07-31 nudge. Decision: no third
   ping this week; one final zero-pressure note ~08-07 if nothing, then

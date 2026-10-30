@@ -186,6 +186,63 @@ real resolver. Architecture and every decision in `docs/LOCATION_RESOLUTION.md`.
     qualifies, so London and its boroughs are untouched. A test holds that.
   - Gated to cities. Applied to regions it reordered 13 of them, Saarland and
     Jiangsu among them, on a distance from a centroid nobody stands at.
+- [ ] **`kyiv` is the last undecided cityAirports call.** `moscow` is settled;
+  eleven of the other twelve were decided and merged earlier.
+  - **`moscow` — DONE.** Fixed by the cleaner route this entry previously
+    described as deliberately not taken: region and city produce candidates
+    with the identical label, and the dedupe kept the FIRST, which is the
+    region. It now prefers the point-like place (city, metro) over the
+    area-like one, and `fromResolution` dedupes BEFORE taking its answer,
+    since the answer is `candidates[0]`.
+    - Origin now answers SVO, DME, VKO — exactly the retired table's triple.
+      Domodedovo, Russia's second airport, had been outside the fan-out
+      because the region carries no metro code and orders airports against a
+      centroid, putting Zhukovsky ahead of it.
+    - Moscow, **Idaho** is untouched and guarded by a test: its label is
+      "Moscow, Idaho, United States", a different string, so the collision
+      rule never reaches it and PUW at 9 km still wins. The multi-country
+      clarification question also survives. This is why a curated alias was
+      the wrong fix and was not used.
+    - Picked up San Juan, Argentina for free — same shape, province over
+      city, leading with Mendoza at 145 km over the city's own UAQ at 10 km.
+    - The `moscow: 'MOW'` table entry STAYS, and is not a workaround:
+      destinations never touch the resolver. `getIataCode` consults
+      `getStaticIata` before the Supabase cache and before Duffel, so the
+      table IS the destination mechanism and its answer there is correct.
+  - **`kyiv`** stays hand-written and cannot be deleted. Both Kyiv airports
+    are filed upstream with no scheduled service, so nothing in the artifact
+    can answer it, and the curated layer refuses to pin a closed airport by
+    design. Its IEV value is a deterministic stub that keeps `getIataCode`
+    off a Duffel guess. When service resumes the resolver answers it with no
+    code change. **Not fixable here** — it needs an upstream data change, not
+    a code change.
+- [ ] **Five metro codes are inferred to work with Duffel, not verified.**
+  `SEL`, `BJS`, `OSA`, `SAI` and `KTI` now ship as destination answers. The
+  table already carried ~20 metro codes (NYC, LON, TYO, OSA, BUE, MOW, BUH,
+  REK) so the mechanism is established, but `SAI` and `KTI` are new upstream
+  codes and no live search has been driven against them. Worth one real
+  Duffel call each before trusting them in production.
+  - **Blocked, not deferred.** This container holds no Duffel credentials
+    (no `.env`, nothing matching `DUFFEL*` in the environment), so the one
+    real call per code cannot be made from here. It needs a run somewhere
+    the key is present; there is no code change to make.
+- [x] **Long airport names in the home cards — measured, no change needed.**
+  Reported as "names wrap in the 200px card, 56 of 4,008 exceed 40 chars, so
+  clamp them". Rendered in a real browser against the real components rather
+  than read off the code, the premise does not hold and a clamp would make it
+  worse.
+  - The results card (`Flowchart.tsx`) is 260px wide, not 200, and 280px tall
+    with ~100px of slack. The worst name in the table — NAT at 74 chars —
+    takes 3 lines with **zero** overflow; the date/time row does not move
+    (identical 18px bottom inset for a 15-char name and a 74-char one).
+  - The 200px card is the canvas one (`CanvasHomeCard.tsx`), which has no
+    fixed height. Measured beside a real `CanvasCityCard` in the real row
+    (`flex items-center min-w-max gap-0`): a SHORT name makes the home card
+    144.5px against the city card's 175px — 30px out of step. The longest
+    name makes it 177.5px, i.e. it LINES UP. Long names improve that row.
+  - So clamping would truncate readable text and make the row less even. The
+    third consumer (`HomeEditModal.tsx`) uses the name in a `title` tooltip,
+    where length cannot affect layout at all.
 - [ ] **Still open from the same sweep: the ordering question at the extreme.**
   The doorstep fix guarantees a nearby airport is PRICED; it does not change
   which airport LEADS. Weifang still leads with Qingdao at 96 km over its own
@@ -650,6 +707,39 @@ without having to type anything — AND be the SEO surface that ranks
 for long-tail queries like "adventure trips from NYC under $1500".
 
 **Phase 1 — Decide & design (blocks everything else)**
+
+> **Decisions (locked 2026-10-10, revised 2026-10-21 — implemented on feat/work):**
+> - **Taxonomy** (`backend/src/services/presetTaxonomy.ts`): vibes = the app-wide 8
+>   (beach, food, history, art, nature, city, nightlife, romance; "adventure" → nature,
+>   "culture" → history+art, "food+wine" → food). **"family" is excluded**: no trip data
+>   can verify kid-friendliness; revisit with an explicit editorial flag. Duration:
+>   weekend ≤4n · 1 wk 5–8 · 2 wk 9–15 · month 16+. Budget tiers on **per-person** cost:
+>   $ <$750 · $$ <$1.5k · $$$ <$3k · $$$$ $3k+. Origin regions: US-East (JFK), US-West
+>   (LAX), Europe (LHR), Asia (SIN); catalog presets are priced from US-East, and "Plan a
+>   similar trip" re-prices from the traveler's own origin.
+> - **Category pages vs dynamic filters:** the full grid is 8 vibes × 5 destination
+>   regions × 4 lengths × 4 tiers × 4 origins = **2,560** combinations — far too many
+>   pages, most empty. So **8 editorial category pages**; everything else is dynamic on
+>   /browse (search, length + budget sliders, jump-to-section).
+> - **Page structure:** separate `/browse` page. Navbar link removed for now (owner, 2026-10-28) — reached via the hub, `/trips` SEO pages and direct links.
+> - **DB schema:** `preset_trips` + `preset_events` (migration 013).
+> - **Editorial / SEO strategy:** categories = Romance in Europe, Culture under $2k,
+>   Adventure trips from NYC, Beach escapes, Food trips, Weekend getaways, Two-week epics,
+>   Asia adventures — each with its own SEO title/description/intro copy (style: one
+>   sensory hook sentence, then what the trips include, second person, no hype).
+>   Trending = last-7-day score (use ×5, click-through/view ×1, impression ×0.05).
+>   **Staff-pick criteria** live in `backend/src/data/presets/editorial.json` (hand-reviewed,
+>   verified photo, plannable route, ≤6 spanning ≥2 regions + ≥2 lengths) and are enforced
+>   by a test.
+> - **SEO plan:** URLs `/trips/<category-slug>` + `/trips` hub; per-page title, meta
+>   description, canonical, Open Graph; schema.org `ItemList` of `TouristTrip`, each with a
+>   **`TravelAction`** (origin hub → first city) + `BreadcrumbList`; `/sitemap.xml` +
+>   `/robots.txt` (private app pages disallowed).
+> - **Hero images:** stock photos — the Wikipedia/Wikimedia lead image of each trip's
+>   signature landmark, falling back to the first city (no image-generation pass); logos,
+>   maps, flags, and crests are filtered out.
+> - **Row layout (owner decision 2026-10-21):** instead of horizontal-scroll rows, the
+>   category headers live inside the main grid as sections, 3 cards per row.
 - [ ] **Taxonomy**: lock the final list of vibes (beach, adventure, culture, romance, family, food+wine, etc.), budget tiers ($, $$, $$$, $$$$), duration buckets (weekend, 1 wk, 2 wk, month), origin regions (US-East, US-West, Europe, Asia). Decide combinatorially how many category pages we support vs. dynamic filters
 - [ ] **Page structure decision**: input-at-top-of-home with browse rows below, OR separate `/browse` page linked from nav. Affects how much the landing page has to do on first paint
 - [ ] **DB schema**: `preset_trips` table — inputs (vibe/budget/duration/origin-region), generated trip JSON, category tag(s), `created_at`, `refresh_status`, `hero_image_url`, `clone_count`, `impression_count`, `view_count`

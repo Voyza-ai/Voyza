@@ -301,6 +301,13 @@ export type HomeLeg = {
   departTime: string | null;
   arriveTime: string | null;
   departDate: string;
+  /**
+   * Local date the flight lands (YYYY-MM-DD). Later than `departDate` on an
+   * overnight flight. Optional: absent on legs saved before the backend
+   * sent it, and when Duffel gave no arrival timestamp — read absence as
+   * "same day as departDate", which is what every reader assumed before.
+   */
+  arriveDate?: string;
   stops: number;
   bookingUrl: string | null;
   alternatives?: Omit<HomeLeg, 'alternatives'>[];

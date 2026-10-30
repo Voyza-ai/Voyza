@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Calendar, Users, TrendingDown, Sparkles, PenSquare, MessageSquare, ChevronDown, CheckCircle2 } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
+import { tripSpan } from '@/lib/tripSpan';
 import { useCountUp } from '@/lib/useCountUp';
 import {
   stashCanvasIntent,
@@ -26,11 +27,6 @@ const formatDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   const date = new Date(y, (m || 1) - 1, d || 1);
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
-
-const parseLocal = (iso: string) => {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
 };
 
 export default function ResultsHeader({ trip }: ResultsHeaderProps) {
@@ -132,14 +128,9 @@ export default function ResultsHeader({ trip }: ResultsHeaderProps) {
       setSaving(false);
     }
   };
-  const startDate = trip.cities[0]?.dates.arrival;
-  const endDate = trip.cities[trip.cities.length - 1]?.dates.departure;
-  const totalNights = startDate && endDate
-    ? Math.round(
-        (parseLocal(endDate).getTime() - parseLocal(startDate).getTime()) /
-          (1000 * 60 * 60 * 24)
-      )
-    : 0;
+  // The TRIP's span — from the day the outbound leaves home — not the first
+  // city's stay, which starts the day an overnight outbound lands.
+  const { start: startDate, end: endDate, nights: totalNights } = tripSpan(trip);
 
   const liveTotal = liveTripTotal(trip);
   const travelers = Math.max(1, trip.travelers);

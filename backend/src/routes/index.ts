@@ -11,6 +11,7 @@ import users from './users';
 import notifications from './notifications';
 import locations from './locations';
 import email from './email';
+import presets from './presets';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
@@ -18,6 +19,7 @@ import { compareLeg } from '../services/compareLeg';
 import { getCachedLegPrices } from '../services/legCache';
 import { optimize } from '../services/optimizer';
 import { getSupabase } from '../services/supabase';
+import { addDays, todayIso } from '../utils/dates';
 
 const router = Router();
 
@@ -41,6 +43,8 @@ router.use('/locations', locations);
 // No requireAuth: unsubscribe links arrive from emails (no session), and
 // run-jobs authenticates schedulers via the CRON_SECRET header itself.
 router.use('/email', email);
+// Public: backs the server-rendered SEO category pages (crawlers are signed out).
+router.use('/presets', presets);
 
 // ─── Compare Leg ─────────────────────────────────────────────
 const compareLegSchema = z.object({
@@ -92,6 +96,54 @@ const optimizeSchema = z.object({
    * 2 nights per city. When set, distributed evenly across cities.
    */
   totalNights: z.number().int().positive().max(180).optional(),
+}).superRefine((input, ctx) => {
+  // Inputs the optimizer used to accept and quietly turn into a broken trip.
+  // Each is a 400 the planner already renders as an error message (zod →
+  // 'ValidationError' in errorHandler → PlanningChat's existing copy).
+
+  // Fewer nights than cities: distributeNights gave the tail cities 0
+  // nights, so e.g. 3 cities in 2 nights came back with the last city
+  // arriving and departing the same day — and a hotel searched for
+  // checkin === checkout.
+  if (input.totalNights !== undefined && input.totalNights < input.cities.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['totalNights'],
+      message: 'Need at least one night per city',
+    });
+  }
+
+  // A repeated city: `dates` is keyed by city name, so the second visit
+  // overwrote the first (Paris, Rome, Paris came back as Rome → Paris →
+  // Paris with one Paris date range and a Paris → Paris "leg"). Compared
+  // trimmed and case-insensitive, the way the persistent caches
+  // (airport_codes, leg_price_cache, train search) already key city names.
+  const seen = new Set<string>();
+  for (const city of input.cities) {
+    const key = (typeof city === 'string' ? city : city.name).trim().toLowerCase();
+    if (seen.has(key)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cities'],
+        message: 'Each city can appear only once',
+      });
+      break;
+    }
+    seen.add(key);
+  }
+
+  // A start date in the past: every leg date was silently clamped to
+  // tomorrow (clampToFuture) while the trip's own dates kept the past ones,
+  // so the calendar and the prices described different trips. One day of
+  // grace for time zones: the server's date is UTC, and a traveller in the
+  // Americas picking "today" in the evening is already a day behind it.
+  if (input.startDate < addDays(todayIso(), -1)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['startDate'],
+      message: 'Start date is in the past',
+    });
+  }
 });
 
 router.post(

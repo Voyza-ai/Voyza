@@ -129,4 +129,15 @@ describe('ResultsPage', () => {
       expect(screen.getByText('Why this order of cities?')).toBeInTheDocument();
     });
   });
+
+  // F5: the budget banner read the stored totalCost, which is set once (at
+  // creation, or a preset's quote on save) and does not follow a hotel or
+  // transport swap. It must compare the total the header shows.
+  it('the over-budget banner uses the live total the header shows', () => {
+    // Live: Rome 3 × ($95 + $5 tax) + train $35, Florence 2 × $80 + flight $89 = $584.
+    useTripStore.setState({ currentTrip: buildTrip({ totalCost: 1200, budget: 500 }) });
+    render(<ResultsPage />);
+    // Before: "$700 over" (1200 − 500).
+    expect(screen.getByText(/\$84 over/)).toBeInTheDocument();
+  });
 });

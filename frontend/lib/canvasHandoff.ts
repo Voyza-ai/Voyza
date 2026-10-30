@@ -105,6 +105,7 @@ export async function resolveCanvasTripId(intent: CanvasIntent): Promise<string 
           lastCity: last.name,
           startDate: first.dates?.arrival,
           endDate: last.dates?.departure,
+          firstCityDeparture: first.dates?.departure,
           travelers: p.travelers ?? 1,
           returnToHome: p.returnToHome ?? true,
         });
@@ -117,6 +118,29 @@ export async function resolveCanvasTripId(intent: CanvasIntent): Promise<string 
           // Keep the localStorage origin handoff in sync so the canvas
           // home cards get the flight pills too.
           if (intent.origin) intent.origin.origin = p.origin;
+        }
+        // The first stay starts the day the outbound LANDS — the rule a
+        // planned trip gets from the optimizer, here from /home-legs (the
+        // backend's one copy of it). A preset dates its first stay from the
+        // departure day, so an overnight flight saved a hotel night spent on
+        // the plane: Paris Nov 29 for a flight landing Nov 30 12:10. The
+        // saved trip, and so the results page's hotel search, use this date.
+        const arrival = legs.outboundLeg ? legs.firstCityArrival : undefined;
+        if (arrival && first.dates && arrival !== first.dates.arrival) {
+          const landed = (c: any) => ({ ...c, dates: { ...c.dates, arrival } });
+          // The canvas handoff carries the same cities (the same array, or a
+          // copy after the OAuth round trip through sessionStorage); keep it
+          // in step, or the canvas would open on — and save back — the old
+          // first-night date.
+          const sync = intent.syncCities;
+          if (
+            Array.isArray(sync) &&
+            sync[0]?.name === first.name &&
+            sync[0]?.dates?.arrival === first.dates.arrival
+          ) {
+            intent.syncCities = [landed(sync[0]), ...sync.slice(1)];
+          }
+          p.cities = [landed(first), ...p.cities.slice(1)];
         }
       } catch {
         // Flight search failed — save without home legs.

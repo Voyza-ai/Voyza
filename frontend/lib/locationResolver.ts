@@ -186,6 +186,74 @@ function candidateOf(id: string, max: number): LocationCandidate | null {
   };
 }
 
+/**
+ * Kinds that name a POINT a traveller can stand in, as against an area.
+ * The server's `POINT_LIKE` in `services/location/originAirports.ts`.
+ */
+const POINT_LIKE: ReadonlySet<LocationKind> = new Set<LocationKind>(['city', 'metro']);
+
+/**
+ * One candidate per READING, preferring the place over the area it sits in —
+ * the server's `dedupePreferringPlaces`, applied to every answer this module
+ * hands out, whether it came from the hot set or from the server.
+ *
+ * A second copy of a server rule is the kind of thing that drifts, so why it
+ * has to exist: this module's answer is the one that gets PRICED.
+ * `optimizer.ts` takes `originAirports` from the request body verbatim, and
+ * every planner path fills it from `originAirportsForCity`. The server learned
+ * this rule in `fromResolution` (e9ca160) and answered `Moscow` with the city
+ * — SVO, DME, VKO — while this module kept sending the federal-city REGION's
+ * SVO, VKO, ZIA, because the hot set stores the resolver's raw candidate order
+ * and `candidates[0]` was the region. Domodedovo, Russia's second airport,
+ * was never priced.
+ *
+ * Neither source can carry the rule for us. The hot set is held to the
+ * resolver's raw order key by key (`locationHotSet.test.ts`), and
+ * `POST /api/locations/resolve` — this module's own fallback — returns that
+ * same raw order. So it runs here, on both. `originAirportsBrowserParity.
+ * test.ts` in the backend holds this copy to the server's answer over every
+ * hot-set key; measured on the current artifact it changes the candidates of
+ * 6 keys (moscow, taipei, madrid, vienna, florida, montana) and the airports
+ * of exactly one, moscow.
+ *
+ * It cannot touch Moscow, Idaho, which is why a label rule and not a curated
+ * `moscow` alias: Idaho's label is "Moscow, Idaho, United States", a different
+ * string, so PUW at 9 km still leads there.
+ */
+function dedupePreferringPlaces(candidates: LocationCandidate[]): LocationCandidate[] {
+  const bestByLabel = new Map<string, LocationCandidate>();
+  const order: string[] = [];
+  for (const candidate of candidates) {
+    const key = candidate.label.toLowerCase();
+    const held = bestByLabel.get(key);
+    if (!held) {
+      bestByLabel.set(key, candidate);
+      order.push(key);
+      continue;
+    }
+    // Only a point-like candidate may displace an area-like one. Two cities
+    // sharing a label keep the first, which is the more prominent row.
+    if (!POINT_LIKE.has(held.kind) && POINT_LIKE.has(candidate.kind)) {
+      bestByLabel.set(key, candidate);
+    }
+  }
+  return order.map((key) => bestByLabel.get(key)!);
+}
+
+/**
+ * The same rule on a whole answer. A `resolved` answer has one place and
+ * nothing to collapse.
+ */
+function preferPlaces(answer: LocationAnswer): LocationAnswer {
+  if (answer.status === 'ambiguous') {
+    return { ...answer, candidates: dedupePreferringPlaces(answer.candidates) };
+  }
+  if (answer.status === 'unknown') {
+    return { ...answer, suggestions: dedupePreferringPlaces(answer.suggestions) };
+  }
+  return answer;
+}
+
 /** A `resolved` answer for one hot-set place. */
 function resolvedOf(id: string, place: HotPlace, via: string, max: number): LocationAnswer {
   return {
@@ -358,7 +426,12 @@ export function resolveLocally(
       .map((id) => candidateOf(id, max))
       .filter((c): c is LocationCandidate => c !== null);
     if (candidates.length < 2) return null;
-    return {
+    // The reason is read off the RAW readings, before the dedupe below, the
+    // same as the server: it describes what the resolver found, and a
+    // collapse to one card does not make the input any less ambiguous.
+    // `taipei` is the shape — the city and its same-label region are the
+    // whole set, so one card is left, as `fromResolution` leaves one.
+    return preferPlaces({
       status: 'ambiguous',
       // The hot set does not store which of the two reasons it was, and the
       // distinction only changes the wording of the question. Candidates
@@ -366,7 +439,7 @@ export function resolveLocally(
       // first by the resolver, so it is derivable rather than guessed.
       reason: new Set(candidates.map((c) => c.country)).size > 1 ? 'multi-country' : 'near-tie',
       candidates,
-    };
+    });
   }
 
   return null;
@@ -398,7 +471,12 @@ export async function resolveLocation(
       body: JSON.stringify({ query: raw, ...(context ?? {}), max }),
     });
     if (!response.ok) return { status: 'unknown', suggestions: [] };
-    return (await response.json()) as LocationAnswer;
+    // The endpoint returns the resolver's raw order, so the same preference
+    // runs here. Without it a long-tail name took the region again through
+    // the planner's fallback: `San Juan` is not in the hot set, and the
+    // server's first reading is the PROVINCE, leading with Mendoza 145 km
+    // away rather than the city's own airport at 10 km.
+    return preferPlaces((await response.json()) as LocationAnswer);
   } catch {
     return { status: 'unknown', suggestions: [] };
   }

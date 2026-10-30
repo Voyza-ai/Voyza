@@ -21,6 +21,101 @@ async function fetchWithTimeout(url: string, timeoutMs = DB_TIMEOUT_MS): Promise
   }
 }
 
+/**
+ * Circuit breaker for Deutsche Bahn REST.
+ *
+ * The timeout above bounds ONE search, but every search still pays it. When
+ * the upstream is down it is down for every leg: measured from this container
+ * on 2026-10-29, db.transport.rest answered 503 after 10.47-10.73s, so the
+ * 4.5s abort fired on every request. compareLeg awaits flights and trains
+ * together, so each leg waited the full 4.5s for nothing, round after round
+ * through the 8-slot gate below: +7.3s on a 3-city optimize, +28.3s on a
+ * 5-city one, ~+2.7s per canvas leg repair (mocked-latency harness, Duffel
+ * calibrated at 1.5-1.9s per search).
+ *
+ * So the first failure that says "the service is down" — our own timeout
+ * abort, an HTTP 5xx, or a network error — opens the breaker for
+ * DB_BREAKER_OPEN_MS, and every Deutsche Bahn search in that window returns
+ * [] at once, before the db_stops reads. Rail from All Aboard is unaffected:
+ * this is one provider's breaker, not the rail search's.
+ *
+ * Deliberately NOT a trip: a 4xx, "No stop found", a malformed body. Those
+ * are about one query, and the next leg may well succeed.
+ *
+ * When the window ends, no user request is sent in to test the water. The
+ * first search after it still answers [] immediately and starts ONE
+ * background probe; the probe closes the breaker if DB REST answers, or
+ * re-opens it for another window if not. Nothing runs while the process is
+ * idle, so there is no timer to keep alive.
+ */
+const DB_BREAKER_OPEN_MS = 5 * 60 * 1000;
+/** Epoch ms the breaker stays open until; 0 = closed. */
+let dbBreakerOpenUntil = 0;
+let dbBreakerProbe: Promise<void> | null = null;
+
+/** A failure that is about the upstream, not about this one query. */
+function isDbUpstreamFailure(err: any): boolean {
+  // Our own timeout (AbortController → DOMException 'AbortError').
+  if (err?.name === 'AbortError' || err?.name === 'TimeoutError') return true;
+  // undici's shape for DNS / refused / reset: TypeError('fetch failed').
+  return err instanceof TypeError && /fetch failed/i.test(err.message ?? '');
+}
+
+function openDbBreaker(reason: string): void {
+  const wasClosed = dbBreakerOpenUntil === 0;
+  dbBreakerOpenUntil = Date.now() + DB_BREAKER_OPEN_MS;
+  // Once per outage, not once per leg — every leg in flight fails together.
+  if (wasClosed) {
+    logger.warn('Deutsche Bahn REST unavailable — rail searches skip it for 5 minutes', {
+      reason,
+    });
+  }
+}
+
+/** True while searches must skip Deutsche Bahn. Starts the re-probe when due. */
+function dbBreakerIsOpen(): boolean {
+  if (dbBreakerOpenUntil === 0) return false;
+  if (Date.now() >= dbBreakerOpenUntil && !dbBreakerProbe) {
+    dbBreakerProbe = probeDbRest().finally(() => {
+      dbBreakerProbe = null;
+    });
+  }
+  return true;
+}
+
+async function probeDbRest(): Promise<void> {
+  const url = `${env.DB_REST_BASE_URL}/locations?query=Berlin&results=1&poi=false&addresses=false`;
+  try {
+    const res = await fetchWithTimeout(url);
+    if (res.ok) {
+      dbBreakerOpenUntil = 0;
+      logger.info('Deutsche Bahn REST answered the re-probe — rail search resumed');
+      return;
+    }
+    dbBreakerOpenUntil = Date.now() + DB_BREAKER_OPEN_MS;
+  } catch {
+    dbBreakerOpenUntil = Date.now() + DB_BREAKER_OPEN_MS;
+  }
+}
+
+/** Every Deutsche Bahn request goes through here so a dead upstream trips the breaker. */
+async function fetchDbRest(url: string): Promise<Response> {
+  try {
+    const res = await fetchWithTimeout(url);
+    if (res.status >= 500) openDbBreaker(`HTTP ${res.status}`);
+    return res;
+  } catch (err: any) {
+    if (isDbUpstreamFailure(err)) openDbBreaker(err?.name ?? 'network error');
+    throw err;
+  }
+}
+
+/** Exposed for tests: close the breaker and forget any probe in flight. */
+export function resetDbBreaker(): void {
+  dbBreakerOpenUntil = 0;
+  dbBreakerProbe = null;
+}
+
 export type TrainOffer = {
   id: string;
   /**
@@ -132,7 +227,7 @@ export async function getStopId(cityName: string): Promise<string> {
   const baseUrl = env.DB_REST_BASE_URL;
   const url = `${baseUrl}/locations?query=${encodeURIComponent(cityName)}&results=1&poi=false&addresses=false`;
 
-  const res = await fetchWithTimeout(url);
+  const res = await fetchDbRest(url);
   if (!res.ok) {
     throw new Error(`DB locations API returned ${res.status}`);
   }
@@ -191,6 +286,9 @@ interface TrainProvider {
 async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderTrainOffer[]> {
   const { origin, destination, date } = params;
 
+  // Upstream known down: answer now, without the db_stops reads either.
+  if (dbBreakerIsOpen()) return [];
+
   try {
     const [fromId, toId] = await Promise.all([
       getStopId(origin),
@@ -201,7 +299,7 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
     const departureISO = new Date(date).toISOString();
     const url = `${baseUrl}/journeys?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}&departure=${encodeURIComponent(departureISO)}&results=5&stopovers=false`;
 
-    const res = await fetchWithTimeout(url);
+    const res = await fetchDbRest(url);
     if (!res.ok) {
       logger.warn('DB journeys API error', { status: res.status, origin, destination });
       return [];

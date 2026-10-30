@@ -1,0 +1,9 @@
+{
+  "staffPickCriteria": [
+    "Hand-reviewed: a curated trip, or a generated trip a person has checked end to end",
+    "Has a verified landmark hero photo",
+    "Every leg is realistic and plannable (live search finds the route)",
+    "At most 6 picks, which together span at least 2 destination regions and 2 trip lengths"
+  ],
+  "staffPicks": ["japan-golden-route", "imperial-europe-rail", "lisbon-sintra-escape", "greek-island-escape"]
+}

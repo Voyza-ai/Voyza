@@ -349,27 +349,49 @@ describe('getIataCode', () => {
 
   it('caches IATA codes in Supabase', async () => {
     mockDuffel.suggestions.list.mockResolvedValue({
-      data: [{ type: 'airport', iata_code: 'FCO', iata_country_code: 'IT' }],
+      data: [
+        {
+          type: 'airport',
+          iata_code: 'ZRH',
+          iata_country_code: 'CH',
+          name: 'Zürich Airport',
+          latitude: 47.4647,
+          longitude: 8.5492,
+        },
+      ],
     });
 
-    // Use a city NOT in the curated override map so this exercises the
-    // Duffel + Supabase cache path rather than short-circuiting.
-    const code = await getIataCode('Verona');
-    expect(code).toBe('FCO');
+    // A name neither the curated map NOR the artifact answers, so this
+    // exercises the Duffel + Supabase cache path. It used to be Verona ->
+    // FCO, which the artifact now answers as VRN, its own airport — and
+    // which a suggestion check would refuse anyway. The trip is what lets a
+    // suggestion be checked, and so cached: see getIataCodeArtifact.test.ts.
+    const code = await getIataCode('Wengen', { tripDestinationNames: ['Zurich'] });
+    expect(code).toBe('ZRH');
   });
 
   it('uses the curated override before Duffel for known cities', async () => {
-    // Kyoto has no airport of its own; the override maps it to Osaka's
-    // Kansai (KIX) so it never mis-resolves (it previously returned ACC).
+    // Kyoto has no airport of its own; the override maps it to the Osaka
+    // metro so it never mis-resolves (it previously returned ACC, Accra).
+    //
+    // OSA rather than KIX since the destination-side decisions in
+    // `data/cityAirports.ts` were made: one metro code searches Kansai,
+    // Itami and Kobe, and the Tokyo-Itami service is how a traveller on a
+    // multi-city Japan trip actually reaches Kyoto. The KIX pin that stops a
+    // HOME leg being priced from Itami is a separate, opposite decision and
+    // lives in `scripts/location-data/curated.ts`;
+    // `cityAirportsDecisions.test.ts` asserts both.
     const code = await getIataCode('Kyoto');
-    expect(code).toBe('KIX');
+    expect(code).toBe('OSA');
     expect(mockDuffel.suggestions.list).not.toHaveBeenCalled();
   });
 
   it('throws AppError when no IATA code found', async () => {
     mockDuffel.suggestions.list.mockResolvedValue({ data: [] });
 
-    await expect(getIataCode('Atlantis')).rejects.toThrow('No IATA code found');
+    // Not `Atlantis` any more: the artifact knows Atlantis, Western Cape,
+    // 47 km from Cape Town, and answers CPT.
+    await expect(getIataCode('Zzyzx')).rejects.toThrow('No IATA code found');
   });
 });
 

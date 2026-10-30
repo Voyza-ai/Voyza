@@ -6,7 +6,15 @@ import { env } from './config/env';
 import { logger } from './utils/logger';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/error';
-import { apiLimiter, expensiveLimiter, locationLimiter } from './middleware/rateLimit';
+import {
+  apiLimiter,
+  canvasRoleLimiter,
+  expensiveLimiter,
+  locationLimiter,
+  optimizeLimiter,
+} from './middleware/rateLimit';
+import { startPresetRefreshScheduler } from './services/presets';
+import { originIndex } from './services/location/originAirports';
 
 const app = express();
 
@@ -20,6 +28,15 @@ app.use(
   cors({
     origin: env.CORS_ORIGIN.split(',').map((s) => s.trim()),
     credentials: true,
+    // Let the browser reuse a preflight answer for 2 hours. Every JSON POST
+    // from the frontend is preflighted, and with no Access-Control-Max-Age
+    // the browser keeps the answer for 5 s, so nearly every call paid an
+    // extra round trip first (~135 ms measured against production). 7200 s
+    // is Chrome's ceiling (Firefox allows a day). Caching is safe: the answer
+    // depends only on the origin list and cors()'s defaults, and an origin
+    // removed from the list still fails on the real response, which has to
+    // carry Access-Control-Allow-Origin too.
+    maxAge: 7200,
   }),
 );
 app.use(express.json({ limit: '1mb' }));
@@ -34,9 +51,14 @@ app.use(
   ['/api/optimize', '/api/plan', '/api/search', '/api/flights', '/api/hotels', '/api/trains'],
   expensiveLimiter,
 );
-// Its own budget, excluded from the general one above — see rateLimit.ts for
-// why a typeahead sharing the planner's allowance 429s the planner.
+// The optimize RUN fans out to dozens of Duffel searches, so it keeps a cap
+// near its old one on top of the shared expensive cap (rateLimit.ts).
+app.post('/api/optimize', optimizeLimiter);
+// Their own budgets, excluded from the general one above — see rateLimit.ts
+// for why a typeahead or a background poll sharing the planner's allowance
+// 429s the planner.
 app.use('/api/locations', locationLimiter);
+app.get('/api/canvas/:tripId/role', canvasRoleLimiter);
 
 // ─── Routes ───────────────────────────────────────────────────
 app.get('/', (_req, res) => {
@@ -49,8 +71,43 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 // ─── Boot ────────────────────────────────────────────────────
+
+/**
+ * Build the location index at boot, instead of on the first planner request
+ * after each deploy.
+ *
+ * originIndex() is lazy so that processes which never resolve a place — a
+ * script, most of the test suite — never pay for it. The server always does:
+ * the first /api/locations/resolve or optimize after a deploy spent 391–421 ms
+ * (and +53 MB of heap) building it, on that user's request.
+ *
+ * setImmediate so `listen`'s callback returns first. The build is synchronous
+ * CPU work, so it holds the event loop for those ~0.4 s whenever it runs; this
+ * moves it to boot, it does not make it free.
+ *
+ * A failure here must never take the process down — it would turn a slow
+ * first request into no server at all. The index stays unbuilt and the first
+ * caller builds it lazily, exactly as before.
+ */
+function warmLocationIndex(): void {
+  setImmediate(() => {
+    const started = Date.now();
+    try {
+      originIndex();
+      logger.info('Location index built', { ms: Date.now() - started });
+    } catch (err: any) {
+      logger.error('Location index warm-up failed — the first request will build it', {
+        errMessage: err?.message,
+      });
+    }
+  });
+}
+
 const server = app.listen(env.PORT, () => {
   logger.info('Backend listening', { port: env.PORT, env: env.NODE_ENV });
+  // Weekly Browse price refresh (see services/presets.ts).
+  if (env.NODE_ENV !== 'test') startPresetRefreshScheduler();
+  warmLocationIndex();
 });
 
 // Graceful shutdown — important when running behind a process manager
@@ -62,3 +119,7 @@ const shutdown = (signal: string) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// For tests that drive the real app, middleware order and all. Importing this
+// module starts the server, exactly as running it does.
+export { app, server };

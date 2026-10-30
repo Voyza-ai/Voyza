@@ -33,6 +33,13 @@
  * Ghana — Kyoto has no airport and the fuzzy place search mismatched. Those
  * overrides are kept verbatim below.
  *
+ * `cityAirports.ts` is destination-side and still exists. Three of the 13
+ * entries the resolver could not reproduce were decided in ITS favour and are
+ * carried here — the `reykjavik` and `bucharest` metro groups and the
+ * `buenos aires` alias. The record of all 13, including the two that cannot be
+ * moved here, is in that file's header and in
+ * `src/tests/cityAirportsDecisions.test.ts`.
+ *
  * Every reference in this file is resolved against the GeoNames dump at build
  * time and the build FAILS on a reference that matches nothing. A silent
  * curated miss would be the same class of bug as the one this replaces.
@@ -291,6 +298,45 @@ export const METRO_GROUPS: MetroGroup[] = [
     airports: ['ARN', 'BMA', 'NYO'],
     why: 'ARN is 36 km out and BMA 8 km; distance ordering would lead with Bromma.',
   },
+  // ─── THE TWO METRO CODES cityAirports.ts HELD AND NO DATASET DOES ─────────
+  //
+  // Both are from the 13 destination-side entries the resolver did not
+  // reproduce. The destination side answers `metro ?? airports[0]`, so a
+  // missing metro code there is not a cosmetic gap: it narrows a city with two
+  // real airports down to one, and the search can no longer return the other.
+  {
+    key: 'reykjavik',
+    metro: 'REK',
+    members: [{ name: 'Reykjavík', country: 'IS', admin: '39' }],
+    airports: ['KEF', 'RKV'],
+    why:
+      'THE METRO CODE, not the order. KEF (large, 38.4 km) already leads RKV ' +
+      '(medium, 2.2 km) on rank, so nothing here changes an origin lookup. ' +
+      'What was missing is REK: OurAirports files both airports under ' +
+      'municipality "Reykjavík" and carries REK only in `keywords`, which is ' +
+      'not an alias field, so the artifact had no metro code and the ' +
+      'destination side answered KEF alone. A traveller flies in from abroad ' +
+      'through Keflavík and on to Akureyri or Egilsstaðir from Reykjavík ' +
+      'Domestic, and REK is the one code that searches both — the ' +
+      'inter-city-leg case cityAirports.ts exists for.',
+  },
+  {
+    key: 'bucharest',
+    metro: 'BUH',
+    members: [{ name: 'Bucharest', country: 'RO', admin: '10' }],
+    airports: ['OTP', 'BBU'],
+    why:
+      'GATEWAY VERSUS CLOSE-IN AIRPORT, and the metro code with it. BBU ' +
+      '(Băneasa, large_airport, 7.9 km) led OTP (Henri Coandă, ' +
+      'large_airport, 15.5 km) on distance, the three-level ordinal unable ' +
+      'to separate them — the old-Doha-International shape exactly, with ' +
+      'Băneasa the business-aviation field and Henri Coandă the country\'s ' +
+      'only real gateway. OurAirports files OTP under municipality ' +
+      '"Otopeni", so only gravity attaches it. Both airports carry BUH in ' +
+      '`keywords`; cityAirports.ts keys `bucharest` to that metro code, and ' +
+      'pinning OTP first also stops an origin lookup pricing Bucharest from ' +
+      'Băneasa.',
+  },
   {
     key: 'sao-paulo',
     metro: 'SAO',
@@ -514,6 +560,28 @@ export const CURATED_ALIASES: CuratedAlias[] = [
   { alias: 'dc', target: { name: 'Washington', country: 'US', admin: 'DC' } },
   { alias: 'washington dc', target: { name: 'Washington', country: 'US', admin: 'DC' } },
   { alias: 'd c', target: { name: 'Washington', country: 'US', admin: 'DC' } },
+  // A bare `buenos aires` is the CITY, not the province around it.
+  //
+  // Two real GeoNames rows are called Buenos Aires and the PROVINCE wins on
+  // prominence, because a region's `population` is the SUM of its member
+  // cities: 7,971,365 against the Autonomous City's 2,891,082. The
+  // city-inside-its-container rule in `decide` cannot rescue it either — the
+  // city (AR.07) is not administratively inside the province (AR.01), so the
+  // two arrive as a near-tie between a point and a region 300 km wide.
+  //
+  // Measured cost on both sides. DESTINATION: the province carries no metro
+  // code, so `metro ?? airports[0]` answered EZE and lost Aeroparque, where
+  // the flights in from Montevideo, Santiago and the Argentine interior
+  // actually land; cityAirports.ts keys `buenos aires` to BUE, which searches
+  // both. ORIGIN: from the province centroid the list is EZE 74 km, AEP
+  // 105 km, SST 237 km, so Santa Teresita — a beach strip — took the third
+  // MAX_HOME_AIRPORTS slot, while the retired table keyed `buenos aires` to
+  // EZE, AEP. The city's own list is EZE 27 km, AEP 7 km.
+  //
+  // Unlike `moscow`, this suppresses no question: both readings are Argentine
+  // so rule 4 never applied, and the province still works as a qualifier,
+  // because a city key may never act as one.
+  { alias: 'buenos aires', target: { name: 'Buenos Aires', country: 'AR', admin: '07' } },
   { alias: 'sf', target: { name: 'San Francisco', country: 'US', admin: 'CA' } },
   { alias: 'philly', target: { name: 'Philadelphia', country: 'US', admin: 'PA' } },
   { alias: 'nola', target: { name: 'New Orleans', country: 'US', admin: 'LA' } },
@@ -745,6 +813,7 @@ export const REGION_AIRPORT_OVERRIDES: RegionAirportOverride[] = [
   { admin1: 'IT.09', airports: ['MXP'], why: 'Lombardy: LIN 8.5 and BGY 35.4 both led MXP 46.9. Linate is the city-centre airport; Malpensa is the gateway. Matches the milan group.' },
   { admin1: 'GB.ENG', airports: ['LHR'], why: 'England: BHX 51.2, LTN 64.4 and EMA 64.9 all led LHR 98 — the centroid sits in the Midlands. Heathrow is the gateway. Matches the london group.' },
   { admin1: 'RU.48', airports: ['SVO'], why: 'Moscow federal city: VKO 27.9 led SVO 28.4 by half a kilometre. Sheremetyevo leads in the moscow group and in originAirports.ts.' },
+  { admin1: 'RO.10', airports: ['OTP'], why: 'Bucharest municipality: BBU 7.9 led OTP 15.5, both large_airport. Băneasa is the business-aviation field; Henri Coandă is the gateway. Matches the bucharest group.' },
   { admin1: 'KR.11', airports: ['ICN'], why: 'Seoul: GMP 16.5 led ICN 47.7. Gimpo is domestic-focused; Incheon is the gateway. Matches the seoul group.' },
   { admin1: 'KR.12', airports: ['ICN'], why: 'Incheon: GMP 13.5 led ICN 22.3 — Seoul\'s domestic airport ahead of the gateway that sits inside this region. Matches the Incheon city override.' },
   { admin1: 'CN.23', airports: ['PVG'], why: 'Shanghai: SHA 8.9 led PVG 36.8. Hongqiao is the domestic airport; Pudong is the gateway. Matches the shanghai group.' },
