@@ -9,10 +9,14 @@ import { liveTripTotal } from '@/lib/tripTotals';
 
 /**
  * The /browse flows a user drives, through the real page: the saved trip's
- * price for a chosen party (A2) and the ?preset= deep link (E13).
+ * price for a chosen party (A2), the ?preset= deep link (E13) and "use my
+ * location" outside the US (E15).
  */
 const mockedCatalog = getPresetCatalog as jest.MockedFunction<typeof getPresetCatalog>;
 const mockedEvents = sendPresetEvents as jest.Mock;
+
+const setGeolocation = (impl: any) =>
+  Object.defineProperty(global.navigator, 'geolocation', { value: impl, configurable: true });
 
 // The live catalog: same presets, as the API wraps them.
 const live = (): PresetCatalog => ({
@@ -45,6 +49,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockSearchParams.delete('preset');
   mockedCatalog.mockResolvedValue({ presets: [], editorial: { staffPicks: [], trending: [] }, categories: [] });
+});
+afterEach(() => {
+  // @ts-expect-error cleanup
+  delete global.navigator.geolocation;
 });
 
 describe('Save for a party of 4 (A2)', () => {
@@ -118,5 +126,34 @@ describe('?preset= deep link (E13)', () => {
     });
     expect(await screen.findByText('Plan a similar trip')).toBeInTheDocument();
     expect(screen.getAllByText('Live Only Trip').length).toBeGreaterThan(0);
+  });
+});
+
+describe('"Use my location" outside the US (E15)', () => {
+  const saveFrom = async (coords: { latitude: number; longitude: number }) => {
+    setGeolocation({ getCurrentPosition: (ok: any) => ok({ coords }) });
+    render(<BrowsePage />);
+    fireEvent.click(screen.getByText('Japan Golden Route'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveTrip).toHaveBeenCalled());
+    return (saveTrip as jest.Mock).mock.calls[0][0].origin;
+  };
+
+  it('Tokyo saves Tokyo airports (was: none, so no home flights were searched)', async () => {
+    const origin = await saveFrom({ latitude: 35.68, longitude: 139.69 });
+    expect(origin.city).toBe('Tokyo');
+    expect(origin.airports).toEqual(['HND', 'NRT', 'IBR']);
+  });
+
+  it('São Paulo saves São Paulo airports', async () => {
+    const origin = await saveFrom({ latitude: -23.55, longitude: -46.63 });
+    expect(origin.airports[0]).toBe('GRU');
+  });
+
+  it('Washington still uses the coordinates (DC airports, not Seattle)', async () => {
+    const origin = await saveFrom({ latitude: 38.91, longitude: -77.04 });
+    expect(origin.city).toBe('Washington');
+    expect(origin.airports).not.toContain('SEA');
+    expect(origin.airports.length).toBeGreaterThan(0);
   });
 });

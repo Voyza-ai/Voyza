@@ -236,24 +236,35 @@ function BrowsePageInner() {
     try {
       const result = await detectNearestAirportCity();
       if (!result.ok) return undefined;
+      // Empty for single-airport cities — the backend resolves the IATA
+      // code from the city name, same as a typed planner answer.
+      //
+      // The real geolocation reading is passed as `userLatLon`, and it
+      // matters: this table's DC row is named exactly `Washington`, which
+      // is ambiguous between the District and Washington State, and the
+      // more prominent reading is the STATE. Without the coordinates, every
+      // "use my location" tap in the DC metro saved Seattle's airports.
+      //
+      // Still synchronous and still offline — `resolveLocally` applies the
+      // position rule against the hot set, which carries coordinates for
+      // every place it ships. Nothing is sent anywhere, which is the
+      // promise `nearestAirport.ts` makes about these coordinates.
+      //
+      // The coordinates only settle an `ask` entry (Washington). For a name
+      // whose stored answer is a `prominence` pick — Tokyo, Seoul, Istanbul,
+      // Dubai, Mexico City, São Paulo… — `resolveLocally` defers to the
+      // server when handed coordinates, and Browse never asks the server, so
+      // 20 major cities saved NO origin airports (audit E15). Without
+      // coordinates the same entry answers with its stored winner, which for
+      // every city in this table is the city itself (measured: geo-origin
+      // sweep over AIRPORT_CITIES). So: coordinates first, the plain name
+      // only when they produced nothing.
+      const near = originAirportsForCity(result.city.city, 3, {
+        userLatLon: result.coords,
+      });
       const origin = {
         city: result.city.city,
-        // Empty for single-airport cities — the backend resolves the IATA
-        // code from the city name, same as a typed planner answer.
-        //
-        // The real geolocation reading is passed as `userLatLon`, and it
-        // matters: this table's DC row is named exactly `Washington`, which
-        // is ambiguous between the District and Washington State, and the
-        // more prominent reading is the STATE. Without the coordinates, every
-        // "use my location" tap in the DC metro saved Seattle's airports.
-        //
-        // Still synchronous and still offline — `resolveLocally` applies the
-        // position rule against the hot set, which carries coordinates for
-        // every place it ships. Nothing is sent anywhere, which is the
-        // promise `nearestAirport.ts` makes about these coordinates.
-        airports: originAirportsForCity(result.city.city, 3, {
-          userLatLon: result.coords,
-        }),
+        airports: near.length > 0 ? near : originAirportsForCity(result.city.city),
       };
       setDetectedOrigin(origin);
       return origin;
