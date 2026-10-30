@@ -935,6 +935,9 @@ function CanvasPageInner() {
         origin: ls.trip?.origin ?? undefined,
         returnToHome: ls.trip?.returnToHome,
         budget: ls.trip?.budget,
+        // The chat reads earlier pins from here (the backend's overlap check
+        // refuses a pin that contradicts one), so it must see them.
+        constraints: ls.trip?.constraints,
         dateShiftSuggestion: undefined,
       } as Trip;
     },
@@ -957,18 +960,29 @@ function CanvasPageInner() {
   );
 
   // Chat edits land in canvas local state: cities replaced wholesale
-  // (color indices re-locked), origin/returnToHome merged into trip —
-  // marking unsaved changes exactly like a manual edit.
+  // (color indices re-locked), origin/returnToHome/constraints merged into
+  // trip — marking unsaved changes exactly like a manual edit.
+  //
+  // Constraints used to be dropped here, so a date pin accepted from the
+  // chat vanished on the spot. An edit that carries none keeps the ones
+  // already on the trip, the same rule as origin; and the key is only
+  // written when there is something to write, so a trip that never had
+  // constraints serialises exactly as before (unsaved-change detection
+  // compares JSON).
   const applyChatTrip = useCallback((updated: Trip) => {
-    setLocalState((prev: any) => ({
-      ...prev,
-      cities: withColorIndices(updated.cities as any[]),
-      trip: {
-        ...(prev?.trip ?? {}),
-        origin: updated.origin ?? prev?.trip?.origin ?? null,
-        returnToHome: updated.returnToHome ?? prev?.trip?.returnToHome,
-      },
-    }));
+    setLocalState((prev: any) => {
+      const constraints = updated.constraints ?? prev?.trip?.constraints;
+      return {
+        ...prev,
+        cities: withColorIndices(updated.cities as any[]),
+        trip: {
+          ...(prev?.trip ?? {}),
+          origin: updated.origin ?? prev?.trip?.origin ?? null,
+          returnToHome: updated.returnToHome ?? prev?.trip?.returnToHome,
+          ...(constraints !== undefined ? { constraints } : {}),
+        },
+      };
+    });
   }, []);
 
   // ── Live sync (Phase B) ──────────────────────────────────────
