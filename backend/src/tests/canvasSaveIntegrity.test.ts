@@ -198,6 +198,66 @@ describe('re-pricing a missing leg prices the whole party', () => {
   });
 });
 
+describe('trips.total_cost is the total the results header shows', () => {
+  // The header's liveTripTotal (frontend/lib/tripTotals.ts): the chosen or
+  // custom hotel with its taxes, every leg, and both home flights, rounded.
+  // The save used to count hotel.pricePerNight × nights and the legs only, so
+  // the trips list read $2,563.52 for a trip whose header said $5,215.
+  beforeEach(() => {
+    mockCompareLeg.mockResolvedValue({ recommendation: 'train', trainOption: null, flightOption: null });
+  });
+  const totalFor = async (state: any) => {
+    const res = await save(state);
+    expect(res.status).toBe(200);
+    return tripsUpdate()?.payload.total_cost;
+  };
+
+  it('counts both home flights', async () => {
+    const state = twoCityState({
+      title: 't',
+      travelers: 2,
+      origin: {
+        city: 'New York',
+        airports: ['JFK'],
+        outboundLeg: { mode: 'flight', price: 1000 },
+        returnLeg: { mode: 'flight', price: 900 },
+      },
+    });
+    // Hotels 300 + 300, the Rome → Florence train 90, home flights 1,900.
+    expect(await totalFor(state)).toBe(2590);
+  });
+
+  it('counts the hotel the traveller picked, not the first one', async () => {
+    const state = twoCityState();
+    (state.cities[1] as any).hotels = [
+      { name: 'A', pricePerNight: 100, rating: 8, area: '' },
+      { name: 'B', pricePerNight: 150, rating: 9, area: '' },
+    ];
+    (state.cities[1] as any).selectedHotelIndex = 1;
+    expect(await totalFor(state)).toBe(300 + 450 + 90);
+  });
+
+  it('counts a custom hotel, entered per night or as a total', async () => {
+    const perNight = twoCityState();
+    (perNight.cities[0] as any).customHotel = { name: 'Mine', mode: 'perNight', amount: 120 };
+    expect(await totalFor(perNight)).toBe(360 + 300 + 90);
+
+    mockWrites.length = 0;
+    const total = twoCityState();
+    (total.cities[0] as any).customHotel = { name: 'Mine', mode: 'total', amount: 500 };
+    expect(await totalFor(total)).toBe(500 + 300 + 90);
+  });
+
+  it('counts hotel taxes and rounds to whole dollars', async () => {
+    const state = twoCityState();
+    (state.cities[0] as any).hotels = [{ name: 'T', pricePerNight: 100, taxesPerNight: 10.2, rating: 8, area: '' }];
+    (state.cities[0] as any).selectedHotelIndex = 0;
+    (state.cities[0] as any).transportOut.price = 90.4;
+    // 110.2 × 3 + 300 + 90.4 = 721
+    expect(await totalFor(state)).toBe(721);
+  });
+});
+
 describe('a city saved without hotels is searched with the party in enough rooms', () => {
   const hotellessState = (travelers: number) => {
     const state = twoCityState({ title: 't', travelers });

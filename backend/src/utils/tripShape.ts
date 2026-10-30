@@ -234,3 +234,47 @@ export function tripDateRange(
     departDate < arrival;
   return { start: leavesEarlier ? departDate : arrival, end: last.departure_date as string };
 }
+
+/**
+ * The trip total the results header shows (frontend/lib/tripTotals.ts
+ * liveTripTotal), from canvas state: each stay's chosen hotel — the custom
+ * one when set, else `hotels[selectedHotelIndex]`, else the legacy `hotel` —
+ * with its taxes, every city's outgoing leg, and both home flights, rounded
+ * to whole dollars. Every price is already a party total.
+ *
+ * The canvas save used to write `hotel.pricePerNight × nights` plus the legs
+ * as trips.total_cost: no home flights, no taxes, and the first hotel even
+ * after a swap. The trips list, which reads that column, said $2,563.52 for
+ * a trip whose header said $5,215.
+ */
+export function liveTripTotal(
+  cities: any[] | undefined,
+  origin: { outboundLeg?: { price?: unknown } | null; returnLeg?: { price?: unknown } | null } | null | undefined,
+): number {
+  const amount = (v: unknown) => {
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
+  let sum = 0;
+  for (const c of cities ?? []) {
+    const nights = nightsBetween(c?.dates?.arrival, c?.dates?.departure);
+    const custom = c?.customHotel;
+    if (custom && custom.amount != null) {
+      sum += custom.mode === 'total' ? amount(custom.amount) : amount(custom.amount) * nights;
+    } else {
+      const hotel = (Array.isArray(c?.hotels) ? c.hotels[c.selectedHotelIndex] : undefined) ?? c?.hotel;
+      if (hotel) sum += (amount(hotel.pricePerNight) + amount(hotel.taxesPerNight)) * nights;
+    }
+    sum += amount(c?.transportOut?.price);
+  }
+  sum += amount(origin?.outboundLeg?.price) + amount(origin?.returnLeg?.price);
+  return Math.round(sum);
+}
+
+/** Whole nights from arrival to departure (YYYY-MM-DD); 0 when unknown. Same rule as the frontend's nightsBetween. */
+function nightsBetween(arrival: unknown, departure: unknown): number {
+  if (typeof arrival !== 'string' || typeof departure !== 'string') return 0;
+  if (!ISO_DATE.test(arrival) || !ISO_DATE.test(departure)) return 0;
+  const days = (Date.parse(`${departure}T00:00:00Z`) - Date.parse(`${arrival}T00:00:00Z`)) / 86_400_000;
+  return Math.max(0, Math.round(days));
+}

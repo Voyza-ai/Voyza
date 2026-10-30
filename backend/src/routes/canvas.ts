@@ -9,7 +9,7 @@ import { createNotification } from '../services/notifications';
 import { sendEmail, emailTemplates, unsubscribeUrlFor } from '../services/email';
 import { env } from '../config/env';
 import { parseDurationMinutes } from '../utils/duration';
-import { buildTripFromDb, resolveTripTitle } from '../utils/tripShape';
+import { buildTripFromDb, liveTripTotal, resolveTripTitle } from '../utils/tripShape';
 import { redactMemberIdentity, MemberRequester } from '../utils/memberVisibility';
 
 const router = Router();
@@ -510,16 +510,9 @@ router.post(
       await replaceTripGraph(tripId, cityRows, transportRows);
     }
 
-    // Update trip metadata
-    const totalCost = (state.cities ?? []).reduce((sum: number, c: any) => {
-      const hotelCost = (c.hotel?.pricePerNight ?? 0) * (
-        c.dates?.arrival && c.dates?.departure
-          ? Math.max(1, Math.round((new Date(c.dates.departure).getTime() - new Date(c.dates.arrival).getTime()) / 86400000))
-          : 1
-      );
-      const transportCost = c.transportOut?.price ?? 0;
-      return sum + hotelCost + transportCost;
-    }, 0);
+    // Update trip metadata. The total the results header shows, so the trips
+    // list agrees with the trip it opens.
+    const totalCost = liveTripTotal(state.cities, state.trip?.origin);
 
     const tripUpdate: Record<string, any> = {
       // Keeps the owner's chosen name instead of overwriting it with a
