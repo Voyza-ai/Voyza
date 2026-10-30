@@ -45,6 +45,11 @@ import { RATE_LIMITS } from '../middleware/rateLimit';
 
 beforeAll(async () => {
   if (!server.listening) await once(server, 'listening');
+  // Boot is not over at 'listening': index.ts builds the location index in a
+  // setImmediate queued by its listen callback, and that build holds the
+  // event loop (~0.4 s; 6.5 s measured on a container at load ~30). Queue
+  // behind it so no test's clock starts while the app is still booting.
+  await new Promise((r) => setImmediate(r));
 });
 afterAll(async () => {
   await new Promise((r) => server.close(r));

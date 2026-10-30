@@ -14,6 +14,7 @@ import {
   optimizeLimiter,
 } from './middleware/rateLimit';
 import { startPresetRefreshScheduler } from './services/presets';
+import { originIndex } from './services/location/originAirports';
 
 const app = express();
 
@@ -70,10 +71,43 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 // ─── Boot ────────────────────────────────────────────────────
+
+/**
+ * Build the location index at boot, instead of on the first planner request
+ * after each deploy.
+ *
+ * originIndex() is lazy so that processes which never resolve a place — a
+ * script, most of the test suite — never pay for it. The server always does:
+ * the first /api/locations/resolve or optimize after a deploy spent 391–421 ms
+ * (and +53 MB of heap) building it, on that user's request.
+ *
+ * setImmediate so `listen`'s callback returns first. The build is synchronous
+ * CPU work, so it holds the event loop for those ~0.4 s whenever it runs; this
+ * moves it to boot, it does not make it free.
+ *
+ * A failure here must never take the process down — it would turn a slow
+ * first request into no server at all. The index stays unbuilt and the first
+ * caller builds it lazily, exactly as before.
+ */
+function warmLocationIndex(): void {
+  setImmediate(() => {
+    const started = Date.now();
+    try {
+      originIndex();
+      logger.info('Location index built', { ms: Date.now() - started });
+    } catch (err: any) {
+      logger.error('Location index warm-up failed — the first request will build it', {
+        errMessage: err?.message,
+      });
+    }
+  });
+}
+
 const server = app.listen(env.PORT, () => {
   logger.info('Backend listening', { port: env.PORT, env: env.NODE_ENV });
   // Weekly Browse price refresh (see services/presets.ts).
   if (env.NODE_ENV !== 'test') startPresetRefreshScheduler();
+  warmLocationIndex();
 });
 
 // Graceful shutdown — important when running behind a process manager
