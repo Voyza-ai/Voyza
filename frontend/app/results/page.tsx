@@ -20,12 +20,12 @@ import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
-import { searchHotels, fetchHomeLegs, updateTrip } from '@/lib/api';
+import { searchHotels, fetchHomeLegs, updateTrip, compareLeg, type LegComparison } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 import { originAirportsForCity } from '@/lib/locationResolver';
-import { Hotel, City, Transport, Trip } from '@/lib/types';
-import { tripStartDate } from '@/lib/tripSpan';
+import { Hotel, City, Transport, HomeLeg, Trip } from '@/lib/types';
+import { tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
 import { useAuthStore } from '@/store/authStore';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
@@ -312,6 +312,25 @@ function ResultsPageInner() {
       }),
     );
 
+  /** Re-price the inter-city leg that leaves `from` on `date` for `to`. */
+  const repriceLeg = (from: string, to: string, date: string, travelers: number) =>
+    track(
+      compareLeg({ origin: from, destination: to, date, travelers }).then((result) => {
+        const cur = useTripStore.getState().currentTrip;
+        if (!cur) return;
+        const idx = cur.cities.findIndex(
+          (c, i) => c.name === from && cur.cities[i + 1]?.name === to && c.dates.departure === date,
+        );
+        if (idx < 0) return; // the leg moved again; its own re-price is coming
+        const transport = comparisonToTransport(result, from, to, date);
+        const { alternatives: _alts, ...flat } = transport;
+        const cities = [...cur.cities];
+        cities[idx] = { ...cities[idx], transportOut: transport };
+        cities[idx + 1] = { ...cities[idx + 1], transportIn: flat };
+        setTrip({ ...cur, cities });
+      }),
+    );
+
   // Enrich cities with real hotel data if hotels[] is empty
   const hotelsFetchedRef = useRef(false);
 
@@ -538,10 +557,20 @@ function ResultsPageInner() {
 
   /**
    * Dates moved on the trip on screen → re-price what was priced for the old
-   * ones: a stay whose dates changed has its hotels searched for the new
-   * dates. One rule for every source of a date change — an outbound swap that
-   * lands on another day, a re-searched outbound's landing day. The header
-   * holds the last settled total until the search has landed.
+   * ones. One rule for every source of a date change: an accepted AI date pin
+   * or shift, an outbound swap that lands on another day, a re-searched
+   * outbound's landing day.
+   *
+   *  - a stay whose dates changed: its hotels are searched for the new dates;
+   *  - an inter-city leg whose day changed: re-priced on the new day;
+   *  - the outbound, when the first stay moved and the flight did NOT (the
+   *    traveller moved the dates): re-searched from the trip's start moved by
+   *    the same number of days, landing rule applied;
+   *  - the return, when the last stay's departure moved: re-searched on it.
+   *
+   * A home leg being re-searched is cleared, which is the flowchart's existing
+   * "Finding flights…" state; the header holds the last settled total until
+   * every search has landed.
    */
   useEffect(
     () =>
@@ -557,9 +586,30 @@ function ResultsPageInner() {
         queueMicrotask(() => {
           const cur = useTripStore.getState().currentTrip;
           if (!cur) return;
+          for (const i of work.legs) {
+            const from = cur.cities[i];
+            const to = cur.cities[i + 1];
+            if (from && to) repriceLeg(from.name, to.name, from.dates.departure, cur.travelers);
+          }
           for (const i of work.hotels) {
             const c = cur.cities[i];
             if (c) searchVisitHotels({ name: c.name, arrival: c.dates.arrival, departure: c.dates.departure }, cur.travelers);
+          }
+          if ((work.outboundFrom || work.ret) && cur.origin) {
+            const cleared = {
+              ...cur,
+              origin: {
+                ...cur.origin,
+                ...(work.outboundFrom ? { outboundLeg: null } : {}),
+                ...(work.ret ? { returnLeg: null } : {}),
+              },
+            };
+            setTrip(cleared);
+            searchHomeLegs(
+              cleared,
+              { outbound: !!work.outboundFrom, return: work.ret },
+              work.outboundFrom ?? tripStartDate(cur) ?? cur.cities[0].dates.arrival,
+            );
           }
         });
       }),
@@ -711,7 +761,31 @@ function ResultsPageInner() {
 type DatedWork = {
   /** Stays whose dates moved — their hotels are searched for the new ones. */
   hotels: number[];
+  /** Inter-city legs (i → i + 1) whose travel day moved. */
+  legs: number[];
+  /** Re-search the outbound leaving this day (the first stay moved, the flight did not). */
+  outboundFrom: string | null;
+  /** Re-search the return (the last stay's departure moved, the flight did not). */
+  ret: boolean;
 };
+
+/**
+ * The same flight, whatever object it arrives in: an accepted AI proposal
+ * comes back from the server as a copy of the whole trip, so identity says
+ * nothing.
+ */
+function sameLeg(a: HomeLeg | null | undefined, b: HomeLeg | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return (
+    a.originAirport === b.originAirport &&
+    a.destAirport === b.destAirport &&
+    a.departDate === b.departDate &&
+    a.departTime === b.departTime &&
+    a.arriveDate === b.arriveDate &&
+    a.operator === b.operator &&
+    a.price === b.price
+  );
+}
 
 function datedWork(prev: Trip, next: Trip): DatedWork | null {
   // Only the same itinerary moving in time. Another trip, or stops added,
@@ -721,11 +795,92 @@ function datedWork(prev: Trip, next: Trip): DatedWork | null {
   if (prev.cities.some((c, i) => c.name !== next.cities[i].name)) return null;
 
   const hotels: number[] = [];
+  const legs: number[] = [];
   next.cities.forEach((c, i) => {
     const p = prev.cities[i];
     if (!p.dates || !c.dates) return;
     if (p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) hotels.push(i);
+    if (i < next.cities.length - 1 && p.dates.departure !== c.dates.departure) legs.push(i);
   });
   if (hotels.length === 0) return null;
-  return { hotels };
+
+  const origin = next.origin;
+  const last = next.cities.length - 1;
+  const firstMoved = prev.cities[0].dates.arrival !== next.cities[0].dates.arrival;
+  const prevStart = tripStartDate(prev);
+  const outboundFrom =
+    origin?.city &&
+    origin.outboundLeg &&
+    sameLeg(origin.outboundLeg, prev.origin?.outboundLeg) &&
+    firstMoved &&
+    prevStart
+      ? addDaysIso(prevStart, daysFrom(prev.cities[0].dates.arrival, next.cities[0].dates.arrival))
+      : null;
+  const ret = !!(
+    origin?.city &&
+    (next.returnToHome ?? true) &&
+    origin.returnLeg &&
+    sameLeg(origin.returnLeg, prev.origin?.returnLeg) &&
+    prev.cities[last].dates.departure !== next.cities[last].dates.departure
+  );
+  return { hotels, legs, outboundFrom, ret };
+}
+
+/**
+ * A compare-leg answer as the leg card shows it: the recommended mode as the
+ * transport, the other (when there is one) as its alternative. A search that
+ * found neither is the existing "no direct option" card, never a $0 flight
+ * still carrying the old day's price.
+ */
+function comparisonToTransport(
+  result: LegComparison | null | undefined,
+  from: string,
+  to: string,
+  date: string,
+): Transport {
+  const hhmm = (iso?: string | null) => (iso ? iso.split('T')[1]?.slice(0, 5) : undefined);
+  const duration = (mins: number) => `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`;
+  const flight = result?.flightOption ?? null;
+  const train = result?.trainOption ?? null;
+  const asTransport = (mode: 'flight' | 'train'): Transport | null => {
+    if (mode === 'flight' && flight) {
+      return {
+        mode,
+        operator: flight.carrier ?? '',
+        duration: duration(flight.durationMinutes ?? 0),
+        price: flight.price ?? 0,
+        from,
+        to,
+        departTime: hhmm(flight.departure),
+        arriveTime: hhmm(flight.arrival),
+        departDate: date,
+        layovers: flight.stops ?? 0,
+        bookingUrl: flight.bookingUrl || undefined,
+      };
+    }
+    if (mode === 'train' && train && train.price != null) {
+      return {
+        mode,
+        operator: train.operator ?? '',
+        duration: duration(train.durationMinutes ?? 0),
+        price: train.price,
+        from,
+        to,
+        departTime: hhmm(train.departure),
+        arriveTime: hhmm(train.arrival),
+        departDate: date,
+        layovers: 0,
+        bookingUrl: train.bookingUrl || undefined,
+      };
+    }
+    return null;
+  };
+  const preferTrain = result?.recommendation === 'train';
+  const main =
+    asTransport(preferTrain ? 'train' : 'flight') ?? asTransport(preferTrain ? 'flight' : 'train');
+  if (!main) {
+    return { mode: 'flight', operator: '', duration: '', price: 0, from, to, departDate: date, unavailable: true };
+  }
+  const other = asTransport(main.mode === 'flight' ? 'train' : 'flight');
+  return { ...main, alternatives: other ? [other] : [] };
 }

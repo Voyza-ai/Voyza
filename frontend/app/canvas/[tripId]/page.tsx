@@ -37,7 +37,7 @@ import { hotelFromResult } from '@/lib/hotelShape';
 import TripNameEditor from '@/components/shared/TripNameEditor';
 import { nextColorIndex, withColorIndices } from '@/lib/cityColors';
 import { readCanvasSync, clearCanvasSync } from '@/lib/canvasHandoff';
-import { outboundSearchDates } from '@/lib/tripSpan';
+import { outboundSearchDates, tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { summarizeCanvasChanges } from '@/lib/canvasDiff';
 import { Trip } from '@/lib/types';
@@ -1038,6 +1038,17 @@ function CanvasPageInner() {
   // constraints serialises exactly as before (unsaved-change detection
   // compares JSON).
   const applyChatTrip = useCallback((updated: Trip) => {
+    // An accepted AI date pin or shift moves stays; what was priced for the
+    // old dates is re-priced for the new ones (see repriceMovedDates).
+    const before = localStateRef.current;
+    if (before?.cities) {
+      const after = {
+        ...before,
+        cities: updated.cities,
+        trip: { ...(before.trip ?? {}), origin: updated.origin ?? before.trip?.origin ?? null },
+      };
+      queueMicrotask(() => repriceMovedDatesRef.current(before, after));
+    }
     setLocalState((prev: any) => {
       const constraints = updated.constraints ?? prev?.trip?.constraints;
       return {
@@ -1184,11 +1195,13 @@ function CanvasPageInner() {
     [],
   );
 
-  // The outbound is searched from the trip's start: the current outbound's
-  // departure day — on an overnight trip the day BEFORE the first stay, not
-  // the first stay's arrival this used to search from.
+  // `startDate`: the day the outbound must leave when the trip on screen no
+  // longer says it (an accepted AI date change moved the first stay; the
+  // trip's start moves by the same number of days). Otherwise the trip's
+  // start: the current outbound's departure day — on an overnight trip the
+  // day BEFORE the first stay, which is what this used to search from.
   const refreshHomeLegDirection = useCallback(
-    async (direction: 'outbound' | 'inbound', ls: any) => {
+    async (direction: 'outbound' | 'inbound', ls: any, startOverride?: string) => {
       const o = ls?.trip?.origin;
       const tripCities = ls?.cities ?? [];
       const first = tripCities[0];
@@ -1201,7 +1214,7 @@ function CanvasPageInner() {
       if (airports.length === 0) return;
       const span =
         direction === 'outbound' ? outboundSearchDates({ cities: tripCities, origin: o }) : null;
-      const startDate = span?.startDate ?? first.dates.arrival;
+      const startDate = startOverride ?? span?.startDate ?? first.dates.arrival;
       setHomeLegLoading(direction);
       try {
         const legs = await fetchHomeLegs({
@@ -1236,6 +1249,46 @@ function CanvasPageInner() {
   // a ref so it always sees this render's state setters and hotel search.
   const applyOutboundLandingRef = useRef(applyOutboundLanding);
   applyOutboundLandingRef.current = applyOutboundLanding;
+
+  /**
+   * Dates moved by an accepted AI proposal → re-price what was priced for
+   * the old ones, each with the canvas's own loading state: a leg whose day
+   * changed (connector spinner), a stay whose dates changed (its hotels),
+   * the outbound when the first stay moved (searched from the trip's start
+   * moved by the same days, landing rule applied) and the return when the
+   * last stay's departure moved (home-card spinner).
+   */
+  const repriceMovedDates = (beforeLs: any, afterLs: any) => {
+    const a: any[] = beforeLs?.cities ?? [];
+    const b: any[] = afterLs?.cities ?? [];
+    if (a.length === 0 || a.length !== b.length) return;
+    if (a.some((c, i) => c.name !== b[i].name)) return;
+    const travelers = afterLs?.trip?.travelers ?? beforeLs?.trip?.travelers ?? 1;
+    b.forEach((c, i) => {
+      const p = a[i];
+      if (!p?.dates || !c?.dates) return;
+      if (p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) {
+        enrichCityHotels(c.name, c.dates.arrival, c.dates.departure, { replace: true });
+      }
+      if (i < b.length - 1 && p.dates.departure !== c.dates.departure) {
+        repairLeg(c.name, b[i + 1].name, c.dates.departure, travelers);
+      }
+    });
+    const o = afterLs?.trip?.origin;
+    if (!o?.city) return;
+    const firstShift = daysFrom(a[0].dates.arrival, b[0].dates.arrival);
+    const prevStart = tripStartDate({ cities: a, origin: beforeLs?.trip?.origin ?? undefined });
+    if (firstShift !== 0 && o.outboundLeg && prevStart) {
+      refreshHomeLegDirection('outbound', afterLs, addDaysIso(prevStart, firstShift));
+    }
+    const lastBefore = a[a.length - 1].dates.departure;
+    const lastAfter = b[b.length - 1].dates.departure;
+    if (lastBefore !== lastAfter && o.returnLeg && (afterLs?.trip?.returnToHome ?? false)) {
+      refreshHomeLegDirection('inbound', afterLs);
+    }
+  };
+  const repriceMovedDatesRef = useRef(repriceMovedDates);
+  repriceMovedDatesRef.current = repriceMovedDates;
 
   useEffect(() => {
     if (!canManipulate || !localState?.cities || localState.cities.length === 0) return;
