@@ -27,6 +27,15 @@ app.use(
   cors({
     origin: env.CORS_ORIGIN.split(',').map((s) => s.trim()),
     credentials: true,
+    // Let the browser reuse a preflight answer for 2 hours. Every JSON POST
+    // from the frontend is preflighted, and with no Access-Control-Max-Age
+    // the browser keeps the answer for 5 s, so nearly every call paid an
+    // extra round trip first (~135 ms measured against production). 7200 s
+    // is Chrome's ceiling (Firefox allows a day). Caching is safe: the answer
+    // depends only on the origin list and cors()'s defaults, and an origin
+    // removed from the list still fails on the real response, which has to
+    // carry Access-Control-Allow-Origin too.
+    maxAge: 7200,
   }),
 );
 app.use(express.json({ limit: '1mb' }));
