@@ -137,6 +137,56 @@ describe('the artifact answers before the cache', () => {
   });
 });
 
+describe('every demo town and preset city, as the optimizer passes it', () => {
+  // Spelled as the presets and a planner would spell them. Each must answer
+  // without reading the cache or asking Duffel, so no production row and no
+  // fuzzy guess can reach a demo trip. Decisions: data/cityAirports.ts.
+  it.each([
+    ['Interlaken', 'ZRH'],
+    ['Lucerne', 'ZRH'],
+    ['Zermatt', 'ZRH'],
+    ['Cinque Terre', 'PSA'],
+    ['Positano', 'NAP'],
+    ['Lake Como', 'MIL'],
+    ['Hallstatt', 'SZG'],
+    ['Oxford', 'LON'],
+    ['Bath', 'BRS'],
+    ['Sintra', 'LIS'],
+    ['Siena', 'FLR'],
+    ['Hakone', 'TYO'],
+    ['Naxos', 'JNX'],
+    ['Mount Cook Village', 'ZQN'],
+    ['Playa del Carmen', 'CUN'],
+    ['Cozumel', 'CZM'],
+    ['Monteverde', 'SJO'],
+    ['La Fortuna', 'SJO'],
+    ['Manuel Antonio', 'SJO'],
+    ['Flåm', 'BGO'],
+    ['Guadalajara', 'GDL'],
+    ['Luxor', 'LXR'],
+    ['Koh Phi Phi', 'HKT'],
+    ['Krabi', 'KBV'],
+    ['Taichung', 'RMQ'],
+    ['Tainan', 'TNN'],
+  ])('%s -> %s', async (city, iata) => {
+    expect(await getIataCode(city)).toBe(iata);
+    expect(mockReads).toEqual([]);
+    expect(mockDuffel.suggestions.list).not.toHaveBeenCalled();
+  });
+
+  it('serves none of the four wrong rows production holds', async () => {
+    mockCache.siena = { iata_code: 'JHB', country: 'MY' };
+    mockCache.sintra = { iata_code: 'SQG', country: 'ID' };
+    mockCache.bath = { iata_code: 'BUT', country: 'BT' };
+    mockCache.monteverde = { iata_code: 'MVD', country: 'UY' };
+    suggest(DUFFEL.JHB, DUFFEL.SQG, DUFFEL.BUT, DUFFEL.MVD);
+    const served = await Promise.all(['Siena', 'Sintra', 'Bath', 'Monteverde'].map((c) => getIataCode(c)));
+    expect(served).toEqual(['FLR', 'LIS', 'BRS', 'SJO']);
+    expect(mockReads).toEqual([]);
+    expect(mockUpserts).toEqual([]);
+  });
+});
+
 describe('trip context reaches the resolver', () => {
   it('picks the reading the trip is near', async () => {
     // Bare Portland is Oregon, the more prominent reading. On a trip through

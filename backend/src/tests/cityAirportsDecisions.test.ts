@@ -32,7 +32,7 @@
  *
  *  - `expectDestination` THROWS when a query resolves to nothing, and a test
  *    proves it throws. Every single-case assertion goes through it.
- *  - the census asserts a COUNT as well as a set: 166 of 168 reproduced. An
+ *  - the census asserts a COUNT as well as a set: 176 of 194 reproduced. An
  *    empty or truncated artifact fails it, and so does an empty table.
  *  - the census comparator is re-run over a deliberately corrupted copy of
  *    the table, and is required to report the corruption. A comparator that
@@ -48,7 +48,7 @@ import { retiredAnswer } from '../data/retiredOriginAirports';
 import { buildIndex } from '../services/location/buildIndex';
 import { resolve } from '../services/location/resolve';
 import { resolveOriginAirports, setOriginIndex } from '../services/location/originAirports';
-import { resolveDestinationIata } from '../services/location/destinationAirport';
+import { locateCode, resolveDestinationIata } from '../services/location/destinationAirport';
 import type { Place, Resolution } from '../services/location/types';
 
 const index = buildIndex(locationArtifact);
@@ -142,8 +142,8 @@ describe('cityAirports decisions: the table and the artifact are both real', () 
   it('is not a stub on either side', () => {
     expect(locationArtifact.places.length).toBeGreaterThan(30_000);
     // 169 when the thirteen were decided; `lagos` has since gone to the
-    // resolver, and the reason is asserted below.
-    expect(Object.keys(CITY_AIRPORTS).length).toBe(168);
+    // resolver and 26 demo and preset keys have come in, both asserted below.
+    expect(Object.keys(CITY_AIRPORTS).length).toBe(194);
     expect(getStaticIata('Kyoto')).toBeTruthy();
   });
 
@@ -366,6 +366,106 @@ describe('cityAirports decisions: the two that stay hand-written', () => {
   });
 });
 
+// ─── The demo towns and the preset cities ────────────────────────────────────
+
+describe('cityAirports decisions: the demo towns and preset cities', () => {
+  /**
+   * Ten rows hold the artifact's own answer. Both sides are asserted, so a
+   * rebuild that moves one of these demo cities fails here.
+   */
+  const AGREED: Array<[key: string, iata: string]> = [
+    ['bath', 'BRS'],
+    ['sintra', 'LIS'],
+    ['siena', 'FLR'],
+    ['lucerne', 'ZRH'],
+    ['cozumel', 'CZM'],
+    ['la fortuna', 'SJO'],
+    ['luxor', 'LXR'],
+    ['krabi', 'KBV'],
+    ['taichung', 'RMQ'],
+    ['tainan', 'TNN'],
+  ];
+
+  it.each(AGREED)('"%s" is %s, and so is the artifact', (key, iata) => {
+    expect(getStaticIata(key)).toBe(iata);
+    expect(expectDestination(key)).toBe(iata);
+  });
+
+  /**
+   * Thirteen keys the artifact cannot answer: the reason each row exists.
+   * The code is asserted to be a live airport or metro in the right country,
+   * which is the whole of what Duffel's guesses got wrong.
+   */
+  const UNANSWERED: Array<[key: string, iata: string, country: string]> = [
+    ['interlaken', 'ZRH', 'CH'],
+    ['zermatt', 'ZRH', 'CH'],
+    ['cinque terre', 'PSA', 'IT'],
+    ['positano', 'NAP', 'IT'],
+    ['lake como', 'MIL', 'IT'],
+    ['hallstatt', 'SZG', 'AT'],
+    ['hakone', 'TYO', 'JP'],
+    ['mount cook village', 'ZQN', 'NZ'],
+    ['monteverde', 'SJO', 'CR'],
+    ['manuel antonio', 'SJO', 'CR'],
+    ['flåm', 'BGO', 'NO'],
+    ['flam', 'BGO', 'NO'],
+    ['koh phi phi', 'HKT', 'TH'],
+  ];
+
+  it.each(UNANSWERED)('"%s" is %s, in %s, where the artifact has nothing', (key, iata, country) => {
+    expect(getStaticIata(key)).toBe(iata);
+    expect(destinationIata(key)).toBeNull();
+    expect(locateCode(iata)?.country).toBe(country);
+  });
+
+  it('answers Flåm however its å arrives', () => {
+    expect(getStaticIata('Flåm')).toBe('BGO');
+    expect(getStaticIata('Flåm')).toBe('BGO'); // a + combining ring
+    expect(getStaticIata('Flam')).toBe('BGO');
+  });
+
+  it('naxos: the island\'s own JNX, not Santorini\'s JTR across the sea', () => {
+    expect(getStaticIata('naxos')).toBe('JNX');
+    expect(expectDestination('naxos')).toBe('JTR');
+    // The artifact's evidence, and why it cannot see the problem: JTR leads
+    // on rank (large over small) at 79 km; JNX is 2.8 km. Nothing in the data
+    // says there is sea in between.
+    const naxos = place('gn:256632');
+    const km = (iata: string) => naxos.airports.find((a) => a.iata === iata)?.km ?? NaN;
+    expect(naxos.airports[0].iata).toBe('JTR');
+    expect(km('JTR')).toBeGreaterThan(70);
+    expect(km('JNX')).toBeLessThan(5);
+  });
+
+  it('playa del carmen: Cancún by road, not Cozumel by ferry', () => {
+    expect(getStaticIata('playa del carmen')).toBe('CUN');
+    expect(expectDestination('playa del carmen')).toBe('CZM');
+    // Both "large"; CZM won on distance, and CZM is Cozumel's own airport.
+    expect(place('gn:3530103').airports[0].iata).toBe('CZM');
+    const playa = place('gn:3521342');
+    expect(playa.airports.map((a) => a.iata).slice(0, 2)).toEqual(['CZM', 'CUN']);
+  });
+
+  it('oxford: London, where a 0.8 km tie handed it to Luton', () => {
+    expect(getStaticIata('oxford')).toBe('LON');
+    expect(expectDestination('oxford')).toBe('LTN');
+    const oxford = place('gn:2640729');
+    const [first, second] = oxford.airports;
+    expect([first.iata, second.iata]).toEqual(['LTN', 'LHR']);
+    expect(Math.abs(first.km - second.km)).toBeLessThan(1);
+    // The metro code covers Heathrow and Gatwick, where the coaches run.
+    const london = chosenPlace(resolve('london', {}, index))!;
+    expect(london.metro).toBe('LON');
+    expect(iatas(london)).toEqual(expect.arrayContaining(['LHR', 'LGW']));
+  });
+
+  it('guadalajara: no row, because the trip has to be able to say Spain', () => {
+    expect(getStaticIata('guadalajara')).toBeUndefined();
+    expect(resolveDestinationIata('Guadalajara')).toBe('GDL');
+    expect(resolveDestinationIata('Guadalajara', { tripDestinationNames: ['Madrid'] })).toBe('MAD');
+  });
+});
+
 // ─── A row removed, so the trip can decide ───────────────────────────────────
 
 describe('cityAirports decisions: lagos goes to the resolver', () => {
@@ -400,32 +500,56 @@ describe('cityAirports decisions: lagos goes to the resolver', () => {
 
 // ─── The whole table, re-measured on every run ───────────────────────────────
 
+/** Every key whose row the artifact does not reproduce, sorted. */
+const LOAD_BEARING = [
+  'cinque terre',
+  'flam',
+  'flåm',
+  'hakone',
+  'hallstatt',
+  'interlaken',
+  'koh phi phi',
+  'kyiv',
+  'lake como',
+  'manuel antonio',
+  'monteverde',
+  'moscow',
+  'mount cook village',
+  'naxos',
+  'oxford',
+  'playa del carmen',
+  'positano',
+  'zermatt',
+];
+
 describe('cityAirports decisions: the census', () => {
-  it('reproduces 166 of the 168 entries, and names the two it does not', () => {
-    // The ratchet. A 14th disagreement — an upstream reclassification, a new
+  it('reproduces 176 of the 194 entries, and names the eighteen it does not', () => {
+    // The ratchet. A new disagreement — an upstream reclassification, a new
     // airport, a changed pin — fails here with the key named, instead of
     // surfacing when someone deletes the table.
     //
+    // The eighteen are every row that is load-bearing: the two hand-written
+    // cases, and sixteen keys from the demo-and-preset pass — thirteen the
+    // artifact cannot answer and three it answers wrongly. Each is asserted
+    // on its own terms above.
+    //
     // Non-vacuous twice over: the count fails against a truncated artifact,
-    // and against an empty one EVERY key would be listed rather than two.
+    // and against an empty one EVERY key would be listed rather than these.
     const { compared, reproduced, disagreed } = census();
-    expect(compared).toBe(168);
-    expect(reproduced).toBe(166);
-    expect(disagreed.map((d) => d.key).sort()).toEqual(['kyiv', 'moscow']);
+    expect(compared).toBe(194);
+    expect(reproduced).toBe(176);
+    expect(disagreed.map((d) => d.key).sort()).toEqual(LOAD_BEARING);
   });
 
-  it('would notice a 14th disagreement — the comparator is not hard-coded', () => {
+  it('would notice one more disagreement — the comparator is not hard-coded', () => {
     // Negative control on the census itself: corrupt one entry and require it
     // to be reported. A comparator that always returned the same two keys, or
     // one that compared nothing, cannot pass this.
     const corrupted = { ...CITY_AIRPORTS, kyoto: 'ZZZ', barcelona: 'ZZZ' };
     const { disagreed } = census(corrupted);
-    expect(disagreed.map((d) => d.key).sort()).toEqual([
-      'barcelona',
-      'kyiv',
-      'kyoto',
-      'moscow',
-    ]);
+    expect(disagreed.map((d) => d.key).sort()).toEqual(
+      [...LOAD_BEARING, 'barcelona', 'kyoto'].sort(),
+    );
     expect(disagreed.find((d) => d.key === 'kyoto')?.resolver).toBe('OSA');
   });
 });
