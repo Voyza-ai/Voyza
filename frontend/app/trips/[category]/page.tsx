@@ -100,7 +100,7 @@ export default async function CategoryPage({ params }: { params: { category: str
             '@type': 'Offer',
             price: p.costPerPerson,
             priceCurrency: 'USD',
-            description: `Estimated per person for ${p.nights} nights, excluding flights from home`,
+            description: `Estimated per person for ${p.nights} ${p.nights === 1 ? 'night' : 'nights'}, excluding flights from home`,
           },
           // The journey itself: from the origin hub to the first city.
           potentialAction: {
@@ -170,7 +170,9 @@ export default async function CategoryPage({ params }: { params: { category: str
                   <MiniRoute cities={p.data.cities} />
                 </div>
                 <div className="flex items-center justify-between mt-3 text-[12px]">
-                  <span className="text-gray-500">{p.nights} nights</span>
+                  <span className="text-gray-500">
+                    {p.nights} {p.nights === 1 ? 'night' : 'nights'}
+                  </span>
                   <span
                     className="font-semibold text-[#2563eb]"
                     title="Per person: 2 sharing a room – solo, excluding flights from home"

@@ -1283,7 +1283,7 @@ export default function PlanningChat() {
       const n = answers.travelers ?? parsed.travelers;
       missing.push({
         id: 'travelers',
-        question: `Just to confirm — is that ${n} people total (including you), or ${n} others (${n + 1} total)?`,
+        question: `Just to confirm — is that ${n} ${n === 1 ? 'person' : 'people'} total (including you), or ${n} ${n === 1 ? 'other' : 'others'} (${n + 1} total)?`,
         type: 'travelers',
       });
     }
