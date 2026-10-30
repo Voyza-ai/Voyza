@@ -8,7 +8,12 @@ import {
   mergeConstraints,
   TripConstraints,
 } from '../services/constraints';
-import { searchLegOptions, LegOption } from '../services/legOptions';
+import {
+  searchLegOptions,
+  LegOption,
+  normalizeTimeWindow,
+  NormalizedTimeWindow,
+} from '../services/legOptions';
 import { converse } from '../services/planConverse';
 import { compareLeg } from '../services/compareLeg';
 import { getCityCountry } from '../data/cityCountries';
@@ -965,16 +970,27 @@ ${JSON.stringify(tripSummary, null, 2)}
       const currentPrice = currentTransport?.price ?? 0;
 
       // Only set_transport_window has a window; show_transport_options
-      // passes no bounds (we still use the same search path).
-      const window =
-        toolName === 'set_transport_window'
-          ? {
-              earliestDepart: toolInput.earliestDepart ?? null,
-              latestDepart: toolInput.latestDepart ?? null,
-              earliestArrive: toolInput.earliestArrive ?? null,
-              latestArrive: toolInput.latestArrive ?? null,
-            }
-          : undefined;
+      // passes no bounds (we still use the same search path). Bounds are
+      // normalised to HH:MM here ("5pm" → "17:00") so the filter, the
+      // reply and the stored constraint all use the same value. A bound
+      // we can't read is answered as such BEFORE searching — it used to be
+      // ignored while the reply claimed it (B10).
+      let window: NormalizedTimeWindow | undefined;
+      if (toolName === 'set_transport_window') {
+        const normalized = normalizeTimeWindow({
+          earliestDepart: toolInput.earliestDepart,
+          latestDepart: toolInput.latestDepart,
+          earliestArrive: toolInput.earliestArrive,
+          latestArrive: toolInput.latestArrive,
+        });
+        if (!normalized.ok) {
+          return res.json({
+            type: 'answer',
+            reply: `I couldn\'t set a time window on ${fromCity.name} → ${toCity.name}: ${JSON.stringify(normalized.raw)} isn\'t a clock time I can use for the ${WINDOW_BOUND_LABEL[normalized.bound]}. Give me one like 17:00 or 5pm.`,
+          });
+        }
+        window = normalized.window;
+      }
 
       const legSearch = await searchLegOptions({
         from: fromCity.name,
@@ -1143,6 +1159,14 @@ ${JSON.stringify(tripSummary, null, 2)}
     });
   }),
 );
+
+/** How a window bound reads in a reply. */
+const WINDOW_BOUND_LABEL = {
+  earliestDepart: 'earliest departure',
+  latestDepart: 'latest departure',
+  earliestArrive: 'earliest arrival',
+  latestArrive: 'latest arrival',
+} as const;
 
 /**
  * Human-readable phrase describing a time window, e.g.

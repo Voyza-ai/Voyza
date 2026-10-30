@@ -61,6 +61,7 @@ jest.mock('../services/compareLeg', () => ({
 import planRouter from '../routes/plan';
 import { errorHandler } from '../middleware/error';
 import { getAnthropicSafe } from '../services/anthropic';
+import { normalizeTimeOfDay, searchLegOptions } from '../services/legOptions';
 const { searchFlights } = require('../services/flights');
 
 function createApp() {
@@ -211,5 +212,75 @@ describe('B9 — leg tools only act on legs in the trip order', () => {
   it('keeps the existing reply for a city that is not in the trip at all', async () => {
     const res = await chat(app, 'compare_modes', { from: 'Rome', to: 'Paris', explanation: 'x' });
     expect(res.body).toEqual({ type: 'answer', reply: "I couldn't find a Rome → Paris leg in your trip." });
+  });
+});
+
+describe('B10 — time windows', () => {
+  const app = createApp();
+  const windowTool = (bounds: Record<string, any>) => ({
+    from: 'Rome', to: 'Venice', earliestDepart: null, latestDepart: null,
+    earliestArrive: null, latestArrive: null, explanation: 'x', ...bounds,
+  });
+
+  it('reads "5pm" as 17:00 instead of silently dropping it', async () => {
+    // Both Rome → Venice options (07:15, 16:00) leave before 17:00.
+    const res = await chat(app, 'set_transport_window', windowTool({ earliestDepart: '5pm' }));
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('departing after 17:00');
+    expect(res.body.reply).not.toContain('5pm');
+  });
+
+  it('filters and stores the normalised bound ("3pm" keeps only the 16:00)', async () => {
+    const res = await chat(app, 'set_transport_window', windowTool({ earliestDepart: '3pm' }));
+    expect(res.body.type).toBe('leg_refresh');
+    expect(res.body.refresh.options.map((o: any) => o.departTime)).toEqual(['16:00']);
+    expect(res.body.refresh.updatedConstraints.transport_windows).toEqual([
+      { from: 'Rome', to: 'Venice', earliestDepart: '15:00', latestDepart: null, earliestArrive: null, latestArrive: null },
+    ]);
+    expect(res.body.reply).toContain('departing after 15:00');
+  });
+
+  it.each(['evening', '25:00', '5', '13pm'])('refuses an unreadable bound %p, says so, and searches nothing', async (bad) => {
+    const res = await chat(app, 'set_transport_window', windowTool({ earliestDepart: bad }));
+    expect(res.body.type).toBe('answer');
+    expect(res.body.refresh).toBeUndefined();
+    expect(res.body.reply).toContain(`"${bad}"`);
+    expect(searchFlights).not.toHaveBeenCalled();
+  });
+
+  it('treats a blank bound as unset, not as unreadable', async () => {
+    const res = await chat(app, 'set_transport_window', windowTool({ earliestDepart: '15:00', latestArrive: '' }));
+    expect(res.body.type).toBe('leg_refresh');
+    expect(res.body.refresh.updatedConstraints.transport_windows[0].latestArrive).toBeNull();
+  });
+});
+
+describe('normalizeTimeOfDay', () => {
+  it.each([
+    ['17:00', '17:00'], ['7:05', '07:05'], ['17:00:00', '17:00'], ['00:00', '00:00'],
+    ['5pm', '17:00'], ['5 PM', '17:00'], ['5:30pm', '17:30'], ['5 p.m.', '17:00'],
+    ['12am', '00:00'], ['12pm', '12:00'], ['11:59 pm', '23:59'], ['noon', '12:00'], [' 9am ', '09:00'],
+  ])('%p → %p', (raw, want) => {
+    expect(normalizeTimeOfDay(raw)).toBe(want);
+  });
+
+  it.each(['5', '17', 'evening', 'midnight', '24:00', '25:00', '13pm', '0am', '5:60pm', '', null, 17])(
+    'rejects %p',
+    (raw) => {
+      expect(normalizeTimeOfDay(raw)).toBeNull();
+    },
+  );
+});
+
+describe('searchLegOptions with an unreadable bound', () => {
+  it('throws instead of ignoring it (a caller that skipped the route\'s check)', async () => {
+    await expect(
+      searchLegOptions({ from: 'Rome', to: 'Venice', date: '2026-12-10', travelers: 1, window: { earliestDepart: 'evening' } }),
+    ).rejects.toThrow(/earliestDepart "evening"/);
+  });
+
+  it('still filters on a 12-hour bound when called directly', async () => {
+    const r = await searchLegOptions({ from: 'Rome', to: 'Venice', date: '2026-12-10', travelers: 1, window: { earliestDepart: '3pm' } });
+    expect(r.options.map((o) => o.departTime)).toEqual(['16:00']);
   });
 });
