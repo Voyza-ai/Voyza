@@ -1,6 +1,6 @@
 import './mocks';
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import CanvasPage from '@/app/canvas/[tripId]/page';
 import { getCanvasSession, saveCanvas, getCanvasSuggestions, joinCanvasByLink, postCanvasSuggestion, compareLeg } from '@/lib/api';
 import { buildCity } from './fixtures';
@@ -350,6 +350,31 @@ describe('CanvasPage', () => {
       ).toBeInTheDocument();
       fireEvent.click(screen.getByText('Take me back to My Trips'));
       expect(mockPush).toHaveBeenCalledWith('/history');
+      getCanvasRole.mockResolvedValue({ role: 'editor' });
+    });
+
+    it('someone who was never on the trip is never told they were removed', async () => {
+      // Final verification: a signed-in non-member opening someone's canvas
+      // link first got "You don't have access to this trip", then — on the
+      // next role check (tab focus, reconnect or the 25s poll) — "You've been
+      // removed from this trip", which never happened.
+      const { getCanvasRole } = jest.requireMock('@/lib/api');
+      getCanvasRole.mockResolvedValue({ role: null });
+      mockedGetSession.mockRejectedValue(new Error('Not a member of this trip'));
+
+      render(<CanvasPage />);
+      expect(
+        await screen.findByText("You don't have access to this trip", {}, { timeout: 3000 }),
+      ).toBeInTheDocument();
+      // Return to the tab: the role check runs (and confirms ~1.5s later).
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 1800));
+      });
+      expect(screen.queryByText("You've been removed from this trip")).not.toBeInTheDocument();
+      expect(screen.getByText("You don't have access to this trip")).toBeInTheDocument();
       getCanvasRole.mockResolvedValue({ role: 'editor' });
     });
 

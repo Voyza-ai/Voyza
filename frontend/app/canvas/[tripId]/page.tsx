@@ -63,6 +63,10 @@ function CanvasPageInner() {
   const storeCities = storeTrip?.cities;
 
   const [role, setRole] = useState<string>('viewer');
+  // The server confirmed a role for this user on this trip at some point —
+  // `role` itself starts as 'viewer', so it can't tell a member from someone
+  // who was never on the trip.
+  const hadRoleRef = useRef(false);
   // Access gate overlay:
   //  'removed'   — the owner removed this user while they were on the canvas
   //  'no_access' — a fresh load by a signed-in user with no role (removed
@@ -227,6 +231,7 @@ function CanvasPageInner() {
 
         const { session, role: userRole } = await getCanvasSession(tripId, fallbackCities);
         setRole(userRole);
+        if (userRole) hadRoleRef.current = true;
 
         // Inject origin/returnToHome if the DB doesn't have it
         const sessionState = { ...session.state };
@@ -708,9 +713,12 @@ function CanvasPageInner() {
         ({ role: fresh } = await getCanvasRole(tripId));
       }
       if (!fresh) {
-        setRemoved(true);
+        // "Removed" only for someone who had a role here; a signed-in
+        // visitor who was never on the trip just has no access.
+        setAccessGate(hadRoleRef.current ? 'removed' : 'no_access');
         return;
       }
+      hadRoleRef.current = true;
       if (fresh !== roleRef.current) {
         roleRef.current = fresh;
         setRole(fresh);
