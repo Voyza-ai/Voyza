@@ -111,6 +111,14 @@ export type HomeLeg = {
   departTime: string | null;
   arriveTime: string | null;
   departDate: string;
+  /**
+   * Local calendar date the flight LANDS (the date part of Duffel's
+   * `arriving_at`, which is wall-clock time at the destination airport).
+   * Differs from departDate on overnight flights: JFK 19:25 Dec 8 → Paris
+   * 12:00 Dec 9. Optional — absent when Duffel gave no arrival timestamp,
+   * and on HomeLegs saved before this field existed.
+   */
+  arriveDate?: string;
   stops: number;
   bookingUrl: string | null;
   /**
@@ -680,6 +688,8 @@ type HomeFlightOffer = {
   carrierCode: string;
   departTime: string | null;
   arriveTime: string | null;
+  /** YYYY-MM-DD local landing date, or null when Duffel gave no arrival. */
+  arriveDate: string | null;
   stops: number;
   bookingUrl: string | null;
   originAirport: string;
@@ -751,6 +761,13 @@ async function searchHomeFlights(params: {
     const hhmm = iso.split('T')[1]?.slice(0, 5);
     return hhmm ?? null;
   };
+  // The DATE half that fmtTime drops. Duffel's timestamps are local wall
+  // clock with no offset, so this is the calendar date at that airport —
+  // for `arriving_at`, the day the traveller actually lands.
+  const fmtDate = (iso: string | null | undefined): string | null => {
+    const match = /^(\d{4}-\d{2}-\d{2})T/.exec(iso ?? '');
+    return match ? match[1] : null;
+  };
 
   return all.slice(0, limit).map(({ offer: o, homeAirport }) => ({
     price: Number(o.price ?? 0),
@@ -760,6 +777,7 @@ async function searchHomeFlights(params: {
     carrierCode: o.carrierCode ?? '',
     departTime: fmtTime(o.departure),
     arriveTime: fmtTime(o.arrival),
+    arriveDate: fmtDate(o.arrival),
     stops: Number(o.stops ?? 0),
     bookingUrl: o.bookingUrl ?? null,
     originAirport: reverse ? cityIata : homeAirport,
@@ -891,6 +909,9 @@ export async function buildHomeLeg(params: {
     departTime: o.departTime,
     arriveTime: o.arriveTime,
     departDate: params.date,
+    // Only when known: the field is optional on the wire, and every reader
+    // of a HomeLeg saved before it existed treats absence as "same day".
+    ...(o.arriveDate ? { arriveDate: o.arriveDate } : {}),
     stops: o.stops,
     bookingUrl: o.bookingUrl,
   });
@@ -1266,7 +1287,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // Step 6: assign arrival/departure dates for the best ordering using
   // the per-city nights array. This keeps the displayed calendar
   // aligned with the dates we actually queried during scoring. (Computed
-  // after the tail: nothing above reads it.)
+  // after the tail: it needs the built outbound flight.)
   const dates: Record<string, { arrival: string; departure: string }> = {};
   let cursor = startDate;
 
@@ -1276,6 +1297,39 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     dates[cityName] = { arrival, departure };
     cursor = departure;
   });
+
+  // The first stay starts the day the outbound LANDS, not the day it
+  // leaves. An evening flight to Europe arrives the next morning: JFK 19:25
+  // Dec 8 → Paris 12:00 Dec 9 used to put Paris's arrival on Dec 8, so the
+  // hotel search checked in on Dec 8 (a $362-405 night spent on the plane
+  // on the owner's trip) and the schedule planned a Paris lunch and evening
+  // while the traveller was still at JFK.
+  //
+  // Decided default (owner can override): the trip's return date and every
+  // inter-city leg date stay as priced; city 0 simply gets fewer nights.
+  // Clamped to keep it at least ONE night: a 0-night stay would send the
+  // hotel search checkin === checkout and break every reader that assumes
+  // arrival < departure. In that narrow case (city 0 had a single night, or
+  // the flight lands 2+ days later and eats all of them) the stay keeps its
+  // last night, which can still overlap the flight — the price of keeping
+  // every priced leg date and the return date as they are. A landing before
+  // the start date (westbound over the date line) keeps the start date.
+  const firstCity = bestOrdering[0];
+  const landed = outboundLeg?.arriveDate;
+  if (firstCity && landed && dates[firstCity]) {
+    const latestArrival = addDays(dates[firstCity].departure, -1);
+    if (landed > latestArrival) {
+      logger.warn('Outbound lands too late to give the first city a full night', {
+        city: firstCity,
+        landed,
+        departure: dates[firstCity].departure,
+      });
+    }
+    const arrival = landed < startDate ? startDate : landed > latestArrival ? latestArrival : landed;
+    // max(startDate, …) as well: latestArrival can only fall before the
+    // start date if city 0 had zero nights, which the request schema rejects.
+    dates[firstCity] = { ...dates[firstCity], arrival: arrival < startDate ? startDate : arrival };
+  }
 
   const publicRoutes = topRoutes.map(toPublicRoute);
   return {

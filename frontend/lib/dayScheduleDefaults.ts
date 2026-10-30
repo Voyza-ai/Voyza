@@ -473,7 +473,13 @@ export function planDay(params: {
 
   const placements: PlanPlacement[] = [];
   const dropped: PlanDrop[] = [];
-  const occupied: Range[] = busyRanges.map(([s, e]): Range => [s, e]);
+  // A block that ends before it starts wraps midnight — an overnight flight
+  // or train rendered as "19:25–12:00". It occupies the rest of THIS day.
+  // `mergeRanges` drops any range with end <= start, so passing it through
+  // as-is made the flight invisible: the planner put a 3-hour evening
+  // activity at 19:40 on the day of a 19:25 departure (production trip,
+  // JFK → Paris, 2026-10-29).
+  const occupied: Range[] = busyRanges.map(([s, e]): Range => [s, e < s ? 24 * 60 : e]);
 
   const bounds = (item: PlanItem): Range => [
     Math.max(dayStart, item.earliestStart),
