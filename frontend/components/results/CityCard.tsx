@@ -27,6 +27,18 @@ type CityCardProps = {
   onClick: () => void;
 };
 
+/**
+ * Whether the city has a stay to show. A city whose hotel search came back
+ * empty carries a placeholder — name '' (planner, saved trip) or
+ * "Select hotel" (canvas) at $0 — which is not a stay. Same rule as the
+ * canvas card (CanvasCityCard).
+ */
+export function hasStay(city: City): boolean {
+  if (city.customHotel) return true;
+  const h = city.hotels[city.selectedHotelIndex] ?? city.hotel;
+  return !!h?.name && h.name !== 'Select hotel';
+}
+
 const formatDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   const date = new Date(y, (m || 1) - 1, d || 1);
@@ -99,24 +111,26 @@ export default function CityCard({
         >
           {String(index + 1).padStart(2, '0')}
         </span>
-        <motion.div
-          key={`stay-${stayTotal}`}
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25, ease: 'easeOut' }}
-          className="flex flex-col items-end px-2.5 py-1 rounded-lg border tabular-nums"
-          style={{
-            background: 'rgba(255,255,255,0.65)',
-            borderColor: 'rgba(0,0,0,0.12)',
-          }}
-        >
-          <span className="text-[9px] uppercase tracking-wider leading-none mb-0.5" style={{ color: `${color.text}99` }}>
-            Stay
-          </span>
-          <span className="text-[15px] font-bold leading-none" style={{ color: color.text }}>
-            ${stayTotal.toLocaleString()}
-          </span>
-        </motion.div>
+        {hasStay(city) && (
+          <motion.div
+            key={`stay-${stayTotal}`}
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="flex flex-col items-end px-2.5 py-1 rounded-lg border tabular-nums"
+            style={{
+              background: 'rgba(255,255,255,0.65)',
+              borderColor: 'rgba(0,0,0,0.12)',
+            }}
+          >
+            <span className="text-[9px] uppercase tracking-wider leading-none mb-0.5" style={{ color: `${color.text}99` }}>
+              Stay
+            </span>
+            <span className="text-[15px] font-bold leading-none" style={{ color: color.text }}>
+              ${stayTotal.toLocaleString()}
+            </span>
+          </motion.div>
+        )}
       </div>
 
       {/* Header */}
@@ -262,37 +276,43 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
         )}
       </div>
 
-      {/* Animated hotel content — slides in on each change */}
-      <div className="relative overflow-hidden">
-        <motion.div
-          key={animKey}
-          initial={{ opacity: 0, x: slideDir * 28 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold leading-tight truncate" style={{ color: color.text }}>
-                {eff.name}
-              </div>
-              {eff.area && (
-                <div className="text-[12px] mt-0.5 truncate" style={{ color: `${color.text}99` }}>{eff.area}</div>
-              )}
-            </div>
-            <div className="text-right flex-shrink-0">
-              {eff.rating != null && (
-                <div className="flex items-center justify-end gap-1 text-[#fbbf24] text-xs">
-                  <Star size={11} fill="currentColor" />
-                  <span>{eff.rating}</span>
+      {/* No hotel found: the "No options found" line the AI panel uses for
+          a mode with nothing found — not a blank name at $0/night. */}
+      {!hasStay(city) ? (
+        <div className="text-[12px] text-gray-400 italic">No options found</div>
+      ) : (
+        /* Animated hotel content — slides in on each change */
+        <div className="relative overflow-hidden">
+          <motion.div
+            key={animKey}
+            initial={{ opacity: 0, x: slideDir * 28 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold leading-tight truncate" style={{ color: color.text }}>
+                  {eff.name}
                 </div>
-              )}
-              <div className="text-xs mt-0.5 font-medium" style={{ color: `${color.text}aa` }}>
-                ${perNight.toLocaleString()}/night
+                {eff.area && (
+                  <div className="text-[12px] mt-0.5 truncate" style={{ color: `${color.text}99` }}>{eff.area}</div>
+                )}
+              </div>
+              <div className="text-right flex-shrink-0">
+                {eff.rating != null && (
+                  <div className="flex items-center justify-end gap-1 text-[#fbbf24] text-xs">
+                    <Star size={11} fill="currentColor" />
+                    <span>{eff.rating}</span>
+                  </div>
+                )}
+                <div className="text-xs mt-0.5 font-medium" style={{ color: `${color.text}aa` }}>
+                  ${perNight.toLocaleString()}/night
+                </div>
               </div>
             </div>
-          </div>
-        </motion.div>
-      </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

@@ -210,6 +210,12 @@ export type Trip = {
       savings: number;
     }>;
   };
+  /**
+   * The optimizer really priced nearby start dates for THESE dates and
+   * nothing cheaper held up — the only case the results header may say
+   * "Best price for these dates". Cleared when the dates change.
+   */
+  dateShiftChecked?: boolean;
   createdAt?: string;
   ownerId?: string;
   /**

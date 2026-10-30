@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { converse, ConverseResponse } from '@/lib/api';
 import { useTripStore } from '@/store/tripStore';
+import { humanDay, humanDayRange } from '@/lib/dateHelpers';
 import VibePills from './VibePills';
 import BudgetPicker from './BudgetPicker';
 
@@ -370,7 +371,11 @@ export default function ConversationalPlanner({
     {
       icon: Calendar,
       label: 'Dates',
-      value: a.dateRange?.start ? `${a.dateRange.start} → ${a.dateRange.end}` : '—',
+      value: a.dateRange?.start
+        ? a.dateRange.end && a.dateRange.end !== a.dateRange.start
+          ? humanDayRange(a.dateRange.start, a.dateRange.end)
+          : humanDay(a.dateRange.start)
+        : '—',
     },
     { icon: Users, label: 'Travelers', value: a.travelers ? String(a.travelers) : '—' },
     {

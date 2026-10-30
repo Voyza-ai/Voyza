@@ -602,3 +602,56 @@ describe('offers whose price cannot be real are dropped', () => {
     expect(offers[0].price).toBe(14.99);
   });
 });
+
+/**
+ * Duffel's test mode sells some routes through its own fictional airline,
+ * "Duffel Airways" (IATA ZZ). The owner's production trip had it on two of
+ * the three return-flight alternatives, so opening the card in a demo showed
+ * a fake airline. A live token never returns it.
+ */
+describe('the Duffel test-mode airline is not shown when a real airline is offered', () => {
+  const offerBy = (id: string, carrier: { name: string; iata_code: string }, amount: string) => ({
+    id,
+    total_amount: amount,
+    total_currency: 'USD',
+    slices: [
+      {
+        duration: 'PT1H30M',
+        segments: [
+          segment({
+            departingAt: '2026-08-01T08:00:00',
+            arrivingAt: '2026-08-01T08:30:00',
+            originIata: 'LHR',
+            originTimeZone: 'Europe/London',
+            destinationIata: 'JFK',
+            destinationTimeZone: 'America/New_York',
+            duration: 'PT1H30M',
+            carrier,
+          }),
+        ],
+      },
+    ],
+  });
+  const ZZ = { name: 'Duffel Airways', iata_code: 'ZZ' };
+  const BA = { name: 'British Airways', iata_code: 'BA' };
+
+  let n = 0;
+  const search = () =>
+    searchFlights({ origin: 'LHR', destination: 'JFK', date: `2026-08-${String(++n).padStart(2, '0')}`, travelers: 1 });
+
+  it('drops Duffel Airways offers, even cheaper ones, when a real airline is in the results', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValue({
+      data: { offers: [offerBy('zz1', ZZ, '120.00'), offerBy('ba', BA, '310.00'), offerBy('zz2', ZZ, '180.00')] },
+    });
+    const offers = await search();
+    expect(offers.map((o) => o.carrier)).toEqual(['British Airways']);
+  });
+
+  it('keeps them when they are all there is, so the leg still has a price (test mode only)', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValue({
+      data: { offers: [offerBy('zz1', ZZ, '120.00'), offerBy('zz2', ZZ, '180.00')] },
+    });
+    const offers = await search();
+    expect(offers.map((o) => o.carrierCode)).toEqual(['ZZ', 'ZZ']);
+  });
+});

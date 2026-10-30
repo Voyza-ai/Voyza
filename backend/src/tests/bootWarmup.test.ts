@@ -70,6 +70,29 @@ it('builds the index once, right after listen, before any request asks for it â€
   }
 }, 30_000);
 
+it('warms the Browse preset checks right after the index, before any /api/presets request', async () => {
+  // The first /api/presets after a deploy otherwise spent ~0.6s resolving
+  // every generated preset's gateway airport (and in CI the first request of
+  // presetsServeProd.test.ts ran past Jest's 5s with the index build on top).
+  let server!: Server;
+  let warm!: jest.Mock;
+  jest.isolateModules(() => {
+    jest.doMock('../services/presets', () => {
+      const actual = jest.requireActual('../services/presets');
+      return { ...actual, warmPresetChecks: jest.fn(actual.warmPresetChecks) };
+    });
+    warm = require('../services/presets').warmPresetChecks;
+    ({ server } = require('../index'));
+  });
+  try {
+    await listening(server);
+    await until(() => warm.mock.calls.length > 0, 'the boot-time preset warm-up');
+    expect(warm).toHaveBeenCalledTimes(1);
+  } finally {
+    await close(server);
+  }
+}, 30_000);
+
 it('a failed build is logged, does not take the server down, and the first request builds it instead', async () => {
   let server!: Server;
   let errorLog!: jest.SpyInstance;

@@ -6,7 +6,7 @@ import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin, LocateFixed, L
 import { useTripStore } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { interpretPlan, optimizeTrip, searchHotels, searchActivities, searchRestaurants, suggestDestinations, OptimizeResult, ActivitySuggestion, RestaurantSuggestion } from '@/lib/api';
+import { ApiError, interpretPlan, optimizeTrip, searchHotels, searchActivities, searchRestaurants, suggestDestinations, OptimizeResult, ActivitySuggestion, RestaurantSuggestion } from '@/lib/api';
 import { Trip, City, Transport, Restaurant, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
@@ -25,6 +25,7 @@ import { originAirportsForCity, type LocationAnswer } from '@/lib/locationResolv
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
+import { formatMinutes, humanDay, humanDayRange } from '@/lib/dateHelpers';
 import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
@@ -75,6 +76,51 @@ function originAirportsFromAnswer(answer: LocationAnswer): string[] {
 function originAirportsForOrigin(query: string, answer: LocationAnswer): string[] {
   const fromTable = originAirportsForCity(query);
   return fromTable.length > 0 ? fromTable : originAirportsFromAnswer(answer);
+}
+
+// ── Copy the planner says back (D-19, D-11/E14) ─────────────────────────
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+// Dates in words ("Jan 10 – Jan 17, 2027") — shared with the conversational
+// planner's recap, so they live in lib/dateHelpers.
+export { humanDay, humanDayRange };
+
+const CONNECTION_FAILED = "I couldn't reach the travel service. Check your connection and try again.";
+const UNREADABLE_ANSWER = "I couldn't make sense of one of your answers. Try rephrasing the dates or budget?";
+/** zod's own wording ("Required", "Expected number…") names a field, not a
+ *  traveller's mistake; a check's custom message ("Each city can appear only
+ *  once") is written to be read. */
+const ZOD_DEFAULT = /^(Required|Invalid\b|Expected\b|String must|Number must|Array must|Too (small|big))/;
+
+/**
+ * What the chat says when planning fails. A server that ANSWERED with a 4xx
+ * said what was wrong — a repeated city, a past start date, too many
+ * requests — so its own words are shown (its `error` sentence; for an older
+ * generic "ValidationError" 400, the field messages in `details`). "Check your connection" is kept for a request
+ * that never got an answer, the only case where it is true: a 400 used to
+ * read "Try rephrasing the dates or budget?" whatever the field was.
+ */
+export function plannerErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+    // /api/optimize now explains a refused trip in one sentence in `error`
+    // ("Paris appears twice in your trip — …"); that wins over the bare
+    // field messages it still sends in `details`.
+    if (err.message && err.message !== 'ValidationError') return err.message;
+    const fields = err.details && typeof err.details === 'object' ? Object.values(err.details as object) : [];
+    const said = Array.from(
+      new Set(fields.flat().filter((m): m is string => typeof m === 'string' && !ZOD_DEFAULT.test(m))),
+    );
+    if (said.length > 0) return said.map((m) => (/[.!?]$/.test(m) ? m : `${m}.`)).join(' ');
+    return UNREADABLE_ANSWER;
+  }
+  const raw = err instanceof Error ? err.message : 'Something went wrong.';
+  // fetch() rejects without a response: Chrome "Failed to fetch", Firefox
+  // "NetworkError when attempting to fetch resource.", Safari "Load failed".
+  if (!(err instanceof ApiError) && /failed to fetch|networkerror|load failed|network request failed/i.test(raw)) {
+    return CONNECTION_FAILED;
+  }
+  if (raw === 'ValidationError' || raw.toLowerCase().includes('validation')) return UNREADABLE_ANSWER;
+  return raw;
 }
 
 type StepType = 'intent' | 'text' | 'vibes' | 'dates' | 'travelers' | 'budget' | 'notes' | 'origin' | 'roundtrip' | 'nights';
@@ -773,9 +819,14 @@ export default function PlanningChat() {
       const nights = Math.max(1, Math.round(ms / 86_400_000));
       setAnswer('nights', nights);
     }
+    // Echo what was understood, in words: a typed range used to come back
+    // as its start alone, "2027-01-10" (D-19). Picker phrases ("Next
+    // month") aren't dates and echo as they are.
+    const echo =
+      !flexible && ISO_DAY.test(end) && start !== end ? humanDayRange(start, end) : humanDay(start);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: start },
+      { id: nextId(), role: 'user', content: echo },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -987,11 +1038,7 @@ export default function PlanningChat() {
 
       const mode: 'flight' | 'train' = useFlight ? 'flight' : 'train';
       const durationMin = picked.durationMinutes ?? 0;
-      const hours = Math.floor(durationMin / 60);
-      const mins = durationMin % 60;
-      const durationStr = hours > 0
-        ? `${hours}h ${mins > 0 ? `${mins}m` : ''}`
-        : `${mins}m`;
+      const durationStr = formatMinutes(durationMin);
       const departIso = picked.departure ?? '';
       const arriveIso = picked.arrival ?? '';
       const departTime = departIso
@@ -1008,14 +1055,12 @@ export default function PlanningChat() {
       if (other && other.price != null) {
         const otherMode: 'flight' | 'train' = useFlight ? 'train' : 'flight';
         const otherDur = other.durationMinutes ?? 0;
-        const oH = Math.floor(otherDur / 60);
-        const oM = otherDur % 60;
         const otherDepartIso = other.departure ?? '';
         const otherArriveIso = other.arrival ?? '';
         alternatives.push({
           mode: otherMode,
           operator: otherMode === 'flight' ? (other.carrier ?? '') : (other.operator ?? ''),
-          duration: oH > 0 ? `${oH}h ${oM > 0 ? `${oM}m` : ''}` : `${oM}m`,
+          duration: formatMinutes(otherDur),
           price: other.price ?? 0,
           from: fromCity,
           to: toCity,
@@ -1104,6 +1149,7 @@ export default function PlanningChat() {
       cities,
       savingsTips: [],
       dateShiftSuggestion: result.dateShiftSuggestion,
+      dateShiftChecked: result.dateShiftChecked === true,
       origin,
       returnToHome: answers.returnToHome ?? true,
       // Carried through so the results page can say which reading of an
@@ -1221,7 +1267,7 @@ export default function PlanningChat() {
       const n = answers.travelers ?? parsed.travelers;
       missing.push({
         id: 'travelers',
-        question: `Just to confirm — is that ${n} people total (including you), or ${n} others (${n + 1} total)?`,
+        question: `Just to confirm — is that ${n} ${n === 1 ? 'person' : 'people'} total (including you), or ${n} ${n === 1 ? 'other' : 'others'} (${n + 1} total)?`,
         type: 'travelers',
       });
     }
@@ -1639,17 +1685,7 @@ export default function PlanningChat() {
       setTrip(trip);
       router.push('/results');
     } catch (err: unknown) {
-      const raw = err instanceof Error ? err.message : 'Something went wrong.';
-      // Translate technical errors into human-readable messages
-      const friendly = (() => {
-        if (raw === 'ValidationError' || raw.toLowerCase().includes('validation')) {
-          return "I couldn't make sense of one of your answers. Try rephrasing the dates or budget?";
-        }
-        if (raw.toLowerCase().includes('fetch')) {
-          return "I couldn't reach the travel service. Check your connection and try again.";
-        }
-        return raw;
-      })();
+      const friendly = plannerErrorMessage(err);
       setFindTripError(friendly);
       setMessages((prev) => {
         // Avoid stacking identical error bubbles if the user spams the button.
@@ -1841,17 +1877,7 @@ export default function PlanningChat() {
       // No country selection needed — go straight to optimize
       await runOptimizeAndBuild(parsed);
     } catch (err: unknown) {
-      const raw = err instanceof Error ? err.message : 'Something went wrong.';
-      // Translate technical errors into human-readable messages
-      const friendly = (() => {
-        if (raw === 'ValidationError' || raw.toLowerCase().includes('validation')) {
-          return "I couldn't make sense of one of your answers. Try rephrasing the dates or budget?";
-        }
-        if (raw.toLowerCase().includes('fetch')) {
-          return "I couldn't reach the travel service. Check your connection and try again.";
-        }
-        return raw;
-      })();
+      const friendly = plannerErrorMessage(err);
       setFindTripError(friendly);
       setMessages((prev) => {
         // Avoid stacking identical error bubbles if the user spams the button.
@@ -2037,6 +2063,10 @@ export default function PlanningChat() {
   // behaves like a normal resume and the user finishes in the chat.
   const autorunRef = useRef(false);
   const autorunArmedRef = useRef(false);
+  // Why this autorun was staged. /browse's "Plan a similar trip" says
+  // 'similar-trip'; the results header's "Cheaper start dates" menu stages
+  // no reason, and its run really is the same trip at shifted dates.
+  const autorunReasonRef = useRef<'similar-trip' | 'date-shift'>('date-shift');
   const [autorunPending, setAutorunPending] = useState(false);
 
   // Detect + restore on mount. The sessionStorage snapshot is the primary
@@ -2063,8 +2093,10 @@ export default function PlanningChat() {
     autorunArmedRef.current = true; // suppress the delayed intent picker
 
     if (snapshot) {
+      const { autorunReason, ...staged } = snapshot;
+      if (autorunReason === 'similar-trip') autorunReasonRef.current = 'similar-trip';
       const set = useTripStore.getState().setAnswer;
-      for (const [key, value] of Object.entries(snapshot)) {
+      for (const [key, value] of Object.entries(staged)) {
         if (value !== undefined && value !== null) set(key as any, value as any);
       }
     }
@@ -2088,7 +2120,12 @@ export default function PlanningChat() {
       {
         id: nextId(),
         role: 'assistant',
-        content: `Recalculating your trip starting ${answers.dateRange?.start ?? 'on the new date'} — searching flights, trains, and hotels with the shifted dates...`,
+        // Only a date shift says "shifted dates" (D-11/E14): a similar trip
+        // re-plans a preset's route at today's prices from ~30 days out.
+        content:
+          autorunReasonRef.current === 'similar-trip'
+            ? `Planning your trip starting ${answers.dateRange?.start ? humanDay(answers.dateRange.start) : 'soon'} — searching flights, trains, and hotels at today’s prices...`
+            : `Recalculating your trip starting ${answers.dateRange?.start ? humanDay(answers.dateRange.start) : 'on the new date'} — searching flights, trains, and hotels with the shifted dates...`,
       },
     ]);
     handleFindTrip();

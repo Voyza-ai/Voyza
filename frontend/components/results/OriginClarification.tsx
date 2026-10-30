@@ -140,7 +140,9 @@ export default function OriginClarification({
                     style={{ borderColor: '#e5e7eb' }}
                   >
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-[12px] font-medium text-gray-900 truncate">
+                      {/* Wraps, never truncates: what tells the readings
+                          apart ("…, Maine", "…, Philippines") is at the end. */}
+                      <span className="text-[12px] font-medium text-gray-900 min-w-0">
                         {candidate.label}
                       </span>
                       <span className="flex items-baseline gap-2 flex-shrink-0 text-[10px]">

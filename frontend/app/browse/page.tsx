@@ -305,6 +305,9 @@ function BrowsePageInner() {
       returnToHome: true,
       planningMode: 'destination',
       vibe: presetVibes(preset)[0],
+      // Read by the planner for its status line — no date was shifted here —
+      // and never stored as an answer.
+      autorunReason: 'similar-trip',
       // No budget is staged. The preset's quote is not a budget the user set,
       // and it leaves out the home flights: staged as one, it capped hotels at
       // 40% of a too-small figure (36 of 37 bundled preset hotels sat above
@@ -501,14 +504,17 @@ function BrowsePageInner() {
                       {preset.travelers}
                     </span>
                   </div>
+                  {/* The quote is hotels + transport BETWEEN cities: the flights
+                      from home are priced live when the trip is saved, so the
+                      saved trip's total is higher (E10). Said where it's shown. */}
                   <span
                     className="text-[12px] font-semibold"
                     style={{ color: '#2563eb' }}
-                    title="Per person: 2 sharing a room – solo"
+                    title="Per person: 2 sharing a room – solo, excluding flights from home"
                   >
                     ${presetPricePerPersonRange(preset).low.toLocaleString()}–$
                     {presetPricePerPersonRange(preset).high.toLocaleString()}
-                    <span className="font-normal text-gray-400"> /person</span>
+                    <span className="font-normal text-gray-400"> /person · excl. home flights</span>
                   </span>
                 </div>
               </div>
@@ -557,7 +563,7 @@ function BrowsePageInner() {
           </div>
           {(isFiltering || anyFilterActive) && results.length > 0 && (
             <div className="text-[11px] text-gray-400 text-center mt-2.5">
-              {results.length} of {catalog.length} itineraries
+              {results.length} of {catalog.length} {catalog.length === 1 ? 'itinerary' : 'itineraries'}
               {isFiltering ? ' match — best match first' : ''}
             </div>
           )}
@@ -594,7 +600,9 @@ function BrowsePageInner() {
                   Trip length
                 </label>
                 <span className="text-[11px] font-medium text-gray-700">
-                  {draft.maxNights >= NIGHTS_MAX ? 'Any' : `≤ ${draft.maxNights} nights`}
+                  {draft.maxNights >= NIGHTS_MAX
+                    ? 'Any'
+                    : `≤ ${draft.maxNights} ${draft.maxNights === 1 ? 'night' : 'nights'}`}
                 </span>
               </div>
               <input
@@ -609,7 +617,7 @@ function BrowsePageInner() {
                 className="w-full cursor-pointer accent-[#2563eb]"
               />
               <div className="flex justify-between text-[9px] text-gray-400 mt-1">
-                <span>{NIGHTS_MIN} nights</span>
+                <span>{NIGHTS_MIN} {NIGHTS_MIN === 1 ? 'night' : 'nights'}</span>
                 <span>Any</span>
               </div>
             </div>
@@ -655,7 +663,7 @@ function BrowsePageInner() {
             </button>
 
             <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-3">
-              {results.length} of {catalog.length} itineraries shown
+              {results.length} of {catalog.length} {catalog.length === 1 ? 'itinerary' : 'itineraries'} shown
               {filtersDirty && (
                 <span className="block mt-1 text-amber-600">
                   Unapplied changes — click Apply
@@ -819,15 +827,20 @@ function BrowsePageInner() {
                   </h2>
                   <div className="flex gap-4 mt-2 text-white/90 text-[12px]">
                     <span className="flex items-center gap-1">
-                      <MapPin size={12} /> {selected.cities.length} cities
+                      <MapPin size={12} /> {selected.cities.length}{' '}
+                      {selected.cities.length === 1 ? 'city' : 'cities'}
                     </span>
                     <span className="flex items-center gap-1">
-                      <Moon size={12} /> {presetNights(selected)} nights
+                      <Moon size={12} /> {presetNights(selected)}{' '}
+                      {presetNights(selected) === 1 ? 'night' : 'nights'}
                     </span>
                     <span className="flex items-center gap-1">
                       <Users size={12} /> {travelers} {travelers === 1 ? 'traveler' : 'travelers'}
                     </span>
-                    <span className="font-semibold">~${presetCostFor(selected, travelers).toLocaleString()}</span>
+                    <span className="font-semibold">
+                      ~${presetCostFor(selected, travelers).toLocaleString()}
+                      <span className="font-normal"> · excl. home flights</span>
+                    </span>
                   </div>
                 </div>
 
@@ -895,8 +908,10 @@ function BrowsePageInner() {
                   </div>
                 </div>
 
-                {/* Footer */}
-                <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
+                {/* Footer — wraps to two rows when the party controls and the
+                    actions don't fit one (they didn't at 1440px: "Plan a
+                    similar trip" broke onto three lines); no label breaks. */}
+                <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-x-3 gap-y-3">
                   {/* Ask party size before saving — the built itinerary uses it */}
                   <div className="flex items-center gap-3">
                     <div
@@ -943,7 +958,7 @@ function BrowsePageInner() {
                         size={13}
                         style={{ color: useLocation ? '#2563eb' : '#9ca3af' }}
                       />
-                      <span className="text-[12px] text-gray-600 hidden sm:inline">
+                      <span className="text-[12px] text-gray-600 hidden sm:inline whitespace-nowrap">
                         Use my location
                       </span>
                       <span
@@ -958,10 +973,10 @@ function BrowsePageInner() {
                       </span>
                     </button>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 ml-auto">
                     <button
                       onClick={() => setSelected(null)}
-                      className="px-4 py-2 rounded-lg text-[13px] font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+                      className="px-4 py-2 rounded-lg text-[13px] font-medium text-gray-600 hover:bg-gray-100 transition-colors whitespace-nowrap"
                     >
                       Close
                     </button>
@@ -969,7 +984,7 @@ function BrowsePageInner() {
                       onClick={() => planSimilar(selected)}
                       disabled={saving || locating || planning}
                       title="Re-plan this route with today's live prices"
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all hover:bg-blue-50 disabled:opacity-50"
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap"
                       style={{ color: '#2563eb', border: '1px solid #2563eb' }}
                     >
                       {planning ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
@@ -978,7 +993,7 @@ function BrowsePageInner() {
                     <button
                       onClick={() => saveAndOpen(selected)}
                       disabled={saving || locating || planning}
-                      className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-50"
+                      className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-50 whitespace-nowrap"
                       style={{ background: '#2563eb' }}
                     >
                       {saving || locating ? (

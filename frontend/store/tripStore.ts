@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Trip, PlanningAnswers, City, CustomHotel, Transport, Restaurant, ScheduledEvent } from '@/lib/types';
+import { firstStayArrival, tripStartDate } from '@/lib/tripSpan';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -215,9 +216,30 @@ export const useTripStore = create<TripStore>((set) => ({
       const newAlts = alts.filter((_, i) => i !== alternativeIndex);
       newAlts.unshift(currentFlat);
       const newLeg = { ...chosen, alternatives: newAlts };
+      // The first stay starts the day the outbound LANDS. Swapping an
+      // overnight flight for a same-day one (or back) moves that day, and the
+      // stay with it — a night gained or lost in the first city. The search
+      // date every alternative shares is the trip's start. The results page
+      // re-searches the city's hotels when its dates change.
+      let cities = state.currentTrip.cities;
+      const first = cities[0];
+      if (direction === 'outbound' && first?.dates?.departure) {
+        const startDate = chosen.departDate || tripStartDate(state.currentTrip);
+        const arrival = startDate
+          ? firstStayArrival({
+              startDate,
+              firstDeparture: first.dates.departure,
+              landed: chosen.arriveDate ?? chosen.departDate,
+            })
+          : undefined;
+        if (arrival && arrival !== first.dates.arrival) {
+          cities = [{ ...first, dates: { ...first.dates, arrival } }, ...cities.slice(1)];
+        }
+      }
       return {
         currentTrip: {
           ...state.currentTrip,
+          cities,
           origin: { ...state.currentTrip.origin, [slot]: newLeg },
         },
       };

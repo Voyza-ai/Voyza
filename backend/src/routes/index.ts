@@ -60,7 +60,9 @@ router.post(
   '/search/compare-leg',
   asyncHandler(async (req, res) => {
     const input = compareLegSchema.parse(req.body);
-    const result = await compareLeg(input);
+    // Every caller of this route puts the flight on a card (the results
+    // page and canvas re-pricing a leg after a date change): it needs times.
+    const result = await compareLeg({ ...input, display: true });
     res.json(result);
   }),
 );
@@ -71,6 +73,13 @@ const cityItem = z.union([
   z.string().min(1),
   z.object({ name: z.string().min(1), country: z.string().optional() }),
 ]);
+
+// Field-level messages, kept in `details` as they were; the sentence a
+// traveller reads is built from them in `optimizeErrorMessage`.
+const FEWER_NIGHTS_THAN_CITIES = 'Need at least one night per city';
+const CITY_REPEATED = 'Each city can appear only once';
+const START_DATE_PAST = 'Start date is in the past';
+const NOTHING_TO_TRAVEL = 'Need at least 2 cities, or 1 city with an origin set';
 
 const optimizeSchema = z.object({
   // Minimum 1 city — single-destination trips (typical of vibe-first
@@ -109,7 +118,7 @@ const optimizeSchema = z.object({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['totalNights'],
-      message: 'Need at least one night per city',
+      message: FEWER_NIGHTS_THAN_CITIES,
     });
   }
 
@@ -125,7 +134,7 @@ const optimizeSchema = z.object({
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['cities'],
-        message: 'Each city can appear only once',
+        message: CITY_REPEATED,
       });
       break;
     }
@@ -141,15 +150,113 @@ const optimizeSchema = z.object({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['startDate'],
-      message: 'Start date is in the past',
+      message: START_DATE_PAST,
+    });
+  }
+
+  // One city and no home: nothing to travel between. optimize() refuses this
+  // too, but with a plain Error, which reached the planner as a 500
+  // "Internal Server Error". Same rule as its `hasOrigin`.
+  if (input.cities.length === 1 && !(input.origin && input.origin.trim().length > 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['cities'],
+      message: NOTHING_TO_TRAVEL,
     });
   }
 });
 
+/** "2026-01-05" → "Jan 5, 2026"; the input itself when it is not a date. */
+function niceDate(iso: unknown): string {
+  const s = String(iso ?? '');
+  const t = Date.parse(`${s}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !Number.isFinite(t)) return s;
+  return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
+
+/**
+ * The one sentence a traveller reads when /api/optimize refuses their trip.
+ *
+ * Every 400 here used to say 'ValidationError', which lib/api.ts throws as the
+ * error's message and the planner turned into "I couldn't make sense of one of
+ * your answers. Try rephrasing the dates or budget?" — for a trip whose only
+ * problem was visiting Paris twice. Each problem the planner can actually send
+ * now names what is wrong and what to do instead. `details` keeps zod's
+ * field-level messages, so the response shape is what it was.
+ *
+ * One sentence for the FIRST problem, in the order a traveller would fix them
+ * (where, when, how long, who), rather than a list: the planner shows it in a
+ * chat bubble. Kept clear of the words "validation" and "fetch", which the
+ * planner's error handler rewrites into its generic messages.
+ */
+export function optimizeErrorMessage(error: z.ZodError, body: unknown): string {
+  const issues = error.issues;
+  const on = (field: string) => issues.filter((i) => i.path[0] === field);
+  const raw = (body ?? {}) as Record<string, unknown>;
+  const cityNames = Array.isArray(raw.cities)
+    ? raw.cities.map((c: any) => String(typeof c === 'string' ? c : c?.name ?? '').trim())
+    : [];
+
+  const cities = on('cities');
+  if (cities.length > 0) {
+    if (cities.some((i) => i.code === z.ZodIssueCode.too_small && i.path.length === 1)) {
+      return 'Add at least one destination to plan a trip.';
+    }
+    if (cities.some((i) => i.message === CITY_REPEATED)) {
+      const seen = new Map<string, string>();
+      for (const name of cityNames) {
+        const key = name.toLowerCase();
+        const first = seen.get(key);
+        if (first !== undefined) {
+          return `${first} appears twice in your trip — to spend more time there, add nights to your first ${first} stay instead of returning to it.`;
+        }
+        seen.set(key, name);
+      }
+    }
+    if (cities.some((i) => i.message === NOTHING_TO_TRAVEL)) {
+      return 'Tell us where you are starting from, or add a second city, so there is a journey to plan.';
+    }
+    if (cities.some((i) => i.path.length > 1)) {
+      return 'One of your destinations is blank — enter a city name for each stop.';
+    }
+  }
+
+  const start = on('startDate');
+  if (start.length > 0) {
+    if (start.some((i) => i.message !== START_DATE_PAST)) return 'Choose a start date for your trip.';
+    return `Your start date (${niceDate(raw.startDate)}) has already passed — pick today or a later date.`;
+  }
+
+  const nights = on('totalNights');
+  if (nights.length > 0) {
+    if (nights.some((i) => i.message === FEWER_NIGHTS_THAN_CITIES)) {
+      const n = Number(raw.totalNights);
+      return `Your ${n}-night trip has ${cityNames.length} cities — each city needs at least one night, so add nights or remove a city.`;
+    }
+    if (nights.some((i) => i.code === z.ZodIssueCode.too_big)) {
+      return 'Trips can be at most 180 nights — choose a shorter date range.';
+    }
+    return 'Choose how many nights your trip lasts — at least one per city.';
+  }
+
+  if (on('travelers').length > 0) return 'A trip needs at least one traveler.';
+  if (on('budget').length > 0) return 'Set a budget above $0, or skip the budget question.';
+  if (on('origin').length > 0 || on('originAirports').length > 0) {
+    return 'We could not read your home city — choose where you are starting from again.';
+  }
+  return 'Something in this trip request could not be read — check your destinations and dates, then try again.';
+}
+
 router.post(
   '/optimize',
   asyncHandler(async (req, res) => {
-    const input = optimizeSchema.parse(req.body);
+    const parsed = optimizeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      // Same status and shape as the ZodError path in errorHandler
+      // (`error` + `details`), with a sentence in `error`.
+      throw new AppError(400, optimizeErrorMessage(parsed.error, req.body), parsed.error.flatten().fieldErrors);
+    }
+    const input = parsed.data;
     // Normalize: strings become { name } objects
     const cities = input.cities.map((c) =>
       typeof c === 'string' ? { name: c } : c,

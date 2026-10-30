@@ -261,10 +261,12 @@ describe('generation validation', () => {
 });
 
 describe('GET /api/presets', () => {
-  it('serves the bundled catalog when the table does not exist yet', async () => {
+  it('serves the bundled curated catalog when the table does not exist yet', async () => {
     const res = await request(app).get('/api/presets');
     expect(res.status).toBe(200);
-    expect(res.body.presets.length).toBe(bundledCatalog().length);
+    // A generated preset is only served once its row has been checked
+    // (presetsServeProd.test.ts); with no table, the curated trips stand alone.
+    expect(res.body.presets.length).toBe(bundledCatalog().filter((b) => b.source === 'curated').length);
     expect(res.body.editorial.staffPicks).toContain('japan-golden-route');
     expect(res.body.editorial.trending).toEqual([]);
     expect(res.body.categories.length).toBeGreaterThan(0);

@@ -176,3 +176,35 @@ describe('leg_price_cache keying', () => {
     expect(rows.map((r) => r.travelers)).toEqual([2, 4]);
   });
 });
+
+/**
+ * A cached flight row stores price and duration only — no departure,
+ * arrival or stops. Fine for ranking orderings; wrong for a card a person
+ * reads: after an accepted AI date change the results page re-prices legs
+ * through /api/search/compare-leg, and the re-priced pills read
+ * "—:— → —:—" (final integrated verification).
+ */
+describe('a caller that shows the flight gets its times', () => {
+  it('display: true skips the cached flight row and returns a searched offer with times', async () => {
+    searchFlights.mockResolvedValue([flightOffer(600)]);
+    await compareLeg(leg(2)); // writes the row
+    searchFlights.mockClear();
+
+    const shown = await compareLeg({ ...leg(2), display: true });
+
+    expect(searchFlights).toHaveBeenCalledTimes(1);
+    expect(shown.flightOption?.departure).toBe('2026-06-01T08:00:00Z');
+    expect(shown.flightOption?.arrival).toBe('2026-06-01T09:10:00Z');
+  });
+
+  it('without display the cached row still serves (the optimizer ranks on price alone)', async () => {
+    searchFlights.mockResolvedValue([flightOffer(600)]);
+    await compareLeg(leg(2));
+    searchFlights.mockClear();
+
+    const ranked = await compareLeg(leg(2));
+
+    expect(searchFlights).not.toHaveBeenCalled();
+    expect(ranked.flightOption?.departure).toBe('');
+  });
+});

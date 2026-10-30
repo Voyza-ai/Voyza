@@ -73,7 +73,9 @@ describe('the city panel shows the party total once', () => {
     const { container } = render(<CityDetailPanel trip={trip} cityIndex={0} {...navProps} />);
     const text = container.textContent ?? '';
 
-    expect(text).not.toMatch(/3 rooms/);
+    // No room MULTIPLIER on the price. The traveller line does name the
+    // three rooms the price covers (stayRooms.test.tsx).
+    expect(text).not.toMatch(/× 3 rooms/);
     expect(text).not.toContain('$2,700');
     expect(text).toContain('Stay total$900');
   });
@@ -81,14 +83,15 @@ describe('the city panel shows the party total once', () => {
   it('without maxGuests renders exactly what it rendered before the multiplier was removed', () => {
     // Every string below was rendered identically by the code with the
     // multiplier, because with `maxGuests` unset it computed one room and
-    // every `roomsNeeded > 1` branch was false.
+    // every `roomsNeeded > 1` branch was false — except the room count,
+    // which now says the 3 rooms the price is for (it said "1 room").
     const trip = sixInRome(partyHotel());
     useTripStore.setState({ currentTrip: trip });
     const { container } = render(<CityDetailPanel trip={trip} cityIndex={0} {...navProps} />);
     const text = container.textContent ?? '';
 
     expect(text).toContain('Stay total$900· 3 nights');
-    expect(text).toContain('6 travelers3 nights · 1 room');
+    expect(text).toContain('6 travelers3 nights · 3 rooms');
     expect(text).toContain('$300/night × 3 nights$900');
     expect(text).toContain('Total$900');
     expect(text).toContain('Per person (6)$150/person');

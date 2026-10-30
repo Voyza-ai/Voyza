@@ -13,10 +13,13 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
  */
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** The response's `details`, when it sent any (a 400's field messages). */
+  details?: unknown;
+  constructor(status: number, message: string, details?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -48,7 +51,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.error ?? `API error ${res.status}`);
+    throw new ApiError(res.status, body.error ?? `API error ${res.status}`, body.details);
   }
 
   return res.json();
@@ -179,6 +182,8 @@ export type OptimizeResult = {
   dates: Record<string, { arrival: string; departure: string }>;
   /** Present when shifting the trip by ±1 or ±2 days saves meaningful money. */
   dateShiftSuggestion?: DateShiftSuggestion;
+  /** Nearby start dates were really priced (see the optimizer's OptimizeResult). */
+  dateShiftChecked?: boolean;
   /** Home anchor legs. Present when `origin` was passed to the request. */
   outboundLeg?: import('./types').HomeLeg | null;
   returnLeg?: import('./types').HomeLeg | null;

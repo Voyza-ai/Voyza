@@ -13,6 +13,8 @@ import {
   type PresetData,
   type PresetFacts,
 } from './presetTaxonomy';
+import { gatewayAirport, validateGenerated, type GenerationCombo } from './presetGeneration';
+import { sameAirportArea } from './location/sameAirportArea';
 import curated from '../data/presets/curated.json';
 import generated from '../data/presets/generated.json';
 import editorial from '../data/presets/editorial.json';
@@ -20,10 +22,13 @@ import editorial from '../data/presets/editorial.json';
 /**
  * Browse catalog: curated + AI-generated preset trips.
  *
- * Source of truth is the preset_trips table (migration 013). Until that
- * table exists — or if the DB read fails — the catalog is served from the
- * bundled JSON (curated.json + generated.json), so /browse and the SEO
- * pages never go dark. Engagement counts are simply zero in that mode.
+ * The preset_trips table (migration 013) says which presets are published
+ * and holds their engagement counts. What a preset SAYS — its cities,
+ * hotels, legs and prices — is always served from the bundled JSON
+ * (curated.json / generated.json); see servableCatalog for why and for
+ * which generated presets qualify. Without the table (or if the read
+ * fails) the curated trips are served from the bundle alone, so /browse
+ * and the SEO pages never go dark.
  */
 
 export type PresetSummary = PresetFacts & {
@@ -165,7 +170,178 @@ function trendingScores(now: Date): Promise<Map<string, number>> {
   return entry.scores;
 }
 
-/** Published catalog, DB first, bundled JSON as fallback. */
+// ── What the catalog serves (decided at read time) ──────────────────────
+//
+// On 2026-10-29 at 06:47 UTC a price refresh ran against the shared
+// database with Duffel's TEST token, before PRESET_REFRESH_ENABLED existed,
+// and rewrote all 20 rows: 18 legs became "Duffel Airways" (Duffel's
+// sandbox carrier, IATA ZZ) at sandbox fares, other flights took sandbox
+// fares under real airline names (Bangkok → Siem Reap "British Airways" $43,
+// Cairo → Luxor "Nile Air" $44), two trains became flights (Lisbon → Sintra
+// $462, 17 h), and hotel rates and categories moved with them. A row
+// records nothing about where its prices came from, so no row's `data`
+// can be served. The bundled JSON is the reviewed copy in the repo.
+
+/** Duffel's sandbox airline: "Duffel Airways", IATA ZZ. Duffel sells no
+ *  real flights under its own name, so any leg naming it is test data. */
+const SANDBOX_CARRIER_NAME = /\bduffel\b/i;
+const SANDBOX_CARRIER_CODE = /^ZZ(\s*\d+)?$/i;
+
+/**
+ * The legs of a stored row that came from Duffel's test mode:
+ *  - any leg naming the sandbox carrier (name, IATA code or flight number),
+ *    or marked `live_mode: false`;
+ *  - any FLIGHT the row prices differently from its bundled copy. Nothing
+ *    but the refresh rewrites a seeded row's legs, and its flight fares
+ *    have only ever come from Duffel's test token (production has never
+ *    had a live one) — so a re-priced flight is a sandbox fare whatever
+ *    airline it names.
+ */
+export function sandboxLegs(stored: PresetData, bundled: PresetData | undefined): string[] {
+  const out: string[] = [];
+  (stored?.cities ?? []).forEach((city, i) => {
+    const t: any = city.transportOut;
+    if (!t) return;
+    const leg = `${city.name} → ${stored.cities[i + 1]?.name ?? '?'}`;
+    const names = [t.operator, t.carrier, t.carrierCode, t.flightNumber].filter(
+      (v): v is string => typeof v === 'string',
+    );
+    if (names.some((n) => SANDBOX_CARRIER_NAME.test(n) || SANDBOX_CARRIER_CODE.test(n.trim())) || t.live_mode === false) {
+      out.push(`${leg}: "${t.operator}" is Duffel's test-mode carrier`);
+      return;
+    }
+    const twin = bundled?.cities[i]?.name === city.name ? bundled.cities[i].transportOut : undefined;
+    if (t.mode === 'flight' && !(twin?.mode === 'flight' && twin.operator === t.operator && twin.price === t.price)) {
+      const was = twin ? `${twin.mode} ${twin.operator} $${twin.price}` : 'no leg';
+      out.push(`${leg}: flight re-priced to ${t.operator} $${t.price} (generated as ${was}) by the test-mode refresh`);
+    }
+  });
+  return out;
+}
+
+/**
+ * Why a GENERATED preset's bundled copy can't be served, judged on the
+ * bundle alone (so computed once per slug):
+ *  - the generator's own validation (validateGenerated), replayed with the
+ *    combo the preset was generated for — the check the script runs before
+ *    it keeps a trip;
+ *  - a "flight" between two places the planner reaches through the same
+ *    airport (sameAirportArea — the planner's own rule) is ground travel:
+ *    it is never searched as a flight, so the model-written fare and
+ *    airline on it can't be priced or checked.
+ */
+const bundleProblems = new Map<string, string[]>();
+
+/**
+ * Run the generated presets' checks ahead of the first request. They resolve
+ * every generated city's gateway airport through the location index, ~0.6s
+ * on first use even with the index already built — paid by the first
+ * /browse visitor after a deploy unless boot does it (index.ts, right after
+ * building the index). The answers depend only on the bundled data, so they
+ * are computed once per process and cached.
+ */
+export function warmPresetChecks(): void {
+  for (const { data, source } of bundledCatalog()) {
+    if (source === 'generated') generatedBundleProblems(data);
+  }
+}
+
+function generatedBundleProblems(p: PresetData): string[] {
+  const cached = bundleProblems.get(p.slug);
+  if (cached) return cached;
+  const problems: string[] = [];
+  const tag = p.searchTags?.find((t) => t.startsWith('combo:'));
+  if (!tag) problems.push('no generation combo recorded');
+  else {
+    const [vibe, region, duration, tier] = tag.slice('combo:'.length).split('|');
+    const raw = { ...p, budgetEstimateTotal: (p.budgetEstimate ?? 0) * p.travelers, coverImageWikipediaTitle: p.title };
+    const combo = { vibe, region, duration, tier } as GenerationCombo;
+    problems.push(...validateGenerated(raw, combo, 0).problems.map((x) => `generator check: ${x}`));
+  }
+  p.cities.forEach((city, i) => {
+    const next = p.cities[i + 1];
+    if (!next || city.transportOut?.mode !== 'flight') return;
+    const a = gatewayAirport(city.name, city.country);
+    const b = gatewayAirport(next.name, next.country);
+    if (a && b && sameAirportArea(a.iata, b.iata)) {
+      problems.push(
+        `${city.name} → ${next.name}: a "${city.transportOut.operator}" flight, but both are reached through ${a.iata} (ground travel, never searched as a flight)`,
+      );
+    }
+  });
+  bundleProblems.set(p.slug, problems);
+  return problems;
+}
+
+const BUNDLED = new Map(bundledCatalog().map((b) => [b.data.slug, b]));
+
+/**
+ * Which published presets are served, and from what.
+ *
+ * Curated: always, from curated.json — the owner's hand-built trips, never
+ * the drifted row.
+ *
+ * Generated: every price in generated.json was written by Claude when the
+ * trip was generated (generatePresets.ts asks the model for "realistic
+ * current USD prices" and calls no fare or hotel API) — estimates like the
+ * curated ones, not sandbox fares, but nobody built or checked them. So a
+ * generated preset is served, from its bundled copy, only when its row
+ * exists and carries no sandbox leg (sandboxLegs) AND its bundled copy has
+ * no problem (generatedBundleProblems). With no rows (table missing / read
+ * failed) there is nothing to check, and the catalog is curated-only — as
+ * the frontend's own offline fallback already is. On production's rows of
+ * 2026-10-29 none of the 9 qualifies.
+ *
+ * A row never contributes itinerary data, derived facts or refreshedAt —
+ * only whether it is published, its engagement counts and staff-pick flag.
+ */
+export function servableCatalog(dbRows: any[] | null): {
+  rows: any[];
+  withheld: Array<{ slug: string; reasons: string[] }>;
+} {
+  const rows: any[] = [];
+  const withheld: Array<{ slug: string; reasons: string[] }> = [];
+  const candidates = dbRows ?? bundledCatalog().map(({ data }) => ({ slug: data.slug, missingRow: true }));
+  for (const row of candidates) {
+    const slug: string = row.slug ?? row.data?.slug;
+    const bundled = BUNDLED.get(slug);
+    if (!bundled) {
+      withheld.push({ slug, reasons: ['not in the bundled catalog, so nothing trustworthy to serve'] });
+      continue;
+    }
+    if (bundled.source === 'generated') {
+      const reasons = row.missingRow
+        ? ['no database row to check it against']
+        : [...sandboxLegs(row.data, bundled.data), ...generatedBundleProblems(bundled.data)];
+      if (reasons.length) {
+        withheld.push({ slug, reasons });
+        continue;
+      }
+    }
+    rows.push({
+      ...toRow(bundled.data, bundled.source),
+      staff_pick: row.staff_pick ?? STAFF_PICKS.has(slug),
+      // The bundled data was never refreshed; it must not say it was.
+      refreshed_at: null,
+      clone_count: row.clone_count ?? 0,
+      view_count: row.view_count ?? 0,
+      impression_count: row.impression_count ?? 0,
+    });
+  }
+  return { rows, withheld };
+}
+
+/** Say once per process why each preset is held back. */
+const reportedWithheld = new Set<string>();
+function reportWithheld(withheld: Array<{ slug: string; reasons: string[] }>): void {
+  for (const w of withheld) {
+    if (reportedWithheld.has(w.slug)) continue;
+    reportedWithheld.add(w.slug);
+    logger.warn('presets: not serving preset', { slug: w.slug, reasons: w.reasons });
+  }
+}
+
+/** Published catalog: the DB says what is published, the bundle what it says. */
 export async function loadCatalog(now = new Date()): Promise<PresetSummary[]> {
   try {
     const { data, error } = await getSupabase()
@@ -175,12 +351,14 @@ export async function loadCatalog(now = new Date()): Promise<PresetSummary[]> {
     if (error) throw new Error(error.message);
     if (data && data.length > 0) {
       const scores = await trendingScores(now);
-      return data.map((row: any) => summarize(row, scores.get(row.slug) ?? 0));
+      const { rows, withheld } = servableCatalog(data);
+      reportWithheld(withheld);
+      return rows.map((row: any) => summarize(row, scores.get(row.slug) ?? 0));
     }
   } catch (err: any) {
     logger.warn('presets: DB catalog unavailable, serving bundled JSON', { message: err?.message });
   }
-  return bundledCatalog().map(({ data, source }) => summarize({ ...toRow(data, source) }));
+  return servableCatalog(null).rows.map((row) => summarize(row));
 }
 
 export type CategoryRow = {

@@ -136,6 +136,9 @@ describe('ConversationalPlanner', () => {
     });
     await sendText('from New York');
     expect(await screen.findByText('Your trip so far')).toBeInTheDocument();
+    // Dates in words, like the rest of the planner — not "2026-10-01 → 2026-10-05".
+    expect(screen.getByText('Oct 1 – Oct 5, 2026')).toBeInTheDocument();
+    expect(screen.queryByText(/2026-10-01/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Find my trip →'));
     expect(baseProps.onFindTrip).toHaveBeenCalled();

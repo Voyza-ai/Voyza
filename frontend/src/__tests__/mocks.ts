@@ -196,9 +196,11 @@ jest.mock('@/lib/api', () => ({
   updateCurrentUser: jest.fn().mockResolvedValue({}),
   ApiError: class ApiError extends Error {
     status: number;
-    constructor(status: number, message: string) {
+    details?: unknown;
+    constructor(status: number, message: string, details?: unknown) {
       super(message);
       this.status = status;
+      this.details = details;
       this.name = 'ApiError';
     }
   },

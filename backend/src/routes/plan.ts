@@ -933,6 +933,7 @@ ${JSON.stringify(tripSummary, null, 2)}
         if (!mins || !Number.isFinite(mins)) return '—';
         const h = Math.floor(mins / 60);
         const m = mins % 60;
+        if (h === 0) return `${m}m`;
         return m > 0 ? `${h}h ${m}m` : `${h}h`;
       };
 
@@ -1399,11 +1400,23 @@ router.post(
       from: c.name,
       to: tripCities[i + 1].name,
       mode: c.transportOut?.mode ?? null,
+      // A leg nothing was found for (no flight, and rail dark): Zurich →
+      // Interlaken share ZRH, so it is never searched as a flight. A chip
+      // like "Cheaper Zurich → Interlaken flight?" leads to "nothing found".
+      optionFound: !c.transportOut?.unavailable,
       trainFound:
         c.transportOut?.mode === 'train' ||
         (c.transportOut?.alternatives ?? []).some((a: any) => a?.mode === 'train'),
     }));
     const anyTrain = legs.some((l: any) => l.trainFound);
+    const namesNoOptionLeg = (s: string) =>
+      legs.some((l: any) => {
+        if (l.optionFound) return false;
+        const text = s.toLowerCase();
+        const from = text.indexOf(String(l.from).toLowerCase());
+        const to = text.indexOf(String(l.to).toLowerCase());
+        return from >= 0 && to > from;
+      });
 
     try {
       const response = await anthropic.messages.create({
@@ -1427,6 +1440,7 @@ BlueMurr AI CAN: explain the trip (why this city order, why a price); lock a cit
 BlueMurr AI can NOT: book anything, add activities, tours or restaurants, change hotels, or add, remove or swap cities. Never suggest those.
 
 Trains: mention a train only for a leg whose "trainFound" is true in "legs". If no leg has "trainFound": true, do not mention trains at all.
+Never suggest anything about a leg whose "optionFound" is false: nothing was found for it.
 
 Cover a mix: one "why" question (ordering/pricing), one cheaper-option request naming a specific leg, one dates or time-of-day request, and one more of any kind above.
 
@@ -1440,10 +1454,12 @@ Return ONLY a JSON array of 4 strings, no prose, no markdown fences.`,
       const parsed = extractJson(text);
       if (Array.isArray(parsed) && parsed.every((s) => typeof s === 'string') && parsed.length >= 3) {
         // The prompt asks; this enforces. Drop any suggestion for something
-        // the chat can't do, and any train suggestion when no leg has a
-        // train — then trim to 4 and pad with fallback as before.
+        // the chat can't do, any train suggestion when no leg has a train,
+        // and any naming a leg with no option — then trim to 4 and pad with
+        // fallback as before.
         const doable = parsed.filter(
-          (s: string) => !CANT_DO_SUGGESTION.test(s) && (anyTrain || !TRAIN_SUGGESTION.test(s)),
+          (s: string) =>
+            !CANT_DO_SUGGESTION.test(s) && (anyTrain || !TRAIN_SUGGESTION.test(s)) && !namesNoOptionLeg(s),
         );
         const trimmed = doable.slice(0, 4).map((s: string) => s.slice(0, 60));
         while (trimmed.length < 4) trimmed.push(fallback[trimmed.length]);
