@@ -19,7 +19,9 @@ import { bundledCatalog, toRow } from '../services/presets';
   const { error } = await supabase.from('preset_trips').upsert(rows, { onConflict: 'slug' });
   if (error) {
     console.error('❌ seed failed:', error.message);
-    console.error('   Has migration 013_preset_trips.sql been applied in the Supabase SQL editor?');
+    console.error(
+      '   Have migrations 013_preset_marketplace.sql and 014_record_preset_event.sql been applied in the Supabase SQL editor?',
+    );
     process.exit(1);
   }
 
