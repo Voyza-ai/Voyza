@@ -154,6 +154,28 @@ describe('OriginClarification', () => {
     expect(list).not.toHaveClass('flex-wrap');
   });
 
+  it('never cuts a label short: the part that tells the readings apart is at the end', () => {
+    // D-10: "Portland, …" (live sweep, r5-banner-open.png); harness
+    // 2026-10-30, "San Juan, National Capital Region, Philip…" — the label
+    // was `truncate`d whenever it outgrew its card. It wraps instead; the
+    // card is already capped at max-w-[480px]. Class-level because jsdom has
+    // no layout; the harness measures the real thing.
+    const sanJuan: NonNullable<Trip['originClarification']> = {
+      input: 'San Juan',
+      reason: 'near-tie',
+      candidates: [
+        { placeId: 'gn:1', label: 'San Juan, Argentina', airports: ['UAQ'] },
+        { placeId: 'gn:2', label: 'San Juan, National Capital Region, Philippines', airports: ['MNL', 'CRK', 'SFS'], distanceKm: 10_394 },
+      ],
+    };
+    render(<OriginClarification clarification={sanJuan} pricedFrom={['UAQ']} />);
+    fireEvent.click(screen.getByRole('button', { name: /see the other/i }));
+    const label = screen.getByText('San Juan, National Capital Region, Philippines');
+    expect(label).not.toHaveClass('truncate');
+    expect(label).not.toHaveClass('whitespace-nowrap');
+    expect(label).toHaveClass('min-w-0');
+  });
+
   it('prefers the airports the trip was really priced from', () => {
     // `pricedFrom` comes off the trip, the candidate's list from the
     // resolver. They can differ when the caller supplied its own, and the
