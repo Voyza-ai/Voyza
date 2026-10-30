@@ -498,6 +498,13 @@ describe('D-07 — compare_modes reports what was found, not what the model gues
     expect(res.body.comparison.train).toMatchObject({ price: 40, duration: '1h 35m' });
   });
 
+  it('states an under-an-hour duration as minutes, not "0h 53m"', async () => {
+    mockCompareLeg.mockResolvedValue({ flightOption: { ...flight, durationMinutes: 53 }, trainOption: null, cheapest: 'flight', fastest: 'flight', recommendation: 'flight', priceDifference: 0, timeDifference: 0 });
+    const res = await chat(app, 'compare_modes', { from: 'Rome', to: 'Venice', explanation: guess });
+    expect(res.body.reply).toBe('I found no train for Rome → Venice on 2026-12-10 — only flights, from $95 (53m).');
+    expect(res.body.comparison.flight).toMatchObject({ duration: '53m' });
+  });
+
   it('does not invent a price for a train whose price is unknown', async () => {
     mockCompareLeg.mockResolvedValue({ flightOption: flight, trainOption: { ...train, price: null }, cheapest: 'flight', fastest: 'train', recommendation: 'flight', priceDifference: 0, timeDifference: 145 });
     const res = await chat(app, 'compare_modes', { from: 'Rome', to: 'Venice', explanation: guess });
@@ -524,6 +531,24 @@ describe('D-07 — chat suggestions only offer what the chat can do', () => {
     t.cities[0].transportOut.alternatives = [{ ...t.cities[0].transportOut, mode: 'train', operator: 'Trenitalia' }];
     const res = await suggest(['Why Rome before Venice?', 'Can we take train Rome→Venice?', 'Give me 3 nights in Venice', 'No flights before 9am to Florence'], t);
     expect(res.body.suggestions).toEqual(['Why Rome before Venice?', 'Can we take train Rome→Venice?', 'Give me 3 nights in Venice', 'No flights before 9am to Florence']);
+  });
+
+  it('drops a suggestion about a leg that has no option at all (Zurich → Interlaken share ZRH; rail is dark)', async () => {
+    const t: any = baseTrip();
+    t.cities[1].transportOut = { ...t.cities[1].transportOut, price: 0, unavailable: true };
+    const res = await suggest(
+      ['Why Rome before Venice?', 'Cheaper Venice → Florence flight?', 'Flights Venice to Florence after 9am', 'Give me 3 nights in Venice'],
+      t,
+    );
+    expect(res.body.suggestions).toHaveLength(4);
+    expect(res.body.suggestions.slice(0, 2)).toEqual(['Why Rome before Venice?', 'Give me 3 nights in Venice']);
+    expect(res.body.suggestions.join(' ')).not.toMatch(/Venice\s*(→|->|to)\s*Florence/i);
+    expect(mockCreate.mock.calls[0][0].messages[0].content).toContain('"optionFound": false');
+  });
+
+  it('keeps suggestions about legs that have an option (control)', async () => {
+    const res = await suggest(['Why Rome before Venice?', 'Cheaper Venice → Florence flight?', 'Flights Rome to Venice after 9am', 'Give me 3 nights in Venice']);
+    expect(res.body.suggestions).toEqual(['Why Rome before Venice?', 'Cheaper Venice → Florence flight?', 'Flights Rome to Venice after 9am', 'Give me 3 nights in Venice']);
   });
 
   it('tells the model which legs have trains and what the chat can do', async () => {
