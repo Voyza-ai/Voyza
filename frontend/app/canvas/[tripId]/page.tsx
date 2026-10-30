@@ -189,11 +189,16 @@ function CanvasPageInner() {
   //      race ahead of the membership claim whenever it ran pre-auth, so
   //      arriving via an invite link 403'd once and then worked forever.
   //      The join effect consumes the token and bumps sessionNonce.
+  //   3. Never load signed out: the session route refuses anonymous callers
+  //      (401), so the load could only fail — "Failed to load canvas
+  //      session" over a "Connection lost" banner (D-16). The sign-in modal
+  //      shows instead, and signing in (user id below) runs the load.
   const loadRetriedRef = useRef(false);
   useEffect(() => {
     if (!tripId) return;
     if (authLoading) return;
     if (shareToken) return;
+    if (!user) return;
 
     (async () => {
       setLoading(true);
@@ -321,7 +326,7 @@ function CanvasPageInner() {
         setLoading(false);
       }
     })();
-  }, [tripId, sessionNonce, authLoading, shareToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tripId, sessionNonce, authLoading, shareToken, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync realtime state (from other users). Applies to EVERY role —
   // editors save now, so the owner receives updates too. Two guards:
@@ -1373,6 +1378,38 @@ function CanvasPageInner() {
     return (user?.email?.[0] ?? '?').toUpperCase();
   })();
 
+  // ─── Sign-in gate ───
+  // A canvas needs an account: the session route refuses anonymous callers,
+  // and joining by a share link needs one too. Signed out, the existing
+  // sign-in modal shows over the loading screen; signing in loads the canvas
+  // in place (Google returns here through /auth/callback). Dismissing it
+  // without signing in leaves for the hub rather than a canvas that cannot
+  // load. LoginModal calls onClose before onSuccess on a sign-in, so the
+  // close waits a tick to see which it was.
+  const signedInRef = useRef(false);
+  const signInModal = (
+    <LoginModal
+      isOpen={!authLoading && !user}
+      onSuccess={() => {
+        signedInRef.current = true;
+      }}
+      onClose={() => {
+        if (shareToken) {
+          // Bailing out of sign-in drops the pending join.
+          setShareToken(null);
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('share');
+            window.history.replaceState({}, '', url.toString());
+          }
+        }
+        setTimeout(() => {
+          if (!signedInRef.current) router.push('/main');
+        }, 0);
+      }}
+    />
+  );
+
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center" style={{ background: '#f0f4f8' }}>
@@ -1380,6 +1417,7 @@ function CanvasPageInner() {
           <div className="w-8 h-8 border-2 border-[#2563eb] border-t-transparent rounded-full animate-spin" />
           <span className="text-gray-500 text-sm">Loading canvas...</span>
         </div>
+        {signInModal}
       </div>
     );
   }
@@ -1891,20 +1929,8 @@ function CanvasPageInner() {
         </div>
       )}
 
-      {/* ─── Share-link sign-in gate: joining requires an account ─── */}
-      <LoginModal
-        isOpen={!!shareToken && !user && !authLoading}
-        onClose={() => {
-          // Bailing out of sign-in: drop the pending join and load whatever
-          // access (if any) this account-less visitor has.
-          setShareToken(null);
-          if (typeof window !== 'undefined') {
-            const url = new URL(window.location.href);
-            url.searchParams.delete('share');
-            window.history.replaceState({}, '', url.toString());
-          }
-        }}
-      />
+      {/* ─── Sign-in gate (see signInModal) ─── */}
+      {signInModal}
 
       {/* ─── Toast ─── */}
       <AnimatePresence>
