@@ -95,20 +95,23 @@ const ZOD_DEFAULT = /^(Required|Invalid\b|Expected\b|String must|Number must|Arr
 /**
  * What the chat says when planning fails. A server that ANSWERED with a 4xx
  * said what was wrong — a repeated city, a past start date, too many
- * requests — so its own words are shown (for a zod 400 they are the field
- * messages in `details`). "Check your connection" is kept for a request
+ * requests — so its own words are shown (its `error` sentence; for an older
+ * generic "ValidationError" 400, the field messages in `details`). "Check your connection" is kept for a request
  * that never got an answer, the only case where it is true: a 400 used to
  * read "Try rephrasing the dates or budget?" whatever the field was.
  */
 export function plannerErrorMessage(err: unknown): string {
   if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+    // /api/optimize now explains a refused trip in one sentence in `error`
+    // ("Paris appears twice in your trip — …"); that wins over the bare
+    // field messages it still sends in `details`.
+    if (err.message && err.message !== 'ValidationError') return err.message;
     const fields = err.details && typeof err.details === 'object' ? Object.values(err.details as object) : [];
     const said = Array.from(
       new Set(fields.flat().filter((m): m is string => typeof m === 'string' && !ZOD_DEFAULT.test(m))),
     );
     if (said.length > 0) return said.map((m) => (/[.!?]$/.test(m) ? m : `${m}.`)).join(' ');
-    if (err.message === 'ValidationError') return UNREADABLE_ANSWER;
-    return err.message;
+    return UNREADABLE_ANSWER;
   }
   const raw = err instanceof Error ? err.message : 'Something went wrong.';
   // fetch() rejects without a response: Chrome "Failed to fetch", Firefox

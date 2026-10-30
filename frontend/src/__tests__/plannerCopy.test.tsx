@@ -98,6 +98,16 @@ describe('when the search fails', () => {
     expect(text).toBe('Sorry, I ran into a problem: Each city can appear only once.');
   });
 
+  it('a 400 carrying the server\'s one-sentence explanation shows it, not the field messages', async () => {
+    // What /api/optimize sends now (routes/index.ts): the sentence in
+    // `error`, zod's field messages still in `details`. Final verification:
+    // the planner showed "Each city can appear only once." instead.
+    const sentence =
+      'Paris appears twice in your trip — to spend more time there, add nights to your first Paris stay instead of returning to it.';
+    const text = await run(new ApiError(400, sentence, { cities: ['Each city can appear only once'] }));
+    expect(text).toBe(`Sorry, I ran into a problem: ${sentence}`);
+  });
+
   it('a 4xx with a plain error message shows that message', async () => {
     const text = await run(new ApiError(429, 'Too many requests — please try again in a few minutes.'));
     expect(text).toBe('Sorry, I ran into a problem: Too many requests — please try again in a few minutes.');
