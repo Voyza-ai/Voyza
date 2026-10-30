@@ -467,39 +467,52 @@ type DateShiftHome = {
   totalNights: number;
 };
 
+type HomeFlightsPrice = {
+  /** Outbound + (if round trip) return, or null when either can't be priced. */
+  cost: number | null;
+  /** Home-side airport of the cheapest outbound / return fare found. */
+  outboundAirport: string | null;
+  returnAirport: string | null;
+};
+
 /**
  * Price the home flights for a trip starting on `start`, the same way the
- * scoring pass does (estimateHomeLegCost, cache-warm). Returns null when
- * any needed home flight can't be priced — an unpriced flight would read
- * as its whole fare "saved".
+ * scoring pass does (estimateHomeLeg, cache-warm). `cost` is null when any
+ * needed home flight can't be priced — an unpriced flight would read as its
+ * whole fare "saved". `airports` narrows which home airports each direction
+ * is searched from; by default both use all of `home.originAirports`.
  */
 async function homeFlightsCost(
   home: DateShiftHome,
   bestOrdering: string[],
   start: string,
   travelers: number,
-): Promise<number | null> {
-  const costs = [
-    await estimateHomeLegCost({
-      originAirports: home.originAirports,
-      destinationCity: bestOrdering[0],
-      date: clampToFuture(start),
-      travelers,
-    }),
-  ];
-  if (home.returnToHome) {
-    costs.push(
-      await estimateHomeLegCost({
-        originAirports: home.originAirports,
+  airports: { outbound: string[]; ret: string[] } = {
+    outbound: home.originAirports,
+    ret: home.originAirports,
+  },
+): Promise<HomeFlightsPrice> {
+  const outbound = await estimateHomeLeg({
+    originAirports: airports.outbound,
+    destinationCity: bestOrdering[0],
+    date: clampToFuture(start),
+    travelers,
+  });
+  const ret = home.returnToHome
+    ? await estimateHomeLeg({
+        originAirports: airports.ret,
         destinationCity: bestOrdering[bestOrdering.length - 1],
         date: clampToFuture(addDays(start, home.totalNights)),
         travelers,
         reverse: true,
-      }),
-    );
-  }
-  if (costs.some((c) => c === Infinity)) return null;
-  return costs.reduce((sum, c) => sum + c, 0);
+      })
+    : null;
+  const costs = [outbound.cost, ...(ret ? [ret.cost] : [])];
+  return {
+    cost: costs.some((c) => c === Infinity) ? null : costs.reduce((sum, c) => sum + c, 0),
+    outboundAirport: outbound.homeAirport,
+    returnAirport: ret?.homeAirport ?? null,
+  };
 }
 
 /**
@@ -531,11 +544,30 @@ async function findDateShiftSuggestion(
 
   // Baseline home flights at the requested dates. Unpriceable → compare
   // inter-city legs only for every offset.
+  //
+  // The baseline is the cheapest fare across ALL home airports — the same
+  // number the scoring pass ranked with, and served from its cache. Each
+  // shifted date is then priced from the airport that won that direction
+  // only. That makes the shifted cost an upper bound on what the trip would
+  // really cost on that date (another airport can only be cheaper), so the
+  // saving shown can understate but never overstate. Probing from
+  // originAirports[0] on both sides used to offer "save $350" on a trip
+  // that was already flying the cheaper airport for $50 less; probing every
+  // airport would be exact but costs (airports - 1) × 2 × 4 more Duffel
+  // searches on every run.
   const baselineHome = home
     ? await homeFlightsCost(home, bestOrdering, requestedStartDate, travelers)
     : null;
-  const includeHome = home !== null && baselineHome !== null;
-  const baselineCost = baselineLegsCost + (includeHome ? (baselineHome as number) : 0);
+  const baselineHomeCost = baselineHome?.cost ?? null;
+  const includeHome = home !== null && baselineHomeCost !== null;
+  const baselineCost = baselineLegsCost + (includeHome ? (baselineHomeCost as number) : 0);
+  // A priced direction always has its airport; [] (never searched → never
+  // offered) is only reachable if that invariant breaks.
+  const winnerOnly = (airport: string | null | undefined) => (airport ? [airport] : []);
+  const shiftedAirports = {
+    outbound: winnerOnly(baselineHome?.outboundAirport),
+    ret: winnerOnly(baselineHome?.returnAirport),
+  };
 
   const shifted = await Promise.all(
     candidateOffsets.map(async (offset) => {
@@ -553,9 +585,15 @@ async function findDateShiftSuggestion(
 
         let homeCost = 0;
         if (includeHome) {
-          const priced = await homeFlightsCost(home as DateShiftHome, bestOrdering, startDate, travelers);
-          if (priced === null) return null;
-          homeCost = priced;
+          const priced = await homeFlightsCost(
+            home as DateShiftHome,
+            bestOrdering,
+            startDate,
+            travelers,
+            shiftedAirports,
+          );
+          if (priced.cost === null) return null;
+          homeCost = priced.cost;
         }
         const cost = legsCost + homeCost;
         return cost > 0 ? { offset, startDate, cost } : null;
@@ -714,43 +752,66 @@ async function searchHomeFlights(params: {
   }));
 }
 
+type HomeEstimate = {
+  /** Cheapest fare across the searched home airports; Infinity when none. */
+  cost: number;
+  /** Home-side airport of that fare (origin outbound, destination on return). */
+  homeAirport: string | null;
+};
+
 /**
- * Cheap estimate for permutation scoring — price only, no offer details.
+ * Price-only home-leg estimate for permutation scoring: the cheapest fare
+ * across EVERY searched home airport (capped at MAX_HOME_AIRPORTS by
+ * searchHomeFlights) — the same offer buildHomeLeg will put on the card.
  *
- * Performance note: originally this did full multi-airport fan-out per
- * permutation per leg, which meant a 3-city trip with NYC origin made
- * ~60 flight searches JUST for ranking permutations (before the final
- * buildHomeLeg). That was blowing past the frontend fetch timeout.
+ * It used to search only originAirports[0], on the theory that whichever
+ * ordering had the cheapest "JFK → X" was also cheapest from LGA/EWR. It
+ * isn't: with JFK → Paris $900 and EWR → Paris $300, the ranking picked
+ * Rome-first, then buildHomeLeg found EWR, and listing the same airports
+ * as [EWR, JFK] instead flipped the answer — a 22% swing on airport order
+ * alone, and a "saved $400" that was really the ranking's own blind spot
+ * (harness, 2026-10-29). bestRoute.totalCost also stopped matching the
+ * legs on screen.
  *
- * Now we only search the FIRST origin airport here (cheap signal —
- * whichever permutation has the cheapest "JFK → X" is likely also
- * cheapest for LGA/EWR). The full multi-airport fan-out is reserved
- * for buildHomeLeg on just the winning permutation. Drops the total
- * call count by ~3x for multi-airport origins like NYC/LHR/Tokyo.
+ * Cost: searchFlights dedupes (origin, destination, date) for 10 minutes,
+ * so this is one Duffel search per (home airport, city, date), shared by
+ * every ordering — and buildHomeLeg on the winner is then served entirely
+ * from that cache instead of searching its airports itself. Net extra
+ * searches per run: 2 × (cities − 1) × (airports − 1), e.g. +8 for a
+ * 3-city NYC trip (JFK/EWR/LGA), +16 for 5 cities, none for one airport.
+ * (The original "~60 searches for 3 cities" this was guarding against
+ * predates that cache.)
  *
- * Returns Infinity — not 0 — when nothing came back (IATA lookup failed,
+ * `cost` is Infinity — not 0 — when nothing came back (IATA lookup failed,
  * every per-airport search threw, or there simply are no offers), the
  * same way scoreRoute reports an unpriceable inter-city leg. Callers must
- * charge UNAVAILABLE_LEG_PENALTY for it: the old `?? 0` scored a
+ * charge UNAVAILABLE_HOME_LEG_PENALTY for it: the old `?? 0` scored a
  * nonexistent home flight as FREE, so the "cheapest" ordering was often
  * the one whose outbound doesn't exist.
  */
-async function estimateHomeLegCost(params: {
+async function estimateHomeLeg(params: {
   originAirports: string[];
   destinationCity: string;
   date: string;
   travelers: number;
   reverse?: boolean;
-}): Promise<number> {
+}): Promise<HomeEstimate> {
+  const reverse = params.reverse ?? false;
   const found = await searchHomeFlights({
-    originAirports: params.originAirports.slice(0, 1),
+    originAirports: params.originAirports,
     tripCity: params.destinationCity,
     date: params.date,
     travelers: params.travelers,
-    reverse: params.reverse ?? false,
+    reverse,
     limit: 1,
   });
-  return found[0]?.price ?? Infinity;
+  const best = found[0];
+  if (!best) return { cost: Infinity, homeAirport: null };
+  return { cost: best.price, homeAirport: reverse ? best.destAirport : best.originAirport };
+}
+
+async function estimateHomeLegCost(params: Parameters<typeof estimateHomeLeg>[0]): Promise<number> {
+  return (await estimateHomeLeg(params)).cost;
 }
 
 /**

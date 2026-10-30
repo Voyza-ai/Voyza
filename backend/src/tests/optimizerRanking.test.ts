@@ -166,3 +166,86 @@ describe('B3 — a city with no airport must not cost the trip a home flight', (
     expect(result.savingsVsNaive).toBe(0);
   }, 30000);
 });
+describe('B4 — home legs are ranked by the cheapest of the searched airports', () => {
+  // JFK is the dearest way into Paris, EWR the cheapest.
+  const NYC = {
+    'JFK>PAR': 900,
+    'EWR>PAR': 300,
+    'JFK>ROM': 500,
+    'EWR>ROM': 600,
+    'PAR>ROM': 100,
+    'ROM>PAR': 100,
+    'PAR>JFK': 500,
+    'PAR>EWR': 500,
+    'ROM>JFK': 500,
+    'ROM>EWR': 500,
+  };
+  const trip = (originAirports: string[]) => ({
+    cities: [{ name: 'Paris' }, { name: 'Rome' }],
+    startDate: '2030-12-08',
+    travelers: 1,
+    origin: 'New York',
+    originAirports,
+    returnToHome: true,
+    totalNights: 6,
+  });
+
+  it.each([[['JFK', 'EWR']], [['EWR', 'JFK']]])(
+    'picks the truly cheapest route whatever the airport order (%j)',
+    async (airports) => {
+      fares(NYC);
+      const result = await optimize(trip(airports));
+
+      // EWR→Paris 300 + Paris→Rome 100 + Rome→home 500 = 900.
+      // Ranked from JFK alone, Rome-first (500+100+500 = 1100) used to win.
+      expect(result.bestRoute.ordering).toEqual(['Paris', 'Rome']);
+      expect(result.bestRoute.totalCost).toBe(900);
+      // The naive order IS the best one: nothing was saved.
+      expect(result.savingsVsNaive).toBe(0);
+    },
+    30000,
+  );
+
+  it('ranks with the same fares the built home legs show', async () => {
+    fares(NYC);
+    const result = await optimize(trip(['JFK', 'EWR']));
+
+    const legsTotal = result.bestRoute.legs.reduce((s, l) => s + l.cost, 0);
+    expect(result.outboundLeg?.originAirport).toBe('EWR');
+    expect(result.bestRoute.totalCost).toBe(
+      legsTotal + (result.outboundLeg?.price ?? 0) + (result.returnLeg?.price ?? 0),
+    );
+  }, 30000);
+
+  it('never offers a date shift that only beats the airport we were not going to use', async () => {
+    // On the requested date EWR (300) already beats JFK (600) into Paris.
+    // Two days earlier JFK drops to 250 and EWR rises to 400. Probing from
+    // JFK alone used to report "save $350" (600 → 250) on a trip that was
+    // already flying EWR at 300 — the real best saving is $50.
+    fares(
+      { 'PAR>JFK': 500, 'PAR>EWR': 500 },
+      (o, d, date) => {
+        if (d !== 'PAR') return undefined;
+        const early = date === '2030-12-06';
+        if (o === 'JFK') return early ? 250 : 600;
+        if (o === 'EWR') return early ? 400 : 300;
+        return undefined;
+      },
+    );
+
+    const result = await optimize({
+      cities: [{ name: 'Paris' }],
+      startDate: '2030-12-08',
+      travelers: 1,
+      origin: 'New York',
+      originAirports: ['JFK', 'EWR'],
+      returnToHome: true,
+      totalNights: 4,
+    });
+
+    expect(result.bestRoute.totalCost).toBe(800); // EWR 300 + 500 home
+    for (const option of result.dateShiftSuggestion?.options ?? []) {
+      expect(option.savings).toBeLessThanOrEqual(50);
+    }
+  }, 30000);
+});
