@@ -306,6 +306,15 @@ router.post(
 
     const supabase = getSupabase();
 
+    // The party size every search below prices for. Hotel lookups already
+    // read it; the leg re-compare further down hard-coded 1, so on a
+    // 2-person trip a missing Rome → Florence leg came back as ONE fare
+    // ($40) inside a total where every other leg is a party total, and
+    // trips.total_cost undercounted it (measured: 640 where 680 is right).
+    // Same rule as every other route's schema: a positive integer, else 1.
+    const rawTravelers = state.trip?.travelers;
+    const travelers = Number.isInteger(rawTravelers) && rawTravelers > 0 ? rawTravelers : 1;
+
     // ── Prepare ──────────────────────────────────────────────
     // Everything that enriches the state — placeholder activities and
     // restaurants, hotel lookups, flight-vs-train comparisons — runs BEFORE
@@ -346,7 +355,7 @@ router.post(
               city: city.name,
               checkin: city.dates.arrival,
               checkout: city.dates.departure,
-              adults: state.trip?.travelers ?? 1,
+              adults: travelers,
               rooms: 1,
             })
               .then((results) => {
@@ -403,7 +412,9 @@ router.post(
               || new Date().toISOString().split('T')[0];
             const idx = i;
             comparePromises.push(
-              compareLeg({ origin, destination: dest, date, travelers: 1 })
+              // compareLeg prices PARTY TOTALS for `travelers`, the unit
+              // every other leg on the trip is stored in.
+              compareLeg({ origin, destination: dest, date, travelers })
                 .then((result) => {
                   const best = result.recommendation === 'train' && result.trainOption
                     ? { mode: 'train' as const, price: result.trainOption.price ?? 0, duration: result.trainOption.durationMinutes, operator: result.trainOption.operator ?? '' }
