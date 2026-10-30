@@ -5,6 +5,7 @@ import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
 import { resolveOriginAirports, type OriginCandidate } from './location/originAirports';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
+import { withDuffelRetryBudget } from './duffelBudget';
 
 type CityInput = {
   name: string;
@@ -242,6 +243,16 @@ const UNAVAILABLE_HOME_LEG_PENALTY = UNAVAILABLE_LEG_PENALTY * 20;
  * is a mistake or abuse.
  */
 const MAX_HOME_AIRPORTS = 3;
+
+/**
+ * Most a date-shift search may wait to retry. Duffel allows 60 requests a
+ * minute per token, and a 5-city plan already needs ~110 to score its
+ * orderings — so by the time the probe runs, the window is often spent and
+ * the next one is up to a minute away. The probe is a "leave a day early,
+ * save $X" banner; waiting a whole window for it held finished plans open.
+ * 3s still covers one ordinary 5xx backoff (1-3s on the first retry).
+ */
+const DATE_SHIFT_RETRY_WAIT_MS = 3000;
 
 /**
  * Distribute a total night count across N cities.
@@ -1148,14 +1159,19 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       // city legs and/or home flights (single-city trips now qualify too —
       // their home flights are exactly what moves with the date).
       if (allLegsPriced && (baselineLegsCost > 0 || home)) {
-        return await findDateShiftSuggestion(
-          bestOrdering,
-          startDate,
-          baselineLegsCost,
-          travelers,
-          cityMap,
-          nightsArray,
-          home,
+        // Optional work: its Duffel calls may not wait out a rate-limit
+        // window (see DATE_SHIFT_RETRY_WAIT_MS). An offset they can't price
+        // is simply not offered.
+        return await withDuffelRetryBudget(DATE_SHIFT_RETRY_WAIT_MS, () =>
+          findDateShiftSuggestion(
+            bestOrdering,
+            startDate,
+            baselineLegsCost,
+            travelers,
+            cityMap,
+            nightsArray,
+            home,
+          ),
         );
       }
     } catch (err: any) {
