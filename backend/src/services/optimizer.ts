@@ -32,14 +32,27 @@ type OptimizedRoute = {
   totalCost: number;
   /**
    * Ranking-only cost: `totalCost` plus UNAVAILABLE_LEG_PENALTY for every
-   * leg — inter-city OR home — whose search came back empty. Sorting on
-   * this instead of totalCost is what stops an ordering with a missing
-   * $700 outbound from beating one where every flight exists. Never shown
-   * to the user; the frontend reads totalCost, which stays real money.
+   * inter-city leg and UNAVAILABLE_HOME_LEG_PENALTY for every home leg whose
+   * search came back empty. Sorting on this instead of totalCost is what
+   * stops an ordering with a missing $700 outbound from beating one where
+   * every flight exists. Never shown to the user; the frontend reads
+   * totalCost, which stays real money.
    */
   rankCost: number;
   legs: OptimizedLeg[];
 };
+
+/**
+ * A route as scored internally: the public shape plus how many of its legs
+ * (inter-city and home) could not be priced. Stripped before the result
+ * leaves optimize(), so the API shape is unchanged.
+ */
+type ScoredRoute = OptimizedRoute & { unpricedLegs: number };
+
+function toPublicRoute(route: ScoredRoute): OptimizedRoute {
+  const { unpricedLegs: _unpriced, ...rest } = route;
+  return rest;
+}
 
 /**
  * Nudge-style suggestion when shifting the trip by a day or two would save
@@ -189,8 +202,9 @@ type OptimizeParams = {
 const DEFAULT_NIGHTS_PER_CITY = 2;
 
 /**
- * Ranking penalty for a leg whose search came back with nothing (neither
- * flight nor train for an inter-city hop; no offers at all for a home leg).
+ * Ranking penalty for an inter-city leg whose search came back with nothing
+ * (neither flight nor train). A missing HOME leg is charged
+ * UNAVAILABLE_HOME_LEG_PENALTY below instead.
  * Without it a missing leg costs `Math.min(Infinity, Infinity) → 0`, so the
  * optimizer happily picks a "$200 trip" with two nonexistent segments over
  * a $900 one where everything exists. Large enough to swamp any real fare
@@ -198,6 +212,25 @@ const DEFAULT_NIGHTS_PER_CITY = 2;
  * totalCost stays the sum of prices we actually found.
  */
 const UNAVAILABLE_LEG_PENALTY = 5000;
+
+/**
+ * Ranking penalty for a missing HOME flight — deliberately far heavier than
+ * a missing inter-city leg, so ranking is lexicographic: fewest missing home
+ * flights first, then fewest missing inter-city legs, then money.
+ *
+ * With one shared penalty, a city with no airport cost the same wherever it
+ * went. NYC → Zurich, Interlaken, Geneva with rail down: Interlaken in the
+ * middle is two unpriced ground legs (2 × 5000); Interlaken first is one
+ * unpriced ground leg plus no outbound flight at all (2 × 5000) — a tie, so
+ * real money broke it, and the ordering that skipped the $600 transatlantic
+ * fare won and was reported as "$480 saved" (harness, 2026-10-29). Nobody
+ * would plan it that way: fly into Zurich, take the train through
+ * Interlaken, fly home from Geneva. An unpriced inter-city hop is usually a
+ * short ground leg we can't quote; a missing home flight is the whole way
+ * there. 20 × the inter-city penalty keeps that order for up to 20 unpriced
+ * inter-city legs, far past any trip this scores.
+ */
+const UNAVAILABLE_HOME_LEG_PENALTY = UNAVAILABLE_LEG_PENALTY * 20;
 
 /**
  * Hard cap on how many origin airports one home-leg search fans out to.
@@ -369,7 +402,7 @@ async function scoreRoute(
    * been updated to thread the user's totalNights through.
    */
   nightsArray?: number[],
-): Promise<OptimizedRoute> {
+): Promise<ScoredRoute> {
   const nights = nightsArray ?? distributeNights(undefined, ordering.length);
   const legPromises = [];
   for (let i = 0; i < ordering.length - 1; i++) {
@@ -414,16 +447,18 @@ async function scoreRoute(
   // sort last instead of looking free.
   let totalCost = 0;
   let rankCost = 0;
+  let unpricedLegs = 0;
   for (const leg of resolvedLegs) {
     if (leg.cost === Infinity) {
       rankCost += UNAVAILABLE_LEG_PENALTY;
+      unpricedLegs++;
     } else {
       totalCost += leg.cost;
       rankCost += leg.cost;
     }
   }
 
-  return { ordering, totalCost, rankCost, legs: resolvedLegs };
+  return { ordering, totalCost, rankCost, legs: resolvedLegs, unpricedLegs };
 }
 
 type DateShiftHome = {
@@ -930,7 +965,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // EXACTLY the same way — same nights, same dates, same home legs — or
   // the subtraction that produces savingsVsNaive compares two different
   // things.
-  const scoreOrderingWithHomeLegs = async (ordering: string[]): Promise<OptimizedRoute> => {
+  const scoreOrderingWithHomeLegs = async (ordering: string[]): Promise<ScoredRoute> => {
     const baseRoute = await scoreRoute(ordering, startDate, travelers, cityMap, nightsArray);
     if (!hasOrigin || resolvedOriginAirports.length === 0) return baseRoute;
 
@@ -968,16 +1003,18 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     // entire airfare.
     let totalCost = baseRoute.totalCost;
     let rankCost = baseRoute.rankCost;
+    let unpricedLegs = baseRoute.unpricedLegs;
     for (const cost of homeCosts) {
       if (cost === Infinity) {
-        rankCost += UNAVAILABLE_LEG_PENALTY;
+        rankCost += UNAVAILABLE_HOME_LEG_PENALTY;
+        unpricedLegs++;
       } else {
         totalCost += cost;
         rankCost += cost;
       }
     }
 
-    return { ...baseRoute, totalCost, rankCost };
+    return { ...baseRoute, totalCost, rankCost, unpricedLegs };
   };
 
   const routes = await Promise.all(orderings.map((ordering) => scoreOrderingWithHomeLegs(ordering)));
@@ -1001,9 +1038,16 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   const naiveRoute =
     routes.find((r) => r.ordering.join('|') === naiveKey) ??
     (await scoreOrderingWithHomeLegs(naiveOrdering));
-  // Money, not rankCost, on both sides: an unpriced leg counts as $0 here,
-  // which under-promises rather than inventing a $5000 "saving".
-  const savingsVsNaive = Math.max(0, naiveRoute.totalCost - topRoutes[0].totalCost);
+  // Money, not rankCost, on both sides — and only when BOTH routes are fully
+  // priced. An unpriced leg is $0 in totalCost, so a subtraction across two
+  // routes with different gaps compares different sets of legs: the winner
+  // that dropped a $600 outbound "saved $480" against a naive route that
+  // kept it (NYC → Zurich, Interlaken, Geneva, harness 2026-10-29). With a
+  // gap on either side the honest saving is unknown, and unknown is $0.
+  const bothFullyPriced = naiveRoute.unpricedLegs === 0 && topRoutes[0].unpricedLegs === 0;
+  const savingsVsNaive = bothFullyPriced
+    ? Math.max(0, naiveRoute.totalCost - topRoutes[0].totalCost)
+    : 0;
 
   // Step 6: assign arrival/departure dates for the best ordering using
   // the per-city nights array. This keeps the displayed calendar
@@ -1133,9 +1177,10 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     }
   }
 
+  const publicRoutes = topRoutes.map(toPublicRoute);
   return {
-    routes: topRoutes,
-    bestRoute: topRoutes[0],
+    routes: publicRoutes,
+    bestRoute: publicRoutes[0],
     savingsVsNaive,
     iataCodes,
     dates,
