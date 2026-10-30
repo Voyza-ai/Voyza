@@ -98,6 +98,11 @@ function BrowsePageInner() {
   // client render the same default and hydration stays clean.
   const [useLocation, setUseLocation] = useState(true);
   useEffect(() => setUseLocation(getUseLocationPref()), []);
+  // The switch's CURRENT value for code that is mid-await: detection can sit
+  // on the browser's prompt for seconds, and a user who turns the switch off
+  // meanwhile must not have a late position saved anyway.
+  const useLocationRef = useRef(useLocation);
+  useLocationRef.current = useLocation;
   const toggleUseLocation = () => {
     const next = !useLocation;
     setUseLocation(next);
@@ -234,8 +239,10 @@ function BrowsePageInner() {
     if (!useLocation) return undefined;
     setLocating(true);
     try {
+      // Bounded, prompt included (detectNearestAirportCity): an ignored
+      // prompt ends in the JFK default instead of a button that spins forever.
       const result = await detectNearestAirportCity();
-      if (!result.ok) return undefined;
+      if (!result.ok || !useLocationRef.current) return undefined;
       // Empty for single-airport cities — the backend resolves the IATA
       // code from the city name, same as a typed planner answer.
       //
