@@ -104,4 +104,23 @@ describe('LoginModal', () => {
     if (closeBtn) fireEvent.click(closeBtn);
     expect(onClose).toHaveBeenCalled();
   });
+
+  // D-15: only the X closed it; Escape did nothing (r1-modal-after-escape.png;
+  // harness 2026-10-30, /browse → Log in → Escape: the form stayed open).
+  test('Escape dismisses the modal, like the X', () => {
+    const onClose = jest.fn();
+    render(<LoginModal isOpen={true} onClose={onClose} />);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('Escape does nothing while the modal is closed, and other keys never close it', () => {
+    const onClose = jest.fn();
+    const { rerender } = render(<LoginModal isOpen={false} onClose={onClose} />);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    rerender(<LoginModal isOpen={true} onClose={onClose} />);
+    fireEvent.keyDown(document, { key: 'Enter' });
+    fireEvent.keyDown(screen.getByPlaceholderText('Email'), { key: 'a' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
