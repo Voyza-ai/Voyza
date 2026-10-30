@@ -109,7 +109,7 @@ function summarize(row: any, trendingScore = 0): PresetSummary {
   };
 }
 
-async function trendingScores(now: Date): Promise<Map<string, number>> {
+async function readTrendingScores(now: Date): Promise<{ scores: Map<string, number>; ok: boolean }> {
   const since = new Date(now.getTime() - TRENDING_WINDOW_MS).toISOString();
   const { data, error } = await getSupabase()
     .from('preset_events')
@@ -117,12 +117,52 @@ async function trendingScores(now: Date): Promise<Map<string, number>> {
     .gte('created_at', since)
     .limit(50_000);
   const scores = new Map<string, number>();
-  if (error) return scores;
+  if (error) return { scores, ok: false };
   for (const e of data ?? []) {
     const w = TRENDING_WEIGHTS[e.kind as keyof typeof TRENDING_WEIGHTS] ?? 0;
     scores.set(e.preset_slug, (scores.get(e.preset_slug) ?? 0) + w);
   }
-  return scores;
+  return { scores, ok: true };
+}
+
+/**
+ * GET /api/presets and every SEO category page go through loadCatalog, and
+ * each call re-read up to 50,000 preset_events rows to rank one row of
+ * cards (audit C12). Trending is a 7-day window, so a minute of staleness
+ * can't be seen: the scores are cached for 60 s, and requests that arrive
+ * together share one read. A failed read is not cached.
+ */
+const TRENDING_CACHE_MS = 60_000;
+let trendingCache: { at: number; scores: Promise<Map<string, number>> } | null = null;
+
+/** Test seam: drop the cached trending scores. */
+export function clearTrendingCache(): void {
+  trendingCache = null;
+}
+
+function trendingScores(now: Date): Promise<Map<string, number>> {
+  const at = now.getTime();
+  if (trendingCache && at >= trendingCache.at && at - trendingCache.at < TRENDING_CACHE_MS) {
+    return trendingCache.scores;
+  }
+  const forget = () => {
+    if (trendingCache === entry) trendingCache = null;
+  };
+  const entry = {
+    at,
+    scores: readTrendingScores(now).then(
+      ({ scores, ok }) => {
+        if (!ok) forget();
+        return scores;
+      },
+      (err) => {
+        forget();
+        throw err;
+      },
+    ),
+  };
+  trendingCache = entry;
+  return entry.scores;
 }
 
 /** Published catalog, DB first, bundled JSON as fallback. */
