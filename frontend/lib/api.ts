@@ -1,6 +1,7 @@
 import { getAuthHeader, refreshAuthHeader } from './supabase';
 import { rankHotels } from './hotelScore';
 import { tripStartDate } from './tripSpan';
+import { withLiveTotal } from './tripTotals';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -424,8 +425,17 @@ export async function editPlan(params: {
   // the refactor lands.
   return apiFetch('/api/plan/chat', {
     method: 'POST',
-    body: JSON.stringify(params),
+    body: JSON.stringify({ ...params, currentTrip: tripForAi(params.currentTrip) }),
   });
+}
+
+/**
+ * Every request that hands the trip to the AI sends it with the LIVE total
+ * (withLiveTotal), not the stored `totalCost`, which a saved trip can carry
+ * stale — the AI quoted a saved preset's $1,344 quote under a $2,693 header.
+ */
+function tripForAi(trip: any): any {
+  return trip && typeof trip === 'object' && Array.isArray(trip.cities) ? withLiveTotal(trip) : trip;
 }
 
 // ─── BlueMurr AI chat ───────────────────────────────────────────
@@ -538,7 +548,7 @@ export async function planChat(params: {
 }): Promise<ChatResponse> {
   return apiFetch<ChatResponse>('/api/plan/chat', {
     method: 'POST',
-    body: JSON.stringify(params),
+    body: JSON.stringify({ ...params, currentTrip: tripForAi(params.currentTrip) }),
   });
 }
 
@@ -547,7 +557,7 @@ export async function planChatSuggestions(params: {
 }): Promise<{ suggestions: string[] }> {
   return apiFetch<{ suggestions: string[] }>('/api/plan/chat-suggestions', {
     method: 'POST',
-    body: JSON.stringify(params),
+    body: JSON.stringify({ ...params, currentTrip: tripForAi(params.currentTrip) }),
   });
 }
 

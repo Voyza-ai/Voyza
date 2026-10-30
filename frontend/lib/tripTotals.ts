@@ -119,6 +119,30 @@ export function liveTripTotal(trip: Trip): number {
 }
 
 /**
+ * The trip as the AI should be told it: `totalCost` replaced by the live
+ * total the header shows.
+ *
+ * `trip.totalCost` is a stored number and can be stale. A saved Browse preset
+ * keeps the preset's quote ($1,344 for Paris Long Weekend, home flights
+ * excluded by design), while the header — live hotels plus the home flights
+ * found at save — said $2,693; asked "how much is this trip?", the AI
+ * answered $1,344. Fresh planner trips only agree because PlanningChat sets
+ * totalCost from this same function once hotels load. Computed here, from
+ * the one source of truth, and never re-derived on the backend.
+ *
+ * A trip this cannot price (no cities array, a malformed hotel) is sent as
+ * it is rather than failing the chat.
+ */
+export function withLiveTotal<T extends Trip>(trip: T): T {
+  try {
+    const total = liveTripTotal(trip);
+    return Number.isFinite(total) ? { ...trip, totalCost: total } : trip;
+  } catch {
+    return trip;
+  }
+}
+
+/**
  * Convert a stored group-total amount into the value to actually render
  * based on the user's priceMode toggle. Every price on the results page
  * (flights, hotels, transit, totals, savings) is stored as a group total —
