@@ -113,7 +113,15 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
       const departureCity = trip.cities.find((c) => c.dates.departure === iso);
       const leavesHome = !departureCity && iso === homeDeparture;
       const isDeparture = !!departureCity || leavesHome;
-      const departureMode = departureCity?.transportOut.mode ?? (leavesHome ? 'flight' : null);
+      // A leg nothing was found for (`unavailable`) carries the empty
+      // placeholder's mode, 'flight' — not a flight. It gets no mode icon.
+      const departureMode = departureCity
+        ? departureCity.transportOut.unavailable
+          ? null
+          : departureCity.transportOut.mode ?? null
+        : leavesHome
+          ? 'flight'
+          : null;
       const departureTime =
         departureCity?.transportOut.departTime ??
         (leavesHome ? trip.origin?.outboundLeg?.departTime ?? null : null);
@@ -270,7 +278,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                         >
                           {cell.date.getDate()}
                         </span>
-                        {cell.isDeparture && (
+                        {cell.isDeparture && cell.departureMode && (
                           cell.departureMode === 'train' ? (
                             <TrainFront size={10} className="text-gray-400" />
                           ) : (
@@ -291,7 +299,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                           </div>
                           {cell.isArrival ? (
                             <div className="flex items-center gap-1 mt-0.5">
-                              {cell.city.transportIn.mode === 'flight' ? (
+                              {cell.city.transportIn.unavailable ? null : cell.city.transportIn.mode === 'flight' ? (
                                 <Plane size={8} className="text-gray-400" />
                               ) : (
                                 <TrainFront size={8} className="text-gray-400" />

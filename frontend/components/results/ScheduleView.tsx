@@ -126,14 +126,16 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
     // Build the travel-mode map. Pass once over cities, marking each
     // arrival and departure date with the relevant transport mode.
     // Departure overwrites arrival on transit days.
+    // A leg nothing was found for (`unavailable`) has no mode: its 'flight'
+    // is the empty placeholder's, so it marks no travel icon.
     const travel = new Map<string, TransportMode>();
     trip.cities.forEach((city) => {
-      if (city.dates.arrival && city.transportIn?.mode) {
+      if (city.dates.arrival && city.transportIn?.mode && !city.transportIn.unavailable) {
         travel.set(city.dates.arrival, city.transportIn.mode);
       }
     });
     trip.cities.forEach((city) => {
-      if (city.dates.departure && city.transportOut?.mode) {
+      if (city.dates.departure && city.transportOut?.mode && !city.transportOut.unavailable) {
         travel.set(city.dates.departure, city.transportOut.mode);
       }
     });
