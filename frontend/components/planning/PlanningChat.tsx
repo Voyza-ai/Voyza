@@ -1966,8 +1966,11 @@ export default function PlanningChat() {
         // A whole typed range ("Jan 10 to Jan 17, 2027") is kept as a range:
         // `parseDateInput` returns one date, so this used to store
         // `{ start, end: start }` as flexible — the end date silently dropped,
-        // and the nights question asked again. Anything that isn't a clean
-        // range takes the single-date path exactly as before.
+        // and a skipped nights question then left the trip with no length at
+        // all. (The nights question is still asked after a range:
+        // `advanceToNextStep` reads `answers` from this render's closure and
+        // cannot see what `handleDatesSelect` just stored.) Anything that
+        // isn't a clean range takes the single-date path exactly as before.
         const range = parseDateRangeInput(value);
         if (range) {
           handleDatesSelect(range.start, range.end, false);
