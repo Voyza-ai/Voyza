@@ -305,6 +305,9 @@ function BrowsePageInner() {
       returnToHome: true,
       planningMode: 'destination',
       vibe: presetVibes(preset)[0],
+      // Read by the planner for its status line — no date was shifted here —
+      // and never stored as an answer.
+      autorunReason: 'similar-trip',
       // No budget is staged. The preset's quote is not a budget the user set,
       // and it leaves out the home flights: staged as one, it capped hotels at
       // 40% of a too-small figure (36 of 37 bundled preset hotels sat above
