@@ -28,6 +28,7 @@ import { useTripStore } from '@/store/tripStore';
 import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
 import { nightsBetween } from '@/lib/hotelScore';
 import { getCityColor, CITY_COLORS } from '@/lib/cityColors';
+import { hasStay } from './CityCard';
 import { VIBE_LABEL } from '@/lib/cityTheme';
 
 type CityDetailPanelProps = {
@@ -242,52 +243,55 @@ export default function CityDetailPanel({
               <Building2 size={12} />
               <span>Where you&apos;ll stay</span>
             </div>
-            <div className="flex flex-col items-end">
-              <button
-                type="button"
-                onClick={() => hasTaxes && setShowFees((v) => !v)}
-                className={`group flex items-center gap-1.5 text-[11px] px-2.5 py-1 -mr-2 rounded-full border transition-all duration-200 ${
-                  hasTaxes ? 'cursor-pointer' : 'cursor-default'
-                }`}
-                style={{
-                  borderColor: hasTaxes ? color.border : 'transparent',
-                  background: hasTaxes ? `${color.text}0c` : 'transparent',
-                }}
-                aria-label={hasTaxes ? 'Toggle fee breakdown' : undefined}
-              >
-                <span style={{ color: `${color.text}88` }}>Stay total</span>
-                <span className="font-semibold tabular-nums" style={{ color: color.text }}>
-                  ${stayTotal.toLocaleString()}
-                </span>
-                <span className="tabular-nums" style={{ color: `${color.text}60` }}>
-                  · {nights} {nights === 1 ? 'night' : 'nights'}
-                </span>
-                {hasTaxes && (
-                  <Info size={11} className="ml-0.5" style={{ color: `${color.text}70` }} />
-                )}
-              </button>
-              <AnimatePresence initial={false}>
-                {hasTaxes && showFees && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                    animate={{ opacity: 1, height: 'auto', marginTop: 6 }}
-                    exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                    transition={{ duration: 0.22, ease: [0.22, 0.61, 0.36, 1] }}
-                    className="overflow-hidden flex flex-col items-end gap-0.5 text-[10.5px] tabular-nums min-w-[180px]"
-                    style={{ color: `${color.text}88` }}
-                  >
-                    <div className="flex justify-between w-full">
-                      <span>Room · ${stayPerNight.toLocaleString()} × {nights} {nights === 1 ? 'night' : 'nights'}</span>
-                      <span>${stayRoom.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between w-full">
-                      <span>Taxes &amp; fees</span>
-                      <span>${stayTaxes.toLocaleString()}</span>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            {/* No stay found: no "$0" stay total. */}
+            {hasStay(city) && (
+              <div className="flex flex-col items-end">
+                <button
+                  type="button"
+                  onClick={() => hasTaxes && setShowFees((v) => !v)}
+                  className={`group flex items-center gap-1.5 text-[11px] px-2.5 py-1 -mr-2 rounded-full border transition-all duration-200 ${
+                    hasTaxes ? 'cursor-pointer' : 'cursor-default'
+                  }`}
+                  style={{
+                    borderColor: hasTaxes ? color.border : 'transparent',
+                    background: hasTaxes ? `${color.text}0c` : 'transparent',
+                  }}
+                  aria-label={hasTaxes ? 'Toggle fee breakdown' : undefined}
+                >
+                  <span style={{ color: `${color.text}88` }}>Stay total</span>
+                  <span className="font-semibold tabular-nums" style={{ color: color.text }}>
+                    ${stayTotal.toLocaleString()}
+                  </span>
+                  <span className="tabular-nums" style={{ color: `${color.text}60` }}>
+                    · {nights} {nights === 1 ? 'night' : 'nights'}
+                  </span>
+                  {hasTaxes && (
+                    <Info size={11} className="ml-0.5" style={{ color: `${color.text}70` }} />
+                  )}
+                </button>
+                <AnimatePresence initial={false}>
+                  {hasTaxes && showFees && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                      animate={{ opacity: 1, height: 'auto', marginTop: 6 }}
+                      exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                      transition={{ duration: 0.22, ease: [0.22, 0.61, 0.36, 1] }}
+                      className="overflow-hidden flex flex-col items-end gap-0.5 text-[10.5px] tabular-nums min-w-[180px]"
+                      style={{ color: `${color.text}88` }}
+                    >
+                      <div className="flex justify-between w-full">
+                        <span>Room · ${stayPerNight.toLocaleString()} × {nights} {nights === 1 ? 'night' : 'nights'}</span>
+                        <span>${stayRoom.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between w-full">
+                        <span>Taxes &amp; fees</span>
+                        <span>${stayTaxes.toLocaleString()}</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
           </div>
 
           {/* Coming-soon actions */}
@@ -360,7 +364,13 @@ export default function CityDetailPanel({
           className={`px-6 py-5 flex flex-col gap-3 overflow-y-auto min-h-0 ${scrollCls}`}
           style={{ background: `${color.text}06` }}
         >
-          <HotelDetail hotel={selectedHotel} nights={nights} travelers={trip.travelers} color={color} />
+          <HotelDetail
+            hotel={selectedHotel}
+            isCustom={!!city.customHotel}
+            nights={nights}
+            travelers={trip.travelers}
+            color={color}
+          />
         </div>
       </div>
 
@@ -781,11 +791,14 @@ function CustomHotelForm({
 
 function HotelDetail({
   hotel,
+  isCustom,
   nights,
   travelers,
   color,
 }: {
   hotel: Hotel | null;
+  /** A custom stay replaces the ranked list; otherwise no hotel = none found. */
+  isCustom: boolean;
   nights: number;
   travelers: number;
   color: { bg: string; text: string; border: string; name: string };
@@ -794,7 +807,7 @@ function HotelDetail({
   if (!hotel) {
     return (
       <div className="flex items-center justify-center h-full" style={{ color: `${color.text}70` }}>
-        <span className="text-sm">Using custom hotel</span>
+        <span className="text-sm">{isCustom ? 'Using custom hotel' : 'No options found'}</span>
       </div>
     );
   }
