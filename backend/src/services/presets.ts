@@ -1,4 +1,5 @@
 import { getSupabase } from './supabase';
+import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { compareLeg } from './compareLeg';
 import { searchHotels, isSameHotel } from './hotels';
@@ -222,6 +223,30 @@ export function isPlausibleRefresh(
 }
 
 /**
+ * True only when the refresh is switched on (PRESET_REFRESH_ENABLED=true).
+ * Gates both the in-process scheduler and POST /run-refresh: the refresh
+ * writes into the one Supabase project that also holds real trips, so it
+ * must be opted into by exactly one deployment, never by default.
+ */
+export function presetRefreshEnabled(): boolean {
+  return env.PRESET_REFRESH_ENABLED === true;
+}
+
+/**
+ * True only when flight fares come from Duffel's LIVE mode. Production runs
+ * a TEST token today — every offer is `live_mode: false`, priced by Duffel's
+ * sandbox and sold by "Duffel Airways" — so a refresh that accepted those
+ * fares would overwrite curated prices with made-up ones (audit: curated
+ * Vietnam Airlines $64 → Duffel Airways $180). With no token at all the only
+ * flight fares compareLeg can return are leg_price_cache rows, which were
+ * written by that same test token. So the rule is "live token or nothing",
+ * not merely "not a test token".
+ */
+export function liveFlightFaresAvailable(): boolean {
+  return (env.DUFFEL_ACCESS_TOKEN ?? '').startsWith('duffel_live_');
+}
+
+/**
  * Weekly price refresh: for every published preset, ~30 days out,
  *  - re-price each inter-city leg with live flight + train search (per
  *    person, matching how presets store transport), and
@@ -247,11 +272,14 @@ export async function refreshPresetPrices(
   if (error) throw new Error(error.message);
 
   const date = new Date(now.getTime() + 30 * 86_400_000).toISOString().split('T')[0];
+  const liveFlights = liveFlightFaresAvailable();
   let refreshed = 0;
   let failed = 0;
 
   for (const row of rows ?? []) {
     const data: PresetData = JSON.parse(JSON.stringify(row.data));
+    // Why each curated fare that was NOT replaced stayed — logged per preset.
+    const kept: string[] = [];
     try {
       await supabase.from('preset_trips').update({ refresh_status: 'refreshing' }).eq('slug', row.slug);
 
@@ -288,6 +316,15 @@ export async function refreshPresetPrices(
       for (let i = 0; i < data.cities.length - 1; i++) {
         const from = data.cities[i];
         const to = data.cities[i + 1];
+        const prev = from.transportOut;
+        // A curated flight can only be re-priced by a LIVE fare. Without one
+        // the search's answer could never be accepted, so it isn't run —
+        // that also skips the airport lookups and price-cache writes it
+        // would make against the shared database.
+        if (prev?.mode === 'flight' && !liveFlights) {
+          kept.push(`${from.name} → ${to.name}: no live Duffel token`);
+          continue;
+        }
         const cmp = await compareLeg({
           origin: from.name,
           destination: to.name,
@@ -303,17 +340,26 @@ export async function refreshPresetPrices(
               ? cmp.flightOption
               : null;
         const price = (pick as any)?.price;
-        const prev = from.transportOut;
-        if (pick && typeof price === 'number' && price > 0 && isPlausibleRefresh(prev, cmp.recommendation, price)) {
+        if (cmp.recommendation === 'flight' && !liveFlights) {
+          // Same rule for a leg with no curated fare to protect.
+          kept.push(`${from.name} → ${to.name}: no live Duffel token`);
+        } else if (pick && typeof price === 'number' && price > 0 && isPlausibleRefresh(prev, cmp.recommendation, price)) {
           const mins = (pick as any).durationMinutes ?? 0;
           from.transportOut = {
             mode: cmp.recommendation as 'flight' | 'train',
+            // The curated operator names the ROUTE ("Vietnam Airlines",
+            // "Shinkansen Hikari"); the cheapest offer's carrier is just
+            // whoever sold that one fare — under a test token, "Duffel
+            // Airways". A refresh updates prices, never the route.
             operator:
-              (pick as any).operator ?? (pick as any).carrier ?? prev?.operator ?? '',
+              prev?.operator || ((pick as any).operator ?? (pick as any).carrier ?? ''),
             duration: mins ? `${Math.floor(mins / 60)}h ${mins % 60}m` : prev?.duration ?? '',
             price: Math.round(price),
           };
         }
+      }
+      if (kept.length > 0) {
+        logger.info('preset refresh: kept curated fares', { slug: row.slug, kept });
       }
       const r = toRow(data, row.source);
       await supabase
@@ -356,21 +402,37 @@ export async function presetRefreshDue(now = new Date()): Promise<boolean> {
 
 let refreshRunning = false;
 
-/** One scheduler tick: refresh if due and not already running. */
-export async function runScheduledPresetRefresh(now = new Date()): Promise<'ran' | 'skipped'> {
-  if (refreshRunning) return 'skipped';
+/**
+ * Run `fn` unless a refresh is already in flight in this process, in which
+ * case return 'busy' without running it. Both entry points — the scheduler
+ * tick and POST /run-refresh — go through here, so an on-demand run can't
+ * overlap a scheduled one (the route used to call refreshPresetPrices
+ * directly and ignored the flag).
+ */
+export async function withPresetRefreshLock<T>(fn: () => Promise<T>): Promise<T | 'busy'> {
+  if (refreshRunning) return 'busy';
   refreshRunning = true;
   try {
-    if (!(await presetRefreshDue(now))) return 'skipped';
-    const result = await refreshPresetPrices(now);
-    logger.info('Weekly preset price refresh complete', result);
-    return 'ran';
-  } catch (err: any) {
-    logger.warn('Weekly preset price refresh failed (non-fatal)', { message: err?.message });
-    return 'skipped';
+    return await fn();
   } finally {
     refreshRunning = false;
   }
+}
+
+/** One scheduler tick: refresh if due and not already running. */
+export async function runScheduledPresetRefresh(now = new Date()): Promise<'ran' | 'skipped'> {
+  const outcome = await withPresetRefreshLock(async (): Promise<'ran' | 'skipped'> => {
+    try {
+      if (!(await presetRefreshDue(now))) return 'skipped';
+      const result = await refreshPresetPrices(now);
+      logger.info('Weekly preset price refresh complete', result);
+      return 'ran';
+    } catch (err: any) {
+      logger.warn('Weekly preset price refresh failed (non-fatal)', { message: err?.message });
+      return 'skipped';
+    }
+  });
+  return outcome === 'busy' ? 'skipped' : outcome;
 }
 
 /**
@@ -380,8 +442,20 @@ export async function runScheduledPresetRefresh(now = new Date()): Promise<'ran'
  * are no-ops. First check waits 10 minutes after boot so a dev restart
  * doesn't immediately spend API quota. POST /api/presets/run-refresh
  * remains for running it on demand.
+ *
+ * Does nothing unless PRESET_REFRESH_ENABLED=true. index.ts starts this on
+ * every non-test boot — including a laptop on `npm run dev`, which talks to
+ * the same production database — so the gate lives HERE, where no caller
+ * can forget it. Says once at boot which way it went.
  */
 export function startPresetRefreshScheduler(): () => void {
+  if (!presetRefreshEnabled()) {
+    logger.info('Preset price refresh scheduler disabled (set PRESET_REFRESH_ENABLED=true to enable)');
+    return () => {};
+  }
+  logger.info('Preset price refresh scheduler enabled', {
+    liveFlightFares: liveFlightFaresAvailable(),
+  });
   const SIX_HOURS = 6 * 60 * 60 * 1000;
   const first = setTimeout(() => void runScheduledPresetRefresh(), 10 * 60 * 1000);
   const every = setInterval(() => void runScheduledPresetRefresh(), SIX_HOURS);

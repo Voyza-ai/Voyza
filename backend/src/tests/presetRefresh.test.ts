@@ -93,9 +93,11 @@ describe('refreshPresetPrices (weekly job)', () => {
     );
     const patch = finalUpdate();
     expect(patch.refresh_status).toBe('fresh');
+    // The fare is live; the operator stays the curated one (a refresh
+    // re-prices the route, it never renames it — presetRefreshGate.test.ts).
     expect(patch.data.cities[0].transportOut).toEqual({
       mode: 'train',
-      operator: 'Trenitalia',
+      operator: 'Old Rail',
       duration: '1h 35m',
       price: 25,
     });

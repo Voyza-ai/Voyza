@@ -7,8 +7,10 @@ import {
   buildCategoryRows,
   buildEditorialRows,
   loadCatalog,
+  presetRefreshEnabled,
   recordPresetEvents,
   refreshPresetPrices,
+  withPresetRefreshLock,
 } from '../services/presets';
 
 const router = Router();
@@ -83,12 +85,20 @@ router.post(
 
 // ─── POST /api/presets/run-refresh — weekly price refresh ────
 // Point a weekly scheduler here (same CRON_SECRET as email run-jobs).
+// It writes prices into the shared database, so it obeys the same switch
+// as the in-process scheduler (PRESET_REFRESH_ENABLED) and the same
+// one-run-at-a-time lock — a cron hit during a scheduled run is refused
+// rather than doubling every search and write.
 router.post(
   '/run-refresh',
   asyncHandler(async (req, res) => {
     if (!env.CRON_SECRET) throw new AppError(503, 'CRON_SECRET is not configured');
     if (req.headers['x-cron-secret'] !== env.CRON_SECRET) throw new AppError(401, 'Unauthorized');
-    const result = await refreshPresetPrices();
+    if (!presetRefreshEnabled()) {
+      throw new AppError(503, 'Preset price refresh is disabled (PRESET_REFRESH_ENABLED is not "true")');
+    }
+    const result = await withPresetRefreshLock(() => refreshPresetPrices());
+    if (result === 'busy') throw new AppError(409, 'A preset price refresh is already running');
     res.json({ success: true, ...result });
   }),
 );
