@@ -452,7 +452,9 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
                   ? 'for these dates'
                   : shiftIsBest
                     ? `by starting ${shiftDateNice}`
-                    : 'vs default routing'}
+                    : // The optimizer's baseline (savingsVsNaive) is the
+                      // order the traveller typed — as the AI chat says it.
+                      'vs your original city order'}
               </div>
             </button>
 

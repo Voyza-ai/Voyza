@@ -28,7 +28,10 @@ describe('ResultsHeader', () => {
     const trip = buildTrip({ savings: 249 });
     render(<ResultsHeader trip={trip} />);
     expect(screen.getByText(/You can save/i)).toBeInTheDocument();
-    expect(screen.getByText(/vs default routing/i)).toBeInTheDocument();
+    // The optimizer's baseline (savingsVsNaive) is the order the traveller
+    // typed — the same words the AI chat uses for it.
+    expect(screen.getByText('vs your original city order')).toBeInTheDocument();
+    expect(screen.queryByText(/default routing/i)).not.toBeInTheDocument();
   });
 
   it('shows the date-shift savings when it beats routing savings', () => {
