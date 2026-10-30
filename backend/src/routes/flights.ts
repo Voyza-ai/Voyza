@@ -88,6 +88,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const input = homeLegsSchema.parse(req.body);
     const { buildHomeLeg } = await import('../services/optimizer');
+    // The only trip this route sees: its two ends. Enough for the trip to
+    // decide which "Lagos" a Portugal itinerary means.
+    const tripCityNames = [input.firstCity, input.lastCity];
 
     const [outboundLeg, returnLeg] = await Promise.all([
       input.outbound
@@ -97,6 +100,7 @@ router.post(
             date: clampToFuture(input.startDate),
             travelers: input.travelers,
             originCity: input.originCity,
+            tripCityNames,
           })
         : Promise.resolve(null),
       input.returnToHome
@@ -107,6 +111,7 @@ router.post(
             travelers: input.travelers,
             reverse: true,
             originCity: input.originCity,
+            tripCityNames,
           })
         : Promise.resolve(null),
     ]);

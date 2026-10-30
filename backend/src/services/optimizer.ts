@@ -1,5 +1,5 @@
 import { compareLeg, LegComparison, type CompareLegParams } from './compareLeg';
-import { getIataCode, searchFlights } from './flights';
+import { getIataCode, searchFlights, type IataLookupContext } from './flights';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
@@ -24,12 +24,23 @@ import { AppError } from '../middleware/error';
  * (10 min) already decide deliberately. A rejected lookup stays rejected
  * for the rest of the run — the same answer every caller would have got.
  *
- * WS2 note: `iata` is the ONE place this run resolves a city to an airport
- * (compareLeg and the home-leg searches go through it), so a trip-context
- * argument to getIataCode belongs in createRunContext.
+ * Trip context: `iata` is the ONE place this run resolves a city to an
+ * airport — compareLeg, the home-leg estimates and builds, the origin and
+ * metro fallbacks all go through it — and it always passes the trip's city
+ * names, so "Lagos" on a Lisbon + Porto trip is FAO and bare it is LOS.
+ * Keying the memo by name alone stays correct: the context is the same for
+ * every lookup in a run (the whole trip), so within a run a name has exactly
+ * one answer; a different trip is a different run with its own memo.
  */
 type RunContext = {
-  iata: (cityName: string) => Promise<string>;
+  /** Every city on the trip — the context every airport lookup gets. */
+  tripCityNames: string[];
+  /**
+   * getIataCode with this run's trip context. The optional second argument
+   * exists to fit CompareLegDeps; it is ignored, because the run's context
+   * is fixed (compareLeg passes the same names it was given by this run).
+   */
+  iata: (cityName: string, context?: IataLookupContext) => Promise<string>;
   compare: (params: CompareLegParams) => Promise<LegComparison>;
   /** searchFlights, counted — see `flightOutcomes`. */
   flights: typeof searchFlights;
@@ -43,7 +54,7 @@ type RunContext = {
   flightOutcomes: { answered: number; threw: number; firstError: unknown };
 };
 
-function createRunContext(): RunContext {
+function createRunContext(tripCityNames: string[]): RunContext {
   const flightOutcomes: RunContext['flightOutcomes'] = { answered: 0, threw: 0, firstError: undefined };
   const noteThrow = (err: unknown) => {
     flightOutcomes.threw++;
@@ -65,7 +76,7 @@ function createRunContext(): RunContext {
   const iata = (cityName: string): Promise<string> => {
     let hit = iataMemo.get(cityName);
     if (!hit) {
-      hit = getIataCode(cityName);
+      hit = getIataCode(cityName, { tripDestinationNames: tripCityNames });
       hit.catch((err: any) => {
         if ((err?.statusCode ?? 0) >= 500) noteThrow(err);
       });
@@ -77,7 +88,8 @@ function createRunContext(): RunContext {
   const compareMemo = new Map<string, Promise<LegComparison>>();
   const compare = (params: CompareLegParams): Promise<LegComparison> => {
     // Every input compareLeg reads — a memo must never merge two travel
-    // days, party sizes or country hints.
+    // days, party sizes or country hints. (tripCityNames is left out: it is
+    // the same for the whole run.)
     const key = [
       params.origin,
       params.destination,
@@ -94,7 +106,7 @@ function createRunContext(): RunContext {
     return hit;
   };
 
-  return { iata, compare, flights, flightOutcomes };
+  return { tripCityNames, iata, compare, flights, flightOutcomes };
 }
 
 type CityInput = {
@@ -535,6 +547,7 @@ async function scoreRoute(
         destination: to,
         date: legDate,
         travelers,
+        tripCityNames: ctx.tripCityNames,
         originCountry: fromCity?.country ?? getCityCountry(from),
         destinationCountry: toCity?.country ?? getCityCountry(to),
       }).then((comparison) => ({
@@ -958,7 +971,14 @@ export async function buildHomeLeg(params: {
    *  the specific airports return offers (e.g. EWR alone comes back empty
    *  but the NYC metro code has plenty). */
   originCity?: string;
-}, ctx: RunContext = createRunContext()): Promise<HomeLeg | null> {
+  /**
+   * Every city on the trip, so the destination (and the metro fallback)
+   * resolve to the reading this trip means — "Lagos" on a Lisbon + Porto
+   * trip is FAO. Used when no run context is passed (/api/flights/home-legs);
+   * inside optimize() the run's context already carries the trip.
+   */
+  tripCityNames?: string[];
+}, ctx: RunContext = createRunContext(params.tripCityNames ?? [])): Promise<HomeLeg | null> {
   // Pull top 4 — first becomes the main leg, rest go into alternatives
   // so the user can swap to another carrier/time without a new search.
   let offers = await searchHomeFlights(ctx, {
@@ -1043,8 +1063,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     throw new Error('Need at least 2 cities, or 1 city with an origin set');
   }
 
-  // One memo of airport codes and leg prices for this whole run (B8).
-  const ctx = createRunContext();
+  // One memo of airport codes and leg prices for this whole run (B8), every
+  // lookup made with the trip's city names as context.
+  const ctx = createRunContext(cities.map((c) => c.name));
 
   // Step 1: resolve IATA codes in parallel
   const iataCodes: Record<string, string> = {};
@@ -1099,10 +1120,13 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
 
     if (originAirports && originAirports.length > 0) {
       // The caller already decided, and we serve that decision verbatim for
-      // PRICING. Nothing to second-guess: the frontend fills this from the
-      // same generated artifact this function would read, which is the point
-      // of having retired the two hand-written tables. The clarification
-      // above is informational and does not override it.
+      // PRICING. The frontend fills this from frontend/lib/locationResolver.ts
+      // — a second implementation reading the browser hot set, not
+      // resolveOriginAirports. It matches this function's no-context answer
+      // because originAirportsBrowserParity.test.ts holds it to that over
+      // every hot-set key; it can still differ where trip context would
+      // change the answer, since the browser answers without the trip. The
+      // clarification above is informational and does not override it.
       resolvedOriginAirports = originAirports;
     } else if (resolution.airports.length > 0) {
       resolvedOriginAirports = resolution.airports;
@@ -1330,6 +1354,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           toCountry: toCity?.country ?? getCityCountry(leg.to),
           currentPrice: leg.cost,
           limit: 4,
+          // Same airports the scoring priced: the trip decides which Lagos.
+          tripCityNames: ctx.tripCityNames,
         });
         if (result.options.length > 0) {
           leg.options = result.options;

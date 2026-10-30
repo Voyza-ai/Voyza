@@ -1,4 +1,4 @@
-import { searchFlights, getIataCode, FlightOffer } from './flights';
+import { searchFlights, getIataCode, FlightOffer, type IataLookupContext } from './flights';
 import { searchTrains, TrainOffer } from './trains';
 import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
@@ -45,6 +45,12 @@ export type CompareLegParams = {
   travelers: number;
   originCountry?: string;
   destinationCountry?: string;
+  /**
+   * Every city on the trip, handed to getIataCode as `tripDestinationNames`
+   * so a name with more than one reading resolves to the one this trip
+   * means: "Lagos" on a Lisbon + Porto trip is FAO, bare it is LOS.
+   */
+  tripCityNames?: string[];
 };
 
 /**
@@ -55,7 +61,7 @@ export type CompareLegParams = {
  * Duffel outage from routes nobody flies.
  */
 export type CompareLegDeps = {
-  getIataCode?: (cityName: string) => Promise<string>;
+  getIataCode?: (cityName: string, context?: IataLookupContext) => Promise<string>;
   searchFlights?: typeof searchFlights;
 };
 
@@ -117,9 +123,10 @@ export async function compareLeg(
       ? Promise.resolve(null) // skip if cached
       : (async () => {
           try {
+            const tripContext = { tripDestinationNames: params.tripCityNames ?? [] };
             const [originIata, destIata] = await Promise.all([
-              resolveIata(origin),
-              resolveIata(destination),
+              resolveIata(origin, tripContext),
+              resolveIata(destination, tripContext),
             ]);
             return await findFlights({
               origin: originIata,
