@@ -23,6 +23,8 @@ jest.mock('../config/env', () => ({
 
 // The SDK calls the module export itself: `require("node-fetch")(url, init)`.
 jest.mock('node-fetch', () => jest.fn());
+// Not what this file is about, and it builds the whole location index.
+jest.mock('../services/location/sameAirportArea', () => ({ sameAirportArea: () => false }));
 
 import nodeFetch from 'node-fetch';
 import { getDuffel } from '../services/duffel';
