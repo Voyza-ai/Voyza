@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { hotelSearchLimiter } from '../middleware/rateLimit';
 import { searchHotels } from '../services/hotels';
 
 const router = Router();
@@ -19,6 +20,9 @@ const searchSchema = z.object({
 
 router.post(
   '/search',
+  // Its own cap on top of the shared expensive one: every search spends
+  // RapidAPI quota (see hotelSearchLimiter for the sizing).
+  hotelSearchLimiter,
   asyncHandler(async (req, res) => {
     const input = searchSchema.parse(req.body);
     const hotels = await searchHotels(input);

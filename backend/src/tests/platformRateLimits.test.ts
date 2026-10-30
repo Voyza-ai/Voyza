@@ -153,6 +153,38 @@ describe('normal use is never refused', () => {
   }, 120_000);
 });
 
+/** The hotels cap (rateLimit.ts RATE_LIMITS.hotels); see there for the sizing. */
+const HOTELS_CAP = 120;
+
+describe('the hotels cap never meets a real traveller', () => {
+  const SIX = ['Paris', 'Zurich', 'London', 'Amsterdam', 'Berlin', 'Prague'];
+  const hotelSearches = (n: number): Call[] =>
+    Array.from({ length: n }, () => ({ method: 'POST' as const, path: '/api/hotels/search' }));
+
+  it('a full 6-city plan, its budget-cap retries, a dozen date changes and a date-shift replan, from one IP: zero 429s', async () => {
+    const work: Call[] = [
+      ...plan(SIX), // one search per city
+      ...hotelSearches(SIX.length), // PlanningChat asks again without the budget cap when a capped search is empty
+      ...hotelSearches(12 * SIX.length), // 12 date edits, each re-searching every city
+      ...plan(SIX), // "2 days earlier" replans the whole trip
+      ...hotelSearches(SIX.length),
+    ];
+    expect(work.filter((c) => c.path === '/api/hotels/search')).toHaveLength(96);
+
+    const { refused } = await run('203.0.113.12', work);
+    expect(refused).toEqual([]);
+  }, 60_000);
+
+  it('the heavy session — 10 five-city plans, every one retried without its budget cap, plus 15 re-searches: zero 429s', async () => {
+    const plans = Array.from({ length: 10 }, () => [...plan(), ...hotelSearches(CITIES.length)]).flat();
+    const work = [...plans, ...hotelSearches(15)];
+    expect(work.filter((c) => c.path === '/api/hotels/search')).toHaveLength(115);
+
+    const { refused } = await run('203.0.113.13', work);
+    expect(refused).toEqual([]);
+  }, 120_000);
+});
+
 describe('a flood is still refused', () => {
   it(`the expensive cap: call ${RATE_LIMITS.expensive + 1} to a paid-API route in one window is refused`, async () => {
     expect(RATE_LIMITS.expensive).toBe(300);
@@ -170,6 +202,36 @@ describe('a flood is still refused', () => {
     const { refused } = await run(ip, optimizes);
     expect(refused).toEqual([`#${RATE_LIMITS.optimize + 1} POST /api/optimize`]);
     expect((await send(ip, { method: 'POST', path: '/api/hotels/search' })).status).toBe(400);
+  }, 60_000);
+
+  it('the hotels cap: hotel search 121 in one window is refused with the same 429 as the other paid routes, and the rest keep their budget', async () => {
+    // Hotel searches spend RapidAPI quota. They used to share the expensive
+    // cap, so one IP could spend 300 searches a window on them alone.
+    const ip = '198.51.100.25';
+    const searches: Call[] = Array.from({ length: HOTELS_CAP + 1 }, () => ({
+      method: 'POST',
+      path: '/api/hotels/search',
+    }));
+    const { refused, statuses } = await run(ip, searches);
+    expect(refused).toEqual([`#${HOTELS_CAP + 1} POST /api/hotels/search`]);
+    // Every earlier one reached the handler (an empty body is a 400 there).
+    expect(new Set(statuses.slice(0, -1))).toEqual(new Set([400]));
+
+    const res = await send(ip, { method: 'POST', path: '/api/hotels/search' });
+    expect(res.status).toBe(429);
+    const optimizeRefusal = await (async () => {
+      const other = '198.51.100.26';
+      for (let i = 0; i < RATE_LIMITS.optimize; i++) await send(other, { method: 'POST', path: '/api/optimize' });
+      return send(other, { method: 'POST', path: '/api/optimize' });
+    })();
+    expect(optimizeRefusal.status).toBe(429);
+    expect(res.body).toEqual(optimizeRefusal.body);
+    expect(res.headers['ratelimit-limit']).toBe(String(HOTELS_CAP));
+    expect((RATE_LIMITS as Record<string, number>).hotels).toBe(HOTELS_CAP);
+
+    // The other paid routes still answer for this IP.
+    expect((await send(ip, { method: 'POST', path: '/api/optimize' })).status).toBe(400);
+    expect((await send(ip, { method: 'POST', path: '/api/plan/converse', body: {} })).status).not.toBe(429);
   }, 60_000);
 
   it(`the general cap: call ${RATE_LIMITS.general + 1} in one window is refused`, async () => {
