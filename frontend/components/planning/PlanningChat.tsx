@@ -1382,6 +1382,43 @@ export default function PlanningChat() {
           ? Math.max(40, Math.floor((totalBudget * 0.4) / totalNights))
           : undefined;
 
+      // Step 4's AI-picked activities AND restaurants, per city, started
+      // BEFORE the hotel searches rather than after them.
+      //
+      // They need only the city, its nights and the user's answers — nothing
+      // from the hotels — but they used to wait for every hotel batch, which
+      // put the whole hotel phase (~2.3s for 3 cities, ~3.3s for 5, measured)
+      // in front of the slowest part of the search (6.9-8.4s per call). Each
+      // call already swallows its own failure into [], so this promise cannot
+      // reject and is safe to hold while the hotels run.
+      //
+      // Not started before the optimizer, although restaurants could be:
+      // activities need the nights the optimizer assigns and take as long, so
+      // restaurants starting earlier would not shorten the search — and if the
+      // optimizer failed, they would be rate-limited calls spent on nothing.
+      const perCityPromises = trip.cities.map(async (city) => {
+        const nights = Math.max(
+          1,
+          Math.round(
+            (new Date(city.dates.departure).getTime() - new Date(city.dates.arrival).getTime()) /
+              (1000 * 60 * 60 * 24),
+          ),
+        );
+        const vibeHint = parsed.vibe ?? answers.vibe;
+        const budgetHint = totalBudget;
+
+        const [activitiesResult, restaurantsResult] = await Promise.all([
+          searchActivities({ city: city.name, vibe: vibeHint, travelers, nights }).catch(
+            () => [] as ActivitySuggestion[],
+          ),
+          searchRestaurants({ city: city.name, vibe: vibeHint, travelers, budget: budgetHint }).catch(
+            () => [] as RestaurantSuggestion[],
+          ),
+        ]);
+
+        return { activities: activitiesResult, restaurants: restaurantsResult };
+      });
+
       // Step 3: Fetch hotels for each city. Booking.com (via RapidAPI free
       // tier) rate-limits parallel calls — 4 simultaneous requests often
       // have one or two come back empty, causing the UI to render "$0/night".
@@ -1451,31 +1488,10 @@ export default function PlanningChat() {
       // and the same trip reloaded now agree.
       trip.totalCost = liveTripTotal(trip);
 
-      // Step 4: fetch AI-picked activities AND restaurants per city in parallel
+      // Step 4: the AI picks, already in flight since before step 3. The
+      // status still changes only now, so the user reads the same two phases
+      // in the same order as when these calls waited for the hotels.
       setFindTripStatus('Finding things to do & places to eat...');
-      const perCityPromises = trip.cities.map(async (city) => {
-        const nights = Math.max(
-          1,
-          Math.round(
-            (new Date(city.dates.departure).getTime() - new Date(city.dates.arrival).getTime()) /
-              (1000 * 60 * 60 * 24),
-          ),
-        );
-        const vibeHint = parsed.vibe ?? answers.vibe;
-        const budgetHint = totalBudget;
-
-        const [activitiesResult, restaurantsResult] = await Promise.all([
-          searchActivities({ city: city.name, vibe: vibeHint, travelers, nights }).catch(
-            () => [] as ActivitySuggestion[],
-          ),
-          searchRestaurants({ city: city.name, vibe: vibeHint, travelers, budget: budgetHint }).catch(
-            () => [] as RestaurantSuggestion[],
-          ),
-        ]);
-
-        return { activities: activitiesResult, restaurants: restaurantsResult };
-      });
-
       const perCityResults = await Promise.all(perCityPromises);
       perCityResults.forEach(({ activities, restaurants }, idx) => {
         if (activities.length > 0) {
