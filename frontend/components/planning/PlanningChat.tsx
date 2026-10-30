@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { interpretPlan, optimizeTrip, searchHotels, searchActivities, searchRestaurants, suggestDestinations, OptimizeResult, ActivitySuggestion, RestaurantSuggestion } from '@/lib/api';
 import { Trip, City, Transport, Restaurant, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
 import { hotelFromResult } from '@/lib/hotelShape';
+import { liveTripTotal } from '@/lib/tripTotals';
 import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput } from '@/lib/parseDate';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
@@ -1436,6 +1437,19 @@ export default function PlanningChat() {
           trip.cities[idx] = { ...trip.cities[idx], ...hotelResult };
         }
       });
+
+      // The trip's total, now that every price in it is known.
+      //
+      // `buildTripFromOptimize` can only set `totalCost` from the route, which
+      // is transport alone — hotels don't exist yet there — and it used to stay
+      // that way. Everything that reads it takes it as the whole trip:
+      // ResultsHeader's savings baseline (`totalCost + savings` against
+      // `liveTripTotal`, which has hotels, so the saving clamped to 0 and every
+      // fresh trip said "Best price" while the AI quoted the routing saving),
+      // BudgetOverBanner, and the AI's trip summary. A saved trip already
+      // stores `liveTripTotal` (ResultsHeader's save payload), so a fresh trip
+      // and the same trip reloaded now agree.
+      trip.totalCost = liveTripTotal(trip);
 
       // Step 4: fetch AI-picked activities AND restaurants per city in parallel
       setFindTripStatus('Finding things to do & places to eat...');
