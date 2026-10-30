@@ -76,6 +76,9 @@ beforeEach(() => {
 });
 
 const finalUpdate = () => updates.filter((u) => 'refresh_status' in u.patch).pop()!.patch;
+// The preset's data after the run: the last data written, or — when nothing
+// came back live and so nothing was written — what was there before.
+const finalData = () => updates.filter((u) => 'data' in u.patch).pop()?.patch.data ?? rows[0].data;
 
 describe('refreshPresetPrices (weekly job)', () => {
   it('re-prices legs per person with live search and recomputes cost', async () => {
@@ -87,9 +90,10 @@ describe('refreshPresetPrices (weekly job)', () => {
     const r = await refreshPresetPrices(new Date('2026-10-10T00:00:00Z'));
     expect(r).toEqual({ refreshed: 1, failed: 0 });
 
-    // Priced for ONE traveler (preset transport prices are per person).
+    // Priced for ONE traveler (preset transport prices are per person), on
+    // the day the leg departs: Rome's 2-night stay from 11-09 ends 11-11.
     expect(mockCompareLeg).toHaveBeenCalledWith(
-      expect.objectContaining({ origin: 'Rome', destination: 'Florence', travelers: 1, date: '2026-11-09' }),
+      expect.objectContaining({ origin: 'Rome', destination: 'Florence', travelers: 1, date: '2026-11-11' }),
     );
     const patch = finalUpdate();
     expect(patch.refresh_status).toBe('fresh');
@@ -105,13 +109,13 @@ describe('refreshPresetPrices (weekly job)', () => {
     expect(patch.est_cost).toBe(450);
   });
 
-  it('keeps the previous fare when the live search finds nothing', async () => {
+  it('keeps the previous fare when the live search finds nothing — and does not call that fresh', async () => {
     mockCompareLeg.mockResolvedValue({ recommendation: 'unavailable', trainOption: null, flightOption: null });
     await refreshPresetPrices();
-    const patch = finalUpdate();
-    expect(patch.data.cities[0].transportOut.price).toBe(40);
-    expect(patch.data.cities[0].transportOut.operator).toBe('Old Rail');
-    expect(patch.refresh_status).toBe('fresh');
+    expect(finalData().cities[0].transportOut.price).toBe(40);
+    expect(finalData().cities[0].transportOut.operator).toBe('Old Rail');
+    // Nothing was re-priced live (presetRefreshHonest.test.ts).
+    expect(finalUpdate()).toEqual({ refresh_status: 'failed' });
   });
 
   it('never swaps a train leg for a flight (the Lisbon → Sintra live bug)', async () => {
@@ -123,7 +127,7 @@ describe('refreshPresetPrices (weekly job)', () => {
       trainOption: null,
     });
     await refreshPresetPrices();
-    expect(finalUpdate().data.cities[0].transportOut).toEqual({
+    expect(finalData().cities[0].transportOut).toEqual({
       mode: 'train',
       operator: 'Old Rail',
       duration: '2h 0m',
@@ -138,7 +142,7 @@ describe('refreshPresetPrices (weekly job)', () => {
       flightOption: null,
     });
     await refreshPresetPrices();
-    expect(finalUpdate().data.cities[0].transportOut.price).toBe(40);
+    expect(finalData().cities[0].transportOut.price).toBe(40);
   });
 
   it('isPlausibleRefresh: same mode within 3× only', () => {
@@ -184,15 +188,15 @@ describe('refreshPresetPrices (weekly job)', () => {
     mockCompareLeg.mockResolvedValue({ recommendation: 'unavailable', trainOption: null, flightOption: null });
     mockSearchHotels.mockResolvedValue([{ name: 'h', pricePerNight: 900 }]);
     await refreshPresetPrices();
-    expect(finalUpdate().data.cities[0].hotel.pricePerNight).toBe(100);
+    expect(finalData().cities[0].hotel.pricePerNight).toBe(100);
   });
 
-  it('keeps hotel rates when the hotel search throws', async () => {
+  it('keeps hotel rates when the hotel search throws (and reports the preset failed)', async () => {
     mockCompareLeg.mockResolvedValue({ recommendation: 'unavailable', trainOption: null, flightOption: null });
     mockSearchHotels.mockRejectedValue(new Error('quota'));
     const r = await refreshPresetPrices();
-    expect(r.refreshed).toBe(1);
-    expect(finalUpdate().data.cities.map((c: any) => c.hotel.pricePerNight)).toEqual([100, 100]);
+    expect(r).toEqual({ refreshed: 0, failed: 1 });
+    expect(finalData().cities.map((c: any) => c.hotel.pricePerNight)).toEqual([100, 100]);
   });
 });
 

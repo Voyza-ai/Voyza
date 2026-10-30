@@ -246,16 +246,163 @@ export function liveFlightFaresAvailable(): boolean {
   return (env.DUFFEL_ACCESS_TOKEN ?? '').startsWith('duffel_live_');
 }
 
+/** Within 3× either way of the anchor (an anchor of 0 accepts anything). */
+const within3x = (price: number, anchor: number) =>
+  !(anchor > 0) || (price <= anchor * 3 && price >= anchor / 3);
+
 /**
- * Weekly price refresh: for every published preset, ~30 days out,
- *  - re-price each inter-city leg with live flight + train search (per
- *    person, matching how presets store transport), and
- *  - re-price each city's hotel: find the SAME hotel in a live search
- *    (1 room, 2 adults — presets store the nightly rate per room) and take
- *    its current nightly rate.
- * Then recompute the derived cost facts. Anything that can't be re-priced
- * (no offer, hotel not in results, API down) keeps its previous price — a
+ * The bundled (curated.json / generated.json) copy of each preset — the
+ * FIXED anchor a refreshed price is judged against. Anchoring to the row's
+ * previous price let a fare ratchet 3× per run with nothing holding it:
+ * curated $100 → $290 → $860 → $2,580 in three weekly runs (audit A7).
+ */
+const BUNDLED_BY_SLUG = new Map(bundledCatalog().map(({ data }) => [data.slug, data]));
+
+/** The bundled city at index i, when it is still the same city. */
+const bundledCity = (slug: string, i: number, name: string) => {
+  const c = BUNDLED_BY_SLUG.get(slug)?.cities[i];
+  return c && c.name === name ? c : undefined;
+};
+
+type RepriceOutcome = {
+  /** Prices that came back from a live source and were accepted. */
+  live: number;
+  /** Prices kept as they were, and why ("Rome → Florence: no live train fare"). */
+  kept: string[];
+  /** Searches that threw. */
+  errors: string[];
+};
+
+/**
+ * Re-price one preset IN PLACE, ~30 days out:
+ *  - each city's hotel: find the SAME hotel in a live search (1 room, 2
+ *    adults — presets store the nightly rate per room) and take its rate;
+ *  - each inter-city leg, per person (how presets store transport), in its
+ *    OWN mode: a curated train is priced from the train option, a curated
+ *    flight from the flight option. The cheapest-overall recommendation
+ *    used to decide, so a priced train lost to a cheaper flight was never
+ *    re-priced, and a mode change was only caught by the guard afterwards.
+ * Leg dates chain like the stays: a leg departs the day its city's stay
+ * ends (every leg used to be searched on the trip's first day).
+ * Never throws; anything not re-priced keeps its price and says why — a
  * refresh must never zero out or invent a price.
+ */
+async function repricePreset(
+  slug: string,
+  data: PresetData,
+  startIso: string,
+  liveFlights: boolean,
+): Promise<RepriceOutcome> {
+  const out: RepriceOutcome = { live: 0, kept: [], errors: [] };
+
+  const stays: Array<{ checkin: string; checkout: string }> = [];
+  let checkin = startIso;
+  for (const city of data.cities) {
+    const checkout = addDaysIso(checkin, city.nights);
+    stays.push({ checkin, checkout });
+    checkin = checkout;
+  }
+
+  for (const [i, city] of data.cities.entries()) {
+    try {
+      // Look up THIS hotel by name (a city search only returns the top
+      // ~20 listings, which rarely include the curated hotel).
+      const offers = await searchHotels({
+        city: city.name,
+        hotelName: city.hotel.name,
+        checkin: stays[i].checkin,
+        checkout: stays[i].checkout,
+        adults: 2,
+        rooms: 1,
+      });
+      const match = offers.find((o) => isSameHotel(city.hotel.name, o.name));
+      const anchor = bundledCity(slug, i, city.name)?.hotel.pricePerNight ?? city.hotel.pricePerNight;
+      if (!match || !(match.pricePerNight > 0)) {
+        out.kept.push(`${city.name} hotel: not in live results`);
+      } else if (!within3x(match.pricePerNight, anchor)) {
+        out.kept.push(`${city.name} hotel: live $${Math.round(match.pricePerNight)} vs curated $${anchor}, over 3×`);
+      } else {
+        city.hotel = { ...city.hotel, pricePerNight: Math.round(match.pricePerNight) };
+        out.live++;
+      }
+    } catch (err: any) {
+      out.errors.push(`${city.name} hotel: ${err?.message ?? 'search failed'}`);
+    }
+  }
+
+  for (let i = 0; i < data.cities.length - 1; i++) {
+    const from = data.cities[i];
+    const to = data.cities[i + 1];
+    const leg = `${from.name} → ${to.name}`;
+    const prev = from.transportOut;
+    // No curated leg: nothing to re-price, and adding one would rewrite the route.
+    if (!prev) {
+      out.kept.push(`${leg}: no curated leg`);
+      continue;
+    }
+    // A curated flight can only be re-priced by a LIVE fare. Without one
+    // the search's answer could never be accepted, so it isn't run —
+    // that also skips the airport lookups and price-cache writes it
+    // would make against the shared database.
+    if (prev.mode === 'flight' && !liveFlights) {
+      out.kept.push(`${leg}: no live Duffel token`);
+      continue;
+    }
+    let cmp;
+    try {
+      cmp = await compareLeg({
+        origin: from.name,
+        destination: to.name,
+        date: stays[i].checkout,
+        travelers: 1,
+        originCountry: from.country,
+        destinationCountry: to.country,
+      });
+    } catch (err: any) {
+      out.errors.push(`${leg}: ${err?.message ?? 'search failed'}`);
+      continue;
+    }
+    const option: any = prev.mode === 'train' ? cmp.trainOption : cmp.flightOption;
+    const price = option?.price;
+    // While rail has no coverage this is the normal answer for a train leg:
+    // a kept price, not a failure.
+    if (!(typeof price === 'number' && price > 0)) {
+      out.kept.push(`${leg}: no live ${prev.mode} fare`);
+      continue;
+    }
+    const bundledLeg = bundledCity(slug, i, from.name)?.transportOut;
+    const anchor = bundledLeg && bundledLeg.mode === prev.mode ? bundledLeg.price : prev.price;
+    if (!isPlausibleRefresh({ mode: prev.mode, price: anchor }, prev.mode, price)) {
+      out.kept.push(`${leg}: live $${Math.round(price)} vs curated $${anchor}, over 3×`);
+      continue;
+    }
+    const mins = option.durationMinutes ?? 0;
+    from.transportOut = {
+      mode: prev.mode,
+      // The curated operator names the ROUTE ("Vietnam Airlines",
+      // "Shinkansen Hikari"); the cheapest offer's carrier is just
+      // whoever sold that one fare — under a test token, "Duffel
+      // Airways". A refresh updates prices, never the route.
+      operator: prev.operator || (option.operator ?? option.carrier ?? ''),
+      duration: mins ? `${Math.floor(mins / 60)}h ${mins % 60}m` : prev.duration,
+      price: Math.round(price),
+    };
+    out.live++;
+  }
+  return out;
+}
+
+/**
+ * Weekly price refresh: re-price every published preset (repricePreset),
+ * then recompute the derived cost facts.
+ *
+ * A preset is marked 'fresh' — and refreshed_at bumped — only when at least
+ * one of its prices really came back from a live source and no search
+ * failed. Anything else is 'failed' (the only other end state 013's CHECK
+ * allows) with the reasons logged, and refreshed_at is left alone, so it
+ * still says when the prices were last live. It used to stamp 'fresh' for
+ * a week even when every provider came back empty (audit E5). Live prices
+ * found on a failed attempt are still saved — they are real.
  */
 export async function refreshPresetPrices(
   now = new Date(),
@@ -271,109 +418,39 @@ export async function refreshPresetPrices(
   const { data: rows, error } = await query;
   if (error) throw new Error(error.message);
 
-  const date = new Date(now.getTime() + 30 * 86_400_000).toISOString().split('T')[0];
+  const start = new Date(now.getTime() + 30 * 86_400_000).toISOString().split('T')[0];
   const liveFlights = liveFlightFaresAvailable();
   let refreshed = 0;
   let failed = 0;
 
   for (const row of rows ?? []) {
     const data: PresetData = JSON.parse(JSON.stringify(row.data));
-    // Why each curated fare that was NOT replaced stayed — logged per preset.
-    const kept: string[] = [];
     try {
       await supabase.from('preset_trips').update({ refresh_status: 'refreshing' }).eq('slug', row.slug);
+      const outcome = await repricePreset(row.slug, data, start, liveFlights);
+      const fresh = outcome.live > 0 && outcome.errors.length === 0;
+      logger.info('preset refresh', {
+        slug: row.slug,
+        status: fresh ? 'fresh' : 'failed',
+        live: outcome.live,
+        kept: outcome.kept,
+        errors: outcome.errors,
+      });
 
-      // Hotels: stay dates chain from the same start date as the legs.
-      let checkin = date;
-      for (const city of data.cities) {
-        const checkout = addDaysIso(checkin, city.nights);
-        try {
-          // Look up THIS hotel by name (a city search only returns the top
-          // ~20 listings, which rarely include the curated hotel).
-          const offers = await searchHotels({
-            city: city.name,
-            hotelName: city.hotel.name,
-            checkin,
-            checkout,
-            adults: 2,
-            rooms: 1,
-          });
-          const match = offers.find((o) => isSameHotel(city.hotel.name, o.name));
-          const prevRate = city.hotel.pricePerNight;
-          if (
-            match &&
-            match.pricePerNight > 0 &&
-            (!(prevRate > 0) || (match.pricePerNight <= prevRate * 3 && match.pricePerNight >= prevRate / 3))
-          ) {
-            city.hotel = { ...city.hotel, pricePerNight: Math.round(match.pricePerNight) };
-          }
-        } catch {
-          // hotel search failed — keep the previous nightly rate
-        }
-        checkin = checkout;
-      }
-
-      for (let i = 0; i < data.cities.length - 1; i++) {
-        const from = data.cities[i];
-        const to = data.cities[i + 1];
-        const prev = from.transportOut;
-        // A curated flight can only be re-priced by a LIVE fare. Without one
-        // the search's answer could never be accepted, so it isn't run —
-        // that also skips the airport lookups and price-cache writes it
-        // would make against the shared database.
-        if (prev?.mode === 'flight' && !liveFlights) {
-          kept.push(`${from.name} → ${to.name}: no live Duffel token`);
-          continue;
-        }
-        const cmp = await compareLeg({
-          origin: from.name,
-          destination: to.name,
-          date,
-          travelers: 1,
-          originCountry: from.country,
-          destinationCountry: to.country,
-        });
-        const pick =
-          cmp.recommendation === 'train'
-            ? cmp.trainOption
-            : cmp.recommendation === 'flight'
-              ? cmp.flightOption
-              : null;
-        const price = (pick as any)?.price;
-        if (cmp.recommendation === 'flight' && !liveFlights) {
-          // Same rule for a leg with no curated fare to protect.
-          kept.push(`${from.name} → ${to.name}: no live Duffel token`);
-        } else if (pick && typeof price === 'number' && price > 0 && isPlausibleRefresh(prev, cmp.recommendation, price)) {
-          const mins = (pick as any).durationMinutes ?? 0;
-          from.transportOut = {
-            mode: cmp.recommendation as 'flight' | 'train',
-            // The curated operator names the ROUTE ("Vietnam Airlines",
-            // "Shinkansen Hikari"); the cheapest offer's carrier is just
-            // whoever sold that one fare — under a test token, "Duffel
-            // Airways". A refresh updates prices, never the route.
-            operator:
-              prev?.operator || ((pick as any).operator ?? (pick as any).carrier ?? ''),
-            duration: mins ? `${Math.floor(mins / 60)}h ${mins % 60}m` : prev?.duration ?? '',
-            price: Math.round(price),
-          };
-        }
-      }
-      if (kept.length > 0) {
-        logger.info('preset refresh: kept curated fares', { slug: row.slug, kept });
-      }
-      const r = toRow(data, row.source);
-      await supabase
-        .from('preset_trips')
-        .update({
+      const patch: Record<string, unknown> = { refresh_status: fresh ? 'fresh' : 'failed' };
+      if (outcome.live > 0) {
+        const r = toRow(data, row.source);
+        Object.assign(patch, {
           data,
           est_cost: r.est_cost,
           budget_tier: r.budget_tier,
           categories: r.categories,
-          refresh_status: 'fresh',
-          refreshed_at: now.toISOString(),
-        })
-        .eq('slug', row.slug);
-      refreshed++;
+        });
+      }
+      if (fresh) patch.refreshed_at = now.toISOString();
+      await supabase.from('preset_trips').update(patch).eq('slug', row.slug);
+      if (fresh) refreshed++;
+      else failed++;
     } catch (err: any) {
       failed++;
       logger.warn('preset refresh failed (non-fatal)', { slug: row.slug, message: err?.message });

@@ -202,8 +202,11 @@ describe('refreshPresetPrices: no sandbox fares, curated operator kept', () => {
     const info = jest.spyOn(logger, 'info').mockImplementation(() => {});
     await refreshPresetPrices(NOW);
     expect(info).toHaveBeenCalledWith(
-      expect.stringMatching(/kept curated/),
-      expect.objectContaining({ slug: 'vietnam', kept: [expect.stringMatching(/Hanoi → Hoi An: no live Duffel token/)] }),
+      'preset refresh',
+      expect.objectContaining({
+        slug: 'vietnam',
+        kept: expect.arrayContaining([expect.stringMatching(/Hanoi → Hoi An: no live Duffel token/)]),
+      }),
     );
     info.mockRestore();
   });
