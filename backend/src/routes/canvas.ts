@@ -306,6 +306,15 @@ router.post(
 
     const supabase = getSupabase();
 
+    // The party size every search below prices for. Hotel lookups already
+    // read it; the leg re-compare further down hard-coded 1, so on a
+    // 2-person trip a missing Rome → Florence leg came back as ONE fare
+    // ($40) inside a total where every other leg is a party total, and
+    // trips.total_cost undercounted it (measured: 640 where 680 is right).
+    // Same rule as every other route's schema: a positive integer, else 1.
+    const rawTravelers = state.trip?.travelers;
+    const travelers = Number.isInteger(rawTravelers) && rawTravelers > 0 ? rawTravelers : 1;
+
     // ── Prepare ──────────────────────────────────────────────
     // Everything that enriches the state — placeholder activities and
     // restaurants, hotel lookups, flight-vs-train comparisons — runs BEFORE
@@ -346,8 +355,15 @@ router.post(
               city: city.name,
               checkin: city.dates.arrival,
               checkout: city.dates.departure,
-              adults: state.trip?.travelers ?? 1,
-              rooms: 1,
+              adults: travelers,
+              // Was a hard-coded 1: six adults priced into one room. Two
+              // per room is the occupancy rule the hotel service applies
+              // when a caller gives none. Stated here rather than omitted
+              // because a service that predates that default still
+              // requires `rooms` (tsc fails without it) and would send
+              // Booking `room_number=undefined`. Same value either way;
+              // this line can go once the service default has landed.
+              rooms: Math.ceil(travelers / 2),
             })
               .then((results) => {
                 if (results.length > 0) {
@@ -403,7 +419,9 @@ router.post(
               || new Date().toISOString().split('T')[0];
             const idx = i;
             comparePromises.push(
-              compareLeg({ origin, destination: dest, date, travelers: 1 })
+              // compareLeg prices PARTY TOTALS for `travelers`, the unit
+              // every other leg on the trip is stored in.
+              compareLeg({ origin, destination: dest, date, travelers })
                 .then((result) => {
                   const best = result.recommendation === 'train' && result.trainOption
                     ? { mode: 'train' as const, price: result.trainOption.price ?? 0, duration: result.trainOption.durationMinutes, operator: result.trainOption.operator ?? '' }
@@ -430,48 +448,6 @@ router.post(
           await Promise.all(comparePromises);
         }
       }
-    }
-
-    // Update canvas session — find existing and update, or insert new
-    const { data: existingSession } = await supabase
-      .from('canvas_sessions')
-      .select('id')
-      .eq('trip_id', tripId)
-      .order('saved_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (existingSession) {
-      // Update existing session
-      await supabase
-        .from('canvas_sessions')
-        .update({
-          state,
-          last_saved_by: user.id,
-          saved_at: new Date().toISOString(),
-        })
-        .eq('id', existingSession.id);
-
-      // Clean up any duplicate sessions for this trip
-      const { data: allSessions } = await supabase
-        .from('canvas_sessions')
-        .select('id')
-        .eq('trip_id', tripId)
-        .neq('id', existingSession.id);
-      if (allSessions && allSessions.length > 0) {
-        for (const s of allSessions) {
-          await supabase.from('canvas_sessions').delete().eq('id', s.id);
-        }
-      }
-    } else {
-      await supabase
-        .from('canvas_sessions')
-        .insert({
-          trip_id: tripId,
-          state,
-          last_saved_by: user.id,
-          saved_at: new Date().toISOString(),
-        });
     }
 
     // Apply canvas changes to live trip tables
@@ -577,7 +553,7 @@ router.post(
       }
     }
 
-    const { error: tripUpdateError } = await supabase
+    let { error: tripUpdateError } = await supabase
       .from('trips')
       .update(tripUpdate)
       .eq('id', tripId);
@@ -590,7 +566,71 @@ router.post(
       );
       delete tripUpdate.return_city;
       delete tripUpdate.return_airports;
-      await supabase.from('trips').update(tripUpdate).eq('id', tripId);
+      ({ error: tripUpdateError } = await supabase.from('trips').update(tripUpdate).eq('id', tripId));
+    }
+    // This error used to be dropped, so a save whose title, total and home
+    // legs never landed still answered { saved: true }.
+    if (tripUpdateError) {
+      throw new AppError(500, `Could not save the trip's details: ${tripUpdateError.message}`);
+    }
+
+    // ── Canvas session — written LAST ────────────────────────
+    // Only once the trip tables hold this state. It used to be written
+    // FIRST, so a save whose graph write then failed answered 500 while
+    // canvas_sessions already held the new state and the trip tables the
+    // old one. The canvas reloads from the session, so the "failed" save
+    // looked saved there and nowhere else (results, history, share links
+    // all read the trip tables). Collaborators' realtime listeners also
+    // fire on this write, so they now only ever see a state the trip
+    // tables agree with. If THIS write fails the session is one save
+    // behind, but every step above is a replace, so a retry converges.
+    const { data: existingSession } = await supabase
+      .from('canvas_sessions')
+      .select('id')
+      .eq('trip_id', tripId)
+      .order('saved_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (existingSession) {
+      // Update existing session
+      const { error: sessionError } = await supabase
+        .from('canvas_sessions')
+        .update({
+          state,
+          last_saved_by: user.id,
+          saved_at: new Date().toISOString(),
+        })
+        .eq('id', existingSession.id);
+      if (sessionError) {
+        throw new AppError(500, `Could not save the canvas: ${sessionError.message}`);
+      }
+
+      // Clean up any duplicate sessions for this trip. Still best-effort:
+      // the session just written is the newest, which is the one the
+      // canvas loads, and the next save retries a leftover duplicate.
+      const { data: allSessions } = await supabase
+        .from('canvas_sessions')
+        .select('id')
+        .eq('trip_id', tripId)
+        .neq('id', existingSession.id);
+      if (allSessions && allSessions.length > 0) {
+        for (const s of allSessions) {
+          await supabase.from('canvas_sessions').delete().eq('id', s.id);
+        }
+      }
+    } else {
+      const { error: sessionError } = await supabase
+        .from('canvas_sessions')
+        .insert({
+          trip_id: tripId,
+          state,
+          last_saved_by: user.id,
+          saved_at: new Date().toISOString(),
+        });
+      if (sessionError) {
+        throw new AppError(500, `Could not save the canvas: ${sessionError.message}`);
+      }
     }
 
     res.json({ saved: true, savedAt: new Date().toISOString() });

@@ -8,7 +8,12 @@
  *
  * Nominatim usage policy: max 1 request/second — uncached lookups are run
  * through a small sequential queue with a delay between requests.
+ *
+ * The trip's own cities skip that queue whenever the location resolver knows
+ * them — see geocodeTripCities.
  */
+
+import { resolveLocation } from './locationResolver';
 
 export type GeoPoint = { lat: number; lon: number };
 
@@ -104,4 +109,60 @@ export async function geocodeCity(name: string): Promise<GeoPlace | null> {
  */
 export async function geocodeCities(names: string[]): Promise<(GeoPlace | null)[]> {
   return Promise.all(names.map((n) => geocodeCity(n)));
+}
+
+// Resolver answers already fetched this page load, so re-rendering the map
+// (any trip edit rebuilds its name list) doesn't ask the server again.
+const resolvedThisLoad = new Map<string, GeoPoint>();
+
+async function fromLocationResolver(name: string): Promise<GeoPoint | null> {
+  const key = normalize(name);
+  const known = resolvedThisLoad.get(key);
+  if (known) return known;
+  // Hot set offline, else one in-memory lookup on our own server. Never
+  // throws: a failed request comes back `unknown`.
+  const answer = await resolveLocation(name);
+  if (answer.status !== 'resolved') return null;
+  const point = { lat: answer.place.lat, lon: answer.place.lon };
+  resolvedThisLoad.set(key, point);
+  return point;
+}
+
+/**
+ * Coordinates for the TRIP's own places — the home city and each stop — for
+ * the Map tab's pins. The location resolver first, Nominatim only for what
+ * it cannot answer.
+ *
+ * Why: every uncached city went through Nominatim one at a time, 1.1 s apart
+ * (its usage policy), so a cold Map tab waited ~1.1 s per pin before showing
+ * any (audit D-12: 7.3 s measured). The resolver's artifact already holds
+ * coordinates for 36,009 places: the browser's hot set answers the common
+ * ones with no request at all, and `/api/locations/resolve` the rest in one
+ * in-memory lookup each, all in parallel and outside the general rate limit.
+ *
+ * Only a `resolved` answer is used. An ambiguous name (`Portland`, and —
+ * measured — `Amsterdam, Netherlands`) or an unknown one falls through to
+ * the same Nominatim lookup as before, as does any network failure. A pin
+ * this browser already cached from Nominatim keeps its place.
+ *
+ * Measured against Nominatim for the demo cities, as the map asks for them:
+ * 0.03-2.4 km apart (Paris 0.03, Vienna 0.03, Prague 0.07, Venice 0.15,
+ * London 0.18, Zurich 1.1, Florence 1.3, Berlin 1.3, Barcelona 1.7,
+ * Lisbon 2.2, Rome 2.4), invisible at trip zoom. The outlier is Budapest at
+ * 8 km, where Nominatim pins the administrative centroid out in Kőbánya and
+ * the resolver the centre on the Danube.
+ *
+ * Deliberately NOT used for sights, hotels and day trips (lib/citySpots):
+ * those decide what a hit IS from OSM's class/type, which the resolver does
+ * not carry, and a spot query like "Versailles, France" would otherwise
+ * resolve to the town it is named after.
+ */
+export async function geocodeTripCities(names: string[]): Promise<(GeoPlace | null)[]> {
+  return Promise.all(
+    names.map(async (name) => {
+      const cached = readCache()[normalize(name)];
+      if (cached) return cached;
+      return (await fromLocationResolver(name)) ?? geocodeCity(name);
+    }),
+  );
 }
