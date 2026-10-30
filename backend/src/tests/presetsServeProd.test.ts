@@ -43,7 +43,7 @@ import express from 'express';
 import request from 'supertest';
 import presetsRouter from '../routes/presets';
 import { errorHandler } from '../middleware/error';
-import { bundledCatalog, clearTrendingCache, servableCatalog, toRow } from '../services/presets';
+import { bundledCatalog, clearTrendingCache, servableCatalog, toRow, warmPresetChecks } from '../services/presets';
 import { presetFacts } from '../services/presetTaxonomy';
 import prod from './fixtures/presets-prod-2026-10-29.json';
 import curated from '../data/presets/curated.json';
@@ -53,6 +53,12 @@ const app = express();
 app.use(express.json());
 app.use('/api/presets', presetsRouter);
 app.use(errorHandler);
+
+// What boot does before the server takes requests (index.ts
+// warmLocationIndex): build the location index and run the generated
+// presets' checks once. Without it the first request below paid ~2.3s for
+// both, and in CI ran past Jest's 5s per-test limit.
+warmPresetChecks();
 
 /** A preset_trips row, rebuilt from one preset of the API response. */
 const rowFrom = (p: any) => ({

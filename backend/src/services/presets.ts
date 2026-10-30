@@ -231,6 +231,21 @@ export function sandboxLegs(stored: PresetData, bundled: PresetData | undefined)
  *    airline on it can't be priced or checked.
  */
 const bundleProblems = new Map<string, string[]>();
+
+/**
+ * Run the generated presets' checks ahead of the first request. They resolve
+ * every generated city's gateway airport through the location index, ~0.6s
+ * on first use even with the index already built — paid by the first
+ * /browse visitor after a deploy unless boot does it (index.ts, right after
+ * building the index). The answers depend only on the bundled data, so they
+ * are computed once per process and cached.
+ */
+export function warmPresetChecks(): void {
+  for (const { data, source } of bundledCatalog()) {
+    if (source === 'generated') generatedBundleProblems(data);
+  }
+}
+
 function generatedBundleProblems(p: PresetData): string[] {
   const cached = bundleProblems.get(p.slug);
   if (cached) return cached;
