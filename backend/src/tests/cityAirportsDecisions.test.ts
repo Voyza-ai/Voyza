@@ -32,7 +32,7 @@
  *
  *  - `expectDestination` THROWS when a query resolves to nothing, and a test
  *    proves it throws. Every single-case assertion goes through it.
- *  - the census asserts a COUNT as well as a set: 167 of 169 reproduced. An
+ *  - the census asserts a COUNT as well as a set: 166 of 168 reproduced. An
  *    empty or truncated artifact fails it, and so does an empty table.
  *  - the census comparator is re-run over a deliberately corrupted copy of
  *    the table, and is required to report the corruption. A comparator that
@@ -48,6 +48,7 @@ import { retiredAnswer } from '../data/retiredOriginAirports';
 import { buildIndex } from '../services/location/buildIndex';
 import { resolve } from '../services/location/resolve';
 import { resolveOriginAirports, setOriginIndex } from '../services/location/originAirports';
+import { resolveDestinationIata } from '../services/location/destinationAirport';
 import type { Place, Resolution } from '../services/location/types';
 
 const index = buildIndex(locationArtifact);
@@ -140,7 +141,9 @@ function census(table: Record<string, string> = CITY_AIRPORTS): {
 describe('cityAirports decisions: the table and the artifact are both real', () => {
   it('is not a stub on either side', () => {
     expect(locationArtifact.places.length).toBeGreaterThan(30_000);
-    expect(Object.keys(CITY_AIRPORTS).length).toBe(169);
+    // 169 when the thirteen were decided; `lagos` has since gone to the
+    // resolver, and the reason is asserted below.
+    expect(Object.keys(CITY_AIRPORTS).length).toBe(168);
     expect(getStaticIata('Kyoto')).toBeTruthy();
   });
 
@@ -363,10 +366,42 @@ describe('cityAirports decisions: the two that stay hand-written', () => {
   });
 });
 
+// ─── A row removed, so the trip can decide ───────────────────────────────────
+
+describe('cityAirports decisions: lagos goes to the resolver', () => {
+  /**
+   * `getIataCode` now asks the artifact after this table, and a caller may
+   * pass the trip's other stops. A row is consulted FIRST and the trip is not
+   * allowed to overrule it, so a row that only repeats the artifact's answer
+   * for an ambiguous name does nothing but silence the trip.
+   */
+  it('has no row, and bare Lagos still answers LOS', () => {
+    expect(getStaticIata('lagos')).toBeUndefined();
+    // Both the raw census reading and the served one: Nigeria, as the row said.
+    expect(expectDestination('lagos')).toBe('LOS');
+    expect(resolveDestinationIata('Lagos')).toBe('LOS');
+  });
+
+  it('answers FAO when the trip is in Portugal', () => {
+    // Lagos, Faro is 190 km from Lisbon and 63 km from Faro airport, which
+    // leads its list as the larger field over Portimão (10 km).
+    expect(resolveDestinationIata('Lagos', { tripDestinationNames: ['Lisbon', 'Porto'] })).toBe('FAO');
+    expect(resolveDestinationIata('Lagos', { tripDestinationNames: ['Lisbon'] })).toBe('FAO');
+  });
+
+  it('keeps Nigeria when the trip is not near Portugal', () => {
+    // Paris -> Lagos is a real route to Nigeria. The resolver's trip rule
+    // would pick Portugal from Paris (1,700 km against 4,700), but a reading
+    // more than 1,000 km from every other stop is not taken on that evidence.
+    expect(resolveDestinationIata('Lagos', { tripDestinationNames: ['Paris'] })).toBe('LOS');
+    expect(resolveDestinationIata('Lagos', { tripDestinationNames: ['Accra'] })).toBe('LOS');
+  });
+});
+
 // ─── The whole table, re-measured on every run ───────────────────────────────
 
 describe('cityAirports decisions: the census', () => {
-  it('reproduces 167 of the 169 entries, and names the two it does not', () => {
+  it('reproduces 166 of the 168 entries, and names the two it does not', () => {
     // The ratchet. A 14th disagreement — an upstream reclassification, a new
     // airport, a changed pin — fails here with the key named, instead of
     // surfacing when someone deletes the table.
@@ -374,8 +409,8 @@ describe('cityAirports decisions: the census', () => {
     // Non-vacuous twice over: the count fails against a truncated artifact,
     // and against an empty one EVERY key would be listed rather than two.
     const { compared, reproduced, disagreed } = census();
-    expect(compared).toBe(169);
-    expect(reproduced).toBe(167);
+    expect(compared).toBe(168);
+    expect(reproduced).toBe(166);
     expect(disagreed.map((d) => d.key).sort()).toEqual(['kyiv', 'moscow']);
   });
 

@@ -66,6 +66,20 @@
  *
  * The 13th, `washington`, was decided before this pass: the curated alias in
  * `curated.ts` makes the resolver answer WAS, so the entry is a bridge only.
+ *
+ * ── SINCE `getIataCode` ASKS THE ARTIFACT (2026-10-30) ──────────────────────
+ *
+ * The lookup now goes table -> artifact -> cache -> checked Duffel, and a
+ * caller may pass the trip's other stops. A row here still answers first and
+ * is NOT opened to the trip, because it is a decision about the famous reading
+ * of a name: measured, letting the trip overrule these rows would send
+ * `Vancouver` on a Seattle and Portland trip to PDX, `Rome` with Atlanta to
+ * ATL, `London` with Toronto to YXU. The consequence is that a row which
+ * merely repeats the artifact's answer for an ambiguous name costs the trip
+ * its say, so such a row does not belong here:
+ *
+ *   lagos         REMOVED. It said LOS, as the artifact does with no trip, and
+ *                 it sent a Lisbon and Porto trip to Nigeria. 168 keys remain.
  */
 export const CITY_AIRPORTS: Record<string, string> = {
   // North America
@@ -126,9 +140,16 @@ export const CITY_AIRPORTS: Record<string, string> = {
   muscat: 'MCT',
 
   // Africa
+  //
+  // No `lagos` row, deliberately. It said LOS, which is also what the
+  // artifact answers for a bare `Lagos` (Nigeria's city, 15 million), so the
+  // row decided nothing — except that, consulted first, it beat the trip:
+  // a Lisbon and Porto trip through Lagos, the Algarve town, was searched
+  // into Nigeria. Without it `getIataCode` asks the resolver, which still
+  // answers LOS with no trip and FAO, 63 km, when the trip is in Portugal.
   cairo: 'CAI', marrakech: 'RAK', casablanca: 'CMN', fez: 'FEZ',
   'cape town': 'CPT', johannesburg: 'JNB', nairobi: 'NBO', zanzibar: 'ZNZ',
-  'addis ababa': 'ADD', accra: 'ACC', lagos: 'LOS', tunis: 'TUN',
+  'addis ababa': 'ADD', accra: 'ACC', tunis: 'TUN',
 
   // South & Central Asia
   delhi: 'DEL', mumbai: 'BOM', jaipur: 'JAI', agra: 'AGR', goa: 'GOI',

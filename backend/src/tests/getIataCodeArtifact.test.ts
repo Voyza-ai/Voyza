@@ -145,6 +145,19 @@ describe('trip context reaches the resolver', () => {
     expect(await getIataCode('Portland', { tripDestinationNames: ['Boston'] })).toBe('PWM');
   });
 
+  it('Lagos: Nigeria bare, the Algarve on a Portugal trip', async () => {
+    // The case the curated `lagos: 'LOS'` row used to block by answering
+    // first. Bare, the artifact still says LOS; on a Lisbon and Porto trip,
+    // FAO. Passing every city of the trip, Lagos included, is what the
+    // optimizer would naturally do, so that form is asserted too.
+    expect(await getIataCode('Lagos')).toBe('LOS');
+    expect(await getIataCode('Lagos', { tripDestinationNames: ['Lisbon', 'Porto'] })).toBe('FAO');
+    expect(
+      await getIataCode('Lagos', { tripDestinationNames: ['Lisbon', 'Porto', 'Lagos'] }),
+    ).toBe('FAO');
+    expect(mockReads).toEqual([]);
+  });
+
   it('ignores the city itself among the trip names', async () => {
     expect(
       await getIataCode('Portland', { tripDestinationNames: ['Boston', 'Portland'] }),
