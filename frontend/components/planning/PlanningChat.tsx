@@ -3,11 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin, LocateFixed, Loader2 } from 'lucide-react';
-import { useTripStore } from '@/store/tripStore';
+import { useTripStore, requestCityPicks, startTripPicks, type CityPicksRequest } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ApiError, interpretPlan, optimizeTrip, searchHotels, searchActivities, searchRestaurants, suggestDestinations, OptimizeResult, ActivitySuggestion, RestaurantSuggestion } from '@/lib/api';
-import { Trip, City, Transport, Restaurant, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
+import { ApiError, interpretPlan, optimizeTrip, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
+import { Trip, City, Transport, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { suggestDestinationsForVibe } from '@/lib/api';
@@ -221,7 +221,7 @@ export default function PlanningChat() {
   const router = useRouter();
   // Landing-page hero seed — handed to the conversational planner on mount.
   const chatSeedRef = useRef<string | null>(null);
-  const { answers, setAnswer, setTrip } = useTripStore();
+  const { answers, setAnswer } = useTripStore();
   const [intent, setIntent] = useState<Intent | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -1505,38 +1505,29 @@ export default function PlanningChat() {
       // BEFORE the hotel searches rather than after them.
       //
       // They need only the city, its nights and the user's answers — nothing
-      // from the hotels — but they used to wait for every hotel batch, which
-      // put the whole hotel phase (~2.3s for 3 cities, ~3.3s for 5, measured)
-      // in front of the slowest part of the search (6.9-8.4s per call). Each
-      // call already swallows its own failure into [], so this promise cannot
-      // reject and is safe to hold while the hotels run.
+      // from the hotels. /results no longer waits for them either: it opens
+      // once the hotels are priced and the picks land on the trip there
+      // (startTripPicks, tripStore). `requestCityPicks` swallows each call's
+      // failure into an empty list, so these promises cannot reject.
       //
       // Not started before the optimizer, although restaurants could be:
       // activities need the nights the optimizer assigns and take as long, so
       // restaurants starting earlier would not shorten the search — and if the
       // optimizer failed, they would be rate-limited calls spent on nothing.
-      const perCityPromises = trip.cities.map(async (city) => {
-        const nights = Math.max(
+      const picksRequests: CityPicksRequest[] = trip.cities.map((city) => ({
+        city: city.name,
+        vibe: parsed.vibe ?? answers.vibe,
+        travelers,
+        nights: Math.max(
           1,
           Math.round(
             (new Date(city.dates.departure).getTime() - new Date(city.dates.arrival).getTime()) /
               (1000 * 60 * 60 * 24),
           ),
-        );
-        const vibeHint = parsed.vibe ?? answers.vibe;
-        const budgetHint = totalBudget;
-
-        const [activitiesResult, restaurantsResult] = await Promise.all([
-          searchActivities({ city: city.name, vibe: vibeHint, travelers, nights }).catch(
-            () => [] as ActivitySuggestion[],
-          ),
-          searchRestaurants({ city: city.name, vibe: vibeHint, travelers, budget: budgetHint }).catch(
-            () => [] as RestaurantSuggestion[],
-          ),
-        ]);
-
-        return { activities: activitiesResult, restaurants: restaurantsResult };
-      });
+        ),
+        budget: totalBudget,
+      }));
+      const picksInFlight = picksRequests.map(requestCityPicks);
 
       // Step 3: Fetch hotels for each city. Booking.com (via RapidAPI free
       // tier) rate-limits parallel calls — 4 simultaneous requests often
@@ -1621,42 +1612,14 @@ export default function PlanningChat() {
       // and the same trip reloaded now agree.
       trip.totalCost = liveTripTotal(trip);
 
-      // Step 4: the AI picks, already in flight since before step 3. The
-      // status still changes only now, so the user reads the same two phases
-      // in the same order as when these calls waited for the hotels.
-      setFindTripStatus('Finding things to do & places to eat...');
-      const perCityResults = await Promise.all(perCityPromises);
-      if (!mountedRef.current) return; // left /plan — see after optimizeTrip
-      perCityResults.forEach(({ activities, restaurants }, idx) => {
-        if (activities.length > 0) {
-          trip.cities[idx].activities = activities.map((s) => s.name);
-        }
-        if (restaurants.length > 0) {
-          trip.cities[idx].restaurants = restaurants.map(
-            (r): Restaurant => ({
-              name: r.name,
-              cuisine: r.cuisine,
-              priceRange: r.priceRange,
-            }),
-          );
-        }
-        // Always rebuild the schedule, even if the AI returned no
-        // activities/restaurants, so home-anchor transport blocks (head-to
-        // airport, flight, arrive-at) still land on day 1 and the home-
-        // return day. Without this, vibe-first single-city trips with no
-        // activity suggestions had empty schedules and the flight events
-        // disappeared from both the Schedule view and the modal.
-        const { schedule, unscheduled } = buildCityScheduleFromSuggestions(
-          activities,
-          restaurants,
-          trip.cities[idx],
-          idx,
-          trip,
-        );
+      // Each city's schedule before its AI picks: the transport blocks alone
+      // (head to the airport, the flight, arrive at the hotel), exactly what a
+      // failed pick request has always left. Built for every city, so a
+      // vibe-first single-city trip still shows its flights on day 1 and the
+      // home-return day. The picks' own schedule replaces it when they land.
+      trip.cities.forEach((city, idx) => {
+        const { schedule, unscheduled } = buildCityScheduleFromSuggestions([], [], city, idx, trip);
         trip.cities[idx].schedule = schedule;
-        // Whatever the stay could not hold at its real length. Kept on the
-        // city so the loss is in the data instead of being papered over by
-        // a shorter block; nothing renders it yet.
         trip.cities[idx].unscheduled = unscheduled;
       });
 
@@ -1682,7 +1645,9 @@ export default function PlanningChat() {
           ? { ...g, intent: g.intent, msgCounter: msgCounter.current }
           : null;
 
-      setTrip(trip);
+      // Step 4 lands on /results: the trip goes on screen now, and each city's
+      // AI picks fill in when they answer (startTripPicks).
+      startTripPicks(trip, picksRequests, picksInFlight);
       router.push('/results');
     } catch (err: unknown) {
       const friendly = plannerErrorMessage(err);
