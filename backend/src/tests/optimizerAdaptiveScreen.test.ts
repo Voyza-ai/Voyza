@@ -13,7 +13,7 @@
  *    → CHI) are one search per city and direction, not one per airport;
  *  - the date-shift probe does not run on 4+ cities.
  *
- * Fares come from fixtures/../helpers/fareModel.ts: per-route bases moved at
+ * Fares come from helpers/fareModel.ts: per-route bases moved at
  * most ±30% by the date, so `exhaustive()` there is the old optimizer's
  * answer and the screen's lower bound always holds.
  */
