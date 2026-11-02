@@ -45,6 +45,15 @@ export type FlightOffer = {
   carrierCode: string;
   bookingUrl: string;
   raw: object;
+  /**
+   * The airports this offer really leaves from and lands at: the first
+   * segment's origin, the last segment's destination. On a search by metro
+   * code (CHI, LON) they say which airport — ORD or MDW — and are how the
+   * optimizer keeps only the airports the traveller asked for. Absent when
+   * Duffel's payload did not say.
+   */
+  originAirport?: string;
+  destinationAirport?: string;
 };
 
 type SearchFlightsParams = {
@@ -399,6 +408,11 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
         `Flights to ${destination} from ${origin} on ${date}`,
       )}`;
 
+      const airportCode = (place: any): string | undefined =>
+        typeof place?.iata_code === 'string' && place.iata_code ? place.iata_code.toUpperCase() : undefined;
+      const originAirport = airportCode(firstSegment?.origin);
+      const destinationAirport = airportCode(lastSegment?.destination);
+
       return {
         id: offer.id,
         price: parseFloat(offer.total_amount ?? '0'),
@@ -411,6 +425,8 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
         carrierCode: carrier.iata_code ?? '',
         bookingUrl: googleFlightsUrl,
         raw: offer,
+        ...(originAirport ? { originAirport } : {}),
+        ...(destinationAirport ? { destinationAirport } : {}),
       };
     });
 
