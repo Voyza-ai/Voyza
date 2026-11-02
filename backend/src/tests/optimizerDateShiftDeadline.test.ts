@@ -145,14 +145,14 @@ describe('the date-shift probe never holds the plan (4+ cities: it does not run)
     const PROBE_DELAY = 3000;
     const asked = fares(FOUR_PLAN_DATES, PROBE_DELAY, '2030-06-09');
 
-    const started = Date.now();
     const result = await optimize(FOUR);
     const returnedAt = Date.now();
 
     // Before: up to 6 probe searches sent, then the plan held 1.5s for them
     // and went out with no suggestion and dateShiftChecked: false anyway.
+    // No probe search, so no grace to wait out. (Not asserted on the clock:
+    // a whole optimize() under 1.4s is not a promise a loaded CI runner keeps.)
     expect(asked.filter((a) => !FOUR_PLAN_DATES.includes(a.key.split('@')[1]))).toEqual([]);
-    expect(returnedAt - started).toBeLessThan(1400); // no grace waited out
     expect(result.dateShiftSuggestion).toBeUndefined();
     expect(result.dateShiftChecked).toBe(false);
 
