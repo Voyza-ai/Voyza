@@ -1,5 +1,6 @@
 import { compareLeg, LegComparison, type CompareLegParams } from './compareLeg';
 import { getIataCode, searchFlights, type IataLookupContext } from './flights';
+import { withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
@@ -1454,7 +1455,8 @@ async function searchHomeFlights(ctx: RunContext, params: {
       }
     }),
   );
-  const all = perAirport.flat();
+  // One airport's test-airline fare must not undercut another's real one.
+  const all = withoutTestAirlineWhenRealOffered(perAirport.flat(), (x: any) => x.offer);
   if (all.length === 0) return [];
   all.sort((a, b) => (a.offer.price ?? Infinity) - (b.offer.price ?? Infinity));
 
@@ -1611,7 +1613,8 @@ async function searchHomeOffers(ctx: RunContext, params: {
       return ours;
     }),
   );
-  const all = perGroup.flat();
+  // One airport's test-airline fare must not undercut another's real one.
+  const all = withoutTestAirlineWhenRealOffered(perGroup.flat(), (x: any) => x.offer);
   all.sort((a, b) => (a.offer.price ?? Infinity) - (b.offer.price ?? Infinity));
   return {
     offers: all.map(({ offer, homeAirport }) => toHomeFlightOffer(offer, homeAirport, cityIata, reverse)),
@@ -1674,7 +1677,10 @@ function createHomeFares(
           }
         }),
       );
-      return [...r.offers, ...extra.flat()].sort((a, b) => a.price - b.price);
+      return withoutTestAirlineWhenRealOffered([...r.offers, ...extra.flat()], (o) => ({
+        carrier: o.operator,
+        carrierCode: o.carrierCode,
+      })).sort((a, b) => a.price - b.price);
     },
   };
 }
