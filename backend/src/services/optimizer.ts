@@ -954,8 +954,8 @@ async function rankByAdaptiveScreen(args: {
     // bound is what an ordering could cost at best, and spending a limited
     // budget on the orderings that only look cheap because most of their
     // legs are unpriced left the budget-stopped plans with poor answers
-    // (gate, 2026-11-02: ±30% fares, 92% the exhaustive winner in bound
-    // order, 98% in this one).
+    // (gate, 2026-11-02, 5 cities, ±30% fares: the exhaustive winner in 92%
+    // of 200 plans in bound order, 98% of 1,000 in this one).
     const contenders = (incumbent === -1 ? est : est.slice(0, incumbent)).sort(
       (a, b) => a.likely - b.likely || a.idx - b.idx,
     );
