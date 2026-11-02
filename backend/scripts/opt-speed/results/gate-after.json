@@ -368,34 +368,34 @@
     {
       "variant": "5c-LON-30-metrocap3",
       "trials": 1000,
-      "identicalPct": 94.2,
-      "worstMissPct": 15.96,
-      "meanMissWhenDifferentPct": 3.83,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
       "winnerUnpricedWhenExhaustiveIsNot": 0,
       "searches": {
-        "mean": 38.7,
-        "p50": 38,
-        "p95": 48,
-        "max": 68,
-        "over40Pct": 30.8,
-        "over45Pct": 9.6
+        "mean": 45.5,
+        "p50": 45,
+        "p95": 57,
+        "max": 76,
+        "over40Pct": 77.9,
+        "over45Pct": 46.7
       },
       "byPhaseMean": {
-        "home": 10,
+        "home": 16.22,
         "screen": 20,
-        "exact": 8.72
+        "exact": 9.25
       },
       "classifiedMean": {
-        "inter-city": 28.72,
-        "home": 10,
+        "inter-city": 29.25,
+        "home": 16.22,
         "probe": 0
       },
       "exactRounds": {
-        "mean": 8.4,
-        "p95": 18,
+        "mean": 8.93,
+        "p95": 19,
         "max": 25
       },
-      "trialsWithSweep": 10,
+      "trialsWithSweep": 13,
       "homeFareDifferentFromPerAirport": 0
     }
   ]
