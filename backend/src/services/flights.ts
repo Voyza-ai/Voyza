@@ -14,6 +14,7 @@ import {
 } from './location/destinationAirport';
 import { sameAirportArea } from './location/sameAirportArea';
 import { parseIsoDuration } from '../utils/duration';
+import { withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
 import { elapsedMinutesBetween } from '../utils/localTime';
 
 /**
@@ -298,11 +299,6 @@ function cachedSearch(key: string, run: () => Promise<FlightOffer[]>): Promise<F
   return promise;
 }
 
-/** Duffel's fictional test-mode airline ("Duffel Airways", IATA ZZ). */
-function isDuffelTestAirline(offer: { carrier: string; carrierCode: string }): boolean {
-  return offer.carrierCode.toUpperCase() === 'ZZ' || /^duffel airways$/i.test(offer.carrier.trim());
-}
-
 export async function searchFlights(params: SearchFlightsParams): Promise<FlightOffer[]> {
   const { origin, destination, date, travelers, cabinClass } = params;
   // A place to itself (ZRH → ZRH, LHR → LON) is not a flight, and never
@@ -436,8 +432,7 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
     // alternatives, so opening the card showed a fake airline. Dropped when
     // any real airline is in the results; kept when it is all there is, so
     // the leg still has a price instead of turning "unavailable".
-    const realAirlines = mapped.filter((o) => !isDuffelTestAirline(o));
-    const shown = realAirlines.length > 0 ? realAirlines : mapped;
+    const shown = withoutTestAirlineWhenRealOffered(mapped, (o) => o);
 
     // One line per search, not per offer: if this fires, Duffel gave us
     // neither an ISO duration nor airport time zones for this route and the
