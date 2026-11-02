@@ -1,0 +1,20 @@
+  ● a cold 5-city optimize (Chicago, ORD + MDW) › sends at most 40 Duffel searches and picks what pricing every ordering picks
+    Expected: <= 40
+    Received:    120
+  ● home flights from a metro: one search per city and direction › Chicago: searched on CHI, never ORD or MDW one by one, and the card names the real airport
+    - Expected  - 10
+  ● home flights from a metro: one search per city and direction › London: an offer from an airport outside the user's list (LCY) is never used
+    Expected: true
+    Received: false
+  ● home flights from a metro: one search per city and direction › Boston (BOS + PVD, no metro code): one search per airport, as before
+    Expected length: 16
+  ● 4+ cities: no date-shift probe › 4 cities: every search is on a date the trip travels, and no price claim
+    - Expected  -  1
+  ● 4+ cities: no date-shift probe › 5 cities: every search is on a date the trip travels, and no price claim
+    - Expected  -  1
+  ● quality gate, CI-sized: same winner as pricing every ordering › 4 cities, ±30% date swing, 12 random trips
+    Expected: < 30
+    Received:   70
+  ● quality gate, CI-sized: same winner as pricing every ordering › 5 cities, ±30% date swing, 12 random trips
+    Expected: < 40
+    Received:   120

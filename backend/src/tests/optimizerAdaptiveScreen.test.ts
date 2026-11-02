@@ -72,6 +72,20 @@ jest.mock('../services/hotels', () => ({
   searchHotels: jest.fn().mockResolvedValue([]),
 }));
 
+// Not what this file is about, and each builds or searches the whole location
+// index: compareLeg asks destinationAirport about every city name on every
+// leg (a fuzzy search for made-up names like these), which alone took
+// minutes for this file. The made-up codes share no airport area.
+jest.mock('../services/location/sameAirportArea', () => ({
+  sameAirportArea: (a: string, b: string) => a.trim().toUpperCase() === b.trim().toUpperCase(),
+}));
+jest.mock('../services/location/destinationAirport', () => ({
+  resolveDestinationIata: () => null,
+}));
+jest.mock('../services/location/originAirports', () => ({
+  resolveOriginAirports: () => ({ airports: [], placeId: null }),
+}));
+
 import { optimize } from '../services/optimizer';
 import { searchFlights } from '../services/flights';
 import { searchHotels } from '../services/hotels';
@@ -126,12 +140,6 @@ const chicagoModel = (seed: number, swing = 0.3, travelers = 4) =>
     metros: { CHI: ['ORD', 'MDW'] },
     travelers,
   });
-
-// The first optimize() in a process builds the location index (seconds).
-beforeAll(async () => {
-  useFares(chicagoModel(1));
-  await run(trip(['Alpha'], 'Chicago', ['ORD']));
-}, 30000);
 
 beforeEach(() => {
   jest.clearAllMocks();
