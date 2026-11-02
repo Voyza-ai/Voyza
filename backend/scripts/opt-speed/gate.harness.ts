@@ -205,6 +205,7 @@ async function runVariant(v: Variant) {
   const rows: Array<{
     same: boolean;
     miss: number;
+    primaryLoss: number;
     requests: number;
     rejected429: number;
     searches: number;
@@ -275,6 +276,11 @@ async function runVariant(v: Variant) {
     const ranked = exhaustive(spec, model, CITY_CODES);
     const best = ranked[0];
     const chosen = priceExactly(spec, model, CITY_CODES, result.bestRoute.ordering);
+    // Model only, no optimizer: what pricing every ordering would lose by
+    // ranking home flights on the first airport alone (the card still the
+    // cheapest of all) — the share of `miss` that is not the search budget's.
+    const onPrimary = exhaustive({ ...spec, homeAirports: home.airports.slice(0, 1) }, model, CITY_CODES)[0];
+    const primaryLoss = (priceExactly(spec, model, CITY_CODES, onPrimary.ordering).rankCost - best.rankCost) / best.rankCost;
     const ledger = mockedInfo.mock.calls.find(([m]) => m === 'Optimize flight searches')?.[1] as any;
     const classified: Record<Phase, number> = { 'inter-city': 0, home: 0, probe: 0 };
     for (const s of asked.values()) classified[classify(s, spec, home)]++;
@@ -290,6 +296,7 @@ async function runVariant(v: Variant) {
     rows.push({
       same: result.bestRoute.ordering.join('|') === best.ordering.join('|'),
       miss: (chosen.rankCost - best.rankCost) / best.rankCost,
+      primaryLoss,
       requests: sim.stats.requests,
       rejected429: sim.stats.rejected429,
       searches: asked.size,
@@ -318,6 +325,11 @@ async function runVariant(v: Variant) {
     meanDearerPct: round(100 * mean(misses), 3),
     worstDearerPct: round(100 * Math.max(0, ...misses), 2),
     meanDearerWhenDifferentPct: differentMisses.length ? round(100 * mean(differentMisses), 2) : 0,
+    exhaustiveRankedOnFirstAirport: {
+      identicalPct: round((100 * rows.filter((r) => r.primaryLoss === 0).length) / rows.length, 2),
+      meanDearerPct: round(100 * mean(rows.map((r) => r.primaryLoss)), 3),
+      worstDearerPct: round(100 * Math.max(0, ...rows.map((r) => r.primaryLoss)), 2),
+    },
     winnerUnpricedWhenExhaustiveIsNot: rows.filter((r) => r.unpricedWinner).length,
     requests: {
       mean: round(mean(requests), 1),
