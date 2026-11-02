@@ -313,6 +313,43 @@ describe('an unavailable leg never wins', () => {
   }, 30000);
 });
 
+describe('a route that does not fly every day', () => {
+  it("is not written off when the screen priced it on a day it does not fly", async () => {
+    const spec = trip(FIVE, 'Chicago', ['ORD', 'MDW']);
+    const dates = tripDates(spec);
+    const base = chicagoModel(41);
+    const winner = exhaustive(spec, base, mockCodes)[0].ordering;
+
+    // Which day did the screen price each of the winner's legs on? (It picks
+    // days from the home flights alone, so the fares below do not move it.)
+    useFares(base);
+    await run(spec);
+    const firstDay = (from: string, to: string) =>
+      searched.find((s) => s.origin === from && s.destination === to)?.date;
+    const k = winner
+      .slice(0, -1)
+      .findIndex((c, i) => firstDay(mockCodes[c], mockCodes[winner[i + 1]]) !== dates.legs[i]);
+    expect(k).toBeGreaterThanOrEqual(0);
+
+    // That leg's route now flies ONLY on the day the winner needs it.
+    const [from, to] = [mockCodes[winner[k]], mockCodes[winner[k + 1]]];
+    const onlyThatDay = (o: string, d: string, date: string) => o !== from || d !== to || date === dates.legs[k];
+    const model: FareModel = {
+      fare: (o, d, date) => (onlyThatDay(o, d, date) ? base.fare(o, d, date) : null),
+      offers: (p) => (onlyThatDay(p.origin, p.destination, p.date) ? base.offers(p) : []),
+    };
+    searched = [];
+    useFares(model);
+
+    const result = await run(spec);
+
+    // Assumed dead after one empty day, the route's orderings were never
+    // explored and a dearer winner came back.
+    expect(exhaustive(spec, model, mockCodes)[0].ordering).toEqual(winner);
+    expect(result.bestRoute.ordering).toEqual(winner);
+  }, 30000);
+});
+
 describe('4+ cities: no date-shift probe', () => {
   it.each([[4], [5]])('%i cities: every search is on a date the trip travels, and no price claim', async (n) => {
     const spec = trip(FIVE.slice(0, n), 'Chicago', ['ORD', 'MDW'], 2 * n);
