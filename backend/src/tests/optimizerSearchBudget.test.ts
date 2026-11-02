@@ -253,6 +253,28 @@ describe("home flights: ranked on the first airport, the winner's searched on th
   }, 30000);
 });
 
+describe('a first airport with only the test airline', () => {
+  it('ranking searches the other airports too, and the card is the real fare', async () => {
+    // MDW listed first: ranking on its test-airline placeholders alone would
+    // rank every city on a made-up fare, so ORD is searched for each as well.
+    const s = { ...spec(5, 'CHI'), homeAirports: ['MDW', 'ORD'] };
+    const model = testModeModel(21, 'CHI');
+    useFares(model);
+
+    const result = await run(s);
+
+    const home = distinct().filter((x) => [x.origin, x.destination].some((c) => ['ORD', 'MDW', 'CHI'].includes(c)));
+    expect(home.filter((x) => x.origin === 'MDW' || x.destination === 'MDW')).toHaveLength(10);
+    expect(home.filter((x) => x.origin === 'ORD' || x.destination === 'ORD')).toHaveLength(10);
+    expect(home).toHaveLength(20);
+    const exact = priceExactly(s, model, mockCodes, result.bestRoute.ordering);
+    expect(result.outboundLeg).toMatchObject({ originAirport: 'ORD', price: exact.outbound!.price });
+    expect(result.returnLeg).toMatchObject({ destAirport: 'ORD', price: exact.ret!.price });
+    // Still one window: best-first gets what is left.
+    expect(distinct().length).toBeLessThanOrEqual(BUDGET);
+  }, 30000);
+});
+
 describe('best-first under the budget', () => {
   it('a round prices several legs at once, so a 5-city plan takes few rounds', async () => {
     (env as any).DUFFEL_ACCESS_TOKEN = 'duffel_live_jest';

@@ -158,6 +158,9 @@ VARIANTS.push(
   { name: '5c-CHI-30-live-gaps', cities: 5, fares: '30', home: 'CHI', duffel: 'live', trials: half, routeGaps: 0.05, dayGaps: 0.05, extra: true },
   // Duffel capping a metro search's offers.
   { name: '5c-LON-30-live-metrocap3', cities: 5, fares: '30', home: 'LON', duffel: 'live', trials: half, metroCap: 3, extra: true },
+  // 1-3 city plans are not this code's: the same requests before and after.
+  { name: '3c-CHI-30-live', cities: 3, fares: '30', home: 'CHI', duffel: 'live', trials: half, extra: true },
+  { name: '3c-NYC-volatile-test', cities: 3, fares: 'volatile', home: 'NYC', duffel: 'test', trials: half, extra: true },
 );
 
 function unit(seed: number, key: string): number {
@@ -192,7 +195,7 @@ async function runVariant(v: Variant) {
   const spec: TripSpec = {
     cities,
     startDate: '2030-05-04',
-    totalNights: v.cities === 5 ? 12 : 10,
+    totalNights: v.cities === 5 ? 12 : v.cities === 4 ? 10 : 9,
     homeAirports: home.airports,
     returnToHome: true,
     countries: v.countries,
