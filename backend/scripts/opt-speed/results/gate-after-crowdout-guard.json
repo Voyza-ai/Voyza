@@ -1,0 +1,105 @@
+{
+  "label": "after",
+  "trialsPerVariant": 1000,
+  "results": [
+    {
+      "variant": "5c-CHI-30",
+      "trials": 1000,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 38.1,
+        "p50": 37,
+        "p95": 48,
+        "max": 73,
+        "over40Pct": 26.4,
+        "over45Pct": 9.9
+      },
+      "byPhaseMean": {
+        "home": 10,
+        "screen": 20,
+        "exact": 8.07
+      },
+      "classifiedMean": {
+        "inter-city": 28.07,
+        "home": 10,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 7.78,
+        "p95": 18,
+        "max": 25
+      },
+      "trialsWithSweep": 6,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-LON-30",
+      "trials": 500,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 39.3,
+        "p50": 38,
+        "p95": 50,
+        "max": 70,
+        "over40Pct": 35.2,
+        "over45Pct": 11.6
+      },
+      "byPhaseMean": {
+        "home": 10,
+        "screen": 20,
+        "exact": 9.26
+      },
+      "classifiedMean": {
+        "inter-city": 29.26,
+        "home": 10,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 8.93,
+        "p95": 20,
+        "max": 25
+      },
+      "trialsWithSweep": 7,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-LON-30-metrocap3",
+      "trials": 500,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 45.5,
+        "p50": 45,
+        "p95": 57,
+        "max": 76,
+        "over40Pct": 77.8,
+        "over45Pct": 47.6
+      },
+      "byPhaseMean": {
+        "home": 16.24,
+        "screen": 20,
+        "exact": 9.26
+      },
+      "classifiedMean": {
+        "inter-city": 29.26,
+        "home": 16.24,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 8.93,
+        "p95": 20,
+        "max": 25
+      },
+      "trialsWithSweep": 7,
+      "homeFareDifferentFromPerAirport": 0
+    }
+  ]
+}

@@ -1,0 +1,306 @@
+{
+  "label": "before (dev 332b564)",
+  "trialsPerVariant": 200,
+  "results": [
+    {
+      "variant": "4c-CHI-30",
+      "trials": 200,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 70,
+        "p50": 70,
+        "p95": 70,
+        "max": 70,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 37,
+        "home": 17,
+        "probe": 16
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "4c-NYC-30",
+      "trials": 200,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 78,
+        "p50": 78,
+        "p95": 78,
+        "max": 78,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 37,
+        "home": 25,
+        "probe": 16
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-CHI-30",
+      "trials": 200,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 120,
+        "p50": 120,
+        "p95": 120,
+        "max": 120,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 81,
+        "home": 21,
+        "probe": 18
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-NYC-30",
+      "trials": 200,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 130,
+        "p50": 130,
+        "p95": 130,
+        "max": 130,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 81,
+        "home": 31,
+        "probe": 18
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "4c-CHI-50",
+      "trials": 200,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 70,
+        "p50": 70,
+        "p95": 70,
+        "max": 70,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 37,
+        "home": 17,
+        "probe": 16
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-CHI-50",
+      "trials": 200,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 120,
+        "p50": 120,
+        "p95": 120,
+        "max": 120,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 81,
+        "home": 21,
+        "probe": 18
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-NYC-50",
+      "trials": 200,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 130,
+        "p50": 130,
+        "p95": 130,
+        "max": 130,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 81,
+        "home": 31,
+        "probe": 18
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-CHI-30-clustered",
+      "trials": 100,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 108.4,
+        "p50": 108,
+        "p95": 109,
+        "max": 109,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 69.36,
+        "home": 21,
+        "probe": 18
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-LON-30",
+      "trials": 100,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 130,
+        "p50": 130,
+        "p95": 130,
+        "max": 130,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 81,
+        "home": 31,
+        "probe": 18
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-BOS-30",
+      "trials": 100,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 120,
+        "p50": 120,
+        "p95": 120,
+        "max": 120,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 81,
+        "home": 21,
+        "probe": 18
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-CHI-30-gaps",
+      "trials": 100,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 120,
+        "p50": 120,
+        "p95": 120,
+        "max": 120,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 81,
+        "home": 21,
+        "probe": 18
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    },
+    {
+      "variant": "5c-LON-30-metrocap3",
+      "trials": 100,
+      "identicalPct": 100,
+      "worstMissPct": 0,
+      "meanMissWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "searches": {
+        "mean": 130,
+        "p50": 130,
+        "p95": 130,
+        "max": 130,
+        "over40Pct": 100,
+        "over45Pct": 100
+      },
+      "byPhaseMean": {},
+      "classifiedMean": {
+        "inter-city": 81,
+        "home": 31,
+        "probe": 18
+      },
+      "exactRounds": null,
+      "trialsWithSweep": 0,
+      "homeFareDifferentFromPerAirport": 0
+    }
+  ]
+}

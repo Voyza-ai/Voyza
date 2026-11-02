@@ -3,12 +3,12 @@
  *
  * It is a banner, but optimize() used to wait for it: on a 5-city trip it was
  * the last 20 Duffel searches of the response — 8.2s of 52.8s at production's
- * ~2.5 searches/s (mocked-latency harness). Now, once the core result is ready
- * (winner, leg alternatives, home legs), a 4+ city probe gets
- * DATE_SHIFT_GRACE_MS (1.5s) more; past that the plan goes out with no
- * suggestion and dateShiftChecked: false, and the probe's unsent searches are
- * dropped. 1-3 city trips keep their probe — it is what shows "Best price for
- * these dates" — with a 10s allowance instead.
+ * ~2.5 searches/s (mocked-latency harness). It was then given 1.5s past the
+ * core result on 4+ cities, which it almost never made; now 4+ city trips do
+ * not start it at all (DATE_SHIFT_MAX_CITIES) — the same no-suggestion,
+ * not-checked plan, without the 6-20 Duffel searches that pushed the next plan
+ * past the rate-limit window. 1-3 city trips keep their probe — it is what
+ * shows "Best price for these dates" — with a 10s allowance.
  */
 
 jest.mock('../config/env', () => ({
@@ -140,21 +140,19 @@ beforeEach(() => {
   flatHotels();
 });
 
-describe('the date-shift probe never holds the plan (4+ cities)', () => {
-  it('a probe still pricing after the grace: no suggestion, not checked, and the plan goes out', async () => {
+describe('the date-shift probe never holds the plan (4+ cities: it does not run)', () => {
+  it('a slow probe would have been given up on: none is started, and the plan goes out', async () => {
     const PROBE_DELAY = 3000;
     const asked = fares(FOUR_PLAN_DATES, PROBE_DELAY, '2030-06-09');
 
     const result = await optimize(FOUR);
-    const returnedAt = Date.now();
-    const probeAsked = asked.filter((a) => !FOUR_PLAN_DATES.includes(a.key.split('@')[1]));
-    expect(probeAsked.length).toBeGreaterThan(0);
-    const probeStarted = Math.min(...probeAsked.map((a) => a.at));
+    const askedByReturn = asked.length;
 
-    // Before: the plan waited for the probe's searches (3s each) and came
-    // back with the $400 suggestion and dateShiftChecked: true.
-    expect(returnedAt - probeStarted).toBeLessThan(PROBE_DELAY);
-    expect(returnedAt - probeStarted).toBeGreaterThanOrEqual(1400); // the grace was given
+    // Before: up to 6 probe searches sent, then the plan held 1.5s for them
+    // and went out with no suggestion and dateShiftChecked: false anyway.
+    // No probe search, so no grace to wait out. (Not asserted on the clock:
+    // a whole optimize() under 1.4s is not a promise a loaded CI runner keeps.)
+    expect(asked.filter((a) => !FOUR_PLAN_DATES.includes(a.key.split('@')[1]))).toEqual([]);
     expect(result.dateShiftSuggestion).toBeUndefined();
     expect(result.dateShiftChecked).toBe(false);
 
@@ -164,22 +162,25 @@ describe('the date-shift probe never holds the plan (4+ cities)', () => {
     expect(result.outboundLeg?.price).toBe(500);
     expect(result.returnLeg?.price).toBe(500);
 
-    // At most one gate's worth of probe searches was ever sent...
-    expect(probeAsked.length).toBeLessThanOrEqual(6);
-
-    // ...and once those land, nothing more is sent, and no hotel is re-priced.
-    await sleep(PROBE_DELAY + 500);
-    expect(asked.filter((a) => a.at >= returnedAt)).toHaveLength(0);
+    // Nothing is sent afterwards either, and no hotel is re-priced. (Counted,
+    // not timed: the plan's last searches can share the millisecond it
+    // returns in.)
+    await sleep(500);
+    expect(asked).toHaveLength(askedByReturn);
     expect(mockedHotels).not.toHaveBeenCalled();
   }, 30000);
 
-  it('a probe that lands inside the grace: suggestion offered and checked', async () => {
-    fares(FOUR_PLAN_DATES, 100, '2030-06-09');
+  it('a probe that would have landed inside the grace: no longer offered (no searches spent on it)', async () => {
+    const asked = fares(FOUR_PLAN_DATES, 100, '2030-06-09');
 
     const result = await optimize(FOUR);
 
-    expect(result.dateShiftChecked).toBe(true);
-    expect(result.dateShiftSuggestion).toMatchObject({ dayOffset: -1, newStartDate: '2030-06-09', savings: 400 });
+    // Before: the $400 "start a day earlier" suggestion, checked. That was
+    // the rare 4+ city probe fast enough to make its 1.5s; the searches it
+    // took were the ones that tipped plans past Duffel's rate-limit window.
+    expect(asked.filter((a) => !FOUR_PLAN_DATES.includes(a.key.split('@')[1]))).toEqual([]);
+    expect(result.dateShiftChecked).toBe(false);
+    expect(result.dateShiftSuggestion).toBeUndefined();
   }, 30000);
 });
 

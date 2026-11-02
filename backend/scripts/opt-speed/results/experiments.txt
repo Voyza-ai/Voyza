@@ -1,0 +1,15 @@
+Experiments, 2026-11-02, gate harness, 1000 trials each. NOT shipped — the
+shipped screen uses the principled bound (MAX_DATE_SWING 0.3 → 0.538).
+
+A) SCREEN_LOWER_BOUND 0.62 instead of 0.538 (MAX_DATE_SWING = 0.2346):
+   4c-CHI-30  99.9% identical, worst 0.30%, searches mean 22.1 p95 25 max 33, rounds mean 1.9
+   5c-CHI-30  99.7% identical, worst 0.34%, searches mean 36.2 p95 45 max 58, >45: 3.9%, rounds mean 5.8 p95 14
+   5c-CHI-50  95.0% identical, worst 5.31%, searches mean 35.1 p95 41 max 50, >45: 0.7%
+
+B) Principled bound + stop when the best exact route is within NEAR of the
+   cheapest estimate (a proven ≤ NEAR miss while fares move ≤ 30%):
+   NEAR 0.25%: 4c 100%/0% mean 22.4 | 5c-30 100%/0% mean 37.8 p95 48 >45 8.4% rounds 7.5 | 5c-50 96.8%/3.41%
+   NEAR 0.5%:  4c 100%/0% mean 22.3 | 5c-30 99.8%/0.33% mean 37.4 p95 47 >45 7.0% rounds 7.1 | 5c-50 96.5%/3.41%
+   NEAR 1%:    4c 99.7%/0.28% mean 22.1 | 5c-30 98.9%/0.74% mean 36.8 p95 46 >45 5.7% rounds 6.5 | 5c-50 95.5%/3.41%
+
+For comparison, shipped (bound 0.538), 2000 trials: see gate-after.json.
