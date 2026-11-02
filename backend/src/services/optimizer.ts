@@ -762,29 +762,31 @@ function countryGroupedOrderings(cities: CityInput[]): string[][] {
  *  3. Best-first. Every ordering gets an optimistic estimate: a leg priced on
  *     its own day at full value (UNAVAILABLE_LEG_PENALTY if nothing flies),
  *     any other leg at SCREEN_LOWER_BOUND × the highest fare its route showed
- *     on any day — the most it can drop — and home flights at full value
- *     (UNAVAILABLE_HOME_LEG_PENALTY if none). While the cheapest estimate is
- *     not fully priced, price its unpriced legs on their own days: the most
- *     uncertain first, and only as many as would lift it above the runner-up
- *     if each came in at its screen fare (always at least one). When the
- *     cheapest estimate is fully priced, nothing else can be cheaper: it is
- *     the exhaustive winner, and ties break by permutation order as the old
- *     stable sort did.
+ *     on any day — the most it can drop — or 0 if it showed none, and home
+ *     flights at full value (UNAVAILABLE_HOME_LEG_PENALTY if none). While the
+ *     cheapest estimate is not fully priced, price its unpriced legs on their
+ *     own days: the most uncertain first, and only as many as would lift it
+ *     above the runner-up if each came in at its screen fare (always at least
+ *     one). When the cheapest estimate is fully priced, nothing else can be
+ *     cheaper: it is the exhaustive winner, and ties break by permutation
+ *     order as the old stable sort did.
  *
- * Unavailable legs: a route that showed no fare on any day it was priced is
- * estimated at UNAVAILABLE_LEG_PENALTY on its other days too, never cheap; and
- * the winner's legs are always priced on their own days, so a missing leg is
- * charged exactly as scoring charges it. (A route that has no fare on its
- * screen day but does fly on another is therefore under-explored — it is
- * assumed not to fly at all; simulated, that is the one way this ranks below
- * exhaustive pricing short of a fare moving more than MAX_DATE_SWING.)
+ * Unavailable legs are charged exactly as scoring charges them: the winner's
+ * legs are always priced on their own days, and a leg with nothing on its
+ * day costs UNAVAILABLE_LEG_PENALTY, so a missing leg never wins by being
+ * missing. A route with nothing on the day it was screened is NOT assumed
+ * dead — routes that do not fly daily are common — it is simply unbounded
+ * (0) until its own day is priced. (Assuming it dead was tried: with 5% of
+ * route-days missing it picked a different winner 4.6% of the time, up to
+ * 48% dearer.)
  *
  * Bounds: one round prices at most cities − 1 legs, and is one Duffel round
  * trip. After MAX_EXACT_ROUNDS it stops choosing: one sweep prices every
  * unpriced leg of every ordering whose estimate is below the best exact one
- * (a sweep repeats only if a route that showed no fare turns out to fly; each
- * prices at least one new leg, so at worst every leg exhaustive pricing
- * would). Deterministic: the same fares give the same searches and answer.
+ * (a sweep repeats only if a sweep's prices bring another ordering's
+ * estimate below that; each prices at least one new leg, so at worst every
+ * leg exhaustive pricing would). Deterministic: the same fares give the same
+ * searches and answer.
  *
  * Returns the orderings proven best, best first: the winner, then each next
  * one that is already fully priced with nothing able to undercut it — at most
@@ -809,10 +811,8 @@ async function rankByAdaptiveScreen(args: {
 
   /** Leg cost on its own day (Infinity: nothing flies), by legOf. */
   const exact = new Map<string, number>();
-  /** Highest fare a route showed on any day it was priced. */
+  /** Highest fare a route showed on any day it was priced (none: no fare yet). */
   const highest = new Map<string, number>();
-  /** Routes priced on at least one day. */
-  const seen = new Set<string>();
   const pending = new Map<string, Promise<void>>();
   const price = (from: string, to: string, i: number, phase: 'screen' | 'exact'): Promise<void> => {
     const key = legOf(from, to, i);
@@ -821,7 +821,6 @@ async function rankByAdaptiveScreen(args: {
       asked = priceLeg(from, to, i, phase).then((cost) => {
         exact.set(key, cost);
         const route = routeOf(from, to);
-        seen.add(route);
         if (cost !== Infinity && cost > (highest.get(route) ?? -Infinity)) highest.set(route, cost);
       });
       pending.set(key, asked);
@@ -868,11 +867,13 @@ async function rankByAdaptiveScreen(args: {
       if (high !== undefined) {
         total += SCREEN_LOWER_BOUND * high;
         open.push({ i, slack: (1 - SCREEN_LOWER_BOUND) * high });
-      } else if (seen.has(route)) {
-        total += UNAVAILABLE_LEG_PENALTY;
-        open.push({ i, slack: 0 });
       } else {
-        // Never priced (not a candidate route when screened): could be anything.
+        // Nothing known about this day: the route was never priced, or had
+        // no fare on the day(s) it was — and a route that does not fly
+        // daily may well fly on this one. No bound, then: 0, priced first
+        // when its ordering is the cheapest estimate. A leg that turns out
+        // to have nothing on its own day is UNAVAILABLE_LEG_PENALTY, as in
+        // scoring, so it never wins by being missing.
         open.push({ i, slack: Infinity });
       }
     }
