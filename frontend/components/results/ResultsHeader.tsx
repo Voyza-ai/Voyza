@@ -9,12 +9,13 @@ import { tripSpan } from '@/lib/tripSpan';
 import { useCountUp } from '@/lib/useCountUp';
 import {
   stashCanvasIntent,
+  readCanvasIntent,
   clearCanvasIntent,
   resolveCanvasTripId,
   type CanvasIntent,
 } from '@/lib/canvasHandoff';
 import { useAuthStore } from '@/store/authStore';
-import { useTripStore } from '@/store/tripStore';
+import { useTripStore, tripPicksSettled } from '@/store/tripStore';
 import LoginModal from '@/components/shared/LoginModal';
 import TripNameEditor from '@/components/shared/TripNameEditor';
 import { updateTrip } from '@/lib/api';
@@ -73,17 +74,21 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
   // Captures the current "Edit in Canvas" request so it can be resumed after
   // sign-in — including across the Google OAuth full-page redirect, which
   // wipes in-memory trip state.
-  const buildCanvasIntent = (): CanvasIntent => ({
-    savedId: alreadySaved ? trip.id ?? null : null,
+  const buildCanvasIntent = (t: Trip = trip): CanvasIntent => ({
+    savedId: alreadySaved ? t.id ?? null : null,
     // Pass the whole trip through so new fields (budget, vibe,
     // dateShiftSuggestion, etc.) flow to the backend.
-    payload: alreadySaved ? null : { ...trip, totalCost: liveTripTotal(trip) },
-    origin: trip.origin
-      ? { origin: trip.origin, returnToHome: trip.returnToHome ?? true }
+    payload: alreadySaved ? null : { ...t, totalCost: liveTripTotal(t) },
+    origin: t.origin
+      ? { origin: t.origin, returnToHome: t.returnToHome ?? true }
       : null,
     // Current cities (including any AI-chat edits) so the canvas reflects them.
-    syncCities: trip.cities,
+    syncCities: t.cities,
   });
+
+  // The trip to save: the store's, which is this one plus anything that
+  // landed since this render (the AI picks, while waiting for them below).
+  const latestTrip = (): Trip => useTripStore.getState().currentTrip ?? trip;
 
   const handleEditInCanvas = async () => {
     if (!user) {
@@ -92,17 +97,30 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
       // resumes it.
       stashCanvasIntent(buildCanvasIntent());
       setShowLoginModal(true);
+      // The trip's AI picks may still be on their way. Signing in takes
+      // longer than they do, so once they land the stashed trip is brought
+      // up to date — unless the sign-in already used it.
+      tripPicksSettled().then((waited) => {
+        if (waited && readCanvasIntent()) stashCanvasIntent(buildCanvasIntent(latestTrip()));
+      });
       return;
     }
 
     // Already authenticated — save if needed and open canvas in a new tab.
     setSaving(true);
     try {
-      const tripId = await resolveCanvasTripId(buildCanvasIntent());
+      // /results opens before the trip's AI picks (activities, restaurants)
+      // are in. Saved without them, the canvas would open with none and its
+      // save would fill each city with generic placeholders ("Explore Paris
+      // old town"), so the save waits for them, on this button's own
+      // "Saving..." state. Every pick request settles, so the wait ends.
+      const waited = await tripPicksSettled();
+      const current = waited ? latestTrip() : trip;
+      const tripId = await resolveCanvasTripId(buildCanvasIntent(current));
       if (!tripId) return;
 
       if (!alreadySaved) {
-        setTrip({ ...trip, id: tripId });
+        setTrip({ ...latestTrip(), id: tripId });
         // Update the browser URL so the trip is bookmarkable
         if (typeof window !== 'undefined') {
           const url = new URL(window.location.href);
@@ -110,7 +128,11 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
           window.history.replaceState({}, '', url.toString());
         }
       }
-      window.open(`/canvas/${tripId}`, '_blank');
+      // A wait for the picks can outlast the click's allowance to open a
+      // tab, and a blocked window.open opens nothing at all — so after one,
+      // the canvas opens in this tab, as it does after an in-place sign-in.
+      if (waited) router.push(`/canvas/${tripId}`);
+      else window.open(`/canvas/${tripId}`, '_blank');
     } catch {
       // handle error silently
     } finally {
@@ -125,10 +147,12 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
   const handleLoginSuccess = async () => {
     setSaving(true);
     try {
-      const tripId = await resolveCanvasTripId(buildCanvasIntent());
+      // Saved with its AI picks, as above.
+      await tripPicksSettled();
+      const tripId = await resolveCanvasTripId(buildCanvasIntent(latestTrip()));
       clearCanvasIntent();
       if (!tripId) return;
-      if (!alreadySaved) setTrip({ ...trip, id: tripId });
+      if (!alreadySaved) setTrip({ ...latestTrip(), id: tripId });
       router.push(`/canvas/${tripId}`);
     } catch {
       // handle error silently

@@ -12,6 +12,11 @@ type CityActivitiesCardProps = {
   isDimmed: boolean;
   /** Whether this card's detail panel is open (drives border accent) */
   expanded: boolean;
+  /**
+   * The city's AI picks are still on their way (/results opens before
+   * them). With none yet, the card keeps its place with faded lines.
+   */
+  loading?: boolean;
   onHover: () => void;
   onLeave: () => void;
   onToggleExpand: () => void;
@@ -27,6 +32,7 @@ export default function CityActivitiesCard({
   isActive,
   isDimmed,
   expanded,
+  loading = false,
   onHover,
   onLeave,
   onToggleExpand,
@@ -35,7 +41,11 @@ export default function CityActivitiesCard({
   const hasActivities = city.activities.length > 0;
   const hasRestaurants = city.restaurants.length > 0;
 
-  if (!hasActivities && !hasRestaurants) return null;
+  if (!hasActivities && !hasRestaurants) {
+    return loading ? (
+      <LoadingCard color={color} isActive={isActive} isDimmed={isDimmed} onHover={onHover} onLeave={onLeave} />
+    ) : null;
+  }
 
   const totalItems = city.activities.length + city.restaurants.length;
 
@@ -140,6 +150,78 @@ export default function CityActivitiesCard({
           </ul>
         </div>
       )}
+    </motion.div>
+  );
+}
+
+/**
+ * The card while the city's AI picks load: the same card, header and colours,
+ * with faded lines where the activities and restaurants will be. Not
+ * clickable — there is nothing to open yet.
+ */
+function LoadingCard({
+  color,
+  isActive,
+  isDimmed,
+  onHover,
+  onLeave,
+}: {
+  color: ReturnType<typeof getCityColor>;
+  isActive: boolean;
+  isDimmed: boolean;
+  onHover: () => void;
+  onLeave: () => void;
+}) {
+  const line = (width: string) => (
+    <span className="h-2.5 rounded-full" style={{ width, background: `${color.text}1f` }} />
+  );
+  return (
+    <motion.div
+      animate={{ opacity: isDimmed ? 0.35 : 1, scale: isActive ? 1.04 : 1 }}
+      transition={{
+        opacity: { duration: 0.25 },
+        scale: { type: 'spring', stiffness: 260, damping: 22 },
+      }}
+      onMouseEnter={onHover}
+      onMouseLeave={onLeave}
+      aria-busy="true"
+      aria-label="Loading activities and dining"
+      className="relative w-[300px] rounded-3xl border-2 overflow-hidden outline-none"
+      style={{ background: `${color.bg}cc`, borderColor: isActive ? color.text : color.border }}
+    >
+      <div className="px-5 pt-4 pb-2 flex items-center gap-2">
+        <div
+          className="w-5 h-5 rounded-full flex items-center justify-center"
+          style={{ background: `${color.text}18` }}
+        >
+          <MapPin size={10} style={{ color: color.text }} />
+        </div>
+        <span
+          className="text-[11px] uppercase tracking-wider font-semibold"
+          style={{ color: color.text }}
+        >
+          Activities & Dining
+        </span>
+      </div>
+      <div className="animate-pulse">
+        <ul className="px-6 pt-2 pb-4 flex flex-col gap-3">
+          {['72%', '58%', '66%'].map((w) => (
+            <li key={w} className="flex gap-2 items-center">
+              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: `${color.text}40` }} />
+              {line(w)}
+            </li>
+          ))}
+        </ul>
+        <div className="h-[2px] rounded-full mx-6" style={{ background: color.border }} />
+        <ul className="px-6 pt-4 pb-5 flex flex-col gap-3">
+          {['64%', '48%'].map((w) => (
+            <li key={w} className="flex items-center justify-between gap-2">
+              {line(w)}
+              {line('12%')}
+            </li>
+          ))}
+        </ul>
+      </div>
     </motion.div>
   );
 }

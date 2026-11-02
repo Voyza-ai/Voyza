@@ -11,7 +11,7 @@ import { Trip, HomeLeg, Transport } from '@/lib/types';
 import CityCard from './CityCard';
 import CityActivitiesCard from './CityActivitiesCard';
 import Connector from './Connector';
-import { useTripStore } from '@/store/tripStore';
+import { useTripStore, cityPicksLoading } from '@/store/tripStore';
 import { useAirportNames } from '@/lib/airportNames';
 
 /**
@@ -57,6 +57,8 @@ type FlowchartProps = {
 
 export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLegSearch }: FlowchartProps) {
   const setHomeLegAlternative = useTripStore((s) => s.setHomeLegAlternative);
+  // AI picks still on their way (/results opens before them; see startTripPicks).
+  const tripPicks = useTripStore((s) => s.tripPicks);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   // Sub-card hover is independent from main card hover — each card is its
   // own object even though they're visually linked.
@@ -268,8 +270,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
           )}
 
           {trip.cities.map((city, idx) => {
+            const picksLoading = cityPicksLoading(tripPicks, trip, city.name);
             const hasSub =
-              city.activities.length > 0 || city.restaurants.length > 0;
+              city.activities.length > 0 || city.restaurants.length > 0 || picksLoading;
             // Dimming is city-level: if ANY card (main or sub) in any other
             // city is hovered, this city's cards dim. Whichever card in the
             // same city is hovered stays bright for both cards.
@@ -314,6 +317,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                       <CityActivitiesCard
                         city={city}
                         cityIndex={idx}
+                        loading={picksLoading}
                         isActive={activeSubIndex === idx}
                         isDimmed={isDimmed}
                         expanded={expandedActivities === idx}
