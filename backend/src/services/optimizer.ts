@@ -2263,7 +2263,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           .then(legCost),
       homeCosts,
       // Read before each round, when every search sent so far is in the ledger.
-      budget: { remaining: () => PLAN_SEARCH_BUDGET - ctx.searchLedger.size - reserved },
+      budget: { remaining: () => Number(process.env.OPT_BUDGET ?? PLAN_SEARCH_BUDGET) - ctx.searchLedger.size - reserved },
     });
     screenStats = { rounds: screen.rounds, budgetStop: screen.budgetStop, reserved };
     // Every leg and home flight of these is priced already: no new searches.

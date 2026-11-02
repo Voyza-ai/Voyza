@@ -1,0 +1,96 @@
+{
+  "label": "after",
+  "baseline": null,
+  "trialsPerVariant": 200,
+  "results": [
+    {
+      "variant": "5c-CHI-30-live",
+      "acceptance": true,
+      "trials": 200,
+      "identicalPct": 100,
+      "meanDearerPct": 0,
+      "worstDearerPct": 0,
+      "meanDearerWhenDifferentPct": 0,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "requests": {
+        "mean": 42.2,
+        "p50": 41,
+        "p95": 54,
+        "max": 63,
+        "over42Pct": 38.5,
+        "over45Pct": 27
+      },
+      "stalledPct": 27,
+      "searchesMean": 41.9,
+      "byPhaseMean": {
+        "home": 10,
+        "screen": 20,
+        "exact": 11.89
+      },
+      "classifiedMean": {
+        "inter-city": 31.89,
+        "home": 10,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 2.3,
+        "p95": 4,
+        "max": 6
+      },
+      "budgetStopPct": 0,
+      "modelledSeconds": {
+        "mean": 37.5,
+        "p50": 28.3,
+        "p95": 72.2,
+        "max": 82
+      },
+      "homeFareNotCheapestOfAllAirports": 0,
+      "testAirlineOnHomeCard": 0
+    },
+    {
+      "variant": "5c-CHI-volatile-test",
+      "acceptance": true,
+      "trials": 200,
+      "identicalPct": 79,
+      "meanDearerPct": 1.596,
+      "worstDearerPct": 33.31,
+      "meanDearerWhenDifferentPct": 7.6,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "requests": {
+        "mean": 48.6,
+        "p50": 49,
+        "p95": 59,
+        "max": 65,
+        "over42Pct": 83,
+        "over45Pct": 63
+      },
+      "stalledPct": 63,
+      "searchesMean": 47.9,
+      "byPhaseMean": {
+        "home": 10,
+        "screen": 20,
+        "exact": 15.92,
+        "homeLegs": 2
+      },
+      "classifiedMean": {
+        "inter-city": 35.92,
+        "home": 12,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 3.01,
+        "p95": 5,
+        "max": 6
+      },
+      "budgetStopPct": 1,
+      "modelledSeconds": {
+        "mean": 56,
+        "p50": 66.1,
+        "p95": 77.8,
+        "max": 88
+      },
+      "homeFareNotCheapestOfAllAirports": 0,
+      "testAirlineOnHomeCard": 0
+    }
+  ]
+}
