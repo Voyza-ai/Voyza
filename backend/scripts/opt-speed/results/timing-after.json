@@ -1,0 +1,1574 @@
+{
+  "label": "after",
+  "model": {
+    "windowMs": 60000,
+    "windowLimit": 45,
+    "latencyMs": [
+      500,
+      2000
+    ],
+    "slots": "flights.ts MAX_CONCURRENT_SEARCHES = 6"
+  },
+  "scenarios": [
+    {
+      "summary": {
+        "scenario": "3-city (Porto, Seville, Valencia) from Chicago",
+        "runs": 12,
+        "seconds": {
+          "mean": 8.5,
+          "p50": 8.4,
+          "max": 10.7
+        },
+        "stalledRuns": 0,
+        "duffelRequests": {
+          "mean": 36,
+          "max": 36
+        },
+        "acceptedSearches": {
+          "mean": 36,
+          "p50": 36,
+          "max": 36
+        },
+        "rejected429Mean": 0,
+        "byKindMean": {
+          "inter-city": 9,
+          "home": 13,
+          "probe": 14
+        },
+        "byPhaseMean": {
+          "score": 20,
+          "probe": 16
+        },
+        "enrichOrOtherMean": 0,
+        "exactRoundsMean": null,
+        "placeSuggestionLookups": 0,
+        "homeLegsBuilt": 12,
+        "dateShiftChecked": 12
+      },
+      "runs": [
+        {
+          "ms": 8146,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Porto > Seville > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 9831,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Seville > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 7281,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Porto > Seville > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 7686,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Seville > Valencia > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 8037,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Seville > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 8691,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Porto > Seville > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 8395,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Seville > Valencia > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 10725,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Seville > Valencia > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 7796,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Porto > Valencia > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 8816,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Seville > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 7047,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Porto > Seville > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        },
+        {
+          "ms": 9044,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 9,
+            "home": 13,
+            "probe": 14
+          },
+          "byPhase": {
+            "score": 20,
+            "probe": 16
+          },
+          "exactRounds": null,
+          "enrichOrOther": 0,
+          "winner": "Porto > Valencia > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": true,
+          "planDays": 4
+        }
+      ]
+    },
+    {
+      "summary": {
+        "scenario": "4-city (+ Marseille) from Chicago",
+        "runs": 12,
+        "seconds": {
+          "mean": 7.5,
+          "p50": 7.5,
+          "max": 14.1
+        },
+        "stalledRuns": 0,
+        "duffelRequests": {
+          "mean": 22.3,
+          "max": 27
+        },
+        "acceptedSearches": {
+          "mean": 22.3,
+          "p50": 22,
+          "max": 27
+        },
+        "rejected429Mean": 0,
+        "byKindMean": {
+          "inter-city": 14.3,
+          "home": 8,
+          "probe": 0
+        },
+        "byPhaseMean": {
+          "home": 8,
+          "screen": 12,
+          "exact": 2.3
+        },
+        "enrichOrOtherMean": 0,
+        "exactRoundsMean": 2,
+        "placeSuggestionLookups": 0,
+        "homeLegsBuilt": 12,
+        "dateShiftChecked": 0
+      },
+      "runs": [
+        {
+          "ms": 7502,
+          "requests": 23,
+          "accepted": 23,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 15,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 3
+          },
+          "exactRounds": 3,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Seville > Porto > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 6158,
+          "requests": 21,
+          "accepted": 21,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 13,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 1
+          },
+          "exactRounds": 1,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Seville > Porto > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 8060,
+          "requests": 23,
+          "accepted": 23,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 15,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 3
+          },
+          "exactRounds": 3,
+          "enrichOrOther": 0,
+          "winner": "Porto > Marseille > Seville > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 7604,
+          "requests": 22,
+          "accepted": 22,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 14,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 2
+          },
+          "exactRounds": 1,
+          "enrichOrOther": 0,
+          "winner": "Seville > Valencia > Marseille > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 14095,
+          "requests": 27,
+          "accepted": 27,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 19,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 7
+          },
+          "exactRounds": 7,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Valencia > Seville > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 6752,
+          "requests": 22,
+          "accepted": 22,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 14,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 2
+          },
+          "exactRounds": 1,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Porto > Seville > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 4890,
+          "requests": 20,
+          "accepted": 20,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 12,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12
+          },
+          "exactRounds": 0,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Seville > Valencia > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 6063,
+          "requests": 22,
+          "accepted": 22,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 14,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 2
+          },
+          "exactRounds": 1,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Seville > Valencia > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 4936,
+          "requests": 20,
+          "accepted": 20,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 12,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12
+          },
+          "exactRounds": 0,
+          "enrichOrOther": 0,
+          "winner": "Porto > Valencia > Seville > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 7835,
+          "requests": 22,
+          "accepted": 22,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 14,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 2
+          },
+          "exactRounds": 2,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Seville > Marseille > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 5707,
+          "requests": 22,
+          "accepted": 22,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 14,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 2
+          },
+          "exactRounds": 1,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Porto > Seville > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        },
+        {
+          "ms": 10444,
+          "requests": 24,
+          "accepted": 24,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 16,
+            "home": 8,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 8,
+            "screen": 12,
+            "exact": 4
+          },
+          "exactRounds": 4,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Seville > Porto > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 5
+        }
+      ]
+    },
+    {
+      "summary": {
+        "scenario": "production: 5-city from Chicago ORD+MDW, 4 travelers, 12 nights",
+        "runs": 12,
+        "seconds": {
+          "mean": 22.9,
+          "p50": 14.6,
+          "max": 67.1
+        },
+        "stalledRuns": 2,
+        "duffelRequests": {
+          "mean": 38.8,
+          "max": 50
+        },
+        "acceptedSearches": {
+          "mean": 38.7,
+          "p50": 39,
+          "max": 49
+        },
+        "rejected429Mean": 0.2,
+        "byKindMean": {
+          "inter-city": 28.7,
+          "home": 10,
+          "probe": 0
+        },
+        "byPhaseMean": {
+          "home": 10,
+          "screen": 20,
+          "exact": 8.7
+        },
+        "enrichOrOtherMean": 0,
+        "exactRoundsMean": 8,
+        "placeSuggestionLookups": 0,
+        "homeLegsBuilt": 12,
+        "dateShiftChecked": 0
+      },
+      "runs": [
+        {
+          "ms": 12584,
+          "requests": 35,
+          "accepted": 35,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 25,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 5
+          },
+          "exactRounds": 5,
+          "enrichOrOther": 0,
+          "winner": "Turin > Marseille > Seville > Porto > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 67073,
+          "requests": 50,
+          "accepted": 49,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 39,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 19
+          },
+          "exactRounds": 19,
+          "enrichOrOther": 0,
+          "winner": "Seville > Turin > Marseille > Porto > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 13956,
+          "requests": 37,
+          "accepted": 37,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 27,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 7
+          },
+          "exactRounds": 6,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Porto > Seville > Turin > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 14623,
+          "requests": 39,
+          "accepted": 39,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 29,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 9
+          },
+          "exactRounds": 8,
+          "enrichOrOther": 0,
+          "winner": "Turin > Marseille > Seville > Valencia > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 64283,
+          "requests": 48,
+          "accepted": 47,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 37,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 17
+          },
+          "exactRounds": 17,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Marseille > Turin > Seville > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 18533,
+          "requests": 41,
+          "accepted": 41,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 31,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 11
+          },
+          "exactRounds": 10,
+          "enrichOrOther": 0,
+          "winner": "Turin > Porto > Valencia > Seville > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 17660,
+          "requests": 40,
+          "accepted": 40,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 30,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 10
+          },
+          "exactRounds": 7,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Turin > Valencia > Porto > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 12215,
+          "requests": 35,
+          "accepted": 35,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 25,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 5
+          },
+          "exactRounds": 4,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Seville > Turin > Valencia > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 10074,
+          "requests": 33,
+          "accepted": 33,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 23,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 3
+          },
+          "exactRounds": 3,
+          "enrichOrOther": 0,
+          "winner": "Porto > Valencia > Marseille > Seville > Turin",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 21019,
+          "requests": 41,
+          "accepted": 41,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 31,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 11
+          },
+          "exactRounds": 11,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Seville > Marseille > Porto > Turin",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 13013,
+          "requests": 35,
+          "accepted": 35,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 25,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 5
+          },
+          "exactRounds": 5,
+          "enrichOrOther": 0,
+          "winner": "Turin > Valencia > Seville > Porto > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 9314,
+          "requests": 32,
+          "accepted": 32,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 22,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 2
+          },
+          "exactRounds": 1,
+          "enrichOrOther": 0,
+          "winner": "Turin > Valencia > Seville > Porto > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        }
+      ]
+    },
+    {
+      "summary": {
+        "scenario": "5-city from New York JFK+LGA+EWR",
+        "runs": 12,
+        "seconds": {
+          "mean": 16.6,
+          "p50": 17,
+          "max": 24.6
+        },
+        "stalledRuns": 0,
+        "duffelRequests": {
+          "mean": 37.4,
+          "max": 42
+        },
+        "acceptedSearches": {
+          "mean": 37.4,
+          "p50": 38,
+          "max": 42
+        },
+        "rejected429Mean": 0,
+        "byKindMean": {
+          "inter-city": 27.4,
+          "home": 10,
+          "probe": 0
+        },
+        "byPhaseMean": {
+          "home": 10,
+          "screen": 20,
+          "exact": 7.4
+        },
+        "enrichOrOtherMean": 0,
+        "exactRoundsMean": 7.2,
+        "placeSuggestionLookups": 0,
+        "homeLegsBuilt": 12,
+        "dateShiftChecked": 0
+      },
+      "runs": [
+        {
+          "ms": 17163,
+          "requests": 38,
+          "accepted": 38,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 28,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 8
+          },
+          "exactRounds": 8,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Porto > Marseille > Turin > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 24551,
+          "requests": 42,
+          "accepted": 42,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 32,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 12
+          },
+          "exactRounds": 12,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Seville > Porto > Valencia > Turin",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 19303,
+          "requests": 40,
+          "accepted": 40,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 30,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 10
+          },
+          "exactRounds": 10,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Porto > Turin > Seville > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 20691,
+          "requests": 42,
+          "accepted": 42,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 32,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 12
+          },
+          "exactRounds": 12,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Turin > Seville > Marseille > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 14819,
+          "requests": 36,
+          "accepted": 36,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 26,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 6
+          },
+          "exactRounds": 6,
+          "enrichOrOther": 0,
+          "winner": "Seville > Porto > Valencia > Marseille > Turin",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 11514,
+          "requests": 33,
+          "accepted": 33,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 23,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 3
+          },
+          "exactRounds": 2,
+          "enrichOrOther": 0,
+          "winner": "Seville > Valencia > Marseille > Porto > Turin",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 22838,
+          "requests": 41,
+          "accepted": 41,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 31,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 11
+          },
+          "exactRounds": 11,
+          "enrichOrOther": 0,
+          "winner": "Porto > Seville > Marseille > Turin > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 14050,
+          "requests": 34,
+          "accepted": 34,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 24,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 4
+          },
+          "exactRounds": 4,
+          "enrichOrOther": 0,
+          "winner": "Seville > Valencia > Porto > Marseille > Turin",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 9801,
+          "requests": 33,
+          "accepted": 33,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 23,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 3
+          },
+          "exactRounds": 3,
+          "enrichOrOther": 0,
+          "winner": "Turin > Marseille > Porto > Valencia > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 14928,
+          "requests": 35,
+          "accepted": 35,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 25,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 5
+          },
+          "exactRounds": 5,
+          "enrichOrOther": 0,
+          "winner": "Seville > Marseille > Porto > Turin > Valencia",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 17037,
+          "requests": 41,
+          "accepted": 41,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 31,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 11
+          },
+          "exactRounds": 10,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Porto > Seville > Valencia > Turin",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 12368,
+          "requests": 34,
+          "accepted": 34,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 24,
+            "home": 10,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 10,
+            "screen": 20,
+            "exact": 4
+          },
+          "exactRounds": 3,
+          "enrichOrOther": 0,
+          "winner": "Turin > Valencia > Seville > Porto > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        }
+      ]
+    },
+    {
+      "summary": {
+        "scenario": "5-city from Boston BOS+PVD (no metro code)",
+        "runs": 12,
+        "seconds": {
+          "mean": 56.6,
+          "p50": 67.2,
+          "max": 77.3
+        },
+        "stalledRuns": 9,
+        "duffelRequests": {
+          "mean": 51.7,
+          "max": 61
+        },
+        "acceptedSearches": {
+          "mean": 50.9,
+          "p50": 50,
+          "max": 60
+        },
+        "rejected429Mean": 0.8,
+        "byKindMean": {
+          "inter-city": 30.9,
+          "home": 20,
+          "probe": 0
+        },
+        "byPhaseMean": {
+          "home": 20,
+          "screen": 20,
+          "exact": 10.9
+        },
+        "enrichOrOtherMean": 0,
+        "exactRoundsMean": 10.6,
+        "placeSuggestionLookups": 0,
+        "homeLegsBuilt": 12,
+        "dateShiftChecked": 0
+      },
+      "runs": [
+        {
+          "ms": 14156,
+          "requests": 45,
+          "accepted": 45,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 25,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 5
+          },
+          "exactRounds": 4,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Turin > Seville > Valencia > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 74701,
+          "requests": 56,
+          "accepted": 55,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 35,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 15
+          },
+          "exactRounds": 15,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Turin > Seville > Porto > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 13093,
+          "requests": 44,
+          "accepted": 44,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 24,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 4
+          },
+          "exactRounds": 4,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Porto > Seville > Valencia > Turin",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 74192,
+          "requests": 57,
+          "accepted": 56,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 36,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 16
+          },
+          "exactRounds": 16,
+          "enrichOrOther": 0,
+          "winner": "Porto > Turin > Valencia > Marseille > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 12192,
+          "requests": 43,
+          "accepted": 43,
+          "rejected429": 0,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 23,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 3
+          },
+          "exactRounds": 3,
+          "enrichOrOther": 0,
+          "winner": "Valencia > Seville > Porto > Turin > Marseille",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 66058,
+          "requests": 51,
+          "accepted": 50,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 30,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 10
+          },
+          "exactRounds": 10,
+          "enrichOrOther": 0,
+          "winner": "Turin > Valencia > Marseille > Porto > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 67227,
+          "requests": 51,
+          "accepted": 50,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 30,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 10
+          },
+          "exactRounds": 9,
+          "enrichOrOther": 0,
+          "winner": "Seville > Marseille > Valencia > Porto > Turin",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 75370,
+          "requests": 57,
+          "accepted": 56,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 36,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 16
+          },
+          "exactRounds": 16,
+          "enrichOrOther": 0,
+          "winner": "Marseille > Seville > Turin > Valencia > Porto",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 77257,
+          "requests": 61,
+          "accepted": 60,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 40,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 20
+          },
+          "exactRounds": 20,
+          "enrichOrOther": 0,
+          "winner": "Turin > Marseille > Porto > Valencia > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 65830,
+          "requests": 50,
+          "accepted": 49,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 29,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 9
+          },
+          "exactRounds": 8,
+          "enrichOrOther": 0,
+          "winner": "Turin > Valencia > Porto > Marseille > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 63284,
+          "requests": 49,
+          "accepted": 48,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 28,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 8
+          },
+          "exactRounds": 7,
+          "enrichOrOther": 0,
+          "winner": "Turin > Valencia > Porto > Marseille > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        },
+        {
+          "ms": 76076,
+          "requests": 56,
+          "accepted": 55,
+          "rejected429": 1,
+          "suggestions": 0,
+          "classified": {
+            "inter-city": 35,
+            "home": 20,
+            "probe": 0
+          },
+          "byPhase": {
+            "home": 20,
+            "screen": 20,
+            "exact": 15
+          },
+          "exactRounds": 15,
+          "enrichOrOther": 0,
+          "winner": "Porto > Turin > Valencia > Marseille > Seville",
+          "homeLegsBuilt": true,
+          "dateShiftChecked": false,
+          "planDays": 6
+        }
+      ]
+    }
+  ]
+}
