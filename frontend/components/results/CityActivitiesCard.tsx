@@ -203,23 +203,27 @@ function LoadingCard({
           Activities & Dining
         </span>
       </div>
+      {/* Rows sized like the real card's (13px snug text, its "+N more"
+          lines), so nothing moves when the picks land. */}
       <div className="animate-pulse">
-        <ul className="px-6 pt-2 pb-4 flex flex-col gap-3">
+        <ul className="px-6 pt-1 pb-3 flex flex-col gap-1.5">
           {['72%', '58%', '66%'].map((w) => (
-            <li key={w} className="flex gap-2 items-center">
+            <li key={w} className="h-[18px] flex gap-2 items-center">
               <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: `${color.text}40` }} />
               {line(w)}
             </li>
           ))}
+          <li className="h-[16px] ml-3.5 flex items-center">{line('16%')}</li>
         </ul>
         <div className="h-[2px] rounded-full mx-6" style={{ background: color.border }} />
-        <ul className="px-6 pt-4 pb-5 flex flex-col gap-3">
+        <ul className="px-6 py-3 flex flex-col gap-1">
           {['64%', '48%'].map((w) => (
-            <li key={w} className="flex items-center justify-between gap-2">
+            <li key={w} className="h-[18px] flex items-center justify-between gap-2">
               {line(w)}
               {line('12%')}
             </li>
           ))}
+          <li className="h-[16px] flex items-center">{line('14%')}</li>
         </ul>
       </div>
     </motion.div>
