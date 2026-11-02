@@ -558,8 +558,9 @@ const SCREEN_LOWER_BOUND = (1 - MAX_DATE_SWING) / (1 + MAX_DATE_SWING);
  * and prices, in one last round, every unpriced leg of every ordering that
  * could still beat the best exact one — the exhaustive answer, at whatever
  * that costs. Each round is one Duffel round trip (1.3-1.9s); simulated 5-city
- * trips needed 7 on average and 17 at the 95th percentile (harness,
- * 2026-11-02), so 24 only cuts a pathological tail.
+ * trips with no country clustering needed 8-9 on average and 19-20 at the
+ * 95th percentile, and reached 24 in 1-1.5% of trips (gate harness,
+ * 2026-11-02); 4-city trips 2-3 on average.
  */
 const MAX_EXACT_ROUNDS = 24;
 
@@ -2042,8 +2043,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   const naiveKey = naiveOrdering.join('|');
 
   // 4-5 cities with a home: the adaptive screen (rankByAdaptiveScreen) finds
-  // the same winner as scoring every permutation, in about a third of the
-  // searches. Everything else scores every candidate, as before.
+  // the same winner as scoring every permutation in well under half the
+  // searches (5 cities from Chicago: ~38 instead of 100, simulated).
+  // Everything else scores every candidate, as before.
   const adaptive = hasOrigin && cities.length >= 4 && cities.length <= 5;
   let routes: ScoredRoute[];
   let screenStats: { rounds: number; sweeps: number } | undefined;
