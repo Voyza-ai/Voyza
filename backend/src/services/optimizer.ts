@@ -1522,8 +1522,11 @@ function homeSearchGroups(airports: string[]): Array<{ code: string; airports: s
  * on the way back), and dropped unless that is one of the traveller's — a
  * London search also answers for City, Southend and Luton. An offer that does
  * not say which airport it uses is dropped too: it cannot be attributed. If
- * the metro search itself fails, its airports are searched one by one, so a
- * metro code Duffel refused costs searches, never fares.
+ * the metro search itself fails, or answers only for airports that are not
+ * the traveller's (theirs crowded out of a capped answer), its airports are
+ * searched one by one: a metro code Duffel refused costs searches, never
+ * fares. Assumed, not verifiable without live calls: that Duffel's city
+ * search covers every airport listed for it in DUFFEL_METRO_AIRPORTS.
  */
 async function searchHomeOffers(ctx: RunContext, params: {
   originAirports: string[];
@@ -1570,10 +1573,16 @@ async function searchHomeOffers(ctx: RunContext, params: {
       } catch {
         return (await Promise.all(members.map(alone))).flat();
       }
-      return offers.flatMap((offer: any) => {
+      const ours = offers.flatMap((offer: any) => {
         const real = String((reverse ? offer.destinationAirport : offer.originAirport) ?? '').toUpperCase();
         return members.includes(real) ? [{ offer, homeAirport: real }] : [];
       });
+      // Flights from the metro, none from the traveller's airports: they may
+      // have been crowded out of the answer (a capped offer list), so ask
+      // each airport before calling the flight missing. Costs searches only
+      // in that case; an empty answer means nothing flies and is final.
+      if (ours.length === 0 && offers.length > 0) return (await Promise.all(members.map(alone))).flat();
+      return ours;
     }),
   );
   const all = perGroup.flat();

@@ -264,6 +264,36 @@ describe('home flights from a metro: one search per city and direction', () => {
     expect(home).toHaveLength(8);
   }, 30000);
 
+  it("London: a metro answer with none of the user's airports in it is searched again per airport", async () => {
+    // Duffel's city search answering only for City and Southend (say it
+    // capped its offers) must not read as "no flight from LHR/LGW/STN".
+    const spec = trip(FIVE.slice(0, 4), 'London', ['LHR', 'LGW', 'STN'], 10);
+    const model = createFareModel({
+      seed: 43,
+      swing: 0.3,
+      cityCodes: mockCodes,
+      homeAirports: ['LHR', 'LGW', 'STN', 'LCY', 'SEN'],
+      metros: { LON: ['LHR', 'LGW', 'STN', 'LCY', 'SEN'] },
+      travelers: 4,
+    });
+    mockedSearchFlights.mockImplementation(async (p: Search) => {
+      searched.push(p);
+      const offers = model.offers(p);
+      const viaLon = p.origin === 'LON' || p.destination === 'LON';
+      return viaLon
+        ? offers.filter((o) => ['LCY', 'SEN'].includes(p.origin === 'LON' ? o.originAirport : o.destinationAirport))
+        : offers;
+    });
+
+    const result = await run(spec);
+
+    const best = exhaustive(spec, model, mockCodes)[0];
+    expect(result.bestRoute.ordering).toEqual(best.ordering);
+    expect(result.outboundLeg?.originAirport).toBe(best.outbound!.airport);
+    expect(result.outboundLeg?.price).toBe(best.outbound!.price);
+    expect(result.returnLeg?.destAirport).toBe(best.ret!.airport);
+  }, 30000);
+
   it('Boston (BOS + PVD, no metro code): one search per airport, as before', async () => {
     const spec = trip(FIVE.slice(0, 4), 'Boston', ['BOS', 'PVD'], 10);
     const model = createFareModel({ seed: 23, swing: 0.3, cityCodes: mockCodes, homeAirports: ['BOS', 'PVD'], travelers: 4 });
