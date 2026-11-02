@@ -762,8 +762,9 @@ function countryGroupedOrderings(cities: CityInput[]): string[][] {
 }
 
 /**
- * Rank a 4-5 city trip's candidate orderings with a fraction of the Duffel
- * searches, and the same winner as pricing every one of them.
+ * Rank a 4-5 city trip's candidate orderings within a fixed number of Duffel
+ * searches: the same winner as pricing every one of them whenever the budget
+ * lets it prove that, and otherwise the best ordering it priced in full.
  *
  * Why: Duffel's test token accepts ~45 searches a minute, shared by every
  * user; the rest stall until the window resets, up to a minute later.
@@ -783,27 +784,28 @@ function countryGroupedOrderings(cities: CityInput[]): string[][] {
  *     in the candidate ordering with the cheapest home flights that contains
  *     it (ties: permutation order). Those are the orderings most likely to
  *     win, so a screen fare is often already the exact one they need.
- *  3. Best-first. Every ordering gets an optimistic estimate: a leg priced on
- *     its own day at full value (UNAVAILABLE_LEG_PENALTY if nothing flies),
- *     any other leg at SCREEN_LOWER_BOUND × the highest fare its route showed
- *     on any day — the most it can drop — or 0 if it showed none, and home
- *     flights at full value (UNAVAILABLE_HOME_LEG_PENALTY if none). While the
- *     cheapest estimate is not fully priced, price unpriced legs on their own
- *     days, up to EXACT_ROUND_WIDTH a round: every unpriced leg of the
- *     cheapest estimate (most uncertain first), then of the next cheapest,
- *     and so on — each ordering whole, so every round leaves fully priced
- *     candidates behind — among the orderings that could still beat the best
- *     fully priced one. When the cheapest estimate is fully priced, nothing
- *     else can be cheaper: it is the exhaustive winner, and ties break by
+ *  3. Best-first. Every ordering gets a bound — the least it could cost: a
+ *     leg priced on its own day at full value (UNAVAILABLE_LEG_PENALTY if
+ *     nothing flies), any other leg at SCREEN_LOWER_BOUND × the highest fare
+ *     its route showed on any day — the most it can drop — or 0 if it showed
+ *     none, and home flights at full value (UNAVAILABLE_HOME_LEG_PENALTY if
+ *     none). Every ordering whose bound is below the best fully priced one's
+ *     total could still beat it. While there are any, a round prices up to
+ *     EXACT_ROUND_WIDTH legs on their own days: every unpriced leg of the
+ *     one LIKELIEST to be cheap (each unpriced leg at the average fare its
+ *     route showed), then of the next, and so on — whole orderings, so every
+ *     round leaves fully priced candidates behind. When none is left, the
+ *     best fully priced ordering is the exhaustive winner, and ties break by
  *     permutation order as the old stable sort did.
  *  4. The budget. A round only takes orderings it can price in full within
  *     `budget.remaining()` searches; when none fits, best-first stops and
- *     the best FULLY PRICED ordering wins — not proven, by design: fares that
- *     move more than the bound assumes (production's test token swings
- *     ±60-80%) used to keep it going for 25 rounds and 33 searches. There is
- *     always such an ordering once the typed order is a candidate (it is
- *     priced in step 1); when it is not one (the country filter dropped it),
- *     the cheapest estimate is priced in full whatever the budget says.
+ *     the best FULLY PRICED ordering wins — not proven, by design: proving it
+ *     took production's 5-city Chicago plan 25 rounds and 33 searches on
+ *     Duffel's test token, whose fares swing ±60-80% between dates, and a
+ *     ±30% plan up to 20-30 searches in the tail. There is always such an
+ *     ordering once the typed order is a candidate (it is priced in step 1);
+ *     when it is not one (the country filter dropped it), the first
+ *     contender is priced in full whatever the budget says.
  *
  * Unavailable legs are charged exactly as scoring charges them: the winner's
  * legs are always priced on their own days, and a leg with nothing on its
@@ -816,7 +818,9 @@ function countryGroupedOrderings(cities: CityInput[]): string[][] {
  *
  * Bounds: one round prices at most EXACT_ROUND_WIDTH legs and is one Duffel
  * round trip; every round prices at least one new leg, and none goes past the
- * budget. Deterministic: the same fares give the same searches and answer.
+ * budget (5 cities: 2 rounds at most but for the rare forced one; see
+ * PLAN_SEARCH_BUDGET). Deterministic: the same fares give the same searches
+ * and answer.
  *
  * Returns the orderings proven best, best first: the winner, then each next
  * one that is already fully priced with nothing able to undercut it — at most
@@ -846,8 +850,9 @@ async function rankByAdaptiveScreen(args: {
   /** Highest fare a route showed on any day it was priced (none: no fare yet). */
   const highest = new Map<string, number>();
   const pending = new Map<string, Promise<void>>();
-  /** Every fare a route showed (for the expected cost of a day not priced yet). */
+  /** The fares a route showed, on any day (for the expected cost of a day not priced yet). */
   const seen = new Map<string, { sum: number; n: number }>();
+  /** The same, over every route. */
   const seenAll = { sum: 0, n: 0 };
   const price = (from: string, to: string, i: number, phase: 'screen' | 'exact'): Promise<void> => {
     const key = legOf(from, to, i);
@@ -858,8 +863,8 @@ async function rankByAdaptiveScreen(args: {
         const route = routeOf(from, to);
         if (cost !== Infinity && cost > (highest.get(route) ?? -Infinity)) highest.set(route, cost);
         if (cost !== Infinity) {
-          const s = seen.get(route) ?? { sum: 0, n: 0 };
-          seen.set(route, { sum: s.sum + cost, n: s.n + 1 });
+          const fares = seen.get(route) ?? { sum: 0, n: 0 };
+          seen.set(route, { sum: fares.sum + cost, n: fares.n + 1 });
           seenAll.sum += cost;
           seenAll.n++;
         }
@@ -893,90 +898,78 @@ async function rankByAdaptiveScreen(args: {
   await Promise.all([...typedLegs, ...[...screenDay.values()].map((s) => price(s.from, s.to, s.i, 'screen'))]);
 
   // 3. Best-first.
-  const SHRINK = Number(process.env.OPT_SHRINK ?? 0);
+  /** What an unpriced day of `route` is expected to cost: the average fare it showed, or every route's average. */
   const expected = (route: string) => {
-    const all = seenAll.n ? seenAll.sum / seenAll.n : 0;
-    const s = seen.get(route);
-    return s ? (1 - SHRINK) * (s.sum / s.n) + SHRINK * all : all;
+    const fares = seen.get(route) ?? seenAll;
+    return fares.n > 0 ? fares.sum / fares.n : 0;
   };
   const estimate = (idx: number) => {
     const o = orderings[idx];
     let total = 0;
-    let ev = 0;
+    let likely = 0;
     const open: Array<{ i: number; slack: number }> = [];
     for (let i = 0; i < o.length - 1; i++) {
       const cost = exact.get(legOf(o[i], o[i + 1], i));
       if (cost !== undefined) {
-        total += cost === Infinity ? UNAVAILABLE_LEG_PENALTY : cost;
-        ev += cost === Infinity ? UNAVAILABLE_LEG_PENALTY : cost;
+        const charged = cost === Infinity ? UNAVAILABLE_LEG_PENALTY : cost;
+        total += charged;
+        likely += charged;
         continue;
       }
       const route = routeOf(o[i], o[i + 1]);
       const high = highest.get(route);
-      ev += expected(route);
+      likely += expected(route);
       if (high !== undefined) {
         total += SCREEN_LOWER_BOUND * high;
         open.push({ i, slack: (1 - SCREEN_LOWER_BOUND) * high });
       } else {
         // Nothing known about this day: the route was never priced, or had
         // no fare on the day(s) it was — and a route that does not fly
-        // daily may well fly on this one. No bound, then: 0, priced first
-        // when its ordering is the cheapest estimate. A leg that turns out
-        // to have nothing on its own day is UNAVAILABLE_LEG_PENALTY, as in
-        // scoring, so it never wins by being missing.
+        // daily may well fly on this one. No bound, then: 0. A leg that
+        // turns out to have nothing on its own day is
+        // UNAVAILABLE_LEG_PENALTY, as in scoring, so it never wins by being
+        // missing.
         open.push({ i, slack: Infinity });
       }
     }
     for (const c of home[idx]) {
       total += c;
-      ev += c;
+      likely += c;
     }
-    return { idx, total, ev, open };
+    return { idx, total, likely, open };
   };
 
-  // Cheapest first; ties in permutation order, as the old stable sort.
+  // Cheapest bound first; ties in permutation order, as the old stable sort.
   const ranking = () => orderings.map((_, idx) => estimate(idx)).sort((a, b) => a.total - b.total || a.idx - b.idx);
 
   let rounds = 0;
   let budgetStop = false;
   for (;;) {
     const est = ranking();
-    // Everything ahead of the best fully priced ordering could still beat it.
+    // Everything ahead of the best fully priced ordering could still beat
+    // it; nothing ahead of it means it is the exhaustive winner.
     const incumbent = est.findIndex((e) => e.open.length === 0);
     if (incumbent === 0) break;
-    let contenders = incumbent === -1 ? est : est.slice(0, incumbent);
-    if (process.env.OPT_ORDER === 'ev') contenders = [...contenders].sort((a, b) => a.ev - b.ev || a.idx - b.idx);
-    const incTotal = incumbent === -1 ? Infinity : est[incumbent].total;
-    // No fully priced candidate yet (the typed order is not one): the
-    // cheapest estimate is priced in full whatever the budget, so there is
-    // always an answer.
+    // Priced in the order they are likely to cost, not in bound order: a
+    // bound is what an ordering could cost at best, and spending a limited
+    // budget on the orderings that only look cheap because most of their
+    // legs are unpriced left the budget-stopped plans with poor answers
+    // (gate, 2026-11-02: ±30% fares, 92% the exhaustive winner in bound
+    // order, 98% in this one).
+    const contenders = (incumbent === -1 ? est : est.slice(0, incumbent)).sort(
+      (a, b) => a.likely - b.likely || a.idx - b.idx,
+    );
+    // No fully priced candidate yet (the typed order is not one): the first
+    // contender is priced in full whatever the budget, so there is always
+    // an answer.
     const forced = incumbent === -1;
-    const cap = Math.min(Number(process.env.OPT_WIDTH ?? EXACT_ROUND_WIDTH), args.budget?.remaining() ?? Infinity);
-    const whole = process.env.OPT_WHOLE !== '0';
+    const cap = Math.min(EXACT_ROUND_WIDTH, args.budget?.remaining() ?? Infinity);
 
     const batch = new Map<string, { idx: number; i: number }>();
     for (const e of contenders) {
-      const fresh = [...e.open]
-        .sort((a, b) => b.slack - a.slack || a.i - b.i)
+      const fresh = e.open
         .map(({ i }) => ({ idx: e.idx, i, key: legOf(orderings[e.idx][i], orderings[e.idx][i + 1], i) }))
         .filter(({ key }) => !batch.has(key));
-      if (!whole) {
-        // As many as would lift it above the incumbent if each came in at its screen fare.
-        let lifted = e.total;
-        const need: typeof fresh = [];
-        const slackOf = new Map(e.open.map((x) => [x.i, x.slack]));
-        for (const leg of fresh) {
-          need.push(leg);
-          lifted += slackOf.get(leg.i)!;
-          if (lifted > incTotal) break;
-        }
-        for (const leg of need) {
-          if (batch.size >= cap && !(forced && batch.size === 0)) break;
-          batch.set(leg.key, leg);
-        }
-        if (batch.size >= cap) break;
-        continue;
-      }
       // Whole orderings only: a half-priced one can never be the answer.
       if (batch.size + fresh.length > cap && !(forced && batch.size === 0)) continue;
       for (const leg of fresh) batch.set(leg.key, leg);
@@ -2263,7 +2256,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           .then(legCost),
       homeCosts,
       // Read before each round, when every search sent so far is in the ledger.
-      budget: { remaining: () => Number(process.env.OPT_BUDGET ?? PLAN_SEARCH_BUDGET) - ctx.searchLedger.size - reserved },
+      budget: { remaining: () => PLAN_SEARCH_BUDGET - ctx.searchLedger.size - reserved },
     });
     screenStats = { rounds: screen.rounds, budgetStop: screen.budgetStop, reserved };
     // Every leg and home flight of these is priced already: no new searches.
