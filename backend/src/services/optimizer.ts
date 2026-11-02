@@ -1638,9 +1638,10 @@ type HomeEstimate = {
  * every ordering — and buildHomeLeg on the winner is then served entirely
  * from that cache instead of searching its airports itself. Net extra
  * searches per run: 2 × (cities − 1) × (airports − 1), e.g. +8 for a
- * 3-city NYC trip (JFK/EWR/LGA), +16 for 5 cities, none for one airport.
- * (The original "~60 searches for 3 cities" this was guarding against
- * predates that cache.)
+ * 3-city NYC trip (JFK/EWR/LGA), none for one airport. (The original "~60
+ * searches for 3 cities" this was guarding against predates that cache.)
+ * Used for 1-3 city trips; 4+ cities price home flights through HomeFares,
+ * one search per city and direction when the airports share a metro code.
  *
  * `cost` is Infinity — not 0 — when nothing came back (IATA lookup failed,
  * every per-airport search threw, or there simply are no offers), the
