@@ -49,6 +49,7 @@ const mockCodes: Record<string, string> = {
   Chicago: 'CHI',
   London: 'LON',
   Boston: 'BOS',
+  Washington: 'WAS',
 };
 jest.mock('../services/flights', () => {
   const { AppError } = jest.requireActual('../middleware/error');
@@ -89,7 +90,7 @@ jest.mock('../services/location/originAirports', () => ({
 import { optimize } from '../services/optimizer';
 import { searchFlights } from '../services/flights';
 import { searchHotels } from '../services/hotels';
-import { createFareModel, exhaustive, tripDates, type FareModel, type TripSpec } from './helpers/fareModel';
+import { createFareModel, exhaustive, priceExactly, tripDates, type FareModel, type TripSpec } from './helpers/fareModel';
 
 const mockedSearchFlights = searchFlights as jest.Mock;
 const mockedHotels = searchHotels as jest.Mock;
@@ -292,6 +293,50 @@ describe('home flights from a metro: one search per city and direction', () => {
     expect(result.outboundLeg?.originAirport).toBe(best.outbound!.airport);
     expect(result.outboundLeg?.price).toBe(best.outbound!.price);
     expect(result.returnLeg?.destAirport).toBe(best.ret!.airport);
+  }, 30000);
+
+  it("Washington: an airport the metro answer left out (BWI) is still searched for the winner's home flights", async () => {
+    // Measured on Duffel, 2026-11-02: a WAS search to Paris answered for IAD
+    // and DCA only, while BWI searched alone had a cheaper fare ($474.26 vs
+    // $480.40). Here BWI is 30% cheaper than the model on every route, and
+    // the WAS answer never includes it.
+    const spec = trip(FIVE.slice(0, 4), 'Washington', ['IAD', 'DCA', 'BWI'], 10);
+    const model = createFareModel({
+      seed: 29,
+      swing: 0.3,
+      cityCodes: mockCodes,
+      homeAirports: ['IAD', 'DCA', 'BWI'],
+      metros: { WAS: ['IAD', 'DCA', 'BWI'] },
+      travelers: 4,
+    });
+    const bwiFare = (f: number | null) => (f === null ? null : Math.round(f * 0.7 * 100) / 100);
+    mockedSearchFlights.mockImplementation(async (p: Search) => {
+      searched.push(p);
+      const offers = model.offers(p);
+      if (p.origin === 'WAS' || p.destination === 'WAS') {
+        return offers.filter((o) => (p.origin === 'WAS' ? o.originAirport : o.destinationAirport) !== 'BWI');
+      }
+      return [p.origin, p.destination].includes('BWI')
+        ? offers.map((o) => ({ ...o, price: bwiFare(o.price)! }))
+        : offers;
+    });
+    const real = { ...model, fare: (o: string, d: string, date: string) => {
+      const f = model.fare(o, d, date);
+      return o === 'BWI' || d === 'BWI' ? bwiFare(f) : f;
+    } };
+
+    const result = await run(spec);
+
+    // The winner's home flights are the cheapest across all three airports.
+    const expected = priceExactly(spec, real, mockCodes, result.bestRoute.ordering);
+    expect([expected.outbound!.airport, expected.ret!.airport]).toContain('BWI');
+    expect(result.outboundLeg?.originAirport).toBe(expected.outbound!.airport);
+    expect(result.outboundLeg?.price).toBe(expected.outbound!.price);
+    expect(result.returnLeg?.destAirport).toBe(expected.ret!.airport);
+    expect(result.returnLeg?.price).toBe(expected.ret!.price);
+    // At the cost of one search per leg: only the winner's two home flights.
+    const bwiAlone = distinct().filter((s) => s.origin === 'BWI' || s.destination === 'BWI');
+    expect(bwiAlone).toHaveLength(2);
   }, 30000);
 
   it('Boston (BOS + PVD, no metro code): one search per airport, as before', async () => {

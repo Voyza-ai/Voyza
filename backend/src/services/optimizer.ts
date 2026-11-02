@@ -574,9 +574,14 @@ const MAX_EXACT_ROUNDS = 24;
  * also answers for City, Southend and Luton.
  *
  * Deliberately conservative: an airport missing here is simply searched on
- * its own, as before, while a wrong entry would lose an airport's fares. So
- * only areas whose membership is settled are listed; Chicago is ORD + MDW
- * (Gary, which the location data adds, has no airline service).
+ * its own, as before. Only areas whose membership is settled are listed;
+ * Chicago is ORD + MDW (Gary, which the location data adds, has no airline
+ * service). A city search is still not a promise to cover every member:
+ * measured on Duffel 2026-11-02, WAS to Paris and to Miami answered for IAD
+ * and DCA only, while BWI searched alone was cheaper on both. So ranking
+ * reads the metro answer as it is, and the winner's home flights search on
+ * its own each of the traveller's airports the answer left out
+ * (searchHomeOffers' `fillMissing`).
  */
 const DUFFEL_METRO_AIRPORTS: Readonly<Record<string, readonly string[]>> = {
   NYC: ['JFK', 'LGA', 'EWR'],
@@ -1526,8 +1531,16 @@ function homeSearchGroups(airports: string[]): Array<{ code: string; airports: s
  * the metro search itself fails, or answers only for airports that are not
  * the traveller's (theirs crowded out of a capped answer), its airports are
  * searched one by one: a metro code Duffel refused costs searches, never
- * fares. Assumed, not verifiable without live calls: that Duffel's city
- * search covers every airport listed for it in DUFFEL_METRO_AIRPORTS.
+ * fares.
+ *
+ * A city search can also answer for some of the traveller's airports and
+ * leave another out (WAS without BWI, measured). With `fillMissing`, each
+ * airport the answer left out is searched on its own as well — what the
+ * winner's home flights use, so the fare shown is the cheapest from every
+ * airport the traveller listed, as before metro search. Ranking reads the
+ * metro answer as it is: one search per city and direction, at the risk of
+ * missing a cheaper left-out airport when choosing which city goes first or
+ * last, never in the price the traveller sees.
  */
 async function searchHomeOffers(ctx: RunContext, params: {
   originAirports: string[];
@@ -1535,6 +1548,7 @@ async function searchHomeOffers(ctx: RunContext, params: {
   date: string;
   travelers: number;
   reverse: boolean;
+  fillMissing?: boolean;
 }): Promise<HomeFlightOffer[]> {
   const { tripCity, date, travelers, reverse } = params;
   const airports = homeAirportsFor(params.originAirports);
@@ -1583,6 +1597,10 @@ async function searchHomeOffers(ctx: RunContext, params: {
       // each airport before calling the flight missing. Costs searches only
       // in that case; an empty answer means nothing flies and is final.
       if (ours.length === 0 && offers.length > 0) return (await Promise.all(members.map(alone))).flat();
+      if (params.fillMissing) {
+        const missing = members.filter((a) => !ours.some((o) => o.homeAirport === a));
+        if (missing.length > 0) ours.push(...(await Promise.all(missing.map(alone))).flat());
+      }
       return ours;
     }),
   );
@@ -1603,6 +1621,7 @@ function createHomeFares(
   originAirports: string[],
   travelers: number,
   dates: { outbound: string; ret: string },
+  fillMissing = false,
 ): HomeFares {
   const memo = new Map<string, Promise<HomeFlightOffer[]>>();
   return (city, reverse) => {
@@ -1615,6 +1634,7 @@ function createHomeFares(
         date: reverse ? dates.ret : dates.outbound,
         travelers,
         reverse,
+        fillMissing,
       });
       memo.set(key, hit);
     }
@@ -2237,6 +2257,13 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // very offers ranking found (homeFares), with no search at all. Outbound
   // and return are independent, so they are built together.
   const homeLegsCtx = homeFares ? ctx.phased('homeLegs') : ctx;
+  // The winner's home flights: the same metro answers (flights.ts holds
+  // them, so no new request), plus a search of each of the traveller's
+  // airports an answer left out — the fare shown is the cheapest from all of
+  // them (see searchHomeOffers).
+  const winnerHomeFares = homeFares
+    ? createHomeFares(homeLegsCtx, resolvedOriginAirports, travelers, { outbound: outboundDate, ret: returnDate }, true)
+    : null;
   const lastCity = bestOrdering[bestOrdering.length - 1];
   const homeLegsTask: Promise<[HomeLeg | null, HomeLeg | null]> = homeKnown
     ? Promise.all([
@@ -2249,7 +2276,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
             originCity: origin,
           },
           homeLegsCtx,
-          homeFares?.(bestOrdering[0], false),
+          winnerHomeFares?.(bestOrdering[0], false),
         ),
         returnToHome
           ? // Return leg departs after spending all the trip's nights —
@@ -2264,7 +2291,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
                 originCity: origin,
               },
               homeLegsCtx,
-              homeFares?.(lastCity, true),
+              winnerHomeFares?.(lastCity, true),
             )
           : Promise.resolve(null),
       ])
