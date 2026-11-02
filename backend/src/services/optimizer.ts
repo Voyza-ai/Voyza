@@ -2184,6 +2184,10 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   let screenStats: { rounds: number; budgetStop: boolean; reserved: number } | undefined;
   if (adaptive) {
     const lastIdx = cities.length - 1;
+    // Searches the winner's home flights will still send (its first and last
+    // cities' airports ranking left out — HomeFares.complete), kept out of
+    // best-first's share of PLAN_SEARCH_BUDGET. The winner is not known yet,
+    // so: the most any first city needs plus the most any last city needs.
     let reserved = 0;
     // Home flights for every city that can start or end the trip (and the
     // typed order's ends, which savingsVsNaive prices), searched up front.
@@ -2196,6 +2200,13 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         Promise.all(firstCities.map(async (c) => [c, penalised(await homeLegCost(c, false))] as const)),
         Promise.all(lastCities.map(async (c) => [c, penalised(await homeLegCost(c, true))] as const)),
       ]);
+      if (homeFares) {
+        const most = async (list: string[], reverse: boolean) =>
+          Math.max(0, ...(await Promise.all(list.map((c) => homeFares.leftOut(c, reverse)))).map((l) => l.length));
+        const candidateFirsts = [...new Set(orderings.map((o) => o[0]))];
+        const candidateLasts = returnToHome ? [...new Set(orderings.map((o) => o[lastIdx]))] : [];
+        reserved = (await most(candidateFirsts, false)) + (await most(candidateLasts, true));
+      }
       const out = new Map(outbound);
       const ret = new Map(back);
       return (o: string[]) => [out.get(o[0])!, ...(returnToHome ? [ret.get(o[lastIdx])!] : [])];
@@ -2210,8 +2221,10 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           .compare(legCompareParams(from, to, legDateAt(startDate, nightsArray, i), travelers, cityMap, ctx))
           .then(legCost),
       homeCosts,
+      // Read before each round, when every search sent so far is in the ledger.
+      budget: { remaining: () => PLAN_SEARCH_BUDGET - ctx.searchLedger.size - reserved },
     });
-    screenStats = { rounds: screen.rounds, sweeps: screen.sweeps };
+    screenStats = { rounds: screen.rounds, budgetStop: screen.budgetStop, reserved };
     // Every leg and home flight of these is priced already: no new searches.
     routes = await Promise.all(screen.ranked.map((ordering) => scoreOrderingWithHomeLegs(ordering)));
   } else {
@@ -2491,7 +2504,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     cities: cities.length,
     searches: ctx.searchLedger.size,
     byPhase,
-    ...(screenStats ? { exactRounds: screenStats.rounds, sweeps: screenStats.sweeps } : {}),
+    ...(screenStats
+      ? { exactRounds: screenStats.rounds, budgetStop: screenStats.budgetStop, reservedForHomeLegs: screenStats.reserved }
+      : {}),
   });
 
   const publicRoutes = topRoutes.map(toPublicRoute);
