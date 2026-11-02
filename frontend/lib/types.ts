@@ -216,6 +216,15 @@ export type Trip = {
    * "Best price for these dates". Cleared when the dates change.
    */
   dateShiftChecked?: boolean;
+  /**
+   * The planner search this trip came out of. /results opens before that
+   * search's AI picks (activities and restaurants) are in; when they arrive
+   * they go only to a trip carrying the same run — copies of it included,
+   * such as an AI date proposal echoed back by the server — never to another
+   * trip opened meanwhile. Set by the planner, kept in the tab's session
+   * snapshot, never saved to the database (saveTrip sends named fields).
+   */
+  picksRun?: string;
   createdAt?: string;
   ownerId?: string;
   /**

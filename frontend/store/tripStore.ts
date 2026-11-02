@@ -1,10 +1,39 @@
 import { create } from 'zustand';
 import { Trip, PlanningAnswers, City, CustomHotel, Transport, Restaurant, ScheduledEvent } from '@/lib/types';
 import { firstStayArrival, tripStartDate } from '@/lib/tripSpan';
+import { searchActivities, searchRestaurants, type ActivitySuggestion, type RestaurantSuggestion } from '@/lib/api';
+import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
+};
+
+/** What one city's AI picks are asked with — kept so a reload can ask again. */
+export type CityPicksRequest = {
+  city: string;
+  vibe?: string;
+  travelers: number;
+  nights: number;
+  budget?: number;
+};
+
+/** One city's AI picks. Both empty when the requests failed. */
+export type CityPicks = {
+  activities: ActivitySuggestion[];
+  restaurants: RestaurantSuggestion[];
+};
+
+/**
+ * The AI picks of the planner search the trip on screen came out of
+ * (`Trip.picksRun`). /results opens before they are in; see startTripPicks.
+ */
+export type TripPicks = {
+  run: string;
+  /** Cities whose picks have not answered yet, with what they were asked. */
+  pending: CityPicksRequest[];
+  /** Picks that have landed, by city — put back if an older copy of the trip is set. */
+  landed: Record<string, CityPicks>;
 };
 
 type TripStore = {
@@ -32,6 +61,9 @@ type TripStore = {
    * reload apart from an ordinary visit. Never persisted.
    */
   restoredFromSession: boolean;
+
+  /** The trip's AI picks while any are still on their way (see startTripPicks). */
+  tripPicks: TripPicks | null;
 
   // Actions
   setAnswer: (key: keyof PlanningAnswers, value: unknown) => void;
@@ -78,6 +110,7 @@ export const useTripStore = create<TripStore>((set) => ({
   chatHistory: [],
   priceMode: 'total',
   restoredFromSession: false,
+  tripPicks: null,
 
   setAnswer: (key, value) =>
     set((state) => ({ answers: { ...state.answers, [key]: value } })),
@@ -89,7 +122,15 @@ export const useTripStore = create<TripStore>((set) => ({
 
   setPriceMode: (mode) => set({ priceMode: mode }),
 
-  setTrip: (trip) => set({ currentTrip: trip }),
+  // A whole-trip replacement can be an older copy of the trip on screen —
+  // an AI date proposal is the trip as it was when the message was sent,
+  // echoed back by the server — taken before its AI picks landed. Accepting
+  // it must not take them away, so picks that landed are put back on the
+  // cities that have none (and still have them on screen). Only for a copy
+  // of the same planner search (`picksRun`); any other trip is set exactly
+  // as given.
+  setTrip: (trip) =>
+    set((state) => ({ currentTrip: keepLandedPicks(trip, state.tripPicks, state.currentTrip) })),
 
   updateCity: (index, cityUpdate) =>
     set((state) => {
@@ -382,8 +423,182 @@ export const useTripStore = create<TripStore>((set) => ({
       currentTrip: null,
       chatHistory: [],
       isLoading: false,
+      // Any picks still out belong to the trip just dropped.
+      tripPicks: null,
     }),
 }));
+
+// ─── AI picks that arrive after /results opens ───────────────────────────────
+//
+// The planner used to hold the traveller on /plan until every city's AI picks
+// (activities and restaurants, ~8-9 s a city in production and the slowest
+// part of the search) were in. It now hands the trip over as soon as flights
+// and hotels are priced — every city scheduled with its transport blocks only,
+// exactly what a failed pick request always left — and the picks fill in here
+// when they answer. Nothing on screen waits on them: a city with no picks
+// shows what it always showed without any (the flowchart draws no
+// "Activities & Dining" card for it), and the card appears when they land.
+//
+// A landing goes to the trip in the STORE at that moment, not the planner's
+// copy: by then the traveller may have swapped a hotel or changed dates, and
+// the planner itself has unmounted.
+
+const NO_PICKS: CityPicks = { activities: [], restaurants: [] };
+
+/** Ask for one city's AI picks. Never rejects: a failed call is an empty list. */
+export async function requestCityPicks(req: CityPicksRequest): Promise<CityPicks> {
+  const [activities, restaurants] = await Promise.all([
+    searchActivities({ city: req.city, vibe: req.vibe, travelers: req.travelers, nights: req.nights }).catch(
+      () => [] as ActivitySuggestion[],
+    ),
+    searchRestaurants({ city: req.city, vibe: req.vibe, travelers: req.travelers, budget: req.budget }).catch(
+      () => [] as RestaurantSuggestion[],
+    ),
+  ]);
+  return { activities: activities ?? [], restaurants: restaurants ?? [] };
+}
+
+let runCounter = 0;
+const newRun = () => `picks-${Date.now().toString(36)}-${++runCounter}`;
+
+/**
+ * Put a freshly planned trip on screen while its AI picks are still out.
+ *
+ * `inFlight[i]` is the request the planner already started for
+ * `requests[i]` (it starts them before the hotel searches); a missing one is
+ * asked here. Replaces any earlier search's picks, so a late answer from a
+ * search the traveller has since redone is dropped.
+ */
+export function startTripPicks(
+  trip: Trip,
+  requests: CityPicksRequest[],
+  inFlight: Array<Promise<CityPicks> | undefined> = [],
+): void {
+  const run = newRun();
+  useTripStore.setState({
+    currentTrip: { ...trip, picksRun: run },
+    tripPicks: { run, pending: requests, landed: {} },
+  });
+  requests.forEach((req, i) => awaitCityPicks(run, req, inFlight[i]));
+}
+
+function awaitCityPicks(run: string, req: CityPicksRequest, inFlight?: Promise<CityPicks>) {
+  (inFlight ?? requestCityPicks(req))
+    .catch(() => NO_PICKS)
+    .then((picks) => landCityPicks(run, req.city, picks));
+}
+
+/**
+ * Set once the tab starts leaving this page (a reload, or typing another
+ * address). The browser then kills every request still out, AFTER `pagehide`
+ * (measured in Chromium: beforeunload, pagehide, unload, then the fetches
+ * reject). Those are not failed requests: counted as failures, they took the
+ * cities off the snapshot's waiting list just before the reload read it, and
+ * the reloaded page never asked again.
+ */
+let pageLeaving = false;
+
+/** One city's picks answered (or failed): it stops waiting, and the trip on screen gets them. */
+function landCityPicks(run: string, cityName: string, picks: CityPicks) {
+  const got = picks.activities.length > 0 || picks.restaurants.length > 0;
+  // Killed by the page going away: still waiting, so the next page asks again.
+  if (!got && pageLeaving) return;
+  useTripStore.setState((state) => {
+    const tp = state.tripPicks;
+    if (!tp || tp.run !== run) return state; // a search since replaced, or planning reset
+    const tripPicks: TripPicks = {
+      run,
+      pending: tp.pending.filter((r) => r.city !== cityName),
+      landed: got ? { ...tp.landed, [cityName]: picks } : tp.landed,
+    };
+    const trip = state.currentTrip;
+    // A failure leaves the city as it is: no lists, its transport-only
+    // schedule — what the planner always produced when the AI call failed.
+    if (!got || !trip || trip.picksRun !== run) return { tripPicks };
+    return { tripPicks, currentTrip: withCityPicks(trip, cityName, picks) };
+  });
+}
+
+/**
+ * `trip` with one city's AI picks added: its activity and restaurant lists
+ * (only where still empty — never over the traveller's own) and its schedule,
+ * built by the same scheduler the planner used, around the transport as it
+ * stands now. A day the traveller has already put something of their own on
+ * keeps their version; a day holding only transport blocks (all a stay has
+ * before its picks) or nothing takes the new one.
+ */
+function withCityPicks(trip: Trip, cityName: string, picks: CityPicks): Trip {
+  const idx = trip.cities.findIndex((c) => c.name === cityName);
+  if (idx < 0) return trip;
+  const old = trip.cities[idx];
+  const cities = [...trip.cities];
+  const city: City = {
+    ...old,
+    activities: old.activities.length > 0 ? old.activities : picks.activities.map((s) => s.name),
+    restaurants:
+      old.restaurants.length > 0
+        ? old.restaurants
+        : picks.restaurants.map((r): Restaurant => ({ name: r.name, cuisine: r.cuisine, priceRange: r.priceRange })),
+  };
+  cities[idx] = city;
+  const next: Trip = { ...trip, cities };
+  const built = buildCityScheduleFromSuggestions(picks.activities, picks.restaurants, city, idx, next);
+  const schedule = { ...(old.schedule ?? {}) };
+  for (const [day, events] of Object.entries(built.schedule)) {
+    const mine = schedule[day];
+    if (!mine || mine.every((e) => e.category === 'transport')) schedule[day] = events;
+  }
+  cities[idx] = { ...city, schedule, unscheduled: built.unscheduled };
+  return next;
+}
+
+/**
+ * See `setTrip`: put landed picks back on a copy of the same trip that
+ * predates them. Only where the trip on screen still has picks for that
+ * city: one the traveller has emptied themselves stays empty.
+ */
+function keepLandedPicks(trip: Trip, tp: TripPicks | null, onScreen: Trip | null): Trip {
+  if (!trip || !tp || !trip.picksRun || trip.picksRun !== tp.run) return trip;
+  const hasPicks = (c?: City) => !!c && (c.activities.length > 0 || c.restaurants.length > 0);
+  let next = trip;
+  for (const c of trip.cities) {
+    const landed = tp.landed[c.name];
+    if (!landed || hasPicks(c)) continue;
+    if (!hasPicks(onScreen?.cities.find((s) => s.name === c.name))) continue;
+    next = withCityPicks(next, c.name, landed);
+  }
+  return next;
+}
+
+/**
+ * True while `cityName`'s AI picks are still on their way to `trip` — the
+ * flowchart shows its "Activities & Dining" card loading meanwhile.
+ */
+export function cityPicksLoading(tp: TripPicks | null, trip: Trip | null | undefined, cityName: string): boolean {
+  return !!tp && !!trip && trip.picksRun === tp.run && tp.pending.some((r) => r.city === cityName);
+}
+
+/** True while the trip on screen still has AI picks on their way. */
+function picksPending(): boolean {
+  const { tripPicks, currentTrip } = useTripStore.getState();
+  return !!tripPicks && tripPicks.pending.length > 0 && currentTrip?.picksRun === tripPicks.run;
+}
+
+/**
+ * Resolves once the trip on screen has no AI picks left on their way — at
+ * once (false) when it has none; true when it had to wait. Every request
+ * settles, success or failure, so this always resolves.
+ */
+export function tripPicksSettled(): Promise<boolean> {
+  if (!picksPending()) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const unsubscribe = useTripStore.subscribe(() => {
+      if (picksPending()) return;
+      unsubscribe();
+      resolve(true);
+    });
+  });
+}
 
 // ─── The current trip survives a reload of this tab ──────────────────────────
 //
@@ -413,6 +628,13 @@ type TripSnapshot = {
   v: number;
   trip: Trip;
   priceMode: 'total' | 'perPerson';
+  /**
+   * AI picks the trip was still waiting for. A reload kills their requests,
+   * so the restore asks for them again rather than leave the cities without.
+   * Absent once every city has answered (and in snapshots written before
+   * this existed, which then restore exactly as they always did).
+   */
+  picks?: { run: string; pending: CityPicksRequest[] };
 };
 
 /** sessionStorage, or null on the server and wherever reading it throws. */
@@ -425,7 +647,7 @@ function tabStorage(): Storage | null {
   }
 }
 
-function writeSnapshot(trip: Trip | null, priceMode: 'total' | 'perPerson') {
+function writeSnapshot(trip: Trip | null, priceMode: 'total' | 'perPerson', tp: TripPicks | null) {
   const storage = tabStorage();
   if (!storage) return;
   try {
@@ -434,6 +656,9 @@ function writeSnapshot(trip: Trip | null, priceMode: 'total' | 'perPerson') {
       return;
     }
     const snapshot: TripSnapshot = { v: SESSION_VERSION, trip, priceMode };
+    if (tp && tp.pending.length > 0 && trip.picksRun === tp.run) {
+      snapshot.picks = { run: tp.run, pending: tp.pending };
+    }
     storage.setItem(SESSION_KEY, JSON.stringify(snapshot));
   } catch {
     // Over quota, or storage blocked. Drop the entry rather than leave the
@@ -472,18 +697,54 @@ export function restoreTripSession(): boolean {
     Array.isArray(trip.cities) &&
     trip.cities.every((c) => !!c && Array.isArray(c.hotels) && !!c.dates);
   if (!usable) return false;
+
+  // The AI picks the trip was still waiting for when the tab reloaded. Their
+  // requests died with the old page, so they are asked again — only for the
+  // cities still without any — and land like the planner's own. Every request
+  // settles, so nothing stays waiting; one that fails leaves its city as a
+  // failure always has.
+  const picks = snapshot?.picks;
+  const pending =
+    picks && typeof picks.run === 'string' && picks.run === trip.picksRun && Array.isArray(picks.pending)
+      ? picks.pending.filter(
+          (r) =>
+            !!r &&
+            typeof r.city === 'string' &&
+            trip.cities.some((c) => c.name === r.city && c.activities.length === 0 && c.restaurants.length === 0),
+        )
+      : [];
+
   useTripStore.setState({
     currentTrip: trip,
     priceMode: snapshot?.priceMode === 'perPerson' ? 'perPerson' : 'total',
     restoredFromSession: true,
+    tripPicks: pending.length > 0 ? { run: picks!.run, pending, landed: {} } : null,
   });
+  for (const req of pending) awaitCityPicks(picks!.run, req);
   return true;
 }
 
 // Browser only: on the server this module is shared by every request.
 if (typeof window !== 'undefined') {
   useTripStore.subscribe((state, prev) => {
-    if (state.currentTrip === prev.currentTrip && state.priceMode === prev.priceMode) return;
-    writeSnapshot(state.currentTrip, state.priceMode);
+    if (
+      state.currentTrip === prev.currentTrip &&
+      state.priceMode === prev.priceMode &&
+      state.tripPicks === prev.tripPicks
+    ) {
+      return;
+    }
+    writeSnapshot(state.currentTrip, state.priceMode, state.tripPicks);
+  });
+
+  window.addEventListener('pagehide', () => {
+    pageLeaving = true;
+  });
+  // Back on the page after all (restored from the back/forward cache): any
+  // request the leaving killed was dropped above, so ask for those again.
+  window.addEventListener('pageshow', (e) => {
+    pageLeaving = false;
+    const tp = useTripStore.getState().tripPicks;
+    if (e.persisted && tp) for (const req of tp.pending) awaitCityPicks(tp.run, req);
   });
 }
