@@ -862,6 +862,8 @@ async function rankByAdaptiveScreen(args: {
   const seen = new Map<string, { sum: number; n: number }>();
   /** The same, over every route. */
   const seenAll = { sum: 0, n: 0 };
+  /** Routes priced at least once, fare or not. */
+  const pricedRoutes = new Set<string>();
   const price = (from: string, to: string, i: number, phase: 'screen' | 'exact'): Promise<void> => {
     const key = legOf(from, to, i);
     let asked = pending.get(key);
@@ -869,6 +871,7 @@ async function rankByAdaptiveScreen(args: {
       asked = priceLeg(from, to, i, phase).then((cost) => {
         exact.set(key, cost);
         const route = routeOf(from, to);
+        pricedRoutes.add(route);
         if (cost !== Infinity && cost > (highest.get(route) ?? -Infinity)) highest.set(route, cost);
         if (cost !== Infinity) {
           const fares = seen.get(route) ?? { sum: 0, n: 0 };
@@ -906,10 +909,19 @@ async function rankByAdaptiveScreen(args: {
   await Promise.all([...typedLegs, ...[...screenDay.values()].map((s) => price(s.from, s.to, s.i, 'screen'))]);
 
   // 3. Best-first.
-  /** What an unpriced day of `route` is expected to cost: the average fare it showed, or every route's average. */
+  /**
+   * What an unpriced day of `route` is expected to cost: the average fare it
+   * showed; UNAVAILABLE_LEG_PENALTY if it was priced and showed none (it may
+   * fly on other days, but spending the budget on it first left plans with a
+   * missing leg when a fully flown ordering existed: 4.6% of 5-city plans
+   * with 5% of routes and route-days missing, gate 2026-11-02); every
+   * route's average if never priced.
+   */
   const expected = (route: string) => {
-    const fares = seen.get(route) ?? seenAll;
-    return fares.n > 0 ? fares.sum / fares.n : 0;
+    const fares = seen.get(route);
+    if (fares) return fares.sum / fares.n;
+    if (pricedRoutes.has(route)) return UNAVAILABLE_LEG_PENALTY;
+    return seenAll.n > 0 ? seenAll.sum / seenAll.n : 0;
   };
   const estimate = (idx: number) => {
     const o = orderings[idx];

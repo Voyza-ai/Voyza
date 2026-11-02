@@ -1,0 +1,56 @@
+{
+  "label": "after",
+  "baseline": null,
+  "trialsPerVariant": 1000,
+  "results": [
+    {
+      "variant": "5c-CHI-30-live-gaps",
+      "acceptance": false,
+      "trials": 500,
+      "identicalPct": 95.4,
+      "meanDearerPct": 0.178,
+      "worstDearerPct": 11.24,
+      "meanDearerWhenDifferentPct": 3.86,
+      "exhaustiveRankedOnFirstAirport": {
+        "identicalPct": 43,
+        "meanDearerPct": 4.933,
+        "worstDearerPct": 40.51
+      },
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "requests": {
+        "mean": 40.4,
+        "p50": 42,
+        "p95": 42,
+        "max": 42,
+        "over42Pct": 0,
+        "over45Pct": 0
+      },
+      "stalledPct": 0,
+      "searchesMean": 40.4,
+      "byPhaseMean": {
+        "home": 10,
+        "screen": 20,
+        "exact": 10.44
+      },
+      "classifiedMean": {
+        "inter-city": 30.44,
+        "home": 10,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 1.86,
+        "p95": 2,
+        "max": 3
+      },
+      "budgetStopPct": 63.8,
+      "modelledSeconds": {
+        "mean": 27.4,
+        "p50": 27.3,
+        "p95": 33.9,
+        "max": 41.4
+      },
+      "homeFareNotCheapestOfAllAirports": 0,
+      "testAirlineOnHomeCard": 0
+    }
+  ]
+}

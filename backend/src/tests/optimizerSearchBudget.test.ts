@@ -330,6 +330,50 @@ describe('best-first under the budget', () => {
     expect(stops).toBeGreaterThan(0);
   }, 30000);
 
+  it('never stops on a leg nothing flies when an ordering that flies everywhere exists', async () => {
+    // 5% of routes never fly and 5% of route-days are missing. A route with
+    // nothing on the day it was screened is likely dead: spending the budget
+    // completing orderings through it left 4.6% of such plans with a missing
+    // leg (gate, 2026-11-02).
+    (env as any).DUFFEL_ACCESS_TOKEN = 'duffel_live_jest';
+    const pick = (seed: number, key: string) => {
+      let h = 0x811c9dc5 ^ seed;
+      for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x01000193);
+      return (h >>> 0) / 4294967296;
+    };
+    const codes = FIVE.map((c) => mockCodes[c]);
+    let checked = 0;
+    // Seeds 55, 90, 93, 117, 125 and 127 stopped on a missing leg before.
+    for (let seed = 50; seed <= 130; seed++) {
+      const noFlights = new Set<string>();
+      const noFlightsOn = new Set<string>();
+      for (const a of codes) for (const b of codes) {
+        if (a === b) continue;
+        if (pick(seed, `route|${a}>${b}`) < 0.05) noFlights.add(`${a}>${b}`);
+        for (let d = 4; d < 24; d++) {
+          const day = `2030-05-${String(d).padStart(2, '0')}`;
+          if (pick(seed, `day|${a}>${b}@${day}`) < 0.05) noFlightsOn.add(`${a}>${b}@${day}`);
+        }
+      }
+      if (noFlights.size === 0) continue;
+      searched = [];
+      mockedInfo.mockClear();
+      const s = spec(5, 'CHI');
+      const model = createFareModel({
+        seed, swing: 0.3, cityCodes: mockCodes, homeAirports: ['ORD', 'MDW'], metros: { CHI: ['ORD', 'MDW'] }, travelers: 4, noFlights, noFlightsOn,
+      });
+      useFares(model);
+
+      const result = await run(s);
+
+      if (exhaustive(s, model, mockCodes)[0].unpricedLegs > 0) continue;
+      checked++;
+      expect(result.bestRoute.legs.every((leg) => leg.cost !== Infinity)).toBe(true);
+      expect(distinct().length).toBeLessThanOrEqual(BUDGET);
+    }
+    expect(checked).toBeGreaterThan(15);
+  }, 30000);
+
   it('when nothing stops it, the winner is still the one pricing every ordering finds (±30%, live)', async () => {
     (env as any).DUFFEL_ACCESS_TOKEN = 'duffel_live_jest';
     for (let seed = 300; seed < 306; seed++) {
