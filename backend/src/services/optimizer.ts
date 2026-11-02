@@ -1575,13 +1575,15 @@ function toHomeFlightOffer(o: any, homeAirport: string, cityIata: string, revers
  * or NYC search answers only test-airline placeholders under the metro code
  * itself, so every one of them fell back to its airports one by one — 26
  * home searches instead of 10 on production's 5-city Chicago plan
- * (2026-11-02). Why not the first airport always: when the airports' fares
- * differ, it ranks blind to the others — on the gate's live model (each
- * airport its own fare) the first airport alone picked the exhaustive winner
- * in 39% of 5-city Chicago plans, 6% dearer on average and 44% at worst
- * (backend/scripts/opt-speed/results/budget/), where the metro search is
- * exact. Why not every airport: 20-30 searches for 5 cities, half of a
- * Duffel rate-limit window before a single inter-city leg.
+ * (2026-11-02). Why not the first airport always: it costs the same 10
+ * searches for 5 cities, but ranks blind to the other airports — on the
+ * gate's live model (each airport its own fare), even pricing every ordering
+ * with home flights ranked on the first airport alone picked the exhaustive
+ * winner in 38% of 5-city Chicago plans, 5.7% dearer on average and 45% at
+ * worst, where the metro answer is exact (backend/scripts/opt-speed/
+ * results/budget/gate-after.json, exhaustiveRankedOnFirstAirport). Why not
+ * every airport: 20-30 searches for 5 cities, half of a Duffel rate-limit
+ * window before a single inter-city leg.
  */
 function rankingGroup(airports: string[], metroSearch: boolean): { code: string; airports: string[] } {
   const primary = airports[0];
