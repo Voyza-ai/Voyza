@@ -568,6 +568,14 @@ const SCREEN_LOWER_BOUND = (1 - MAX_DATE_SWING) / (1 + MAX_DATE_SWING);
  * cold (2026-11-02). A 5-city plan's fixed cost is now 30 (10 home + 20
  * screen), plus the winner's other home airports (2 from Chicago, 4 from New
  * York), which leaves best-first 8-12.
+ *
+ * What it trades (gate, 1,000 simulated plans per row, 2026-11-02): every
+ * 5-city plan ≤ 42 and 27-31 s modelled cold (before: 38-69 on average, up
+ * to 101, and 42-102 s), but best-first can no longer always prove its
+ * winner — with ±30% fares 98% of plans still pick the exhaustive one, the
+ * worst 5% dearer; with test-mode fares (±60-80%) they are 6% dearer on
+ * average. More budget buys that back only up to the window: at 48, a
+ * quarter of 5-city plans went over 45 and stalled for most of a minute.
  */
 const PLAN_SEARCH_BUDGET = 42;
 
