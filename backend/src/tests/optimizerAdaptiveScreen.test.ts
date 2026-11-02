@@ -20,7 +20,7 @@
 
 jest.mock('../config/env', () => ({
   env: {
-    DUFFEL_ACCESS_TOKEN: 'test_token',
+    DUFFEL_ACCESS_TOKEN: 'duffel_live_jest',
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'test_key',
     DB_REST_BASE_URL: 'https://v6.db.transport.rest',

@@ -846,6 +846,9 @@ async function rankByAdaptiveScreen(args: {
   /** Highest fare a route showed on any day it was priced (none: no fare yet). */
   const highest = new Map<string, number>();
   const pending = new Map<string, Promise<void>>();
+  /** Every fare a route showed (for the expected cost of a day not priced yet). */
+  const seen = new Map<string, { sum: number; n: number }>();
+  const seenAll = { sum: 0, n: 0 };
   const price = (from: string, to: string, i: number, phase: 'screen' | 'exact'): Promise<void> => {
     const key = legOf(from, to, i);
     let asked = pending.get(key);
@@ -854,6 +857,12 @@ async function rankByAdaptiveScreen(args: {
         exact.set(key, cost);
         const route = routeOf(from, to);
         if (cost !== Infinity && cost > (highest.get(route) ?? -Infinity)) highest.set(route, cost);
+        if (cost !== Infinity) {
+          const s = seen.get(route) ?? { sum: 0, n: 0 };
+          seen.set(route, { sum: s.sum + cost, n: s.n + 1 });
+          seenAll.sum += cost;
+          seenAll.n++;
+        }
       });
       pending.set(key, asked);
     }
@@ -884,18 +893,27 @@ async function rankByAdaptiveScreen(args: {
   await Promise.all([...typedLegs, ...[...screenDay.values()].map((s) => price(s.from, s.to, s.i, 'screen'))]);
 
   // 3. Best-first.
+  const SHRINK = Number(process.env.OPT_SHRINK ?? 0);
+  const expected = (route: string) => {
+    const all = seenAll.n ? seenAll.sum / seenAll.n : 0;
+    const s = seen.get(route);
+    return s ? (1 - SHRINK) * (s.sum / s.n) + SHRINK * all : all;
+  };
   const estimate = (idx: number) => {
     const o = orderings[idx];
     let total = 0;
+    let ev = 0;
     const open: Array<{ i: number; slack: number }> = [];
     for (let i = 0; i < o.length - 1; i++) {
       const cost = exact.get(legOf(o[i], o[i + 1], i));
       if (cost !== undefined) {
         total += cost === Infinity ? UNAVAILABLE_LEG_PENALTY : cost;
+        ev += cost === Infinity ? UNAVAILABLE_LEG_PENALTY : cost;
         continue;
       }
       const route = routeOf(o[i], o[i + 1]);
       const high = highest.get(route);
+      ev += expected(route);
       if (high !== undefined) {
         total += SCREEN_LOWER_BOUND * high;
         open.push({ i, slack: (1 - SCREEN_LOWER_BOUND) * high });
@@ -909,8 +927,11 @@ async function rankByAdaptiveScreen(args: {
         open.push({ i, slack: Infinity });
       }
     }
-    for (const c of home[idx]) total += c;
-    return { idx, total, open };
+    for (const c of home[idx]) {
+      total += c;
+      ev += c;
+    }
+    return { idx, total, ev, open };
   };
 
   // Cheapest first; ties in permutation order, as the old stable sort.
@@ -923,12 +944,15 @@ async function rankByAdaptiveScreen(args: {
     // Everything ahead of the best fully priced ordering could still beat it.
     const incumbent = est.findIndex((e) => e.open.length === 0);
     if (incumbent === 0) break;
-    const contenders = incumbent === -1 ? est : est.slice(0, incumbent);
+    let contenders = incumbent === -1 ? est : est.slice(0, incumbent);
+    if (process.env.OPT_ORDER === 'ev') contenders = [...contenders].sort((a, b) => a.ev - b.ev || a.idx - b.idx);
+    const incTotal = incumbent === -1 ? Infinity : est[incumbent].total;
     // No fully priced candidate yet (the typed order is not one): the
     // cheapest estimate is priced in full whatever the budget, so there is
     // always an answer.
     const forced = incumbent === -1;
-    const cap = Math.min(EXACT_ROUND_WIDTH, args.budget?.remaining() ?? Infinity);
+    const cap = Math.min(Number(process.env.OPT_WIDTH ?? EXACT_ROUND_WIDTH), args.budget?.remaining() ?? Infinity);
+    const whole = process.env.OPT_WHOLE !== '0';
 
     const batch = new Map<string, { idx: number; i: number }>();
     for (const e of contenders) {
@@ -936,6 +960,23 @@ async function rankByAdaptiveScreen(args: {
         .sort((a, b) => b.slack - a.slack || a.i - b.i)
         .map(({ i }) => ({ idx: e.idx, i, key: legOf(orderings[e.idx][i], orderings[e.idx][i + 1], i) }))
         .filter(({ key }) => !batch.has(key));
+      if (!whole) {
+        // As many as would lift it above the incumbent if each came in at its screen fare.
+        let lifted = e.total;
+        const need: typeof fresh = [];
+        const slackOf = new Map(e.open.map((x) => [x.i, x.slack]));
+        for (const leg of fresh) {
+          need.push(leg);
+          lifted += slackOf.get(leg.i)!;
+          if (lifted > incTotal) break;
+        }
+        for (const leg of need) {
+          if (batch.size >= cap && !(forced && batch.size === 0)) break;
+          batch.set(leg.key, leg);
+        }
+        if (batch.size >= cap) break;
+        continue;
+      }
       // Whole orderings only: a half-priced one can never be the answer.
       if (batch.size + fresh.length > cap && !(forced && batch.size === 0)) continue;
       for (const leg of fresh) batch.set(leg.key, leg);

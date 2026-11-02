@@ -1,0 +1,185 @@
+{
+  "label": "after",
+  "baseline": null,
+  "trialsPerVariant": 200,
+  "results": [
+    {
+      "variant": "5c-CHI-30-live",
+      "acceptance": true,
+      "trials": 200,
+      "identicalPct": 92,
+      "meanDearerPct": 0.112,
+      "worstDearerPct": 4.98,
+      "meanDearerWhenDifferentPct": 1.4,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "requests": {
+        "mean": 39.3,
+        "p50": 41,
+        "p95": 42,
+        "max": 42,
+        "over42Pct": 0,
+        "over45Pct": 0
+      },
+      "stalledPct": 0,
+      "searchesMean": 39.3,
+      "byPhaseMean": {
+        "home": 10,
+        "screen": 20,
+        "exact": 9.3
+      },
+      "classifiedMean": {
+        "inter-city": 29.3,
+        "home": 10,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 1.71,
+        "p95": 2,
+        "max": 2
+      },
+      "budgetStopPct": 36.5,
+      "modelledSeconds": {
+        "mean": 26.3,
+        "p50": 26.3,
+        "p95": 33.6,
+        "max": 37.3
+      },
+      "homeFareNotCheapestOfAllAirports": 0,
+      "testAirlineOnHomeCard": 0
+    },
+    {
+      "variant": "5c-NYC-30-live",
+      "acceptance": true,
+      "trials": 200,
+      "identicalPct": 92,
+      "meanDearerPct": 0.151,
+      "worstDearerPct": 6.04,
+      "meanDearerWhenDifferentPct": 1.89,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "requests": {
+        "mean": 39.8,
+        "p50": 42,
+        "p95": 42,
+        "max": 42,
+        "over42Pct": 0,
+        "over45Pct": 0
+      },
+      "stalledPct": 0,
+      "searchesMean": 39.8,
+      "byPhaseMean": {
+        "home": 10,
+        "screen": 20,
+        "exact": 9.77
+      },
+      "classifiedMean": {
+        "inter-city": 29.77,
+        "home": 10,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 1.72,
+        "p95": 2,
+        "max": 3
+      },
+      "budgetStopPct": 48,
+      "modelledSeconds": {
+        "mean": 26.9,
+        "p50": 26.7,
+        "p95": 33.5,
+        "max": 38.6
+      },
+      "homeFareNotCheapestOfAllAirports": 0,
+      "testAirlineOnHomeCard": 0
+    },
+    {
+      "variant": "5c-CHI-volatile-test",
+      "acceptance": true,
+      "trials": 200,
+      "identicalPct": 46,
+      "meanDearerPct": 7.692,
+      "worstDearerPct": 46.36,
+      "meanDearerWhenDifferentPct": 14.24,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "requests": {
+        "mean": 41.3,
+        "p50": 42,
+        "p95": 42,
+        "max": 42,
+        "over42Pct": 0,
+        "over45Pct": 0
+      },
+      "stalledPct": 0,
+      "searchesMean": 41.3,
+      "byPhaseMean": {
+        "home": 10,
+        "screen": 20,
+        "exact": 9.32,
+        "homeLegs": 2
+      },
+      "classifiedMean": {
+        "inter-city": 29.32,
+        "home": 12,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 1.92,
+        "p95": 2,
+        "max": 3
+      },
+      "budgetStopPct": 73,
+      "modelledSeconds": {
+        "mean": 31.3,
+        "p50": 31.1,
+        "p95": 38.8,
+        "max": 44.1
+      },
+      "homeFareNotCheapestOfAllAirports": 0,
+      "testAirlineOnHomeCard": 0
+    },
+    {
+      "variant": "5c-NYC-volatile-test",
+      "acceptance": true,
+      "trials": 200,
+      "identicalPct": 28.5,
+      "meanDearerPct": 14.226,
+      "worstDearerPct": 65.43,
+      "meanDearerWhenDifferentPct": 19.9,
+      "winnerUnpricedWhenExhaustiveIsNot": 0,
+      "requests": {
+        "mean": 41.5,
+        "p50": 42,
+        "p95": 42,
+        "max": 42,
+        "over42Pct": 0,
+        "over45Pct": 0
+      },
+      "stalledPct": 0,
+      "searchesMean": 41.5,
+      "byPhaseMean": {
+        "home": 10,
+        "screen": 20,
+        "exact": 7.54,
+        "homeLegs": 4
+      },
+      "classifiedMean": {
+        "inter-city": 27.54,
+        "home": 14,
+        "probe": 0
+      },
+      "exactRounds": {
+        "mean": 1.81,
+        "p95": 2,
+        "max": 2
+      },
+      "budgetStopPct": 81.5,
+      "modelledSeconds": {
+        "mean": 30.7,
+        "p50": 30.3,
+        "p95": 38.6,
+        "max": 43.4
+      },
+      "homeFareNotCheapestOfAllAirports": 0,
+      "testAirlineOnHomeCard": 0
+    }
+  ]
+}
