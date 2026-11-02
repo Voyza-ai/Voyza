@@ -1,0 +1,112 @@
+Gate, 2026-11-02: before = shipped dev 073be1d, after = fix/proto-optimizer-budget. Virtual-time Duffel (sim.ts):
+2.6 s median latency, 5% 5-10 s tails, 6 slots, 45 requests per 60 s window. 1,000 plans per acceptance row, 500 per extra.
+'same' / 'dearer' are against pricing every ordering at every home airport. Raw rows: gate-after.jsonl, gate-shipped.jsonl.
+Fares: 30 = ±30% by date; volatile = ±60-80% (Duffel test token). live / test = Duffel mode (test: metro search answers placeholders, MDW/LGA test airline only).
+
+5c-CHI-volatile-test-clustered
+  before  req    60 p95  69 max  76 >45   100% | home/screen/exact/homeLegs 30/20/9.0/0            | rounds  8.51 p95 17 |  91.5 s p95 119.7 | same  85.8% dearer mean  0.844% worst  41.32%
+  after   req  40.5 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/8.5/2            | rounds  1.79 p95  2 |  30.5 s p95    38 | same  72.8% dearer mean  2.983% worst  44.69%
+5c-CHI-volatile-test
+  before  req  63.8 p95  74 max 101 >45   100% | home/screen/exact/homeLegs 30/20/12.8/0           | rounds 12.13 p95 23 | 102.2 s p95   135 | same  77.3% dearer mean  1.241% worst  25.26%
+  after   req  41.2 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/9.2/2            | rounds   1.9 p95  2 |  31.1 s p95  38.4 | same    53% dearer mean  5.855% worst  52.83%
+5c-NYC-volatile-test
+  before  req    76 p95  89 max 120 >45   100% | home/screen/exact/homeLegs 40/20/15.0/0           | rounds 14.01 p95 25 | 112.7 s p95 148.9 | same  72.7% dearer mean  1.686% worst  49.44%
+  after   req  41.4 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/7.4/4            | rounds  1.74 p95  2 |  30.5 s p95  37.7 | same    27% dearer mean 14.055% worst  75.11%
+  (exhaustive, home ranked on the first airport only: same 52.9% dearer mean 5.692% worst 59.61%)
+5c-CHI-30-live
+  before  req  38.1 p95  48 max  73 >45   9.9% | home/screen/exact/homeLegs 10/20/8.1/0            | rounds  7.78 p95 18 |  41.8 s p95  74.2 | same   100% dearer mean      0% worst      0%
+  after   req  39.4 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/9.4/0            | rounds  1.75 p95  2 |  26.7 s p95  33.9 | same  97.7% dearer mean  0.024% worst    5.1%
+  (exhaustive, home ranked on the first airport only: same 38.2% dearer mean 5.652% worst 45.21%)
+5c-NYC-30-live
+  before  req  39.5 p95  51 max  65 >45  15.3% | home/screen/exact/homeLegs 10/20/9.5/0            | rounds  9.19 p95 20 |  46.1 s p95  81.4 | same   100% dearer mean      0% worst      0%
+  after   req    40 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/10.0/0           | rounds   1.8 p95  2 |  27.1 s p95  33.8 | same  98.1% dearer mean  0.032% worst   3.98%
+  (exhaustive, home ranked on the first airport only: same 25.7% dearer mean 7.487% worst 39.28%)
+5c-CHI-30-test
+  before  req  57.8 p95  66 max  94 >45   100% | home/screen/exact/homeLegs 30/20/6.8/0            | rounds  6.53 p95 15 |    85 s p95 112.3 | same   100% dearer mean      0% worst      0%
+  after   req  39.9 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/7.9/2            | rounds  1.65 p95  2 |  29.6 s p95  37.1 | same  97.2% dearer mean  0.031% worst   4.63%
+5c-NYC-30-test
+  before  req  69.4 p95  80 max  93 >45   100% | home/screen/exact/homeLegs 40/20/8.4/0            | rounds  8.09 p95 19 |  94.6 s p95 125.7 | same   100% dearer mean      0% worst      0%
+  after   req  40.6 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/6.6/4            | rounds  1.45 p95  2 |  29.3 s p95  37.1 | same  37.9% dearer mean  5.598% worst  46.31%
+  (exhaustive, home ranked on the first airport only: same 38.8% dearer mean 5.481% worst 46.31%)
+5c-CHI-volatile-live
+  before  req  45.4 p95  58 max  91 >45  44.8% | home/screen/exact/homeLegs 10/20/15.2/0           | rounds 14.15 p95 25 |  61.9 s p95  96.5 | same  72.2% dearer mean  1.695% worst  28.59%
+  after   req  41.2 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/11.2/0           | rounds  1.95 p95  2 |  27.7 s p95  34.5 | same  46.1% dearer mean  7.175% worst   71.9%
+  (exhaustive, home ranked on the first airport only: same 52.3% dearer mean 5.357% worst 58.65%)
+5c-NYC-volatile-live
+  before  req  46.9 p95  63 max  88 >45  52.1% | home/screen/exact/homeLegs 10/20/16.7/0           | rounds 15.31 p95 25 |  65.8 s p95 101.1 | same  70.7% dearer mean  1.859% worst  36.63%
+  after   req  41.4 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/11.4/0           | rounds  1.97 p95  2 |    28 s p95  34.5 | same  40.3% dearer mean   8.91% worst  69.98%
+  (exhaustive, home ranked on the first airport only: same 42.6% dearer mean 7.926% worst 60.51%)
+4c-CHI-30-live
+  before  req  22.5 p95  27 max  34 >45     0% | home/screen/exact/homeLegs 8/12/2.5/0             | rounds  2.36 p95  7 |  20.8 s p95  34.8 | same   100% dearer mean      0% worst      0%
+  after   req  24.5 p95  31 max  37 >45     0% | home/screen/exact/homeLegs 8/12/4.5/0             | rounds  1.01 p95  2 |  18.1 s p95  25.8 | same   100% dearer mean      0% worst      0%
+  (exhaustive, home ranked on the first airport only: same 42.8% dearer mean 5.813% worst 57.67%)
+4c-NYC-30-live
+  before  req  22.8 p95  28 max  34 >45     0% | home/screen/exact/homeLegs 8/12/2.8/0             | rounds  2.62 p95  8 |  21.6 s p95  39.1 | same   100% dearer mean      0% worst      0%
+  after   req  24.9 p95  32 max  38 >45     0% | home/screen/exact/homeLegs 8/12/4.9/0             | rounds  1.08 p95  2 |  18.5 s p95  26.9 | same   100% dearer mean      0% worst      0%
+  (exhaustive, home ranked on the first airport only: same 34.2% dearer mean 7.186% worst 56.53%)
+4c-CHI-30-test
+  before  req    38 p95  42 max  50 >45   0.7% | home/screen/exact/homeLegs 24/12/2.0/0            | rounds  1.83 p95  6 |  28.4 s p95  41.3 | same   100% dearer mean      0% worst      0%
+  after   req  25.5 p95  31 max  38 >45     0% | home/screen/exact/homeLegs 8/12/3.5/2             | rounds  0.88 p95  2 |  21.3 s p95  29.3 | same   100% dearer mean      0% worst      0%
+4c-NYC-30-test
+  before  req  47.2 p95  52 max  59 >45  62.3% | home/screen/exact/homeLegs 32/12/2.5/0            | rounds  2.36 p95  7 |  53.4 s p95  79.5 | same   100% dearer mean      0% worst      0%
+  after   req  27.5 p95  33 max  42 >45     0% | home/screen/exact/homeLegs 8/12/3.5/4             | rounds  0.91 p95  2 |    22 s p95    30 | same  46.5% dearer mean  5.225% worst  49.26%
+  (exhaustive, home ranked on the first airport only: same 46.5% dearer mean 5.225% worst 49.26%)
+4c-CHI-volatile-live
+  before  req    26 p95  32 max  36 >45     0% | home/screen/exact/homeLegs 8/12/6.0/0             | rounds  5.72 p95 12 |    31 s p95  50.7 | same  83.8% dearer mean  1.029% worst     25%
+  after   req  28.8 p95  35 max  42 >45     0% | home/screen/exact/homeLegs 8/12/8.8/0             | rounds  1.77 p95  3 |  22.1 s p95    31 | same  86.2% dearer mean  0.913% worst     25%
+  (exhaustive, home ranked on the first airport only: same 58.1% dearer mean 5.469% worst 74.95%)
+4c-NYC-volatile-live
+  before  req  26.7 p95  33 max  39 >45     0% | home/screen/exact/homeLegs 8/12/6.7/0             | rounds  6.46 p95 13 |  33.2 s p95  53.2 | same  83.5% dearer mean  1.003% worst  31.24%
+  after   req  29.7 p95  37 max  40 >45     0% | home/screen/exact/homeLegs 8/12/9.7/0             | rounds  1.92 p95  3 |  22.7 s p95  32.2 | same  85.2% dearer mean  0.913% worst  27.33%
+  (exhaustive, home ranked on the first airport only: same 49.4% dearer mean 7.202% worst 68.02%)
+4c-CHI-volatile-test
+  before  req  41.2 p95  48 max  56 >45  11.1% | home/screen/exact/homeLegs 24/12/5.1/0            | rounds  4.84 p95 11 |  38.7 s p95  67.3 | same  86.7% dearer mean  0.694% worst  24.38%
+  after   req  29.8 p95  36 max  42 >45     0% | home/screen/exact/homeLegs 8/12/7.8/2             | rounds  1.57 p95  3 |  24.9 s p95    34 | same  89.2% dearer mean  0.549% worst  20.35%
+4c-NYC-volatile-test
+  before  req  50.8 p95  57 max  62 >45  91.1% | home/screen/exact/homeLegs 32/12/5.9/0            | rounds  5.66 p95 12 |  72.3 s p95  95.3 | same    84% dearer mean  0.944% worst  31.24%
+  after   req  31.5 p95  38 max  42 >45     0% | home/screen/exact/homeLegs 8/12/7.5/4             | rounds  1.51 p95  3 |  25.4 s p95  35.3 | same  52.4% dearer mean  6.791% worst  70.01%
+  (exhaustive, home ranked on the first airport only: same 58.3% dearer mean 5.417% worst 68.02%)
+3c-CHI-30-live
+  before  req    40 p95  40 max  40 >45     0% | home/screen/exact/homeLegs score:24/probe:16      | rounds     0 p95  0 |  24.4 s p95  29.2 | same   100% dearer mean      0% worst      0%
+  after   req    40 p95  40 max  40 >45     0% | home/screen/exact/homeLegs score:24/probe:16      | rounds     0 p95  0 |  24.4 s p95  29.2 | same   100% dearer mean      0% worst      0%
+  (exhaustive, home ranked on the first airport only: same 50.4% dearer mean 5.787% worst 49.3%)
+3c-NYC-volatile-test
+  before  req    47 p95  47 max  47 >45   100% | home/screen/exact/homeLegs score:30/probe:16      | rounds     0 p95  0 |  63.6 s p95  68.2 | same   100% dearer mean      0% worst      0%
+  after   req    47 p95  47 max  47 >45   100% | home/screen/exact/homeLegs score:30/probe:16      | rounds     0 p95  0 |  63.6 s p95  68.2 | same   100% dearer mean      0% worst      0%
+  (exhaustive, home ranked on the first airport only: same 69.2% dearer mean 5.799% worst 104.54%)
+5c-CHI-30-live-clustered
+  before  req  34.4 p95  41 max  50 >45   1.2% | home/screen/exact/homeLegs 10/20/4.4/0            | rounds  4.18 p95 11 |    31 s p95  52.6 | same   100% dearer mean      0% worst      0%
+  after   req  36.9 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/6.9/0            | rounds  1.36 p95  2 |  24.8 s p95  32.2 | same   100% dearer mean      0% worst      0%
+  (exhaustive, home ranked on the first airport only: same 43.2% dearer mean 5.453% worst 42.09%)
+5c-CHI-50-live
+  before  req  36.4 p95  44 max  53 >45   2.4% | home/screen/exact/homeLegs 10/20/6.4/0            | rounds  6.01 p95 14 |  36.4 s p95  63.3 | same  96.6% dearer mean  0.033% worst   3.21%
+  after   req  38.7 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/8.7/0            | rounds  1.66 p95  2 |  25.9 s p95  32.8 | same  94.2% dearer mean    0.1% worst   7.54%
+  (exhaustive, home ranked on the first airport only: same 34.4% dearer mean 8.716% worst 52.86%)
+5c-CHI-30-live-ranked-on-primary
+  before  req  38.1 p95  48 max  73 >45   9.9% | home/screen/exact/homeLegs 10/20/8.1/0            | rounds  7.78 p95 18 |  41.8 s p95  74.2 | same   100% dearer mean      0% worst      0%
+  after   req  39.9 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/7.9/2            | rounds  1.65 p95  2 |  29.6 s p95  37.1 | same  37.8% dearer mean  5.726% worst  45.21%
+  (exhaustive, home ranked on the first airport only: same 38.2% dearer mean 5.652% worst 45.21%)
+5c-NYC-30-live-ranked-on-primary
+  before  req  39.5 p95  51 max  65 >45  15.3% | home/screen/exact/homeLegs 10/20/9.5/0            | rounds  9.19 p95 20 |  46.1 s p95  81.4 | same   100% dearer mean      0% worst      0%
+  after   req  40.6 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/6.6/4            | rounds  1.45 p95  2 |  29.3 s p95  37.1 | same  24.8% dearer mean  7.623% worst  42.03%
+  (exhaustive, home ranked on the first airport only: same 25.7% dearer mean 7.487% worst 39.28%)
+5c-LON-30-live
+  before  req  39.3 p95  50 max  70 >45  11.6% | home/screen/exact/homeLegs 10/20/9.3/0            | rounds  8.93 p95 20 |    45 s p95    82 | same   100% dearer mean      0% worst      0%
+  after   req  40.1 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/10.1/0           | rounds  1.83 p95  2 |    27 s p95  33.3 | same    98% dearer mean  0.012% worst   2.21%
+  (exhaustive, home ranked on the first airport only: same 27% dearer mean 7.394% worst 34.18%)
+5c-LON-30-live-metrocap3
+  before  req  49.3 p95  61 max  81 >45  65.4% | home/screen/exact/homeLegs 16.2/20/9.3/3.2        | rounds  8.93 p95 20 |  64.5 s p95  99.5 | same   100% dearer mean      0% worst      0%
+  after   req  40.9 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 12.1/20/5.5/3.3        | rounds  1.11 p95  2 |  29.6 s p95  36.1 | same  84.8% dearer mean  0.386% worst  15.96%
+  (exhaustive, home ranked on the first airport only: same 27% dearer mean 7.394% worst 34.18%)
+5c-BOS-30-live
+  before  req  49.2 p95  59 max  81 >45  69.8% | home/screen/exact/homeLegs 20/20/8.5/0            | rounds  8.23 p95 18 |    64 s p95 101.7 | same   100% dearer mean      0% worst      0%
+  after   req    40 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/8/2              | rounds  1.68 p95  2 |  29.7 s p95  37.2 | same    44% dearer mean  4.659% worst  45.63%
+  (exhaustive, home ranked on the first airport only: same 45.2% dearer mean 4.581% worst 45.63%)
+5c-BOS-volatile-test
+  before  req  55.9 p95  68 max  90 >45  93.8% | home/screen/exact/homeLegs 20/20/15/0             | rounds 14.08 p95 25 |    88 s p95 123.5 | same  70.8% dearer mean  2.227% worst  56.36%
+  after   req  41.2 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/9.2/2            | rounds   1.9 p95  2 |  30.7 s p95  37.8 | same  31.6% dearer mean 12.417% worst 100.79%
+  (exhaustive, home ranked on the first airport only: same 50.4% dearer mean 5.68% worst 44.85%)
+5c-CHI-30-live-gaps
+  before  req  40.9 p95  53 max  86 >45  22.2% | home/screen/exact/homeLegs 10/20/10.9/0           | rounds 10.42 p95 23 |  49.6 s p95  90.8 | same   100% dearer mean      0% worst      0%
+  after   req  40.4 p95  42 max  42 >45     0% | home/screen/exact/homeLegs 10/20/10.4/0           | rounds  1.86 p95  2 |  27.4 s p95  33.9 | same  95.4% dearer mean  0.178% worst  11.24%
+  (exhaustive, home ranked on the first airport only: same 43% dearer mean 4.933% worst 40.51%)

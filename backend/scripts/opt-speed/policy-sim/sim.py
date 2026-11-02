@@ -1,3 +1,11 @@
+"""Offline model of the gate's fare distributions (5 cities, home fares exact, legs
+priced per route and day) for comparing best-first policies under a search budget
+in seconds rather than minutes. Not the optimizer: the choice it suggested was
+checked in the real gate (gate.harness.ts). sim2-8.py: the variants tried
+(no screen, Thompson sampling, shrinkage, packing, expected improvement, top-K
+screen); none beat expected-cost order with whole orderings at this budget.
+  python3 sim.py 500
+"""
 import random, itertools, statistics, sys
 N=5
 PERMS=list(itertools.permutations(range(N)))
