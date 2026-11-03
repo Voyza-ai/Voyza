@@ -256,3 +256,30 @@ describe('never a wrong number: anything that does not add up is left unset', ()
     }
   });
 });
+
+describe('?breakdown=1: Booking\'s own price breakdown, for checking the reader against real rows', () => {
+  it('returns the first rows\' breakdown fields next to the hotels, and changes no price', async () => {
+    stubBooking([kraft()]);
+    const res = await request(app)
+      .post('/api/hotels/search?breakdown=1')
+      .send({ city: 'Paris', checkin: '2031-03-02', checkout: '2031-03-04', adults: 2 });
+    expect(res.status).toBe(200);
+    const plain = await request(app)
+      .post('/api/hotels/search')
+      .send({ city: 'Paris', checkin: '2031-03-02', checkout: '2031-03-04', adults: 2 });
+    expect(res.body.hotels).toEqual(plain.body.hotels);
+    expect(res.body.breakdownSample).toHaveLength(1);
+    const [row] = res.body.breakdownSample;
+    expect(row.name).toBe('Kraft Hotel');
+    expect(row.composite_price_breakdown.gross_amount).toEqual({ value: 360.03, currency: 'EUR' });
+    expect(row.composite_price_breakdown.all_inclusive_amount).toEqual({ value: 392.55, currency: 'EUR' });
+  });
+
+  it('is not in the response the app gets', async () => {
+    stubBooking([kraft()]);
+    const res = await request(app)
+      .post('/api/hotels/search')
+      .send({ city: 'Paris', checkin: '2031-03-09', checkout: '2031-03-11', adults: 2 });
+    expect(Object.keys(res.body)).toEqual(['hotels']);
+  });
+});
