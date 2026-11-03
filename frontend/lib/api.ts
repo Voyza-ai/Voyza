@@ -575,6 +575,27 @@ export type ActivitySuggestion = {
   reason: string;
 };
 
+/**
+ * Most an AI pick request (activities, restaurants) may take. They answer in
+ * 8-17 s on production; the backend's own Anthropic limit is 90 s with one
+ * retry, and /results now waits on them in two places — Edit in Canvas's
+ * "Saving..." and the sign-in callback, which save the trip with its picks —
+ * so one stalled call could hold either for three minutes. Past this the call
+ * fails like any failed pick request: the city keeps no picks.
+ */
+export const AI_PICKS_TIMEOUT_MS = 30_000;
+
+/** `run` with a signal that aborts after `ms`; the timer is cleared once it settles. */
+async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await run(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function searchActivities(params: {
   city: string;
   country?: string;
@@ -582,10 +603,13 @@ export async function searchActivities(params: {
   travelers?: number;
   nights?: number;
 }): Promise<ActivitySuggestion[]> {
-  const data = await apiFetch<{ activities: ActivitySuggestion[] }>('/api/plan/activities', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
+  const data = await withTimeout(AI_PICKS_TIMEOUT_MS, (signal) =>
+    apiFetch<{ activities: ActivitySuggestion[] }>('/api/plan/activities', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      signal,
+    }),
+  );
   return data.activities;
 }
 
@@ -605,10 +629,13 @@ export async function searchRestaurants(params: {
   travelers?: number;
   budget?: number;
 }): Promise<RestaurantSuggestion[]> {
-  const data = await apiFetch<{ restaurants: RestaurantSuggestion[] }>('/api/plan/restaurants', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
+  const data = await withTimeout(AI_PICKS_TIMEOUT_MS, (signal) =>
+    apiFetch<{ restaurants: RestaurantSuggestion[] }>('/api/plan/restaurants', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      signal,
+    }),
+  );
   return data.restaurants;
 }
 

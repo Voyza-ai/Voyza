@@ -3,6 +3,8 @@ import { Trip, PlanningAnswers, City, CustomHotel, Transport, Restaurant, Schedu
 import { firstStayArrival, tripStartDate } from '@/lib/tripSpan';
 import { searchActivities, searchRestaurants, type ActivitySuggestion, type RestaurantSuggestion } from '@/lib/api';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
+import { liveTripTotal } from '@/lib/tripTotals';
+import type { CanvasIntent } from '@/lib/canvasHandoff';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -489,20 +491,40 @@ function awaitCityPicks(run: string, req: CityPicksRequest, inFlight?: Promise<C
 }
 
 /**
- * Set once the tab starts leaving this page (a reload, or typing another
- * address). The browser then kills every request still out, AFTER `pagehide`
- * (measured in Chromium: beforeunload, pagehide, unload, then the fetches
- * reject). Those are not failed requests: counted as failures, they took the
- * cities off the snapshot's waiting list just before the reload read it, and
- * the reloaded page never asked again.
+ * Set once the tab starts leaving this page (a reload, the sign-in redirect to
+ * Google, typing another address). The browser kills every request still out
+ * as the page goes, and those are not failed requests: counted as failures,
+ * they took the cities off the snapshot's waiting list just before the next
+ * page read it, and it never asked again.
  */
 let pageLeaving = false;
+
+/**
+ * How long a failed pick request waits before its city stops waiting. A
+ * request the page's own departure kills rejects around that departure, in
+ * an order browsers do not promise: after `pagehide` on a reload (measured in
+ * Chromium), BEFORE it on the redirect to Google's sign-in (measured: the
+ * waiting list was already empty when the callback page read it). A failure
+ * is therefore taken in only once the page has stayed this long; a page that
+ * left takes the timer with it, and the city stays on the snapshot's waiting
+ * list for the next page to ask again. A real failure clears its loading card
+ * this much later — nothing else waits on it.
+ */
+export const FAILED_PICKS_GRACE_MS = 2000;
 
 /** One city's picks answered (or failed): it stops waiting, and the trip on screen gets them. */
 function landCityPicks(run: string, cityName: string, picks: CityPicks) {
   const got = picks.activities.length > 0 || picks.restaurants.length > 0;
+  if (got) return settleCityPicks(run, cityName, picks);
   // Killed by the page going away: still waiting, so the next page asks again.
-  if (!got && pageLeaving) return;
+  if (pageLeaving) return;
+  setTimeout(() => {
+    if (!pageLeaving) settleCityPicks(run, cityName, picks);
+  }, FAILED_PICKS_GRACE_MS);
+}
+
+function settleCityPicks(run: string, cityName: string, picks: CityPicks) {
+  const got = picks.activities.length > 0 || picks.restaurants.length > 0;
   useTripStore.setState((state) => {
     const tp = state.tripPicks;
     if (!tp || tp.run !== run) return state; // a search since replaced, or planning reset
@@ -598,6 +620,29 @@ export function tripPicksSettled(): Promise<boolean> {
       resolve(true);
     });
   });
+}
+
+/**
+ * An "Edit in Canvas" request stashed before a sign-in that left the page
+ * (Google's sign-in is a full-page redirect), with the trip's AI picks in it.
+ *
+ * Signing in with Google while the picks were still loading stashed the trip
+ * without them, and the redirect killed their requests: the canvas was saved
+ * with no picks and filled each city with generic placeholders ("Explore
+ * Paris old town"). The tab's session snapshot survives the redirect, the
+ * cities still waiting included, so the trip is restored, those picks are
+ * asked for again and land, and the trip is saved as it is then. Only for a
+ * trip from the same planner search (`picksRun`); any other intent comes back
+ * as it was.
+ */
+export async function canvasIntentWithPicks(intent: CanvasIntent): Promise<CanvasIntent> {
+  const payload = intent.payload;
+  if (!payload?.picksRun) return intent;
+  if (!useTripStore.getState().currentTrip) restoreTripSession();
+  await tripPicksSettled();
+  const trip = useTripStore.getState().currentTrip;
+  if (!trip || trip.picksRun !== payload.picksRun) return intent;
+  return { ...intent, payload: { ...trip, totalCost: liveTripTotal(trip) }, syncCities: trip.cities };
 }
 
 // ─── The current trip survives a reload of this tab ──────────────────────────

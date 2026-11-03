@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 import { readCanvasIntent, clearCanvasIntent, resolveCanvasTripId } from '@/lib/canvasHandoff';
+import { canvasIntentWithPicks } from '@/store/tripStore';
 import { Suspense } from 'react';
 
 export default function AuthCallbackPage() {
@@ -49,11 +50,14 @@ function AuthCallbackInner() {
 
       // Did the user start an "Edit in Canvas" flow before signing in? If so,
       // save the trip (now that we're authenticated) and go straight to the
-      // canvas instead of the page they came from.
+      // canvas instead of the page they came from — with the AI picks that
+      // were still loading when they left for Google (canvasIntentWithPicks;
+      // this spinner shows meanwhile).
       const canvasIntent = readCanvasIntent();
       if (canvasIntent) {
         clearCanvasIntent();
-        resolveCanvasTripId(canvasIntent)
+        canvasIntentWithPicks(canvasIntent)
+          .then((intent) => resolveCanvasTripId(intent))
           .then((tripId) => {
             if (!tripId) return router.push('/history');
             router.push(
