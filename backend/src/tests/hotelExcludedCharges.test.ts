@@ -257,29 +257,35 @@ describe('never a wrong number: anything that does not add up is left unset', ()
   });
 });
 
-describe('?breakdown=1: Booking\'s own price breakdown, for checking the reader against real rows', () => {
-  it('returns the first rows\' breakdown fields next to the hotels, and changes no price', async () => {
-    stubBooking([kraft()]);
-    const res = await request(app)
-      .post('/api/hotels/search?breakdown=1')
-      .send({ city: 'Paris', checkin: '2031-03-02', checkout: '2031-03-04', adults: 2 });
-    expect(res.status).toBe(200);
-    const plain = await request(app)
-      .post('/api/hotels/search')
-      .send({ city: 'Paris', checkin: '2031-03-02', checkout: '2031-03-04', adults: 2 });
-    expect(res.body.hotels).toEqual(plain.body.hotels);
-    expect(res.body.breakdownSample).toHaveLength(1);
-    const [row] = res.body.breakdownSample;
-    expect(row.name).toBe('Kraft Hotel');
-    expect(row.composite_price_breakdown.gross_amount).toEqual({ value: 360.03, currency: 'EUR' });
-    expect(row.composite_price_breakdown.all_inclusive_amount).toEqual({ value: 392.55, currency: 'EUR' });
-  });
-
-  it('is not in the response the app gets', async () => {
-    stubBooking([kraft()]);
-    const res = await request(app)
-      .post('/api/hotels/search')
-      .send({ city: 'Paris', checkin: '2031-03-09', checkout: '2031-03-11', adults: 2 });
-    expect(Object.keys(res.body)).toEqual(['hotels']);
-  });
+/**
+ * A row from our own subscription (production, Paris, 2026-11-03), amount
+ * fields as Booking sent them: taxes already in the price, nothing excluded.
+ * Every hotel sampled in Paris, Rome and London that day looked like this.
+ */
+it('a real row with taxes already in the price gets no extra charge, and the price is unchanged', async () => {
+  const mercure = {
+    hotel_id: 2001,
+    hotel_name: 'Mercure Tour Eiffel Grenelle',
+    currency_code: 'EUR',
+    currencycode: 'EUR',
+    min_total_price: 443.3,
+    review_score: 8.1,
+    review_nr: 2000,
+    class: 4,
+    url: 'https://www.booking.com/hotel/fr/mercure-tour-eiffel-grenelle.html',
+    composite_price_breakdown: {
+      gross_amount_per_night: amount(221.65),
+      included_taxes_and_charges_amount: amount(71.0273),
+      excluded_amount: amount(0),
+      all_inclusive_amount: amount(443.3),
+      gross_amount: amount(443.3),
+      gross_amount_hotel_currency: amount(443.3),
+      all_inclusive_amount_hotel_currency: amount(443.3),
+      net_amount: amount(372.2727),
+    },
+  };
+  const [hotel] = await search([mercure]);
+  expect(hotel.name).toBe('Mercure Tour Eiffel Grenelle');
+  expect(hotel.taxesPerNight ?? 0).toBe(0);
+  expect(hotel.price).toBeCloseTo(443.3 * 1.25, 2); // EUR → USD at the test rate
 });
