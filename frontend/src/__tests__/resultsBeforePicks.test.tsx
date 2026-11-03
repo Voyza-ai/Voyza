@@ -8,6 +8,7 @@ import {
   tripPicksSettled,
   restoreTripSession,
   cityPicksLoading,
+  FAILED_PICKS_GRACE_MS,
   type CityPicks,
   type CityPicksRequest,
 } from '@/store/tripStore';
@@ -95,6 +96,7 @@ beforeEach(() => {
 });
 
 it('lands each city as it answers; a failed one is left as before and nothing keeps waiting', async () => {
+  jest.useFakeTimers();
   const trip = plannedTrip();
   const names = trip.cities.map((c) => c.name);
   const calls = names.map(() => deferred<CityPicks>());
@@ -110,6 +112,13 @@ it('lands each city as it answers; a failed one is left as before and nothing ke
     calls[0].reject(new Error('502'));
     calls[2].resolve(NONE);
   });
+  // A failure is taken in once the page has stayed FAILED_PICKS_GRACE_MS (it
+  // may be the page's own departure killing the request).
+  expect(store().tripPicks!.pending.map((r) => r.city)).toEqual([names[0], names[2]]);
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(FAILED_PICKS_GRACE_MS);
+  });
+  jest.useRealTimers();
   expect(store().tripPicks!.pending).toEqual([]);
   expect(store().currentTrip!.cities[0].activities).toEqual([]);
   expect(store().currentTrip!.cities[2].restaurants).toEqual([]);
