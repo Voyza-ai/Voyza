@@ -1235,6 +1235,48 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
  * that depends only on what was asked of Booking. Never throws: any failure is
  * logged and comes back as no rows.
  */
+/**
+ * Diagnostic, read-only: what Booking's price breakdown looked like on the
+ * first rows of recent searches, so the "Taxes & fees" reader
+ * (excludedChargesTotal) can be checked against real rows. Production showed
+ * no excluded charges on any of 18 Paris hotels, although Paris charges a
+ * city tax, and no raw Booking row is otherwise reachable. Served only when
+ * /api/hotels/search is asked with ?breakdown=1; changes no price.
+ */
+const breakdownSamples = new Map<string, unknown[]>();
+const BREAKDOWN_SAMPLE_ROWS = 5;
+const BREAKDOWN_SAMPLE_SEARCHES = 50;
+
+function breakdownKey(p: { city: string; checkin: string; checkout: string; adults: number; rooms: number }): string {
+  return JSON.stringify([p.city.trim().toLowerCase(), p.checkin, p.checkout, p.adults, p.rooms]);
+}
+
+/** Amount-shaped fields of a breakdown block: `{ value, currency }` objects and plain numbers/strings. */
+function amountFields(block: any): Record<string, unknown> | undefined {
+  if (!block || typeof block !== 'object') return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(block)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && ('value' in (v as any) || 'currency' in (v as any))) {
+      out[k] = { value: (v as any).value, currency: (v as any).currency };
+    } else if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') {
+      out[k] = v;
+    } else if (Array.isArray(v)) {
+      out[k] = `[${v.length} items]`;
+    }
+  }
+  return out;
+}
+
+export function priceBreakdownSample(p: {
+  city: string;
+  checkin: string;
+  checkout: string;
+  adults: number;
+  rooms?: number;
+}): unknown[] | null {
+  return breakdownSamples.get(breakdownKey({ ...p, rooms: p.rooms ?? roomsFor(p.adults) })) ?? null;
+}
+
 async function searchVettedHotels(params: {
   city: string;
   hotelName?: string;
@@ -1295,6 +1337,20 @@ async function searchVettedHotels(params: {
 
     const data: any = await res.json();
     const results = data.result ?? [];
+    breakdownSamples.set(
+      breakdownKey({ city, checkin, checkout, adults, rooms }),
+      results.slice(0, BREAKDOWN_SAMPLE_ROWS).map((h: any) => ({
+        name: h?.hotel_name,
+        currency_code: h?.currency_code,
+        currencycode: h?.currencycode,
+        min_total_price: h?.min_total_price,
+        price_breakdown: amountFields(h?.price_breakdown),
+        composite_price_breakdown: amountFields(h?.composite_price_breakdown),
+      })),
+    );
+    if (breakdownSamples.size > BREAKDOWN_SAMPLE_SEARCHES) {
+      breakdownSamples.delete(breakdownSamples.keys().next().value as string);
+    }
 
     // Calculate nights for per-night pricing
     const checkinDate = new Date(checkin);
