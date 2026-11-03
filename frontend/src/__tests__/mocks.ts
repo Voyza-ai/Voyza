@@ -190,6 +190,7 @@ jest.mock('@/lib/api', () => ({
   // apiMockSurface.test.ts, which fails if this list drifts again.
   updateTrip: jest.fn().mockResolvedValue({ trip: {} }),
   fetchHomeLegs: jest.fn().mockResolvedValue([]),
+  AI_PICKS_TIMEOUT_MS: 30_000,
   searchActivities: jest.fn().mockResolvedValue([]),
   searchRestaurants: jest.fn().mockResolvedValue([]),
   suggestDestinationsForVibe: jest.fn().mockResolvedValue([]),
