@@ -17,6 +17,17 @@
  * the optimizer did before the adaptive screen (full permutations, the
  * country filter, UNAVAILABLE_LEG_PENALTY / UNAVAILABLE_HOME_LEG_PENALTY,
  * a stable sort on rankCost), so a test can ask "same winner?".
+ *
+ * Duffel's TEST mode, as measured on production's token (2026-11-02), is
+ * modelled by three options:
+ *  - `swingRange`: fares move far more by date than ±30% — each route draws
+ *    its own swing from the range (e.g. [0.6, 0.8]);
+ *  - `placeholderMetros`: a metro search (CHI, NYC) answers only with the
+ *    test airline under the metro code itself, never a real airport;
+ *  - `testAirlineOnly`: airports served only by the test airline ("Duffel
+ *    Airways", ZZ) — MDW. Home fares then follow the optimizer's rule
+ *    (utils/testAirline.ts): a test-airline fare counts only when no airport
+ *    has a real one.
  */
 
 import { addDays, clampToFuture } from '../../utils/dates';
@@ -57,6 +68,12 @@ export type FareModelOptions = {
   noFlights?: Set<string>;
   /** "AAA>BBB@YYYY-MM-DD" routes with no flight on that one date. */
   noFlightsOn?: Set<string>;
+  /** Per-route swing drawn uniformly from this range (overrides `swing`): Duffel test mode. */
+  swingRange?: [number, number];
+  /** Metro codes whose search answers only test-airline placeholders under the metro code. */
+  placeholderMetros?: string[];
+  /** Airports served only by the test airline. */
+  testAirlineOnly?: string[];
 };
 
 export type MockOffer = {
@@ -80,13 +97,19 @@ export type FareModel = {
   fare(origin: string, destination: string, date: string): number | null;
   /** What the mocked searchFlights answers (metro codes expanded to their airports). */
   offers(params: { origin: string; destination: string; date: string; travelers: number }): MockOffer[];
+  /** True when `airport` is served only by the test airline (omitted: none is). */
+  testAirlineOnly?(airport: string): boolean;
 };
+
+export const TEST_AIRLINE = { carrier: 'Duffel Airways', carrierCode: 'ZZ' };
 
 export function createFareModel(opts: FareModelOptions): FareModel {
   const home = new Set(opts.homeAirports);
   const metros = opts.metros ?? {};
   const [legLo, legHi] = opts.legRange ?? [50, 225];
   const [homeLo, homeHi] = opts.homeRange ?? [600, 1100];
+  const placeholders = new Set(opts.placeholderMetros ?? []);
+  const testOnly = new Set(opts.testAirlineOnly ?? []);
 
   const fare = (origin: string, destination: string, date: string): number | null => {
     const route = `${origin}>${destination}`;
@@ -94,39 +117,51 @@ export function createFareModel(opts: FareModelOptions): FareModel {
     const isHome = home.has(origin) || home.has(destination);
     const [lo, hi] = isHome ? [homeLo, homeHi] : [legLo, legHi];
     const base = lo + unit(opts.seed, `base|${route}`) * (hi - lo);
-    const move = (2 * unit(opts.seed, `date|${route}@${date}`) - 1) * opts.swing;
+    const swing = opts.swingRange
+      ? opts.swingRange[0] + unit(opts.seed, `swing|${route}`) * (opts.swingRange[1] - opts.swingRange[0])
+      : opts.swing;
+    const move = (2 * unit(opts.seed, `date|${route}@${date}`) - 1) * swing;
     return Math.round(base * (1 + move) * opts.travelers * 100) / 100;
   };
+
+  const offer = (origin: string, destination: string, date: string, price: number, i: number, testAirline: boolean): MockOffer => ({
+    id: `off-${origin}-${destination}-${date}-${i}`,
+    price: Math.round((price + 37 * i) * 100) / 100,
+    currency: 'USD',
+    departure: `${date}T${String(8 + 3 * i).padStart(2, '0')}:00:00`,
+    arrival: `${date}T${String(13 + 3 * i).padStart(2, '0')}:30:00`,
+    durationMinutes: 150 + 30 * i,
+    stops: i,
+    ...(testAirline ? TEST_AIRLINE : { carrier: `Carrier ${i}`, carrierCode: `C${i}` }),
+    bookingUrl: `https://example.test/${origin}-${destination}-${date}`,
+    raw: {},
+    originAirport: origin,
+    destinationAirport: destination,
+  });
 
   const airportOffers = (origin: string, destination: string, date: string): MockOffer[] => {
     const cheapest = fare(origin, destination, date);
     if (cheapest === null) return [];
-    return [0, 1].map((i) => ({
-      id: `off-${origin}-${destination}-${date}-${i}`,
-      price: Math.round((cheapest + 37 * i) * 100) / 100,
-      currency: 'USD',
-      departure: `${date}T${String(8 + 3 * i).padStart(2, '0')}:00:00`,
-      arrival: `${date}T${String(13 + 3 * i).padStart(2, '0')}:30:00`,
-      durationMinutes: 150 + 30 * i,
-      stops: i,
-      carrier: `Carrier ${i}`,
-      carrierCode: `C${i}`,
-      bookingUrl: `https://example.test/${origin}-${destination}-${date}`,
-      raw: {},
-      originAirport: origin,
-      destinationAirport: destination,
-    }));
+    const testAirline = testOnly.has(origin) || testOnly.has(destination);
+    return [0, 1].map((i) => offer(origin, destination, date, cheapest, i, testAirline));
   };
 
   return {
     fare,
     offers({ origin, destination, date }) {
+      // Test mode: the metro answers with the test airline under its own code.
+      const placeholder = placeholders.has(origin) ? origin : placeholders.has(destination) ? destination : null;
+      if (placeholder) {
+        const price = 300 + 900 * unit(opts.seed, `placeholder|${origin}>${destination}@${date}`);
+        return [0, 1].map((i) => offer(origin, destination, date, price * opts.travelers, i, true));
+      }
       const from = metros[origin] ?? [origin];
       const to = metros[destination] ?? [destination];
       const out: MockOffer[] = [];
       for (const o of from) for (const d of to) out.push(...airportOffers(o, d, date));
       return out;
     },
+    testAirlineOnly: (airport) => testOnly.has(airport),
   };
 }
 
@@ -212,13 +247,18 @@ export function priceExactly(
       totalCost += f;
     }
   }
+  // The test airline counts only when no airport has a real fare
+  // (withoutTestAirlineWhenRealOffered).
   const cheapestHome = (city: string, reverse: boolean, date: string) => {
-    let best: { price: number; airport: string } | null = null;
+    let best: { price: number; airport: string; test: boolean } | null = null;
     for (const airport of spec.homeAirports) {
       const f = reverse ? model.fare(cityCodes[city], airport, date) : model.fare(airport, cityCodes[city], date);
-      if (f !== null && (best === null || f < best.price)) best = { price: f, airport };
+      if (f === null) continue;
+      const test = model.testAirlineOnly?.(airport) ?? false;
+      const better = best === null || (best.test && !test) || (best.test === test && f < best.price);
+      if (better) best = { price: f, airport, test };
     }
-    return best;
+    return best && { price: best.price, airport: best.airport };
   };
   const outbound = cheapestHome(ordering[0], false, dates.outbound);
   const ret = spec.returnToHome ? cheapestHome(ordering[ordering.length - 1], true, dates.ret) : null;

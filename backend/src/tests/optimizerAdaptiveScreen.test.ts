@@ -16,11 +16,16 @@
  * Fares come from helpers/fareModel.ts: per-route bases moved at
  * most ±30% by the date, so `exhaustive()` there is the old optimizer's
  * answer and the screen's lower bound always holds.
+ *
+ * Duffel's LIVE mode (a `duffel_live_` token): a metro search answers for its
+ * airports, which is what the fare model does. Production's TEST token, where
+ * it answers placeholders, and the plan's 42-search budget are
+ * optimizerSearchBudget.test.ts.
  */
 
 jest.mock('../config/env', () => ({
   env: {
-    DUFFEL_ACCESS_TOKEN: 'test_token',
+    DUFFEL_ACCESS_TOKEN: 'duffel_live_jest',
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'test_key',
     DB_REST_BASE_URL: 'https://v6.db.transport.rest',
@@ -174,9 +179,12 @@ describe('a cold 5-city optimize (Chicago, ORD + MDW)', () => {
     for (let i = 0; i < FIVE.length - 1; i++) {
       expect(asked).toContain(`${mockCodes[FIVE[i]]}>${mockCodes[FIVE[i + 1]]}@${dates.legs[i]}#4`);
     }
-    const ranked = exhaustive(spec, model, mockCodes);
-    const naive = ranked.find((r) => r.ordering.join('|') === FIVE.join('|'))!;
-    expect(result.savingsVsNaive).toBeCloseTo(Math.max(0, naive.totalCost - ranked[0].totalCost), 6);
+    // Against the winner it chose, priced exactly: under the plan's search
+    // budget that need not be the exhaustive winner (optimizerSearchBudget).
+    const naive = priceExactly(spec, model, mockCodes, FIVE);
+    const chosen = priceExactly(spec, model, mockCodes, result.bestRoute.ordering);
+    expect(result.bestRoute.totalCost).toBeCloseTo(chosen.totalCost, 6);
+    expect(result.savingsVsNaive).toBeCloseTo(Math.max(0, naive.totalCost - chosen.totalCost), 6);
   }, 30000);
 
   it('returns only routes it priced exactly, best first', async () => {
@@ -265,9 +273,11 @@ describe('home flights from a metro: one search per city and direction', () => {
     expect(home).toHaveLength(8);
   }, 30000);
 
-  it("London: a metro answer with none of the user's airports in it is searched again per airport", async () => {
+  it("London: a metro answer with none of the user's airports in it falls back to the first airport; the winner's flights search the rest", async () => {
     // Duffel's city search answering only for City and Southend (say it
     // capped its offers) must not read as "no flight from LHR/LGW/STN".
+    // Ranking then reads LHR alone (one more search per city and direction,
+    // not one per airport), and the winner's home flights search LGW and STN.
     const spec = trip(FIVE.slice(0, 4), 'London', ['LHR', 'LGW', 'STN'], 10);
     const model = createFareModel({
       seed: 43,
@@ -288,11 +298,19 @@ describe('home flights from a metro: one search per city and direction', () => {
 
     const result = await run(spec);
 
-    const best = exhaustive(spec, model, mockCodes)[0];
-    expect(result.bestRoute.ordering).toEqual(best.ordering);
-    expect(result.outboundLeg?.originAirport).toBe(best.outbound!.airport);
-    expect(result.outboundLeg?.price).toBe(best.outbound!.price);
-    expect(result.returnLeg?.destAirport).toBe(best.ret!.airport);
+    // Every city and direction is priced, from LHR — none is written off.
+    const home = distinct().filter((s) => [s.origin, s.destination].some((c) => ['LON', 'LHR', 'LGW', 'STN'].includes(c)));
+    const viaLhr = home.filter((s) => s.origin === 'LHR' || s.destination === 'LHR');
+    expect(viaLhr).toHaveLength(8);
+    expect(result.bestRoute.legs.every((leg) => leg.cost !== Infinity)).toBe(true);
+    // The card: the cheapest of all three airports for the winner.
+    const exact = priceExactly(spec, model, mockCodes, result.bestRoute.ordering);
+    expect(result.outboundLeg?.originAirport).toBe(exact.outbound!.airport);
+    expect(result.outboundLeg?.price).toBe(exact.outbound!.price);
+    expect(result.returnLeg?.destAirport).toBe(exact.ret!.airport);
+    expect(result.returnLeg?.price).toBe(exact.ret!.price);
+    // 8 LON + 8 LHR, and LGW + STN for the winner's two flights.
+    expect(home).toHaveLength(8 + 8 + 4);
   }, 30000);
 
   it("Washington: an airport the metro answer left out (BWI) is still searched for the winner's home flights", async () => {
@@ -339,19 +357,23 @@ describe('home flights from a metro: one search per city and direction', () => {
     expect(bwiAlone).toHaveLength(2);
   }, 30000);
 
-  it('Boston (BOS + PVD, no metro code): one search per airport, as before', async () => {
+  it("Boston (BOS + PVD, no metro code): ranked on BOS, the winner's flights from PVD too", async () => {
     const spec = trip(FIVE.slice(0, 4), 'Boston', ['BOS', 'PVD'], 10);
     const model = createFareModel({ seed: 23, swing: 0.3, cityCodes: mockCodes, homeAirports: ['BOS', 'PVD'], travelers: 4 });
     useFares(model);
 
     const result = await run(spec);
 
+    // Before: every airport for every city and direction (16). Now one
+    // search each on the first airport, and PVD for the winner's two.
     const home = distinct().filter((s) => [s.origin, s.destination].some((c) => ['BOS', 'PVD'].includes(c)));
-    expect(home).toHaveLength(4 * 2 * 2);
-    const best = exhaustive(spec, model, mockCodes)[0];
-    expect(result.bestRoute.ordering).toEqual(best.ordering);
-    expect(result.outboundLeg?.originAirport).toBe(best.outbound!.airport);
-    expect(result.returnLeg?.destAirport).toBe(best.ret!.airport);
+    expect(home.filter((s) => s.origin === 'BOS' || s.destination === 'BOS')).toHaveLength(4 * 2);
+    expect(home).toHaveLength(4 * 2 + 2);
+    const exact = priceExactly(spec, model, mockCodes, result.bestRoute.ordering);
+    expect(result.outboundLeg?.originAirport).toBe(exact.outbound!.airport);
+    expect(result.outboundLeg?.price).toBe(exact.outbound!.price);
+    expect(result.returnLeg?.destAirport).toBe(exact.ret!.airport);
+    expect(result.returnLeg?.price).toBe(exact.ret!.price);
   }, 30000);
 });
 
@@ -441,11 +463,12 @@ describe('4+ cities: no date-shift probe', () => {
   }, 30000);
 });
 
-describe('quality gate, CI-sized: same winner as pricing every ordering', () => {
+describe('quality gate, CI-sized: the winner pricing every ordering finds, or within 3% of it', () => {
   // The full gate (thousands of trials, ±30% and ±50%, 2- and 3-airport
   // metros) is backend/scripts/opt-speed/; this keeps a slice of it in CI.
   it.each([[4], [5]])('%i cities, ±30% date swing, 12 random trips', async (n) => {
     let totalSearches = 0;
+    let different = 0;
     for (let seed = 100; seed < 112; seed++) {
       searched = [];
       const spec = trip(FIVE.slice(0, n), 'Chicago', ['ORD', 'MDW'], 2 * n + 2);
@@ -455,12 +478,22 @@ describe('quality gate, CI-sized: same winner as pricing every ordering', () => 
       const result = await run(spec);
 
       const best = exhaustive(spec, model, mockCodes)[0];
-      expect(result.bestRoute.ordering).toEqual(best.ordering);
-      expect(result.outboundLeg?.originAirport).toBe(best.outbound!.airport);
-      expect(result.returnLeg?.destAirport).toBe(best.ret!.airport);
+      const chosen = priceExactly(spec, model, mockCodes, result.bestRoute.ordering);
+      // Under the search budget a 5-city plan may stop before it can prove
+      // its winner (gate: ~2% of ±30% plans pick another, the worst ~4-5%
+      // dearer); 4 cities never do.
+      if (result.bestRoute.ordering.join('|') !== best.ordering.join('|')) different++;
+      expect(chosen.rankCost).toBeLessThanOrEqual(best.rankCost * 1.03);
+      expect(result.outboundLeg?.originAirport).toBe(chosen.outbound!.airport);
+      expect(result.returnLeg?.destAirport).toBe(chosen.ret!.airport);
       totalSearches += distinct().length;
+      // Every plan inside one Duffel window (PLAN_SEARCH_BUDGET).
+      expect(distinct().length).toBeLessThanOrEqual(42);
     }
     // Before: 4 cities 36 + 16 home (+ probe), 5 cities 80 + 20 (+ probe).
-    expect(totalSearches / 12).toBeLessThan(n === 4 ? 30 : BUDGET_5_CITY);
+    // 5 cities now spend most of the 42-search budget on purpose: whole
+    // orderings, six legs a round, in at most two rounds.
+    if (n === 4) expect(totalSearches / 12).toBeLessThan(30);
+    expect(different).toBeLessThanOrEqual(n === 4 ? 0 : 1);
   }, 30000);
 });

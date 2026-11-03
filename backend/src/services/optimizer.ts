@@ -1,6 +1,7 @@
 import { compareLeg, LegComparison, type CompareLegParams } from './compareLeg';
 import { getIataCode, searchFlights, type IataLookupContext } from './flights';
-import { withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
+import { isDuffelTestAirline, withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
+import { duffelLiveMode } from '../utils/duffelMode';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
@@ -555,27 +556,51 @@ const MAX_DATE_SWING = 0.3;
 const SCREEN_LOWER_BOUND = (1 - MAX_DATE_SWING) / (1 + MAX_DATE_SWING);
 
 /**
- * Best-first rounds the adaptive screen may take before it stops choosing
- * and prices, in one last round, every unpriced leg of every ordering that
- * could still beat the best exact one — the exhaustive answer, at whatever
- * that costs. Each round is one Duffel round trip (1.3-1.9s); simulated 5-city
- * trips with no country clustering needed 8-9 on average and 19-20 at the
- * 95th percentile, and reached 24 in 1-1.5% of trips (gate harness,
- * 2026-11-02); 4-city trips 2-3 on average.
+ * Most Duffel searches one 4-5 city plan may send: Duffel accepts ~45 a
+ * minute per token and stalls the rest until the window resets, so a plan
+ * that stays under this never waits on the rate limit by itself (with 3 to
+ * spare for a retry or a neighbour's search). Counted over the run's whole
+ * search ledger: home flights, screen, best-first, and the winner's own home
+ * flights, which are reserved before best-first starts.
+ *
+ * Production's shipped screen sent 79 for one 5-city Chicago plan on the
+ * test token (home 26, screen 20, exact 33 over 25 rounds) and took 54-89 s
+ * cold (2026-11-02). A 5-city plan's fixed cost is now 30 (10 home + 20
+ * screen), plus the winner's other home airports (2 from Chicago, 4 from New
+ * York), which leaves best-first 8-12.
+ *
+ * What it trades (gate, 1,000 simulated plans per row, 2026-11-02): every
+ * 5-city plan ≤ 42 and 27-31 s modelled cold (before: 38-69 on average, up
+ * to 101, and 42-102 s), but best-first can no longer always prove its
+ * winner — with ±30% fares 98% of plans still pick the exhaustive one, the
+ * worst 5% dearer; with test-mode fares (±60-80%) they are 6% dearer on
+ * average. More budget buys that back only up to the window: at 48, a
+ * quarter of 5-city plans went over 45 and stalled for most of a minute.
  */
-const MAX_EXACT_ROUNDS = 24;
+const PLAN_SEARCH_BUDGET = 42;
+
+/**
+ * Most legs one best-first round prices: flights.ts' search slots
+ * (MAX_CONCURRENT_SEARCHES). A round is one Duffel round trip (~2.6 s median
+ * on production) whether 1 or 6 searches are in it, and rounds run one
+ * after another, so pricing one leg a round made production's 25 rounds
+ * ≈ 65 s on their own.
+ */
+const EXACT_ROUND_WIDTH = 6;
 
 /**
  * Metro codes Duffel searches as one city, and the airports each one covers:
  * the IATA metropolitan areas behind the codes this app already sends Duffel
- * as destinations (cityAirports.ts). When two or more of a traveller's home
- * airports belong to one of these, a home flight is priced with ONE search on
- * the metro code instead of one per airport (homeSearchGroups), and each offer
- * is kept only if it flies from or to one of THEIR airports — London's search
- * also answers for City, Southend and Luton.
+ * as destinations (cityAirports.ts). On Duffel's live mode, when the
+ * traveller's first home airport and at least one more belong to one of
+ * these, a home flight is ranked with ONE search on the metro code
+ * (rankingGroup), and each offer is kept only if it flies from or to one of
+ * THEIR airports — London's search also answers for City, Southend and
+ * Luton. (On the test token a metro search answers only placeholders, so it
+ * is not used there.)
  *
- * Deliberately conservative: an airport missing here is simply searched on
- * its own, as before. Only areas whose membership is settled are listed;
+ * Deliberately conservative: an airport missing here is simply ranked on the
+ * first airport alone. Only areas whose membership is settled are listed;
  * Chicago is ORD + MDW (Gary, which the location data adds, has no airline
  * service). A city search is still not a promise to cover every member:
  * measured on Duffel 2026-11-02, WAS to Paris and to Miami answered for IAD
@@ -745,8 +770,9 @@ function countryGroupedOrderings(cities: CityInput[]): string[][] {
 }
 
 /**
- * Rank a 4-5 city trip's candidate orderings with a fraction of the Duffel
- * searches, and the same winner as pricing every one of them.
+ * Rank a 4-5 city trip's candidate orderings within a fixed number of Duffel
+ * searches: the same winner as pricing every one of them whenever the budget
+ * lets it prove that, and otherwise the best ordering it priced in full.
  *
  * Why: Duffel's test token accepts ~45 searches a minute, shared by every
  * user; the rest stall until the window resets, up to a minute later.
@@ -766,17 +792,28 @@ function countryGroupedOrderings(cities: CityInput[]): string[][] {
  *     in the candidate ordering with the cheapest home flights that contains
  *     it (ties: permutation order). Those are the orderings most likely to
  *     win, so a screen fare is often already the exact one they need.
- *  3. Best-first. Every ordering gets an optimistic estimate: a leg priced on
- *     its own day at full value (UNAVAILABLE_LEG_PENALTY if nothing flies),
- *     any other leg at SCREEN_LOWER_BOUND × the highest fare its route showed
- *     on any day — the most it can drop — or 0 if it showed none, and home
- *     flights at full value (UNAVAILABLE_HOME_LEG_PENALTY if none). While the
- *     cheapest estimate is not fully priced, price its unpriced legs on their
- *     own days: the most uncertain first, and only as many as would lift it
- *     above the runner-up if each came in at its screen fare (always at least
- *     one). When the cheapest estimate is fully priced, nothing else can be
- *     cheaper: it is the exhaustive winner, and ties break by permutation
- *     order as the old stable sort did.
+ *  3. Best-first. Every ordering gets a bound — the least it could cost: a
+ *     leg priced on its own day at full value (UNAVAILABLE_LEG_PENALTY if
+ *     nothing flies), any other leg at SCREEN_LOWER_BOUND × the highest fare
+ *     its route showed on any day — the most it can drop — or 0 if it showed
+ *     none, and home flights at full value (UNAVAILABLE_HOME_LEG_PENALTY if
+ *     none). Every ordering whose bound is below the best fully priced one's
+ *     total could still beat it. While there are any, a round prices up to
+ *     EXACT_ROUND_WIDTH legs on their own days: every unpriced leg of the
+ *     one LIKELIEST to be cheap (each unpriced leg at the average fare its
+ *     route showed), then of the next, and so on — whole orderings, so every
+ *     round leaves fully priced candidates behind. When none is left, the
+ *     best fully priced ordering is the exhaustive winner, and ties break by
+ *     permutation order as the old stable sort did.
+ *  4. The budget. A round only takes orderings it can price in full within
+ *     `budget.remaining()` searches; when none fits, best-first stops and
+ *     the best FULLY PRICED ordering wins — not proven, by design: proving it
+ *     took production's 5-city Chicago plan 25 rounds and 33 searches on
+ *     Duffel's test token, whose fares swing ±60-80% between dates, and a
+ *     ±30% plan up to 20-30 searches in the tail. There is always such an
+ *     ordering once the typed order is a candidate (it is priced in step 1);
+ *     when it is not one (the country filter dropped it), the first
+ *     contender is priced in full whatever the budget says.
  *
  * Unavailable legs are charged exactly as scoring charges them: the winner's
  * legs are always priced on their own days, and a leg with nothing on its
@@ -787,18 +824,16 @@ function countryGroupedOrderings(cities: CityInput[]): string[][] {
  * route-days missing it picked a different winner 4.6% of the time, up to
  * 48% dearer.)
  *
- * Bounds: one round prices at most cities − 1 legs, and is one Duffel round
- * trip. After MAX_EXACT_ROUNDS it stops choosing: one sweep prices every
- * unpriced leg of every ordering whose estimate is below the best exact one
- * (a sweep repeats only if a sweep's prices bring another ordering's
- * estimate below that; each prices at least one new leg, so at worst every
- * leg exhaustive pricing would). Deterministic: the same fares give the same
- * searches and answer.
+ * Bounds: one round prices at most EXACT_ROUND_WIDTH legs and is one Duffel
+ * round trip; every round prices at least one new leg, and none goes past the
+ * budget (5 cities: 2 rounds at most but for the rare forced one; see
+ * PLAN_SEARCH_BUDGET). Deterministic: the same fares give the same searches
+ * and answer.
  *
  * Returns the orderings proven best, best first: the winner, then each next
  * one that is already fully priced with nothing able to undercut it — at most
  * three, at no extra search. One is normal; see optimize() for why routes[1..2]
- * need not be bought.
+ * need not be bought. After a budget stop, only the winner.
  */
 async function rankByAdaptiveScreen(args: {
   /** Candidate orderings, in permutation order (the order ties break in). */
@@ -811,7 +846,9 @@ async function rankByAdaptiveScreen(args: {
   priceLeg: (from: string, to: string, i: number, phase: 'screen' | 'exact') => Promise<number>;
   /** Each ordering's home flights, penalties applied, in scoring's order (outbound, return). */
   homeCosts: Promise<(ordering: string[]) => number[]>;
-}): Promise<{ ranked: string[][]; rounds: number; sweeps: number }> {
+  /** Searches best-first may still send (read before each round); omitted: no limit. */
+  budget?: { remaining: () => number };
+}): Promise<{ ranked: string[][]; rounds: number; budgetStop: boolean }> {
   const { orderings, typed, legDate, priceLeg } = args;
   const routeOf = (from: string, to: string) => `${from}\u0000${to}`;
   const legOf = (from: string, to: string, i: number) => `${routeOf(from, to)}\u0000${legDate(i)}`;
@@ -821,6 +858,12 @@ async function rankByAdaptiveScreen(args: {
   /** Highest fare a route showed on any day it was priced (none: no fare yet). */
   const highest = new Map<string, number>();
   const pending = new Map<string, Promise<void>>();
+  /** The fares a route showed, on any day (for the expected cost of a day not priced yet). */
+  const seen = new Map<string, { sum: number; n: number }>();
+  /** The same, over every route. */
+  const seenAll = { sum: 0, n: 0 };
+  /** Routes priced at least once, fare or not. */
+  const pricedRoutes = new Set<string>();
   const price = (from: string, to: string, i: number, phase: 'screen' | 'exact'): Promise<void> => {
     const key = legOf(from, to, i);
     let asked = pending.get(key);
@@ -828,7 +871,14 @@ async function rankByAdaptiveScreen(args: {
       asked = priceLeg(from, to, i, phase).then((cost) => {
         exact.set(key, cost);
         const route = routeOf(from, to);
+        pricedRoutes.add(route);
         if (cost !== Infinity && cost > (highest.get(route) ?? -Infinity)) highest.set(route, cost);
+        if (cost !== Infinity) {
+          const fares = seen.get(route) ?? { sum: 0, n: 0 };
+          seen.set(route, { sum: fares.sum + cost, n: fares.n + 1 });
+          seenAll.sum += cost;
+          seenAll.n++;
+        }
       });
       pending.set(key, asked);
     }
@@ -859,72 +909,111 @@ async function rankByAdaptiveScreen(args: {
   await Promise.all([...typedLegs, ...[...screenDay.values()].map((s) => price(s.from, s.to, s.i, 'screen'))]);
 
   // 3. Best-first.
+  /**
+   * What an unpriced day of `route` is expected to cost: the average fare it
+   * showed; UNAVAILABLE_LEG_PENALTY if it was priced and showed none (it may
+   * fly on other days, but spending the budget on it first left plans with a
+   * missing leg when a fully flown ordering existed: 4.6% of 5-city plans
+   * with 5% of routes and route-days missing, gate 2026-11-02); every
+   * route's average if never priced.
+   */
+  const expected = (route: string) => {
+    const fares = seen.get(route);
+    if (fares) return fares.sum / fares.n;
+    if (pricedRoutes.has(route)) return UNAVAILABLE_LEG_PENALTY;
+    return seenAll.n > 0 ? seenAll.sum / seenAll.n : 0;
+  };
   const estimate = (idx: number) => {
     const o = orderings[idx];
     let total = 0;
+    let likely = 0;
     const open: Array<{ i: number; slack: number }> = [];
     for (let i = 0; i < o.length - 1; i++) {
       const cost = exact.get(legOf(o[i], o[i + 1], i));
       if (cost !== undefined) {
-        total += cost === Infinity ? UNAVAILABLE_LEG_PENALTY : cost;
+        const charged = cost === Infinity ? UNAVAILABLE_LEG_PENALTY : cost;
+        total += charged;
+        likely += charged;
         continue;
       }
       const route = routeOf(o[i], o[i + 1]);
       const high = highest.get(route);
+      likely += expected(route);
       if (high !== undefined) {
         total += SCREEN_LOWER_BOUND * high;
         open.push({ i, slack: (1 - SCREEN_LOWER_BOUND) * high });
       } else {
         // Nothing known about this day: the route was never priced, or had
         // no fare on the day(s) it was — and a route that does not fly
-        // daily may well fly on this one. No bound, then: 0, priced first
-        // when its ordering is the cheapest estimate. A leg that turns out
-        // to have nothing on its own day is UNAVAILABLE_LEG_PENALTY, as in
-        // scoring, so it never wins by being missing.
+        // daily may well fly on this one. No bound, then: 0. A leg that
+        // turns out to have nothing on its own day is
+        // UNAVAILABLE_LEG_PENALTY, as in scoring, so it never wins by being
+        // missing.
         open.push({ i, slack: Infinity });
       }
     }
-    for (const c of home[idx]) total += c;
-    return { idx, total, open };
+    for (const c of home[idx]) {
+      total += c;
+      likely += c;
+    }
+    return { idx, total, likely, open };
   };
 
-  let rounds = 0;
-  let sweeps = 0;
-  for (;;) {
-    const est = orderings.map((_, idx) => estimate(idx));
-    let top = 0;
-    for (let k = 1; k < est.length; k++) if (est[k].total < est[top].total) top = k;
-    if (est[top].open.length === 0) break;
+  // Cheapest bound first; ties in permutation order, as the old stable sort.
+  const ranking = () => orderings.map((_, idx) => estimate(idx)).sort((a, b) => a.total - b.total || a.idx - b.idx);
 
-    let legs: Array<{ idx: number; i: number }>;
-    if (rounds >= MAX_EXACT_ROUNDS) {
-      let bestExact = Infinity;
-      for (const e of est) if (e.open.length === 0 && e.total < bestExact) bestExact = e.total;
-      legs = est.filter((e) => e.open.length > 0 && e.total < bestExact).flatMap((e) => e.open.map(({ i }) => ({ idx: e.idx, i })));
-      sweeps++;
-    } else {
-      let runnerUp = Infinity;
-      for (const e of est) if (e.idx !== top && e.total < runnerUp) runnerUp = e.total;
-      const open = [...est[top].open].sort((a, b) => b.slack - a.slack || a.i - b.i);
-      legs = [];
-      let lifted = est[top].total;
-      for (const leg of open) {
-        legs.push({ idx: top, i: leg.i });
-        lifted += leg.slack;
-        if (lifted > runnerUp) break;
-      }
+  let rounds = 0;
+  let budgetStop = false;
+  for (;;) {
+    const est = ranking();
+    // Everything ahead of the best fully priced ordering could still beat
+    // it; nothing ahead of it means it is the exhaustive winner.
+    const incumbent = est.findIndex((e) => e.open.length === 0);
+    if (incumbent === 0) break;
+    // Priced in the order they are likely to cost, not in bound order: a
+    // bound is what an ordering could cost at best, and spending a limited
+    // budget on the orderings that only look cheap because most of their
+    // legs are unpriced left the budget-stopped plans with poor answers
+    // (gate, 2026-11-02, 5 cities, ±30% fares: the exhaustive winner in 92%
+    // of 200 plans in bound order, 98% of 1,000 in this one).
+    const contenders = (incumbent === -1 ? est : est.slice(0, incumbent)).sort(
+      (a, b) => a.likely - b.likely || a.idx - b.idx,
+    );
+    // No fully priced candidate yet (the typed order is not one): the first
+    // contender is priced in full whatever the budget, so there is always
+    // an answer.
+    const forced = incumbent === -1;
+    const cap = Math.min(EXACT_ROUND_WIDTH, args.budget?.remaining() ?? Infinity);
+
+    const batch = new Map<string, { idx: number; i: number }>();
+    for (const e of contenders) {
+      const fresh = e.open
+        .map(({ i }) => ({ idx: e.idx, i, key: legOf(orderings[e.idx][i], orderings[e.idx][i + 1], i) }))
+        .filter(({ key }) => !batch.has(key));
+      // Whole orderings only: a half-priced one can never be the answer.
+      if (batch.size + fresh.length > cap && !(forced && batch.size === 0)) continue;
+      for (const leg of fresh) batch.set(leg.key, leg);
+      if (batch.size >= cap) break;
     }
-    await Promise.all(legs.map(({ idx, i }) => price(orderings[idx][i], orderings[idx][i + 1], i, 'exact')));
+    if (batch.size === 0) {
+      budgetStop = true;
+      break;
+    }
+    await Promise.all([...batch.values()].map(({ idx, i }) => price(orderings[idx][i], orderings[idx][i + 1], i, 'exact')));
     rounds++;
   }
 
-  const final = orderings.map((_, idx) => estimate(idx)).sort((a, b) => a.total - b.total || a.idx - b.idx);
+  const final = ranking();
   const ranked: string[][] = [];
-  for (const e of final) {
-    if (e.open.length > 0 || ranked.length === 3) break;
-    ranked.push(orderings[e.idx]);
+  if (budgetStop) {
+    ranked.push(orderings[final.find((e) => e.open.length === 0)!.idx]);
+  } else {
+    for (const e of final) {
+      if (e.open.length > 0 || ranked.length === 3) break;
+      ranked.push(orderings[e.idx]);
+    }
   }
-  return { ranked, rounds, sweeps };
+  return { ranked, rounds, budgetStop };
 }
 
 /**
@@ -1495,58 +1584,70 @@ function toHomeFlightOffer(o: any, homeAirport: string, cityIata: string, revers
 }
 
 /**
- * How to search a set of home airports: one group per Duffel search. Two or
- * more of them in one metro (DUFFEL_METRO_AIRPORTS) are one group searched on
- * the metro code — ORD + MDW is CHI, JFK + LGA + EWR is NYC; every other
- * airport is a group of its own, searched alone as before (Boston's BOS and
- * PVD share no metro code). Groups keep the order of their first airport.
+ * The ONE search that prices a home flight for ranking, per city and
+ * direction: the traveller's first airport (their primary, as resolved) —
+ * or, on Duffel's LIVE mode, the metro code when that airport's metro
+ * (DUFFEL_METRO_AIRPORTS) covers two or more of theirs: ORD + MDW is CHI,
+ * JFK + LGA + EWR is NYC. Every other airport is left for the winner's own
+ * home flights (HomeFares.complete).
+ *
+ * Why not the metro code always: on the TEST token (production today) a CHI
+ * or NYC search answers only test-airline placeholders under the metro code
+ * itself, so every one of them fell back to its airports one by one — 26
+ * home searches instead of 10 on production's 5-city Chicago plan
+ * (2026-11-02). Why not the first airport always: it costs the same 10
+ * searches for 5 cities, but ranks blind to the other airports — on the
+ * gate's live model (each airport its own fare), even pricing every ordering
+ * with home flights ranked on the first airport alone picked the exhaustive
+ * winner in 38% of 5-city Chicago plans, 5.7% dearer on average and 45% at
+ * worst, where the metro answer is exact (backend/scripts/opt-speed/
+ * results/budget/gate-after.json, exhaustiveRankedOnFirstAirport). Why not
+ * every airport: 20-30 searches for 5 cities, half of a Duffel rate-limit
+ * window before a single inter-city leg.
  */
-function homeSearchGroups(airports: string[]): Array<{ code: string; airports: string[] }> {
-  let metro: { code: string; airports: string[] } | null = null;
-  for (const [code, members] of Object.entries(DUFFEL_METRO_AIRPORTS)) {
-    const covered = airports.filter((a) => members.includes(a));
-    if (covered.length >= 2 && (!metro || covered.length > metro.airports.length)) metro = { code, airports: covered };
-  }
-  const groups: Array<{ code: string; airports: string[] }> = [];
-  for (const airport of airports) {
-    if (metro?.airports.includes(airport)) {
-      if (airport === metro.airports[0]) groups.push(metro);
-    } else {
-      groups.push({ code: airport, airports: [airport] });
+function rankingGroup(airports: string[], metroSearch: boolean): { code: string; airports: string[] } {
+  const primary = airports[0];
+  if (metroSearch) {
+    for (const [code, members] of Object.entries(DUFFEL_METRO_AIRPORTS)) {
+      if (!members.includes(primary)) continue;
+      const covered = airports.filter((a) => members.includes(a));
+      if (covered.length >= 2) return { code, airports: covered };
     }
   }
-  return groups;
+  return { code: primary, airports: [primary] };
 }
 
 /**
- * Every home-flight offer for one city and direction from the traveller's own
+ * Home-flight offers for one city and direction from the traveller's own
  * airports, cheapest first — what both ranking (the cheapest) and the home
- * card (the top four) read on a 4+ city trip.
+ * card (the top four, after HomeFares.complete) read on a 4+ city trip.
  *
- * Same answer as searchHomeFlights, in fewer searches: airports that share a
- * metro are ONE search on the metro code (homeSearchGroups) — Chicago's ORD +
- * MDW is a single CHI search per city and direction, 10 instead of 20 for 5
- * cities. Each offer is attributed to the airport it really flies from (or to,
- * on the way back), and dropped unless that is one of the traveller's — a
- * London search also answers for City, Southend and Luton. An offer that does
- * not say which airport it uses is dropped too: it cannot be attributed. If
- * the metro search itself fails, or answers only for airports that are not
- * the traveller's (theirs crowded out of a capped answer), its airports are
- * searched one by one: a metro code Duffel refused costs searches, never
- * fares.
+ * One search (rankingGroup), then more only where that one cannot price the
+ * flight:
+ *  - A metro answer is attributed to the airport each offer really flies
+ *    from (or to, on the way back), and an offer from an airport not on the
+ *    traveller's list is dropped — a London search also answers for City,
+ *    Southend and Luton; one that does not say which airport it uses cannot
+ *    be attributed and is dropped too. If the metro search fails, or answers
+ *    only for airports that are not the traveller's (theirs crowded out of a
+ *    capped answer, or test-mode placeholders), the first airport is
+ *    searched alone instead. An empty answer means nothing flies: final.
+ *  - If what was searched has no real airline at all — nothing flies from
+ *    the first airport, or only the test airline does — the traveller's
+ *    other airports are searched too, now: ranking must not write a city off,
+ *    or rank it on a placeholder fare, when another airport may have a real
+ *    flight (withoutTestAirlineWhenRealOffered).
  *
-* A city search can also answer for some of the traveller's airports and
- * leave another out (WAS without BWI, measured). Those are returned as
- * `leftOut`: ranking reads the metro answer as it is (one search per city and
- * direction, at the risk of missing a cheaper left-out airport when choosing
- * which city goes first or last), and the winner's home flights search them
- * on their own (HomeFares.complete), so the fare the traveller sees is the
- * cheapest from every airport they listed, as before metro search.
+ * The airports not searched are `leftOut`: the winner's home flights search
+ * them (HomeFares.complete), so the fare the traveller sees is the cheapest
+ * real one from every airport they listed. Ranking reads only the searched
+ * ones, at the risk of missing a cheaper left-out airport when choosing which
+ * city goes first or last — the price of one search per city and direction.
  */
 type HomeOffers = {
-  /** Offers from the traveller's own airports, cheapest first. */
+  /** Offers from the airports searched so far, cheapest first. */
   offers: HomeFlightOffer[];
-  /** Their airports a metro answer left out while answering for others of theirs. */
+  /** Their airports not searched yet. */
   leftOut: string[];
   /** The trip city's code the searches used. */
   cityIata: string;
@@ -1560,6 +1661,8 @@ async function searchHomeOffers(ctx: RunContext, params: {
   date: string;
   travelers: number;
   reverse: boolean;
+  /** Rank on the metro code where there is one (Duffel live mode). */
+  metroSearch: boolean;
 }): Promise<HomeOffers> {
   const { tripCity, date, travelers, reverse } = params;
   const airports = homeAirportsFor(params.originAirports);
@@ -1571,6 +1674,9 @@ async function searchHomeOffers(ctx: RunContext, params: {
   } catch {
     return NO_HOME_OFFERS;
   }
+  // As in searchHomeFlights: no flight from an airport the city shares.
+  const usable = airports.filter((a) => !sameAirportArea(a, cityIata));
+  if (usable.length === 0) return { ...NO_HOME_OFFERS, cityIata };
 
   const search = (homeCode: string) =>
     ctx.flights({
@@ -1587,38 +1693,46 @@ async function searchHomeOffers(ctx: RunContext, params: {
     }
   };
 
-  const leftOut: string[] = [];
-  const perGroup = await Promise.all(
-    homeSearchGroups(airports).map(async (group) => {
-      // As in searchHomeFlights: no flight from an airport the city shares.
-      const members = group.airports.filter((a) => !sameAirportArea(a, cityIata));
-      if (members.length === 0) return [];
-      if (members.length === 1) return alone(members[0]);
-      let offers;
-      try {
-        offers = await search(group.code);
-      } catch {
-        return (await Promise.all(members.map(alone))).flat();
-      }
-      const ours = offers.flatMap((offer: any) => {
-        const real = String((reverse ? offer.destinationAirport : offer.originAirport) ?? '').toUpperCase();
-        return members.includes(real) ? [{ offer, homeAirport: real }] : [];
-      });
-      // Flights from the metro, none from the traveller's airports: they may
-      // have been crowded out of the answer (a capped offer list), so ask
-      // each airport before calling the flight missing. Costs searches only
-      // in that case; an empty answer means nothing flies and is final.
-      if (ours.length === 0 && offers.length > 0) return (await Promise.all(members.map(alone))).flat();
-      if (ours.length > 0) leftOut.push(...members.filter((a) => !ours.some((o) => o.homeAirport === a)));
-      return ours;
-    }),
-  );
+  const group = rankingGroup(usable, params.metroSearch);
+  let found: Array<{ offer: any; homeAirport: string }>;
+  let searched: string[];
+  if (group.airports.length === 1) {
+    found = await alone(group.code);
+    searched = [group.code];
+  } else {
+    let offers: any[] | null = null;
+    try {
+      offers = await search(group.code);
+    } catch {
+      // Refused: as if it had answered for none of theirs.
+    }
+    const ours = (offers ?? []).flatMap((offer: any) => {
+      const real = String((reverse ? offer.destinationAirport : offer.originAirport) ?? '').toUpperCase();
+      return group.airports.includes(real) ? [{ offer, homeAirport: real }] : [];
+    });
+    if (ours.length > 0) {
+      found = ours;
+      searched = group.airports.filter((a) => ours.some((o) => o.homeAirport === a));
+    } else if (offers && offers.length === 0) {
+      found = [];
+      searched = [...group.airports];
+    } else {
+      found = await alone(usable[0]);
+      searched = [usable[0]];
+    }
+  }
+  if (!found.some(({ offer }) => !isDuffelTestAirline(offer))) {
+    const rest = usable.filter((a) => !searched.includes(a));
+    found = [...found, ...(await Promise.all(rest.map(alone))).flat()];
+    searched = [...searched, ...rest];
+  }
+
   // One airport's test-airline fare must not undercut another's real one.
-  const all = withoutTestAirlineWhenRealOffered(perGroup.flat(), (x: any) => x.offer);
+  const all = withoutTestAirlineWhenRealOffered(found, (x) => x.offer);
   all.sort((a, b) => (a.offer.price ?? Infinity) - (b.offer.price ?? Infinity));
   return {
     offers: all.map(({ offer, homeAirport }) => toHomeFlightOffer(offer, homeAirport, cityIata, reverse)),
-    leftOut,
+    leftOut: usable.filter((a) => !searched.includes(a)),
     cityIata,
   };
 }
@@ -1626,11 +1740,13 @@ async function searchHomeOffers(ctx: RunContext, params: {
 /**
  * One run's home flights on a 4+ city trip: searchHomeOffers per city and
  * direction, each asked once. Ranking takes the cheapest of `offers`; the
- * winner's home card takes the top four of `complete`, which adds only the
- * airports a metro answer left out.
+ * winner's home card takes the top four of `complete`, which adds the
+ * airports ranking left out (one search each). `leftOut` says how many that
+ * will be, so best-first can keep them inside the plan's search budget.
  */
 type HomeFares = {
   offers(city: string, reverse: boolean): Promise<HomeFlightOffer[]>;
+  leftOut(city: string, reverse: boolean): Promise<string[]>;
   complete(city: string, reverse: boolean, searchCtx: RunContext): Promise<HomeFlightOffer[]>;
 };
 
@@ -1639,6 +1755,7 @@ function createHomeFares(
   originAirports: string[],
   travelers: number,
   dates: { outbound: string; ret: string },
+  metroSearch: boolean,
 ): HomeFares {
   const memo = new Map<string, Promise<HomeOffers>>();
   const get = (city: string, reverse: boolean): Promise<HomeOffers> => {
@@ -1651,6 +1768,7 @@ function createHomeFares(
         date: reverse ? dates.ret : dates.outbound,
         travelers,
         reverse,
+        metroSearch,
       });
       memo.set(key, hit);
     }
@@ -1658,6 +1776,7 @@ function createHomeFares(
   };
   return {
     offers: (city, reverse) => get(city, reverse).then((r) => r.offers),
+    leftOut: (city, reverse) => get(city, reverse).then((r) => r.leftOut),
     complete: async (city, reverse, searchCtx) => {
       const r = await get(city, reverse);
       if (r.leftOut.length === 0) return r.offers;
@@ -2041,15 +2160,22 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // things.
   //
   // Home flights on 4+ city trips go through `homeFares`: each city and
-  // direction searched once — on the metro code when the home airports share
-  // one (ORD + MDW → CHI) — and the winner's home cards built from the same
-  // answers. 1-3 city trips price them exactly as before.
+  // direction ranked on one search — the first home airport, or on Duffel's
+  // live mode the metro code when the home airports share one (ORD + MDW →
+  // CHI) — and the winner's home cards built from the same answers plus its
+  // other airports. 1-3 city trips price them exactly as before.
   const homeKnown = hasOrigin && resolvedOriginAirports.length > 0;
   const outboundDate = clampToFuture(startDate);
   const returnDate = clampToFuture(addDays(startDate, totalNightsResolved));
   const homeFares: HomeFares | null =
     homeKnown && cities.length >= 4
-      ? createHomeFares(ctx.phased('home'), resolvedOriginAirports, travelers, { outbound: outboundDate, ret: returnDate })
+      ? createHomeFares(
+          ctx.phased('home'),
+          resolvedOriginAirports,
+          travelers,
+          { outbound: outboundDate, ret: returnDate },
+          duffelLiveMode(),
+        )
       : null;
   const homeLegCost = (city: string, reverse: boolean): Promise<number> =>
     homeFares
@@ -2106,14 +2232,19 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   const naiveKey = naiveOrdering.join('|');
 
   // 4-5 cities with a home: the adaptive screen (rankByAdaptiveScreen) finds
-  // the same winner as scoring every permutation in well under half the
-  // searches (5 cities from Chicago: ~38 instead of 100, simulated).
-  // Everything else scores every candidate, as before.
+  // the winner scoring every permutation would, in at most
+  // PLAN_SEARCH_BUDGET searches (5 cities from Chicago: ≤ 42 instead of
+  // 100). Everything else scores every candidate, as before.
   const adaptive = hasOrigin && cities.length >= 4 && cities.length <= 5;
   let routes: ScoredRoute[];
-  let screenStats: { rounds: number; sweeps: number } | undefined;
+  let screenStats: { rounds: number; budgetStop: boolean; reserved: number } | undefined;
   if (adaptive) {
     const lastIdx = cities.length - 1;
+    // Searches the winner's home flights will still send (its first and last
+    // cities' airports ranking left out — HomeFares.complete), kept out of
+    // best-first's share of PLAN_SEARCH_BUDGET. The winner is not known yet,
+    // so: the most any first city needs plus the most any last city needs.
+    let reserved = 0;
     // Home flights for every city that can start or end the trip (and the
     // typed order's ends, which savingsVsNaive prices), searched up front.
     const homeCosts = (async () => {
@@ -2125,6 +2256,13 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         Promise.all(firstCities.map(async (c) => [c, penalised(await homeLegCost(c, false))] as const)),
         Promise.all(lastCities.map(async (c) => [c, penalised(await homeLegCost(c, true))] as const)),
       ]);
+      if (homeFares) {
+        const most = async (list: string[], reverse: boolean) =>
+          Math.max(0, ...(await Promise.all(list.map((c) => homeFares.leftOut(c, reverse)))).map((l) => l.length));
+        const candidateFirsts = [...new Set(orderings.map((o) => o[0]))];
+        const candidateLasts = returnToHome ? [...new Set(orderings.map((o) => o[lastIdx]))] : [];
+        reserved = (await most(candidateFirsts, false)) + (await most(candidateLasts, true));
+      }
       const out = new Map(outbound);
       const ret = new Map(back);
       return (o: string[]) => [out.get(o[0])!, ...(returnToHome ? [ret.get(o[lastIdx])!] : [])];
@@ -2139,8 +2277,10 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           .compare(legCompareParams(from, to, legDateAt(startDate, nightsArray, i), travelers, cityMap, ctx))
           .then(legCost),
       homeCosts,
+      // Read before each round, when every search sent so far is in the ledger.
+      budget: { remaining: () => PLAN_SEARCH_BUDGET - ctx.searchLedger.size - reserved },
     });
-    screenStats = { rounds: screen.rounds, sweeps: screen.sweeps };
+    screenStats = { rounds: screen.rounds, budgetStop: screen.budgetStop, reserved };
     // Every leg and home flight of these is priced already: no new searches.
     routes = await Promise.all(screen.ranked.map((ordering) => scoreOrderingWithHomeLegs(ordering)));
   } else {
@@ -2420,7 +2560,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     cities: cities.length,
     searches: ctx.searchLedger.size,
     byPhase,
-    ...(screenStats ? { exactRounds: screenStats.rounds, sweeps: screenStats.sweeps } : {}),
+    ...(screenStats
+      ? { exactRounds: screenStats.rounds, budgetStop: screenStats.budgetStop, reservedForHomeLegs: screenStats.reserved }
+      : {}),
   });
 
   const publicRoutes = topRoutes.map(toPublicRoute);
