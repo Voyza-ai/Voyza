@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { hotelSearchLimiter } from '../middleware/rateLimit';
-import { searchHotels, priceBreakdownSample } from '../services/hotels';
+import { searchHotels } from '../services/hotels';
 
 const router = Router();
 
@@ -26,12 +26,6 @@ router.post(
   asyncHandler(async (req, res) => {
     const input = searchSchema.parse(req.body);
     const hotels = await searchHotels(input);
-    // Diagnostic, read-only (see priceBreakdownSample): Booking's own price
-    // breakdown for the first rows, when asked for. Nothing in the app asks.
-    if (req.query.breakdown === '1') {
-      res.json({ hotels, breakdownSample: priceBreakdownSample(input) });
-      return;
-    }
     res.json({ hotels });
   }),
 );
