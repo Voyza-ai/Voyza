@@ -13,7 +13,7 @@
  *   6. Old-owner clones the (now not-owned) trip with selective body.
  *      - verifies cities copied, transports NOT copied (default).
  *      - verifies source.clone_count incremented.
- *   7. DELETE /api/users/me schedules soft-deletion.
+ *   7. Confirming an emailed deletion token schedules soft-deletion.
  *      - GET /me now reports 'pending_deletion' + scheduledDeletionAt.
  *   8. POST /me/cancel-deletion reverses it, status back to 'active'.
  *   9. GET /me/export returns a downloadable JSON with trips nested.
@@ -25,6 +25,7 @@
 
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
+import { makeDeletionToken } from '../services/accountDeletion';
 
 const API = process.env.E2E_API_URL ?? 'http://localhost:4000/api';
 const SUPABASE_URL = process.env.SUPABASE_URL!;
@@ -235,17 +236,39 @@ async function main() {
     const { data: cloneRow } = await admin.from('trips').select('cloned_from_trip_id').eq('id', cloneId).single();
     assert(cloneRow?.cloned_from_trip_id === tripId, 'cloned_from_trip_id set correctly');
 
-    // ─── 7. Soft-delete ─────────────────────────────────────
-    console.log('\n7. DELETE /users/me — soft delete');
-    const del = await api(owner.token, 'DELETE', '/users/me', { reason: 'e2e test' });
-    assert(del.status === 200, 'delete 200', del);
+    // ─── 7. Soft-delete (two-step: request → emailed link → confirm) ──
+    // Step 1 emails a link, which an e2e run can't read — and these
+    // throwaway addresses don't receive mail. So mint the token the way
+    // requestDeletion() does and store its hash with the admin client, then
+    // exercise the real confirm endpoint (step 2).
+    console.log('\n7. Deletion: confirm via emailed token');
+    const { token: delToken, hash } = makeDeletionToken(owner.id);
+    await admin
+      .from('user_profiles')
+      .update({
+        preferences: {
+          deletionRequest: {
+            tokenHash: hash,
+            requestedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            reason: 'e2e test',
+          },
+        },
+      })
+      .eq('id', owner.id);
+    const del = await api(owner.token, 'POST', '/email/confirm-deletion', { token: delToken });
+    assert(del.status === 200, 'confirm 200', del);
     assert(del.body.accountStatus === 'pending_deletion', 'status=pending_deletion');
     assert(!!del.body.scheduledDeletionAt, 'scheduledDeletionAt returned');
     assert(del.body.alreadyScheduled === false, 'alreadyScheduled=false first time');
 
-    // Repeat call should be idempotent (alreadyScheduled=true).
-    const delAgain = await api(owner.token, 'DELETE', '/users/me');
-    assert(delAgain.body.alreadyScheduled === true, 'second delete is idempotent');
+    // The link is single-use.
+    const delAgain = await api(owner.token, 'POST', '/email/confirm-deletion', { token: delToken });
+    assert(delAgain.status === 400, 'reusing the link is rejected');
+
+    // A request while already pending reports the existing schedule.
+    const reqAgain = await api(owner.token, 'POST', '/users/me/deletion-request');
+    assert(reqAgain.body.alreadyScheduled === true, 'request while pending is idempotent');
 
     const mePending = await api(owner.token, 'GET', '/users/me');
     assert(mePending.body.accountStatus === 'pending_deletion', 'GET /me reports pending_deletion');

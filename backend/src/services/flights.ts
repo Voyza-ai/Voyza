@@ -213,7 +213,9 @@ function rateLimitedError(waitMs: number): Error {
   return err;
 }
 
-async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
+/** Exported for the booking quote (services/booking.ts), which re-searches
+ *  a leg and must ride out the same 429/5xx blips a search does. */
+export async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
   // A caller doing optional work may cap it lower (see duffelBudget.ts).
   const budget = Math.min(MAX_TOTAL_RETRY_WAIT_MS, currentDuffelRetryBudget() ?? Infinity);
   let waited = 0;

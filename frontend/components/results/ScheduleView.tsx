@@ -219,6 +219,7 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
               date={iso}
               city={city}
               cityIndex={cityIndex}
+              trip={trip}
               events={events}
               travelMode={travelByDate.get(iso) ?? null}
               onOpenEditor={() => setEditorDate(iso)}

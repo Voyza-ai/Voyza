@@ -68,13 +68,39 @@ describe('Connector', () => {
     expect(screen.getByText('1 carry-on + 1 personal item')).toBeInTheDocument();
   });
 
-  it('shows Book button with correct URL in expanded view', () => {
+  it('a dated flight books in-app; its external link stays as a compare link', () => {
     render(
       <Connector transport={mockTransportFlight} {...baseProps} isExpanded={true} />,
     );
+    // In-app booking (Duffel): a button, not a link out.
+    expect(screen.getByRole('button', { name: 'Book' })).toBeInTheDocument();
+    const compare = screen.getByLabelText('Compare on Google Flights');
+    expect(compare).toHaveAttribute('href', 'https://ryanair.example.com/booking');
+    expect(compare).toHaveAttribute('target', '_blank');
+  });
+
+  it('a train keeps its Book deep link (no in-app booking)', () => {
+    render(
+      <Connector
+        transport={{ ...mockTransportTrain, bookingUrl: 'https://trains.example.com/x' }}
+        {...baseProps}
+        isExpanded={true}
+      />,
+    );
     const bookLink = screen.getByText('Book').closest('a');
-    expect(bookLink).toHaveAttribute('href', 'https://ryanair.example.com/booking');
-    expect(bookLink).toHaveAttribute('target', '_blank');
+    expect(bookLink).toHaveAttribute('href', 'https://trains.example.com/x');
+    expect(screen.queryByRole('button', { name: 'Book' })).not.toBeInTheDocument();
+  });
+
+  it('an undated flight keeps the deep link', () => {
+    render(
+      <Connector
+        transport={{ ...mockTransportFlight, departDate: undefined }}
+        {...baseProps}
+        isExpanded={true}
+      />,
+    );
+    expect(screen.getByText('Book').closest('a')).toHaveAttribute('href', 'https://ryanair.example.com/booking');
   });
 
   it('shows alternative transport options in expanded view', () => {

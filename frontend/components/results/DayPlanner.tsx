@@ -19,6 +19,8 @@ import { getCityColor } from '@/lib/cityColors';
 import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
 import { useTripStore } from '@/store/tripStore';
 import { homeDepartureDay } from '@/lib/tripSpan';
+import TravelConnectors from './TravelConnectors';
+import { useDayHubs } from '@/lib/tripHubs';
 
 type DayPlannerProps = {
   trip: Trip;
@@ -88,6 +90,7 @@ export default function DayPlanner({
 }: DayPlannerProps) {
   const color = getCityColor(city.colorIndex ?? cityIndex);
   const accent = color.text;
+  const hubs = useDayHubs(trip, cityIndex, date);
 
   const addScheduledEvent = useTripStore((s) => s.addScheduledEvent);
   const updateScheduledEvent = useTripStore((s) => s.updateScheduledEvent);
@@ -401,6 +404,15 @@ export default function DayPlanner({
                 </div>
               );
             })}
+
+            {/* Travel time between consecutive located stops (POI coordinates). */}
+            <TravelConnectors
+              events={events}
+              minuteToPx={(m) => ((m - startHour * 60) / 60) * HOUR_HEIGHT}
+              accent={accent}
+              left={8}
+              hubs={hubs}
+            />
 
             {/* Current time indicator (if today) */}
             <CurrentTimeIndicator accent={accent} startHour={startHour} />

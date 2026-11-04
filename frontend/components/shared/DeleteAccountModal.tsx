@@ -1,19 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Loader2, Mail, X } from 'lucide-react';
 import {
   getCurrentUser,
-  deleteCurrentUser,
+  requestAccountDeletion,
   cancelAccountDeletion,
 } from '@/lib/api';
 
 type Props = {
   isOpen: boolean;
   onClose: () => void;
+  /** Called after the account's deletion state changes (e.g. cancelled). */
+  onChanged?: () => void;
 };
 
-type View = 'loading' | 'confirm' | 'scheduled' | 'error';
+type View = 'loading' | 'confirm' | 'emailSent' | 'scheduled' | 'error';
 
 const niceDate = (iso: string | null | undefined) =>
   iso
@@ -25,19 +27,23 @@ const niceDate = (iso: string | null | undefined) =>
     : '';
 
 /**
- * The "Delete account" flow behind the profile menu's red button.
+ * The "Delete account" flow (profile menu + Settings → Account).
  *
- * Two states, resolved on open from GET /users/me:
- *  - active account  → explain the 30-day grace period + confirm (red)
+ * States, resolved on open from GET /users/me:
+ *  - active account   → explain the 30-day grace period + "Email me a link"
+ *  - emailSent        → step 1 done: nothing is scheduled until the user
+ *                       clicks the emailed link (/settings/confirm-deletion)
  *  - pending_deletion → show the countdown + "Keep my account" (cancel)
  *
- * Deleting schedules anonymization 30 days out (GDPR erasure) — the user
- * stays signed in through the grace period and can cancel from this same
- * modal any time. A self-notification with the same info lands in the bell.
+ * Confirming the link schedules anonymization 30 days out (GDPR erasure) —
+ * the user stays signed in through the grace period and can cancel from
+ * here any time. A self-notification with the same info lands in the bell.
  */
-export default function DeleteAccountModal({ isOpen, onClose }: Props) {
+export default function DeleteAccountModal({ isOpen, onClose, onChanged }: Props) {
   const [view, setView] = useState<View>('loading');
   const [scheduledAt, setScheduledAt] = useState<string | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [errorText, setErrorText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -55,7 +61,9 @@ export default function DeleteAccountModal({ isOpen, onClose }: Props) {
         }
       })
       .catch(() => {
-        if (!disposed) setView('error');
+        if (disposed) return;
+        setErrorText(null);
+        setView('error');
       });
     return () => {
       disposed = true;
@@ -68,10 +76,16 @@ export default function DeleteAccountModal({ isOpen, onClose }: Props) {
     if (busy) return;
     setBusy(true);
     try {
-      const res = await deleteCurrentUser();
-      setScheduledAt(res.scheduledDeletionAt);
-      setView('scheduled');
-    } catch {
+      const res = await requestAccountDeletion();
+      if (res.alreadyScheduled) {
+        setScheduledAt(res.scheduledDeletionAt ?? null);
+        setView('scheduled');
+      } else {
+        setSentTo(res.email ?? null);
+        setView('emailSent');
+      }
+    } catch (err) {
+      setErrorText(err instanceof Error ? err.message : null);
       setView('error');
     } finally {
       setBusy(false);
@@ -83,6 +97,7 @@ export default function DeleteAccountModal({ isOpen, onClose }: Props) {
     setBusy(true);
     try {
       await cancelAccountDeletion();
+      onChanged?.();
       onClose();
     } catch {
       setView('error');
@@ -117,10 +132,11 @@ export default function DeleteAccountModal({ isOpen, onClose }: Props) {
             </div>
             <div className="text-[13px] text-gray-600 space-y-2.5 mb-5">
               <p>
-                Your account will be scheduled for permanent deletion, with a{' '}
-                <span className="font-medium text-gray-800">30-day grace period</span> to change
-                your mind — you stay signed in and can cancel from this menu any time before
-                then.
+                We&apos;ll email you a confirmation link first — nothing happens until you
+                click it. Once confirmed, your account is scheduled for permanent deletion with
+                a <span className="font-medium text-gray-800">30-day grace period</span> to
+                change your mind: you stay signed in and can cancel from Settings any time
+                before then.
               </p>
               <p>
                 After 30 days, your name, email, and personal details are permanently erased.
@@ -141,7 +157,30 @@ export default function DeleteAccountModal({ isOpen, onClose }: Props) {
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors"
               >
                 {busy && <Loader2 size={13} className="animate-spin" />}
-                Delete my account
+                Email me a confirmation link
+              </button>
+            </div>
+          </>
+        )}
+
+        {view === 'emailSent' && (
+          <>
+            <div className="flex items-center gap-2.5 mb-3">
+              <Mail size={20} className="text-[#2563eb]" />
+              <h2 className="text-lg font-semibold text-gray-900">Check your email</h2>
+            </div>
+            <p className="text-[13px] text-gray-600 mb-5">
+              We sent a confirmation link to{' '}
+              <span className="font-medium text-gray-800">{sentTo ?? 'your email address'}</span>.
+              Your account is only scheduled for deletion once you open it and confirm. The link
+              expires in 24 hours.
+            </p>
+            <div className="flex justify-end">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-[13px] font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                Close
               </button>
             </div>
           </>
@@ -179,7 +218,7 @@ export default function DeleteAccountModal({ isOpen, onClose }: Props) {
 
         {view === 'error' && (
           <p className="py-6 text-center text-[13px] text-gray-500">
-            Something went wrong — close this and try again.
+            {errorText || 'Something went wrong — close this and try again.'}
           </p>
         )}
       </div>

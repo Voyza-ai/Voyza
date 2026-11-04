@@ -346,6 +346,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                   <div className="flex items-center flex-shrink-0 mx-2">
                     <Connector
                       transport={city.transportOut}
+                      legDate={city.dates?.departure}
                       index={idx}
                       cityIndex={idx}
                       isExpanded={openConnectors.has(idx)}

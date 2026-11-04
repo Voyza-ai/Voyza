@@ -8,6 +8,7 @@ import { AppError } from '../middleware/error';
 import { parseDurationMinutes } from '../utils/duration';
 import { buildTripFromDb, tripDateRange } from '../utils/tripShape';
 
+import { recommendationDefaultFor } from '../services/accountDeletion';
 const router = Router();
 
 // ─── POST /api/trips — Save a new trip ──────────────────────
@@ -92,6 +93,8 @@ router.post(
       return_to_home: body.returnToHome ?? true,
       outbound_leg: body.outboundLeg ?? null,
       return_leg: body.returnLeg ?? null,
+      // Settings → Privacy global default (opt-out; true when never set).
+      allow_recommendations: await recommendationDefaultFor(user.id),
     };
     // Back-home overrides — only written when actually set, so trips that
     // never use the feature don't touch the (migration-003) columns.
@@ -657,7 +660,8 @@ router.post(
         // its new owner never granted (and would have made the new
         // `allow_clones` default in migration 009 a no-op for clones).
         allow_clones: false,
-        allow_recommendations: true,
+        // The NEW owner's Settings → Privacy default, not the source's.
+        allow_recommendations: await recommendationDefaultFor(user.id),
         is_public: false,
       })
       .select()

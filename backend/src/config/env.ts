@@ -33,6 +33,13 @@ const envSchema = z.object({
 
   // Providers — optional during early development
   DUFFEL_ACCESS_TOKEN: z.string().optional(),
+  // In-app booking (services/booking.ts) refuses to run on a LIVE Duffel
+  // token unless this is exactly "true": a live order is real money and a
+  // real ticket. A duffel_test_ token books in test mode regardless.
+  BOOKING_LIVE_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v.trim().toLowerCase() === 'true'),
 
   // Hotels (RapidAPI / Booking.com)
   RAPIDAPI_KEY: z.string().optional(),
@@ -45,6 +52,13 @@ const envSchema = z.object({
   // at go-live together with a live-scoped key.
   ALLABOARD_API_KEY: z.string().optional(),
   ALLABOARD_API_URL: z.string().default('https://test.api-gateway.allaboard.eu'),
+
+  // Points of interest for the geo-aware day planner (services/places).
+  // Both optional: Google wins when set (and also unlocks Distance Matrix
+  // travel times), then Foursquare; with neither, the keyless OpenStreetMap
+  // Nominatim fallback is used (1 request/second, cached in-process).
+  GOOGLE_PLACES_API_KEY: z.string().optional(),
+  FOURSQUARE_API_KEY: z.string().optional(),
 
   // Frontend URL for invite links and redirects
   FRONTEND_URL: z.string().default('http://localhost:3000'),

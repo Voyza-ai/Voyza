@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/authStore';
 import LoginModal from '@/components/shared/LoginModal';
 import NotificationBell from '@/components/shared/NotificationBell';
 import DeleteAccountModal from '@/components/shared/DeleteAccountModal';
+import { getCurrentUser } from '@/lib/api';
 
 type NavbarProps = {
   minimal?: boolean;
@@ -21,10 +22,30 @@ type NavbarProps = {
 export default function Navbar({ minimal = false, tabs }: NavbarProps) {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
+  const avatarUrl = useAuthStore((s) => s.avatarUrl);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // The profile photo lives on the profile row, not the auth user — fetch it
+  // once per signed-in user. Settings updates the store directly on change.
+  useEffect(() => {
+    if (!user || avatarUrl !== undefined) return;
+    let live = true;
+    getCurrentUser()
+      .then((p) => {
+        if (live && useAuthStore.getState().user?.id === user.id) {
+          useAuthStore.getState().setAvatarUrl(p.avatarUrl ?? null);
+        }
+      })
+      .catch(() => {
+        /* initials stay — a failed photo fetch is not worth an error */
+      });
+    return () => {
+      live = false;
+    };
+  }, [user, avatarUrl]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -79,10 +100,15 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium transition-opacity hover:opacity-80"
+            aria-label="Account menu"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium transition-opacity hover:opacity-80 overflow-hidden"
             style={{ background: 'rgba(255,255,255,0.2)' }}
           >
-            {initials}
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" className="w-full h-full object-cover" data-testid="navbar-avatar" />
+            ) : (
+              initials
+            )}
           </button>
 
           {dropdownOpen && (
@@ -103,6 +129,13 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
                 className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Explore trips
+              </Link>
+              <Link
+                href="/settings"
+                onClick={() => setDropdownOpen(false)}
+                className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Settings
               </Link>
               <div className="border-t border-gray-100" />
               <button

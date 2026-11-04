@@ -4,12 +4,12 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import DeleteAccountModal from '@/components/shared/DeleteAccountModal';
 import {
   getCurrentUser,
-  deleteCurrentUser,
+  requestAccountDeletion,
   cancelAccountDeletion,
 } from '@/lib/api';
 
 const mockedMe = getCurrentUser as jest.MockedFunction<typeof getCurrentUser>;
-const mockedDelete = deleteCurrentUser as jest.MockedFunction<typeof deleteCurrentUser>;
+const mockedDelete = requestAccountDeletion as jest.MockedFunction<typeof requestAccountDeletion>;
 const mockedCancel = cancelAccountDeletion as jest.MockedFunction<typeof cancelAccountDeletion>;
 
 const activeMe = {
@@ -28,10 +28,11 @@ beforeEach(() => {
   mockedMe.mockResolvedValue(activeMe);
   mockedDelete.mockResolvedValue({
     success: true,
-    accountStatus: 'pending_deletion',
-    deletedAt: '2026-09-29T00:00:00Z',
-    scheduledDeletionAt: '2026-10-29T12:00:00Z',
+    confirmationSent: true,
     alreadyScheduled: false,
+    accountStatus: 'active',
+    email: 'test@test.com',
+    expiresAt: '2026-09-30T00:00:00Z',
   });
   mockedCancel.mockResolvedValue({ success: true });
 });
@@ -43,16 +44,23 @@ describe('DeleteAccountModal', () => {
     expect(mockedMe).not.toHaveBeenCalled();
   });
 
-  it('active account: shows the grace-period warning and confirms deletion', async () => {
+  it('active account: deleting only emails a confirmation link (step 1 of 2)', async () => {
     render(<DeleteAccountModal isOpen onClose={jest.fn()} />);
     expect(await screen.findByText('Delete your account?')).toBeInTheDocument();
     expect(screen.getByText(/30-day grace period/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Delete my account'));
+    fireEvent.click(screen.getByText('Email me a confirmation link'));
     await waitFor(() => expect(mockedDelete).toHaveBeenCalled());
-    // Flips to the scheduled view with the real date.
-    expect(await screen.findByText('Deletion scheduled')).toBeInTheDocument();
-    expect(screen.getByText(/October 29, 2026/)).toBeInTheDocument();
+    expect(await screen.findByText('Check your email')).toBeInTheDocument();
+    expect(screen.getByText('test@test.com')).toBeInTheDocument();
+    expect(screen.queryByText('Deletion scheduled')).not.toBeInTheDocument();
+  });
+
+  it('shows the server message when the email could not be sent', async () => {
+    mockedDelete.mockRejectedValue(new Error("We couldn't send the confirmation email."));
+    render(<DeleteAccountModal isOpen onClose={jest.fn()} />);
+    fireEvent.click(await screen.findByText('Email me a confirmation link'));
+    expect(await screen.findByText(/couldn't send the confirmation email/)).toBeInTheDocument();
   });
 
   it('"Keep my account" on the confirm view just closes — no API call', async () => {

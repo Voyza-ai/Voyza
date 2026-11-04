@@ -120,6 +120,13 @@ describe('Navbar', () => {
     expect(link.closest('a')).toHaveAttribute('href', '/history');
   });
 
+  test('"Settings" link navigates to /settings', () => {
+    mockUser = { id: 'u1', email: 'jane@test.com', user_metadata: {} };
+    render(<Navbar />);
+    fireEvent.click(screen.getByText('J'));
+    expect(screen.getByText('Settings').closest('a')).toHaveAttribute('href', '/settings');
+  });
+
   test('"Sign out" calls authStore.signOut', () => {
     mockUser = { id: 'u1', email: 'jane@test.com', user_metadata: {} };
     render(<Navbar />);
