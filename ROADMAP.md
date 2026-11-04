@@ -740,23 +740,23 @@ for long-tail queries like "adventure trips from NYC under $1500".
 >   maps, flags, and crests are filtered out.
 > - **Row layout (owner decision 2026-10-21):** instead of horizontal-scroll rows, the
 >   category headers live inside the main grid as sections, 3 cards per row.
-- [ ] **Taxonomy**: lock the final list of vibes (beach, adventure, culture, romance, family, food+wine, etc.), budget tiers ($, $$, $$$, $$$$), duration buckets (weekend, 1 wk, 2 wk, month), origin regions (US-East, US-West, Europe, Asia). Decide combinatorially how many category pages we support vs. dynamic filters
-- [ ] **Page structure decision**: input-at-top-of-home with browse rows below, OR separate `/browse` page linked from nav. Affects how much the landing page has to do on first paint
-- [ ] **DB schema**: `preset_trips` table — inputs (vibe/budget/duration/origin-region), generated trip JSON, category tag(s), `created_at`, `refresh_status`, `hero_image_url`, `clone_count`, `impression_count`, `view_count`
-- [ ] **Editorial + SEO strategy**: which categories get dedicated landing pages (`/adventure-trips-from-nyc`), category description copy style, trending-row heuristic (last-7-day impressions? clicks? handoff rate?), staff-pick criteria
-- [ ] **SEO plan**: URL shape for category pages, meta tag strategy, sitemap entry, schema.org TravelAction markup
+- [x] **Taxonomy**: lock the final list of vibes (beach, adventure, culture, romance, family, food+wine, etc.), budget tiers ($, $$, $$$, $$$$), duration buckets (weekend, 1 wk, 2 wk, month), origin regions (US-East, US-West, Europe, Asia). Decide combinatorially how many category pages we support vs. dynamic filters
+- [x] **Page structure decision**: input-at-top-of-home with browse rows below, OR separate `/browse` page linked from nav. Affects how much the landing page has to do on first paint
+- [x] **DB schema**: `preset_trips` table — inputs (vibe/budget/duration/origin-region), generated trip JSON, category tag(s), `created_at`, `refresh_status`, `hero_image_url`, `clone_count`, `impression_count`, `view_count`
+- [x] **Editorial + SEO strategy**: which categories get dedicated landing pages (`/adventure-trips-from-nyc`), category description copy style, trending-row heuristic (last-7-day impressions? clicks? handoff rate?), staff-pick criteria
+- [x] **SEO plan**: URL shape for category pages, meta tag strategy, sitemap entry, schema.org TravelAction markup
 
 **Phase 2 — Generation pipeline**
-- [ ] **Bulk-generation prompt**: single Claude prompt that takes taxonomy inputs and produces a realistic trip (cities + activities + restaurants + budget estimate). Batch-run across all taxonomy combinations to seed the catalog
-- [ ] **Refresh job**: weekly cron to regenerate pricing on all preset trips (flights/hotels go stale). Separately update a "trending" row from real user impressions + click-through
-- [ ] **Hero image sourcing**: either stock photos keyed by first city, or a separate image-generation pass (decide in Phase 1)
+- [x] **Bulk-generation prompt**: single Claude prompt that takes taxonomy inputs and produces a realistic trip (cities + activities + restaurants + budget estimate). Batch-run across all taxonomy combinations to seed the catalog
+- [x] **Refresh job**: weekly cron to regenerate pricing on all preset trips (flights/hotels go stale). Separately update a "trending" row from real user impressions + click-through
+- [x] **Hero image sourcing**: either stock photos keyed by first city, or a separate image-generation pass (decide in Phase 1)
 
 **Phase 3 — User-facing UI**
-- [ ] **Preset trip card**: hero image, title, price range, duration, mini-flowchart preview (just the city sequence, no flight detail), category badge
-- [ ] **Browse row layout**: horizontal scroll by category ("Adventure trips from NYC", "Romance in Europe", "Culture under $2k"), matching the landing-page structure decision
-- [ ] **"Plan a similar trip" handoff**: preset click pre-fills planner answers (origin, destinations, dates, vibe, budget) and immediately runs a fresh `/api/optimize` call with today's prices. User can tweak before saving
-- [ ] **Editorial surfaces**: staff-picks row, trending-this-week row, category landing pages with editorial copy
-- [ ] **SEO implementation**: server-rendered category pages, sitemap generation, canonical URLs, rich snippet markup
+- [x] **Preset trip card**: hero image, title, price range, duration, mini-flowchart preview (just the city sequence, no flight detail), category badge
+- [x] **Browse row layout** (shipped as in-grid category sections, 3 cards per row — owner decision 2026-10-21): horizontal scroll by category ("Adventure trips from NYC", "Romance in Europe", "Culture under $2k"), matching the landing-page structure decision
+- [x] **"Plan a similar trip" handoff**: preset click pre-fills planner answers (origin, destinations, dates, vibe, budget) and immediately runs a fresh `/api/optimize` call with today's prices. User can tweak before saving
+- [x] **Editorial surfaces**: staff-picks row, trending-this-week row, category landing pages with editorial copy
+- [x] **SEO implementation**: server-rendered category pages, sitemap generation, canonical URLs, rich snippet markup
 
 ### Feature: Settings page
 - [x] `/settings` route
