@@ -40,6 +40,12 @@ export type SpotSeed = {
    * could go".
    */
   recommended?: boolean;
+  /**
+   * Coordinates the trip already carries for this place — located by the
+   * backend's POI provider when the day planner scheduled it. A seed with
+   * them is pinned as-is, with no geocoder lookup.
+   */
+  known?: GeoPoint;
 };
 
 /** A spot that resolved to real coordinates. */
@@ -271,25 +277,40 @@ export function buildCitySpots(trip: Trip, cityIndex: number): SpotSeed[] {
     });
   }
 
+  // Coordinates the day planner stored on scheduled events, by title.
+  const knownByTitle = new Map<string, GeoPoint>();
+  for (const events of Object.values(city.schedule ?? {})) {
+    for (const e of events ?? []) {
+      if (typeof e?.lat === 'number' && typeof e?.lng === 'number' && e.title && !knownByTitle.has(e.title)) {
+        knownByTitle.set(e.title, { lat: e.lat, lon: e.lng });
+      }
+    }
+  }
+
   for (const raw of city.activities ?? []) {
     const text = String(raw ?? '').trim();
     if (!text) continue;
     const kind = classifySpot(text);
+    const known = knownByTitle.get(text);
     seeds.push({
       kind,
       name: text,
       detail: kind === 'sightseeing' ? 'Sight' : 'Activity',
       query: `${cleanSpotQuery(text)}, ${scope}`,
+      ...(known ? { known } : {}),
     });
   }
 
   for (const r of city.restaurants ?? []) {
     if (!r?.name) continue;
+    const known =
+      typeof r.lat === 'number' && typeof r.lng === 'number' ? { lat: r.lat, lon: r.lng } : undefined;
     seeds.push({
       kind: 'restaurant',
       name: r.name,
       detail: [r.cuisine, r.priceRange].filter(Boolean).join(' · ') || 'Restaurant',
       query: `${cleanSpotQuery(r.name)}, ${scope}`,
+      ...(known ? { known } : {}),
     });
   }
 
@@ -402,9 +423,38 @@ export function buildRecommendedSpots(
 export async function geocodeSpots(
   seeds: SpotSeed[],
   cityCenter: GeoPoint,
+  /** Called at once with the spots the trip already has coordinates for, before any lookup. */
+  onPreLocated?: (spots: Spot[]) => void,
 ): Promise<{ spots: Spot[]; dropped: string[] }> {
   if (seeds.length === 0) return { spots: [], dropped: [] };
 
+  // Already located by the backend's POI provider: pinned where it said,
+  // with no browser-side lookup. Still held to the same distance guard.
+  const preLocated: Spot[] = [];
+  const toLookUp: SpotSeed[] = [];
+  for (const seed of seeds) {
+    if (seed.known && distanceKm(cityCenter, seed.known) <= MAX_SPOT_KM) {
+      const { known, ...rest } = seed;
+      preLocated.push({ ...rest, point: known });
+    } else {
+      toLookUp.push(seed);
+    }
+  }
+  if (toLookUp.length === 0) return { spots: preLocated, dropped: [] };
+  if (preLocated.length > 0) onPreLocated?.(preLocated);
+  const looked = await geocodeSpotsByName(toLookUp, cityCenter);
+  const order = new Map(seeds.map((s, i) => [s.name, i]));
+  const spots = [...preLocated, ...looked.spots].sort(
+    (a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0),
+  );
+  return { spots, dropped: looked.dropped };
+}
+
+/** The geocoder path of `geocodeSpots`, for seeds the trip has no coordinates for. */
+async function geocodeSpotsByName(
+  seeds: SpotSeed[],
+  cityCenter: GeoPoint,
+): Promise<{ spots: Spot[]; dropped: string[] }> {
   /** Turn a geocoder hit into a Spot, or null if it fails the sanity checks. */
   const accept = (seed: SpotSeed, p: GeoPlace | null, shortened = false): Spot | null => {
     if (!p || distanceKm(cityCenter, p) > MAX_SPOT_KM) return null;

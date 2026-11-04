@@ -31,6 +31,7 @@ jest.mock('@/lib/api', () => ({
   searchRestaurants: jest.fn(),
   saveTrip: jest.fn().mockResolvedValue({ tripId: 'trip-9', trip: {} }),
   fetchHomeLegs: jest.fn(),
+  resolvePlaces: jest.fn().mockResolvedValue({ provider: 'osm', places: [] }),
 }));
 
 import React from 'react';

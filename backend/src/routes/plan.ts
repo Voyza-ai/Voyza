@@ -27,6 +27,14 @@ import { parseDurationMinutes } from '../utils/duration';
 import { todayIso } from '../utils/dates';
 
 import { getAnthropicSafe } from '../services/anthropic';
+import {
+  cachedPlacesAndPrefetch,
+  providerName,
+  resolvePlaces,
+  type PlaceRequestItem,
+  type ResolvedPlace,
+} from '../services/places';
+import { travelLegs } from '../services/places/travel';
 
 const router = Router();
 
@@ -1513,6 +1521,82 @@ function buildFallbackSuggestions(trip: any): string[] {
   ].slice(0, 4);
 }
 
+// ─── Real coordinates for AI picks ───────────────────────────
+//
+// The model names places; a POI provider (services/places) says where they
+// are. Anything coordinate-shaped in the model's own output is stripped, so
+// a location can only ever come from the provider.
+
+/** Keep well-formed picks, drop any model-supplied coordinates, attach cached real ones. */
+function withCachedPlaces(parsed: any[], city: string, country?: string): any[] {
+  const picks = parsed
+    .filter((p) => p && typeof p === 'object' && typeof p.name === 'string' && p.name.trim())
+    .map(({ lat: _lat, lng: _lng, lon: _lon, latitude: _la, longitude: _lo, placeId: _pid, ...rest }: any) => ({
+      ...rest,
+      placeQuery: typeof rest.placeQuery === 'string' && rest.placeQuery.trim() ? rest.placeQuery.trim() : undefined,
+    }));
+  const places = cachedPlacesAndPrefetch(
+    city,
+    country,
+    picks.map((p): PlaceRequestItem => ({ name: p.name, placeQuery: p.placeQuery })),
+  );
+  return picks.map((p, i) => withPlace(p, places[i]));
+}
+
+const withPlace = <T extends object>(item: T, place: ResolvedPlace | undefined): T =>
+  place && place.lat != null && place.lng != null && place.placeId
+    ? { ...item, lat: place.lat, lng: place.lng, placeId: place.placeId }
+    : item;
+
+// ─── POST /api/plan/places ───────────────────────────────────
+// Coordinates for a city's picks, from the configured POI provider, answered
+// within `PLACES_DEADLINE_MS`. Items still queued (Nominatim, 1/s) come back
+// `pending: true` and keep resolving into the cache. With a Google key the
+// response also carries measured walk/transit times between the places.
+const PLACES_DEADLINE_MS = 20_000;
+const placesSchema = z.object({
+  city: z.string().min(1).max(120),
+  country: z.string().max(120).optional(),
+  items: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(200),
+        placeQuery: z.string().max(200).nullable().optional(),
+        kind: z.enum(['activity', 'restaurant']).optional(),
+      }),
+    )
+    .max(30),
+  deadlineMs: z.number().int().min(0).max(PLACES_DEADLINE_MS).optional(),
+});
+
+router.post(
+  '/places',
+  asyncHandler(async (req, res) => {
+    const { city, country, items, deadlineMs } = placesSchema.parse(req.body);
+    const started = Date.now();
+    const places = await resolvePlaces(city, country, items, {
+      deadlineMs: deadlineMs ?? PLACES_DEADLINE_MS,
+    });
+    const points = places
+      .filter((p) => p.lat != null && p.lng != null && p.placeId)
+      .map((p) => ({ placeId: p.placeId!, lat: p.lat!, lng: p.lng! }));
+    const legs = await travelLegs(points);
+    logger.info('places resolved', {
+      city,
+      provider: providerName(),
+      asked: items.length,
+      resolved: points.length,
+      pending: places.filter((p) => p.pending).length,
+      ms: Date.now() - started,
+    });
+    res.json({
+      provider: providerName(),
+      places,
+      ...(legs ? { travel: { source: 'google', legs } } : {}),
+    });
+  }),
+);
+
 // ─── POST /api/plan/activities ───────────────────────────────
 // AI-picks (Claude) returns 5 activity names + short reason per city.
 // Later we'll enrich each with real POI data (Google Places / Foursquare).
@@ -1548,7 +1632,8 @@ Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
   "category": "landmark" | "museum" | "food" | "nature" | "nightlife" | "experience" | "shopping",
   "timeOfDay": "morning" | "afternoon" | "evening",
   "durationHours": number between 1 and 4,
-  "reason": "one short sentence why"
+  "reason": "one short sentence why",
+  "placeQuery": "the venue or landmark exactly as it is named on a map (e.g. \"Musée d'Orsay\"), or null when the activity has no single location"
 }`,
         messages: [
           {
@@ -1561,7 +1646,7 @@ Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
       const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
       const parsed = extractJson(rawText);
       if (Array.isArray(parsed)) {
-        return res.json({ activities: parsed });
+        return res.json({ activities: withCachedPlaces(parsed, city, country) });
       }
       // fall through to mock if parse failed
     }
@@ -1617,7 +1702,8 @@ Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
   "cuisine": "short cuisine label, e.g. 'Roman pasta', 'Neapolitan pizza', 'izakaya', 'ramen'",
   "priceRange": "$" | "$$" | "$$$" | "$$$$",
   "mealType": "breakfast" | "lunch" | "dinner" | "any",
-  "reason": "one short sentence why a traveler should go"
+  "reason": "one short sentence why a traveler should go",
+  "placeQuery": "the restaurant's name as it appears on a map, with its street or neighbourhood if the name is common"
 }`,
         messages: [
           {
@@ -1630,7 +1716,7 @@ Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
       const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
       const parsed = extractJson(rawText);
       if (Array.isArray(parsed)) {
-        return res.json({ restaurants: parsed });
+        return res.json({ restaurants: withCachedPlaces(parsed, city, country) });
       }
       // fall through to mock
     }

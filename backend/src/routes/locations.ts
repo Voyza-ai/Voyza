@@ -23,6 +23,8 @@ import { LOCATION_DATA_ATTRIBUTION } from '../data/attribution';
 import { DEFAULT_OPTIONS } from '../services/location/options';
 import { originIndex } from '../services/location/originAirports';
 import { resolve } from '../services/location/resolve';
+import { suggestAirports, suggestCities } from '../services/location/suggest';
+import { hubFor } from '../services/location/hub';
 import { logger } from '../utils/logger';
 import type { Candidate, PlaceAirport, Resolution } from '../services/location/types';
 
@@ -135,6 +137,35 @@ router.post(
     // so the notice travels with it rather than depending on a caller having
     // read ATTRIBUTION.md. ~100 bytes.
     res.json({ ...wire(result, input.max), attribution: LOCATION_DATA_ATTRIBUTION });
+  }),
+);
+
+const suggestSchema = z.object({
+  q: z.string().trim().min(1).max(80),
+  kind: z.enum(['city', 'airport']),
+});
+
+/** Type-ahead for Settings → Home city / Home airport. Offline data only. */
+router.get(
+  '/suggest',
+  asyncHandler(async (req, res) => {
+    const { q, kind } = suggestSchema.parse(req.query);
+    res.json({ suggestions: kind === 'city' ? suggestCities(q) : suggestAirports(q) });
+  }),
+);
+
+const hubSchema = z.object({
+  city: z.string().trim().min(1).max(120),
+  country: z.string().trim().max(80).optional(),
+  mode: z.enum(['flight', 'train']),
+  code: z.string().trim().max(4).optional(),
+});
+
+/** The airport / station a traveller arrives at or leaves from. Offline. */
+router.get(
+  '/hub',
+  asyncHandler(async (req, res) => {
+    res.json({ hub: hubFor(hubSchema.parse(req.query)) });
   }),
 );
 

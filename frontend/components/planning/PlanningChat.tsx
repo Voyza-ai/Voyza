@@ -1516,6 +1516,9 @@ export default function PlanningChat() {
       // optimizer failed, they would be rate-limited calls spent on nothing.
       const picksRequests: CityPicksRequest[] = trip.cities.map((city) => ({
         city: city.name,
+        // Scopes the picks AND the backend's POI lookups it starts for them,
+        // so the later /places call finds that work under the same key.
+        country: city.country || undefined,
         vibe: parsed.vibe ?? answers.vibe,
         travelers,
         nights: Math.max(

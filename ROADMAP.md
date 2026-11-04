@@ -759,26 +759,27 @@ for long-tail queries like "adventure trips from NYC under $1500".
 - [ ] **SEO implementation**: server-rendered category pages, sitemap generation, canonical URLs, rich snippet markup
 
 ### Feature: Settings page
-- [ ] `/settings` route
-- [ ] Profile tab (name, avatar, preferences)
-- [ ] Account tab (change password, change email via Supabase, delete account with 2-step email confirm)
-- [ ] Notifications tab (preferences)
-- [ ] Privacy tab (allow trips to be used for recommendations toggle — global default)
-- [ ] Data export button (calls `/api/users/me/export`)
+- [x] `/settings` route
+- [x] Profile tab (name, avatar, preferences)
+- [x] Account tab (change password, change email via Supabase, delete account with 2-step email confirm)
+- [x] Notifications tab (preferences)
+- [x] Privacy tab (allow trips to be used for recommendations toggle — global default)
+- [x] Data export button (calls `/api/users/me/export`)
 
 ### Feature: Intra-city geographic scheduling
-- [ ] POI API integration (Google Places or Foursquare) for real coordinates
-- [ ] Update activities/restaurants to include `{ lat, lng, placeId }`
-- [ ] Geo-aware day scheduler: morning activity → nearest lunch spot → nearest afternoon activity
-- [ ] Optional: integrate Distance Matrix for walking/transit time between slots
+- [x] POI API integration (Google Places or Foursquare) for real coordinates — `backend/src/services/places` (Google / Foursquare when keyed, keyless Nominatim fallback)
+- [x] Update activities/restaurants to include `{ lat, lng, placeId }`
+- [x] Geo-aware day scheduler: morning activity → nearest lunch spot → nearest afternoon activity
+- [x] Optional: integrate Distance Matrix for walking/transit time between slots (Google key only; estimate otherwise)
 
 ### Feature: In-app booking
-- [ ] Duffel Orders API integration
-- [ ] Passenger info form (name, DOB, gender, passport, contact)
-- [ ] Payment flow (Duffel Payments or Stripe with Duffel marketplace)
-- [ ] Airline T&Cs acceptance per booking
-- [ ] Seller-of-travel compliance research (varies by US state, UK ATOL, etc.)
-- [ ] Booking confirmation email + itinerary PDF
+- [x] Duffel Orders API integration (test mode; `services/booking.ts`, live token refused unless `BOOKING_LIVE_ENABLED=true`)
+- [x] Passenger info form (name, DOB, gender, passport, contact) — passport only when the offer requires it
+- [x] Payment flow (Duffel Payments) — Duffel says the product takes no new customers; confirm live access before launch
+- [x] Airline T&Cs acceptance per booking
+- [x] Seller-of-travel compliance research (varies by US state, UK ATOL, etc.) — `docs/SELLER_OF_TRAVEL.md`
+- [x] Booking confirmation email + itinerary PDF — email needs a verified Resend domain to reach anyone but the Resend owner
+- [ ] Apply `015_bookings.sql` (bookings persist in memory until then)
 
 ### Feature: Running trip summary on the conversation page
 A floating "trip card" on the conversation page that updates as the

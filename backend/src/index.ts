@@ -37,6 +37,8 @@ app.use(
     // removed from the list still fails on the real response, which has to
     // carry Access-Control-Allow-Origin too.
     maxAge: 7200,
+    // Settings → "Export my data" reads the download's filename from it.
+    exposedHeaders: ['Content-Disposition'],
   }),
 );
 app.use(express.json({ limit: '1mb' }));
