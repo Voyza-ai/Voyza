@@ -43,14 +43,14 @@ Features to have implemented by the demo. Each item says where it lives in
 this file.
 
 **Must do**
-- [ ] Planning-phase conversational revision — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
+- [x] Planning-phase conversational revision — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
 - [x] Calendar reacts to transport changes — *feature heading*
 - [x] No-train-data flag — *bullet under "🐛 Bugs / tech debt"*
 - [ ] Saved bookings (`015_bookings.sql`) — *bullet under "Feature: In-app booking"*
 
 **Should do**
 - [ ] Running trip summary — *feature heading ("Running trip summary on the conversation page")*
-- [ ] BlueMurr AI — add / remove / replace cities — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
+- [x] BlueMurr AI — add / remove / replace cities — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
 - [x] Unique AI suggestions per city — *bullet under "🐛 Bugs / tech debt"*
 
 **Strongly recommended**
@@ -830,8 +830,8 @@ before the final "Find my trip" click.
 ### Feature: BlueMurr AI — edits beyond current scope
 Tasks deferred from the current chat work:
 
-- [ ] **Planning-phase conversational revision** (task 4): during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
-- [ ] **Post-results add/remove/replace cities** (task 5): new tools on `/api/plan/chat` — `add_city(city, afterCity?)`, `remove_city(city)`, `replace_city(old, new)`. Backend rebuilds trip with new city's hotel + transports. Shows diff card for Accept/Reject.
+- [x] **Planning-phase conversational revision** (task 4): during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
+- [x] **Post-results add/remove/replace cities** (task 5): new tools on `/api/plan/chat` — `add_city(city, afterCity?)`, `remove_city(city)`, `replace_city(old, new)`. Backend rebuilds trip with new city's hotel + transports. Shows diff card for Accept/Reject.
 
 ### Feature: Ownership transfer UX
 - [ ] Frontend flow: owner picks a collaborator (or invites one) to transfer to
@@ -968,7 +968,7 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 - [x] Intent picker animation timing on rapid interactions — re-verified 2026-11-05 with double-clicks, fast intent switching, clicks mid-entrance and /plan bounces: no duplicates
 - [x] Canvas → Back → Flights gone — verified 2026-11-05: flights survive Back, a canvas AI edit + save + Back, and a hard reload
 - [x] ~~Canvas save silently drops transports~~ — FIXED in feat/db-persistence
-- [ ] Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice). No back button, no edit-previous-message. Partial workaround exists via city picker's "+ another city" but it's awkward. Full fix = task 4 (planning-phase conversational revision).
+- [x] ~~Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice).~~ — FIXED: a correction typed after the destination step goes to `/api/plan/revise-destinations`, which changes only the destination list.
 - [x] Origin-location lookup misses non-city inputs (states, regions, neighborhoods). User typing "from New Jersey" / "Newark" / "Long Island" / "Connecticut" → AI returns the literal string → `getOriginAirports()` lookup misses → empty `originAirports` → home flight search never runs → schedule view shows no transport blocks for day 1. Already partially fixed for "<City> City" suffix variants (commit `0f24996`). Need: state-name aliases (NJ → EWR or NYC metro, CT → BDL, etc.), region aliases (Long Island → JFK/LGA, Bay Area is already in), and a smarter normalization layer at the AI-parse step that resolves vague locations to canonical metro keys before the lookup table is queried. Affects both `frontend/lib/originAirports.ts` and `backend/src/data/originAirports.ts`. — fixed: shared `originPhrase.ts` (frontend + backend, byte-identical) strips "from …" phrasing and maps informal regions/old abbreviations to metros before both lookups; all 50 states covered by tests
 - [x] ~~AI chat: "are there more flights?" returns an answer-only response instead of showing options~~ — FIXED in 1704365 (leg_refresh + `show_transport_options` tool + clarifying "which leg?" routing).
 - [x] ~~AI chat: transport-window proposal card says "Applied the next time we re-pick this leg"~~ — FIXED in 1704365 (card-refresh pattern replaces the inline card entirely).

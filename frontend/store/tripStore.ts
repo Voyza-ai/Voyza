@@ -508,6 +508,26 @@ export function startTripPicks(
   requests.forEach((req, i) => awaitCityPicks(run, req, inFlight[i]));
 }
 
+/**
+ * Ask for the AI picks of ONE city just put on the trip on screen — a city the
+ * AI chat added or swapped in. Joins the trip's current picks run when there
+ * is one (so its landed picks and waiting list survive), else starts one.
+ * Lands like the planner's picks (landCityPicks).
+ */
+export function requestPicksForAddedCity(req: CityPicksRequest): void {
+  const { currentTrip: trip, tripPicks: tp } = useTripStore.getState();
+  if (!trip) return;
+  const joined = !!trip.picksRun && tp?.run === trip.picksRun;
+  const run = joined ? trip.picksRun! : newRun();
+  useTripStore.setState({
+    currentTrip: joined ? trip : { ...trip, picksRun: run },
+    tripPicks: joined
+      ? { ...tp!, pending: [...tp!.pending.filter((r) => r.city !== req.city), req] }
+      : { run, pending: [req], landed: {} },
+  });
+  awaitCityPicks(run, req);
+}
+
 /** The country each city's picks were asked with — the /places call must use the same key. */
 const picksCountry = new Map<string, string | undefined>();
 

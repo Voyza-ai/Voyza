@@ -6,7 +6,7 @@ import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin, LocateFixed, L
 import { useTripStore, requestCityPicks, startTripPicks, type CityPicksRequest } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ApiError, interpretPlan, optimizeTrip, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
+import { ApiError, interpretPlan, optimizeTrip, reviseDestinations, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
 import { Trip, City, Transport, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
@@ -217,6 +217,27 @@ type GuidedSnapshot = {
   msgCounter: number;
 };
 let guidedSession: GuidedSnapshot | null = null;
+
+/**
+ * Does a message typed AFTER the destinations were given look like it might
+ * change them ("actually Venice not Venezuela", "drop Milan", "add Rome")?
+ * Only such messages go to /api/plan/revise-destinations first; the AI there
+ * decides, and a message that wasn't about destinations comes back marked so
+ * and is handed to the question on screen as before. Plain answers — a
+ * number, a date, "round-trip" — never match, so they cost no extra call.
+ */
+const DESTINATION_EDIT_WORDS =
+  /\b(actually|instead|rather|meant|typo|misspel\w*|wrong|swap|replace|switch|change|add|remove|drop|skip|scratch|forget|also|cities|city|destinations?)\b/i;
+const NOT_A_PLACE = /\bnot\s+[A-Z]/;
+
+export function looksLikeDestinationEdit(text: string, destinations: string[] | undefined): boolean {
+  if (!destinations || destinations.length === 0) return false;
+  const t = text.trim();
+  if (!t || /^[\d\s$.,€£-]+$/.test(t)) return false;
+  if (DESTINATION_EDIT_WORDS.test(t) || NOT_A_PLACE.test(t)) return true;
+  const lower = t.toLowerCase();
+  return destinations.some((d) => d && lower.includes(d.toLowerCase()));
+}
 
 export default function PlanningChat() {
   const router = useRouter();
@@ -660,10 +681,10 @@ export default function PlanningChat() {
     }
   };
 
-  const handleTextSubmit = async () => {
-    if (!textInput.trim() || !steps.length) return;
+  const handleTextSubmit = async (typed?: string) => {
+    const value = (typed ?? textInput).trim();
+    if (!value || !steps.length) return;
     const step = steps[currentStepIndex];
-    const value = textInput.trim();
 
     setMessages((prev) => [
       ...prev,
@@ -1883,6 +1904,7 @@ export default function PlanningChat() {
   // user can always type a free-form answer for whatever question is showing.
   const barPlaceholder = (() => {
     if (!intent) return 'Or just tell me everything at once...';
+    if (isComplete) return 'Need to change a city? e.g. "Venice instead of Rome"';
     if (!currentStep) return 'Type a message...';
     switch (currentStep.type) {
       case 'text':    return currentStep.placeholder || 'Type a destination...';
@@ -1898,14 +1920,75 @@ export default function PlanningChat() {
     }
   })();
 
+  // ── Destination corrections after the destination step ──────────────
+  //
+  // Typed text used to go only to the question on screen, so "actually
+  // Venice not Venezuela" at the dates step was read as a date and the
+  // destination could not be corrected (ROADMAP bug). A message that looks
+  // like a destination edit goes to /api/plan/revise-destinations first.
+  // Only `destinations` is ever written from its answer: dates, budget, vibe
+  // and the rest are untouched. A message the AI says wasn't about
+  // destinations falls through to the question on screen, unchanged.
+  const [revising, setRevising] = useState(false);
+  const canReviseDestinations =
+    !!intent && intent !== 'chat' && (answers.destinations?.length ?? 0) > 0 && !citySelectionData;
+
+  const reviseOrFallThrough = async (value: string, fallThrough: (() => void) | null) => {
+    const bubbleId = nextId();
+    setMessages((prev) => [...prev, { id: bubbleId, role: 'user', content: value }]);
+    setTextInput('');
+    setRevising(true);
+    const dropBubble = () => setMessages((prev) => prev.filter((m) => m.id !== bubbleId));
+    const say = (content: string) =>
+      setMessages((prev) => [...prev, { id: nextId(), role: 'assistant', content }]);
+    try {
+      const res = await reviseDestinations({
+        message: value,
+        destinations: useTripStore.getState().answers.destinations ?? [],
+        history: guidedStateRef.current.messages
+          .slice(-8)
+          .map((m) => ({ role: m.role, content: m.content })),
+        currentQuestion: isComplete ? undefined : currentStep?.question,
+      });
+      if (!mountedRef.current) return;
+      if (res.type === 'revision') {
+        setAnswer('destinations', res.destinations);
+        say(res.reply);
+        return;
+      }
+      if (res.aboutDestinations || !fallThrough) {
+        say(
+          res.aboutDestinations || !res.reply
+            ? res.reply || 'Here I can change your cities — to change another answer, edit its message above.'
+            : 'Here I can change your cities — to change another answer, edit its message above.',
+        );
+        return;
+      }
+      dropBubble();
+      fallThrough();
+    } catch {
+      if (!mountedRef.current) return;
+      if (fallThrough) {
+        dropBubble();
+        fallThrough();
+      } else {
+        say("Sorry — I couldn't reach the assistant to change your cities. Try again in a moment.");
+      }
+    } finally {
+      if (mountedRef.current) setRevising(false);
+    }
+  };
+
   const handleBarSubmit = () => {
     const value = textInput.trim();
-    if (!value) return;
-    // Same defensive guard as handleChatSubmit: do nothing if the user
-    // has already finished the flow. The input bar is hidden when
-    // isComplete is true, but this defends against any race where a
-    // stale event fires after completion.
-    if (isComplete) return;
+    if (!value || revising) return;
+    // After "Perfect — I've got everything" the bar stays only for
+    // destination corrections; any other text gets a pointer to the
+    // message edit buttons.
+    if (isComplete) {
+      if (canReviseDestinations && !findTripLoading) reviseOrFallThrough(value, null);
+      return;
+    }
 
     // Pre-intent — typing here opens the AI conversation, seeded with the
     // sentence. It has to hand off through `chatSeedRef` (the same path the
@@ -1933,13 +2016,27 @@ export default function PlanningChat() {
 
     if (!currentStep) return;
 
+    if (
+      canReviseDestinations &&
+      currentStep.id !== 'destination' &&
+      looksLikeDestinationEdit(value, answers.destinations)
+    ) {
+      reviseOrFallThrough(value, () => answerCurrentStep(value));
+      return;
+    }
+    answerCurrentStep(value);
+  };
+
+  /** The typed `value` as the answer to the question on screen. */
+  const answerCurrentStep = (value: string) => {
+    if (!currentStep) return;
     switch (currentStep.type) {
       case 'text':
       case 'notes':
       case 'origin':
         // Origin uses the same free-text input path as destination/notes;
         // handleTextSubmit dispatches on step.id to store it correctly.
-        handleTextSubmit();
+        handleTextSubmit(value);
         return;
       case 'roundtrip': {
         // Allow the user to just type "one way" or "round trip" as text
@@ -2514,7 +2611,7 @@ export default function PlanningChat() {
       {/* Floating chat pill — ALWAYS pinned to the bottom of the viewport
           (until the form is complete). Mounts ONCE; placeholder text just
           swaps in place so we don't get a re-fade on every step change. */}
-      {!isComplete && (
+      {(!isComplete || canReviseDestinations) && (
         <div className="relative z-10 px-6 pb-6 pt-2 flex justify-center pointer-events-none">
           <motion.div
             initial={{ opacity: 0, y: 8 }}
@@ -2545,7 +2642,7 @@ export default function PlanningChat() {
             />
             <button
               onClick={handleBarSubmit}
-              disabled={!textInput.trim()}
+              disabled={!textInput.trim() || revising}
               className="p-2.5 rounded-full bg-[#4f8ef7] hover:bg-[#3d7de6] text-white disabled:opacity-30 disabled:hover:bg-[#4f8ef7] transition-all flex-shrink-0"
             >
               <Send size={18} />
