@@ -1071,6 +1071,9 @@ function CanvasPageInner() {
         cities: withColorIndices(updated.cities as any[]),
         trip: {
           ...(prev?.trip ?? {}),
+          // A city edit renames an auto-titled trip ("Rome → Venice" →
+          // "Rome → Florence → Venice"); every other edit keeps the title.
+          ...(updated.title ? { title: updated.title } : {}),
           origin: updated.origin ?? prev?.trip?.origin ?? null,
           returnToHome: updated.returnToHome ?? prev?.trip?.returnToHome,
           ...(constraints !== undefined ? { constraints } : {}),

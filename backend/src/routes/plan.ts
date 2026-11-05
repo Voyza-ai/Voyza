@@ -21,7 +21,9 @@ import {
   NormalizedTimeWindow,
 } from '../services/legOptions';
 import { converse } from '../services/planConverse';
+import { reviseDestinations } from '../services/destinationRevision';
 import { compareLeg } from '../services/compareLeg';
+import { buildCityEditProposal, cityEditOpFromTool, type CityEditProposal } from '../services/cityEdit';
 import { getCityCountry } from '../data/cityCountries';
 import { parseDurationMinutes } from '../utils/duration';
 import { todayIso } from '../utils/dates';
@@ -136,6 +138,28 @@ router.post(
     const input = converseSchema.parse(req.body);
     const result = await converse(input);
     res.json(result);
+  }),
+);
+
+// ─── POST /api/plan/revise-destinations ──────────────────────
+// Guided planner, after the destination step: a free-text correction
+// ("actually Venice not Venezuela") edits ONLY the destination list — see
+// services/destinationRevision.ts. 503 'assistant_unavailable' on AI failure.
+const reviseDestinationsSchema = z.object({
+  message: z.string().min(1).max(2000),
+  destinations: z.array(z.string().min(1).max(200)).min(1).max(30),
+  history: z
+    .array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(4000) }))
+    .max(40)
+    .default([]),
+  currentQuestion: z.string().max(500).optional(),
+});
+
+router.post(
+  '/revise-destinations',
+  asyncHandler(async (req, res) => {
+    const input = reviseDestinationsSchema.parse(req.body);
+    res.json(await reviseDestinations(input));
   }),
 );
 
@@ -659,6 +683,54 @@ const CHAT_TOOLS = [
       required: ['from', 'to', 'explanation'],
     },
   },
+  {
+    name: 'add_city',
+    description:
+      'Add a NEW city to the trip. Use when the user says "add Venice", "can we squeeze in Nice after Paris", "add 3 days in Lisbon at the end". The backend prices the new city\'s hotel and the travel in and out, and the user sees a diff to Accept or Reject. Only for a specific city — if the user names a country or region ("add somewhere in Spain"), use answer_only to ask which city.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        city: { type: 'string', description: 'The city to add, plain English name ("Venice").' },
+        afterCity: {
+          type: ['string', 'null'],
+          description: 'Existing trip city the new one goes right after. Null/omitted = add it at the end.',
+        },
+        nights: {
+          type: ['number', 'null'],
+          description: 'Nights in the new city, only if the user said ("3 days in Lisbon" → 3). Omit otherwise (default 2).',
+        },
+        explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
+      },
+      required: ['city', 'explanation'],
+    },
+  },
+  {
+    name: 'remove_city',
+    description:
+      'Remove a city that is in the trip. Use when the user says "drop Florence", "skip Milan", "remove Berlin". Its nights go to the city before it, so the trip dates stay the same.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        city: { type: 'string', description: 'Exact city name as it appears in the trip.' },
+        explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
+      },
+      required: ['city', 'explanation'],
+    },
+  },
+  {
+    name: 'replace_city',
+    description:
+      'Swap one trip city for a different one on the same dates. Use when the user says "swap Florence for Bologna", "Naples instead of Rome", "actually Venice not Verona".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        old: { type: 'string', description: 'Exact name of the trip city being replaced.' },
+        new: { type: 'string', description: 'The city that takes its place, plain English name.' },
+        explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
+      },
+      required: ['old', 'new', 'explanation'],
+    },
+  },
 ];
 
 /**
@@ -778,6 +850,19 @@ function isSameLegOption(a: LegOption, b: LegOption): boolean {
   );
 }
 
+/** "Here's your trip with Venice added after Rome." — from the planned edit. */
+function describeCityEdit(p: CityEditProposal): string {
+  const op = p.op;
+  if (op.kind === 'replace') {
+    const added = p.after.find((s) => s.status === 'replaced');
+    return `Here's your trip with ${added?.name ?? op.newCity} instead of ${added?.replaces ?? op.oldCity}.`;
+  }
+  if (op.kind === 'remove') return `Here's your trip without ${p.removed[0] ?? op.city}.`;
+  const idx = p.after.findIndex((s) => s.status === 'added');
+  const prev = idx > 0 ? p.after[idx - 1].name : null;
+  return `Here's your trip with ${op.city} added${idx === p.after.length - 1 ? ' at the end' : prev ? ` after ${prev}` : ''}.`;
+}
+
 router.post(
   '/chat',
   asyncHandler(async (req, res) => {
@@ -813,13 +898,16 @@ router.post(
 
 Today is ${todayIso()} (UTC). Trip dates are always in the future: a date the user gives without a year ("Dec 10", "the 15th") means its next occurrence after today.
 
-You have six tools:
+You have nine tools:
 1. answer_only — for plain questions, explanations, small talk, AND for clarifying questions when the user's request is ambiguous about which leg.
 2. pin_city_dates — when the user wants a city locked to specific dates.
 3. set_min_days — when the user wants a minimum stay in a city.
 4. set_transport_window — when the user gives a TIME BOUND on a specific leg ("no flights before 5pm", "arrive by 3pm").
 5. show_transport_options — when the user wants to SWAP transport for a specific leg ("show me cheaper flights", "find me other options"). Updates the card with top-4 mixed-mode options.
 6. compare_modes — when the user is CURIOUS about the OTHER mode without committing yet ("are there any flights?" when the leg uses train, "what about trains?" when leg uses flight, "is it cheaper to fly?"). Returns flight + train side-by-side so the user can decide.
+7. add_city — add a NEW city to the trip ("add Venice after Rome", "add 3 nights in Nice").
+8. remove_city — drop a city that is in the trip ("skip Florence").
+9. replace_city — swap a trip city for another on the same dates ("Bologna instead of Florence").
 
 ALWAYS pick exactly one tool per turn.
 
@@ -835,8 +923,11 @@ Decision guide:
 - User asks a general question, wants explanation, or their request is ambiguous → answer_only
 - User wants to lock a city to specific dates → pin_city_dates
 - User wants more time in a city → set_min_days
+- User wants a city added / dropped / swapped → add_city / remove_city / replace_city. Each change is shown to the user as a diff to Accept, so call the tool directly instead of asking "are you sure?".
 
-If the user references a city that isn't in the trip, answer_only and ask them to clarify — do NOT invent a pin or window.
+City edits: ONE city edit per turn. If the user asks for several at once, do the first and say you'll do the next after they accept. If it's unclear which city they mean (e.g. "swap one of the Italian cities", "add a beach town", a country instead of a city), use answer_only to ask. Use the exact trip spelling for cities already in the trip.
+
+If the user references a city that isn't in the trip for a pin, window or transport question, answer_only and ask them to clarify — do NOT invent a pin or window.
 
 Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them.
 
@@ -882,6 +973,26 @@ ${JSON.stringify(tripSummary, null, 2)}
       return res.json({
         type: 'answer',
         reply: toolInput.answer,
+      });
+    }
+
+    // --- City edits: add_city / remove_city / replace_city. Priced here
+    //     (new city's hotels, the legs that changed, home flights when the
+    //     trip's ends changed) and returned as a proposal the frontend
+    //     shows as a diff card. Nothing is applied until Accept.
+    if (toolName === 'add_city' || toolName === 'remove_city' || toolName === 'replace_city') {
+      const op = cityEditOpFromTool(toolName, toolInput);
+      if (!op) {
+        return res.json({ type: 'answer', reply: 'Which city did you mean? Tell me the name and I\'ll work it out.' });
+      }
+      const built = await buildCityEditProposal(currentTrip, toolName, op);
+      if (built.type === 'answer') return res.json(built);
+      // Worded from the plan, not the model's `explanation`, which is
+      // written before anything was searched (see compare_modes, D-07).
+      return res.json({
+        type: 'proposal',
+        reply: `${describeCityEdit(built.proposal)} ${built.proposal.note} Accept to apply it.`,
+        proposal: built.proposal,
       });
     }
 
