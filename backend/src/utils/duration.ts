@@ -60,6 +60,7 @@ export function parseIsoDuration(input: string | null | undefined): number | nul
  *   - "3h 37m"  → 217
  *   - "4h"      → 240
  *   - "15m"     → 15
+ *   - "3 hours 15 minutes" → 195
  *   - "PT7H35M" → 455  (ISO 8601, straight from a provider payload)
  *   - "102"     → 102  (already a number string)
  *   - 217       → 217  (pass-through for numbers)
@@ -82,21 +83,21 @@ export function parseDurationMinutes(input: string | number | null | undefined):
   // Pure integer string
   if (/^\d+$/.test(s)) return parseInt(s, 10);
 
-  // Hours + minutes form: "3h 37m", "3h37m", "3 h 37 m"
-  const match = s.match(/(\d+)\s*h(?:our|rs)?\s*(\d+)?\s*m?/i);
-  if (match) {
-    const hours = parseInt(match[1], 10);
-    const minutes = match[2] ? parseInt(match[2], 10) : 0;
-    return hours * 60 + minutes;
+  // Unit-tagged form, any spelling: "3h 37m", "3h37m", "3 h 37 m",
+  // "3 hours 15 minutes", "1 hr 5 mins", "2 days 3 hours", "45 min".
+  // The old single regex read "3 hours 15 minutes" as 180: its `h(?:our|rs)?`
+  // stopped at "hour", left the "s" behind, and never reached the minutes.
+  const unitRe = /(\d+(?:\.\d+)?)\s*(d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?)(?![a-z])/gi;
+  const unitOnly = /^(?:\s*(?:and|,)?\s*\d+(?:\.\d+)?\s*(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?)(?![a-z]))+\s*$/i;
+  if (unitOnly.test(s)) {
+    let total = 0;
+    for (const m of s.matchAll(unitRe)) {
+      const n = Number(m[1]);
+      const u = m[2][0].toLowerCase();
+      total += u === 'd' ? n * 1440 : u === 'h' ? n * 60 : n;
+    }
+    return Math.round(total);
   }
-
-  // Just minutes: "15m", "15 min", "15 minutes"
-  const minOnly = s.match(/^(\d+)\s*m(?:in|inutes?)?$/i);
-  if (minOnly) return parseInt(minOnly[1], 10);
-
-  // Just hours: "4h", "4 hours"
-  const hoursOnly = s.match(/^(\d+)\s*h(?:our|rs?)?$/i);
-  if (hoursOnly) return parseInt(hoursOnly[1], 10) * 60;
 
   // Fall back to parseInt (same as old behavior) so we don't throw on novel
   // formats. 0 means "unknown" which is safer than a wrong number.

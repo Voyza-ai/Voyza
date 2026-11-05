@@ -609,6 +609,7 @@ export async function searchActivities(params: {
   vibe?: string;
   travelers?: number;
   nights?: number;
+  otherCities?: string[];
 }): Promise<ActivitySuggestion[]> {
   const data = await withTimeout(AI_PICKS_TIMEOUT_MS, (signal) =>
     apiFetch<{ activities: ActivitySuggestion[] }>('/api/plan/activities', {
@@ -639,6 +640,7 @@ export async function searchRestaurants(params: {
   vibe?: string;
   travelers?: number;
   budget?: number;
+  otherCities?: string[];
 }): Promise<RestaurantSuggestion[]> {
   const data = await withTimeout(AI_PICKS_TIMEOUT_MS, (signal) =>
     apiFetch<{ restaurants: RestaurantSuggestion[] }>('/api/plan/restaurants', {
