@@ -5,6 +5,7 @@ import { AnimatePresence } from 'framer-motion';
 import { Trip, City, TransportMode } from '@/lib/types';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
 import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
+import { reconcileDayTransport } from '@/lib/transportReconcile';
 import { homeDepartureDay } from '@/lib/tripSpan';
 import { useTripStore } from '@/store/tripStore';
 import DayCard from './DayCard';
@@ -170,7 +171,13 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
       const match = scheduleOwner(iso);
       if (!match) return; // travel-only day with no city mapping
       const existing = match.city.schedule?.[iso];
-      if (existing && existing.length > 0) return; // user already has events here
+      if (existing && existing.length > 0) {
+        // Built already: bring its generated travel blocks onto the
+        // current transport (legacy days included), nothing else.
+        const next = reconcileDayTransport(trip, match.index, iso);
+        if (next) setDaySchedule(match.index, iso, next);
+        return;
+      }
       const events = buildDefaultSchedule(match.city, iso, trip, match.index);
       if (events.length > 0) {
         setDaySchedule(match.index, iso, events);
