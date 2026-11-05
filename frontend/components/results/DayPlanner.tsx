@@ -17,6 +17,7 @@ import {
 import { Trip, City, ScheduledEvent } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
+import { reconcileDayTransport } from '@/lib/transportReconcile';
 import { useTripStore } from '@/store/tripStore';
 import { homeDepartureDay } from '@/lib/tripSpan';
 import TravelConnectors from './TravelConnectors';
@@ -110,6 +111,16 @@ export default function DayPlanner({
       setInitialized(true);
     }
   }, [initialized, existingSchedule, city, date, trip, cityIndex, setDaySchedule]);
+
+  // Keep the day's generated travel blocks on the current transport — on
+  // open, and live whenever the trip changes while the planner is up (a
+  // flight swapped on the flowchart, a home leg that finished loading).
+  // Activities, meals, the user's own events and any travel block they
+  // moved are left alone; `null` means already in step, so no write.
+  useEffect(() => {
+    const next = reconcileDayTransport(trip, cityIndex, date);
+    if (next) setDaySchedule(cityIndex, date, next);
+  }, [trip, cityIndex, date, setDaySchedule]);
 
   const events = city.schedule?.[date] ?? [];
 

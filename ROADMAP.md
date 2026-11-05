@@ -44,7 +44,7 @@ this file.
 
 **Must do**
 - [ ] Planning-phase conversational revision — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
-- [ ] Calendar reacts to transport changes — *feature heading*
+- [x] Calendar reacts to transport changes — *feature heading*
 - [ ] No-train-data flag — *bullet under "🐛 Bugs / tech debt"*
 - [ ] Saved bookings (`015_bookings.sql`) — *bullet under "Feature: In-app booking"*
 
@@ -949,12 +949,12 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 - [ ] Ferry pill + icon styling in the flowchart Connector (new mode visual)
 
 ### Feature: Calendar reacts to transport changes (calendar view just like flowchart view)
-- [ ] Tag auto-generated travel events ("head to airport" / flight / arrive) with an `auto` flag on `ScheduledEvent`
-- [ ] DayPlanner reconciles tagged events from current `transportIn`/`transportOut` on each open
-- [ ] Live update while planner is open if user swaps a flight on the flowchart
-- [ ] Restaurants, activities, and user-added events stay untouched
-- [ ] Decide: snap user-edited transport blocks back to new flight times, or honor manual edits
-- [ ] Affected dates: arrival day (uses `transportIn`) and departure day (uses `transportOut`)
+- [x] Tag auto-generated travel events ("head to airport" / flight / arrive) with an `auto` flag on `ScheduledEvent`
+- [x] DayPlanner reconciles tagged events from current `transportIn`/`transportOut` on each open
+- [x] Live update while planner is open if user swaps a flight on the flowchart
+- [x] Restaurants, activities, and user-added events stay untouched
+- [x] Decide: snap user-edited transport blocks back to new flight times, or honor manual edits — **honor**: a moved block drops `auto` and stays put
+- [x] Affected dates: arrival day (uses `transportIn`) and departure day (uses `transportOut`)
 
 ---
 

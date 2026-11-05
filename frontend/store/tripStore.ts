@@ -10,6 +10,7 @@ import {
   type ResolvedPlace,
 } from '@/lib/api';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
+import { applyUserEdit, reconcileTripTransport } from '@/lib/transportReconcile';
 import { liveTripTotal } from '@/lib/tripTotals';
 import type { CanvasIntent } from '@/lib/canvasHandoff';
 import { coordsOf, hasCoords, type TravelLegs } from '@/lib/geoSchedule';
@@ -259,7 +260,8 @@ export const useTripStore = create<TripStore>((set) => ({
           transportIn: chosenFlat,
         };
       }
-      return { currentTrip: { ...state.currentTrip, cities } };
+      // Generated travel blocks on every built day follow the new pick.
+      return { currentTrip: reconcileTripTransport({ ...state.currentTrip, cities }) };
     }),
 
   setHomeLegAlternative: (direction, alternativeIndex) =>
@@ -298,11 +300,11 @@ export const useTripStore = create<TripStore>((set) => ({
         }
       }
       return {
-        currentTrip: {
+        currentTrip: reconcileTripTransport({
           ...state.currentTrip,
           cities,
           origin: { ...state.currentTrip.origin, [slot]: newLeg },
-        },
+        }),
       };
     }),
 
@@ -409,8 +411,9 @@ export const useTripStore = create<TripStore>((set) => ({
       const cities = [...state.currentTrip.cities];
       const c = cities[cityIndex];
       if (!c) return state;
+      // A user edit to a generated travel block makes it theirs (drops `auto`).
       const dayEvents = (c.schedule?.[date] ?? []).map((e) =>
-        e.id === eventId ? { ...e, ...updates } : e
+        e.id === eventId ? applyUserEdit(e, updates) : e
       );
       const schedule = { ...(c.schedule ?? {}), [date]: dayEvents };
       cities[cityIndex] = { ...c, schedule };
