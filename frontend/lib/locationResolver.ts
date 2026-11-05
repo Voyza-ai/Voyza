@@ -31,6 +31,7 @@
  */
 
 import hotSet from './generated/locationHotSet.json';
+import { originQueries } from './originPhrase';
 import { keysForQuery } from './locationKeys';
 // composition below; phase 5 removes this import with the table itself.
 
@@ -501,10 +502,16 @@ export function originAirportsLocally(
   max: number = DEFAULT_MAX_AIRPORTS,
   context?: LocationContext,
 ): string[] {
-  const answer = resolveLocally(query, context, max);
-  if (!answer) return [];
-  if (answer.status === 'resolved') return answer.airports.map((a) => a.iata);
-  if (answer.status === 'ambiguous') return answer.candidates[0].airports.map((a) => a.iata);
+  // "from New Jersey", "Northern Virginia", "Conn." — see originPhrase.ts.
+  // The first reading with airports wins.
+  for (const q of originQueries(query)) {
+    const answer = resolveLocally(q, context, max);
+    if (!answer) continue;
+    if (answer.status === 'resolved' && answer.airports.length > 0) return answer.airports.map((a) => a.iata);
+    if (answer.status === 'ambiguous' && answer.candidates[0]?.airports.length) {
+      return answer.candidates[0].airports.map((a) => a.iata);
+    }
+  }
   return [];
 }
 

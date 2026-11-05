@@ -22,6 +22,7 @@ import { vibesFromAnswer } from '@/lib/vibeMap';
 // The async `resolveLocation` still arrives through the `await import()` at
 // each call site below, so the long-tail path stays lazy.
 import { originAirportsForCity, type LocationAnswer } from '@/lib/locationResolver';
+import { stripOriginFiller } from '@/lib/originPhrase';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
@@ -786,7 +787,8 @@ export default function PlanningChat() {
       // `answer.candidates` carries the `label` to show and the `placeId` to
       // persist. Taking the best reading until that UI is approved.
       const airports = originAirportsForOrigin(value, answer);
-      setAnswer('origin', value);
+      // "from New Jersey" is shown and saved as "New Jersey".
+      setAnswer('origin', stripOriginFiller(value) || value);
       setAnswer('originAirports', airports);
     }
 
