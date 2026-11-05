@@ -39,59 +39,31 @@ Check this section before any public release.
 
 ## 🎯 Demo — Junction (Hervé), Wed 2026-11-11 6:30 am
 
-Hervé runs a multimodal rail + flights API, so the demo is judged on how trains
-show up in a trip and on honest data (we told him we do not have live rail
-fares — the screen must match). Everything here is dev/localhost; nothing is
-deployed. Chosen 2026-11-04 from the backlog below.
+Features to have implemented by the demo. Each item says where it lives in
+this file.
 
-**Must do — the demo breaks or misleads without these**
-- [ ] **Planning-phase revision**: "actually Venice, not Venezuela" fixes the
-  destination without restarting (see BlueMurr AI → task 4, and the planning
-  typo bug under Bugs)
-- [ ] **Calendar follows flight changes**: swapping a flight on the flowchart
-  updates the schedule's head-to / flight / arrive blocks (see "Calendar reacts
-  to transport changes")
-- [ ] **Flag regions with no train data**: US / Canada / etc. routes say "no
-  train data here" instead of silently showing flights only (see Bugs)
-- [ ] **Apply `015_bookings.sql`** so test bookings survive a backend restart
-  (dry run with the owner first — DB change)
-- [ ] **Dry-run the exact demo trips**: 2–3 rehearsed routes (one rail-heavy,
-  e.g. Paris → Lyon → Milan), run end to end the day before
+**Must do**
+- [ ] Planning-phase conversational revision — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
+- [ ] Calendar reacts to transport changes — *feature heading*
+- [ ] No-train-data flag — *bullet under "🐛 Bugs / tech debt"*
+- [ ] Saved bookings (`015_bookings.sql`) — *bullet under "Feature: In-app booking"*
 
-**Should do — strong demo value**
-- [ ] **Running trip summary card** on the planning page (see its feature section)
-- [ ] **Add / remove / replace cities from the AI chat** after results (BlueMurr
-  AI → task 5)
-- [ ] **No duplicate AI suggestions across nearby cities** (Uffizi for Rome and
-  Florence — see Bugs)
+**Should do**
+- [ ] Running trip summary — *feature heading ("Running trip summary on the conversation page")*
+- [ ] BlueMurr AI — add / remove / replace cities — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
+- [ ] Unique AI suggestions per city — *bullet under "🐛 Bugs / tech debt"*
 
-**Strongly recommended — makes us stand out to a rail API**
-- [ ] **Door-to-door time, train vs flight**: "Train 3h 50m centre to centre"
-  vs "Flight 4h 20m incl. airport transfer + security" (reuses the airport ↔
-  city transfer estimate from geo scheduling)
-- [ ] **CO₂ per leg**: Duffel's flight emissions vs a distance-based rail
-  estimate — "Train saves ~90% CO₂"
-- [ ] **Label every rail price "live" or "estimated"** — must match what we told
-  Hervé about live fares
-- [ ] **Show where a rail partner plugs in**: train legs get an honest "Booking
-  via rail partner — coming soon" slot mirroring the flight Book button (no fake
-  booking)
-- [ ] **Reliable demo trip**: pre-warm 2–3 rehearsed trips (e.g. from a Browse
-  preset) so they open instantly, with a fallback if a live API is slow
+**Strongly recommended**
+- [ ] Door-to-door time comparison (train vs flight) — *new, not elsewhere in the roadmap yet*
+- [ ] CO₂ per leg — *new, not elsewhere in the roadmap yet*
+- [ ] Rail price source labels (live / estimated) — *new, not elsewhere in the roadmap yet*
+- [ ] Rail partner booking slot — *new, not elsewhere in the roadmap yet*
+- [ ] Instant demo trips — *new, not elsewhere in the roadmap yet*
 
 **Nice to have**
-- [ ] **Read-only share link** so Hervé can open the trip after the call (see
-  Clone UX → shareable links)
-- [ ] **One real rail-demand number**, e.g. "X% of planned trips include a train
-  leg" (read-only count over existing trips)
-- [ ] **Loading screen with live steps** ("Comparing 14 train and flight
-  options…") instead of a spinner during the 25–35 s search
-
-**Not before the demo**: real rail booking (that's the conversation with
-Hervé), points & miles, taste-based recommendations, clone / ownership UX,
-admin, Stripe, ferries, regional train APIs, LCC second source, location-resolver
-cleanups, GeoNames credits page, infra (backups matter soon, not for the demo),
-mobile (deferred by owner).
+- [ ] Read-only share links — *bullet under "Feature: Clone UX"*
+- [ ] Rail demand stat — *new, not elsewhere in the roadmap yet*
+- [ ] Live search progress — *new, not elsewhere in the roadmap yet*
 
 ---
 
