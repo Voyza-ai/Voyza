@@ -1,3 +1,4 @@
+import { keepOwnCity, otherStopsHint } from '../utils/cityPicks';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -1606,12 +1607,14 @@ const activitiesSchema = z.object({
   vibe: z.string().optional(),
   travelers: z.number().int().positive().optional(),
   nights: z.number().int().positive().optional(),
+  /** The trip's other stops, so this city's picks stay in this city. */
+  otherCities: z.array(z.string().max(120)).max(30).optional(),
 });
 
 router.post(
   '/activities',
   asyncHandler(async (req, res) => {
-    const { city, country, vibe, travelers, nights } = activitiesSchema.parse(req.body);
+    const { city, country, vibe, travelers, nights, otherCities } = activitiesSchema.parse(req.body);
     const anthropic = getAnthropicSafe();
 
     if (anthropic) {
@@ -1624,7 +1627,7 @@ router.post(
       const response = await anthropic.messages.create({
         model: DEFAULT_MODEL,
         max_tokens: 1024,
-        system: `You recommend things to do in a city. ${vibeHint}${groupHint}Pick ${n} diverse activities — a mix of must-see landmarks, cultural experiences, food, and a couple lesser-known picks. Avoid generic listicle fodder.
+        system: `You recommend things to do in a city. ${vibeHint}${groupHint}${otherStopsHint(city, otherCities)}Pick ${n} diverse activities — a mix of must-see landmarks, cultural experiences, food, and a couple lesser-known picks. Avoid generic listicle fodder.
 
 Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
 {
@@ -1646,7 +1649,7 @@ Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
       const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
       const parsed = extractJson(rawText);
       if (Array.isArray(parsed)) {
-        return res.json({ activities: withCachedPlaces(parsed, city, country) });
+        return res.json({ activities: withCachedPlaces(keepOwnCity(parsed, city, otherCities), city, country) });
       }
       // fall through to mock if parse failed
     }
@@ -1674,12 +1677,13 @@ const restaurantsSchema = z.object({
   vibe: z.string().optional(),
   travelers: z.number().int().positive().optional(),
   budget: z.number().int().positive().optional(),
+  otherCities: z.array(z.string().max(120)).max(30).optional(),
 });
 
 router.post(
   '/restaurants',
   asyncHandler(async (req, res) => {
-    const { city, country, vibe, travelers, budget } = restaurantsSchema.parse(req.body);
+    const { city, country, vibe, travelers, budget, otherCities } = restaurantsSchema.parse(req.body);
     const anthropic = getAnthropicSafe();
 
     if (anthropic) {
@@ -1694,7 +1698,7 @@ router.post(
       const response = await anthropic.messages.create({
         model: DEFAULT_MODEL,
         max_tokens: 1024,
-        system: `You recommend restaurants in a city. ${vibeHint}${groupHint}Pick 5 diverse spots representing local specialties. Avoid generic chain restaurants and tourist traps. ${budgetHint}
+        system: `You recommend restaurants in a city. ${vibeHint}${groupHint}${otherStopsHint(city, otherCities)}Pick 5 diverse spots representing local specialties. Avoid generic chain restaurants and tourist traps. ${budgetHint}
 
 Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
 {
@@ -1716,7 +1720,7 @@ Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
       const rawText = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
       const parsed = extractJson(rawText);
       if (Array.isArray(parsed)) {
-        return res.json({ restaurants: withCachedPlaces(parsed, city, country) });
+        return res.json({ restaurants: withCachedPlaces(keepOwnCity(parsed, city, otherCities), city, country) });
       }
       // fall through to mock
     }

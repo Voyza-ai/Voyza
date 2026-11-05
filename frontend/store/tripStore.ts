@@ -1,3 +1,4 @@
+import { dedupeAcrossCities } from '@/lib/picksDedupe';
 import { create } from 'zustand';
 import { Trip, PlanningAnswers, City, CustomHotel, Transport, Restaurant, ScheduledEvent } from '@/lib/types';
 import { firstStayArrival, tripStartDate } from '@/lib/tripSpan';
@@ -28,6 +29,8 @@ export type CityPicksRequest = {
   travelers: number;
   nights: number;
   budget?: number;
+  /** The trip's other stops, so this city's picks stay in this city. */
+  otherCities?: string[];
 };
 
 /** One city's AI picks. Both empty when the requests failed. */
@@ -468,10 +471,10 @@ const NO_PICKS: CityPicks = { activities: [], restaurants: [] };
 /** Ask for one city's AI picks. Never rejects: a failed call is an empty list. */
 export async function requestCityPicks(req: CityPicksRequest): Promise<CityPicks> {
   const [activities, restaurants] = await Promise.all([
-    searchActivities({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, nights: req.nights }).catch(
+    searchActivities({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, nights: req.nights, otherCities: req.otherCities }).catch(
       () => [] as ActivitySuggestion[],
     ),
-    searchRestaurants({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, budget: req.budget }).catch(
+    searchRestaurants({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, budget: req.budget, otherCities: req.otherCities }).catch(
       () => [] as RestaurantSuggestion[],
     ),
   ]);
@@ -545,7 +548,11 @@ function landCityPicks(run: string, cityName: string, picks: CityPicks) {
   }, FAILED_PICKS_GRACE_MS);
 }
 
-function settleCityPicks(run: string, cityName: string, picks: CityPicks) {
+function settleCityPicks(run: string, cityName: string, rawPicks: CityPicks) {
+  // A pick another stop already has goes to that stop only (ROADMAP: the
+  // Uffizi on Rome's list as well as Florence's).
+  const current = useTripStore.getState().currentTrip;
+  const picks = current && current.picksRun === run ? dedupeAcrossCities(current, cityName, rawPicks) : rawPicks;
   const got = picks.activities.length > 0 || picks.restaurants.length > 0;
   useTripStore.setState((state) => {
     const tp = state.tripPicks;

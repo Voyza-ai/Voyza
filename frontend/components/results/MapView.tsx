@@ -1242,13 +1242,14 @@ export default function MapView({ trip }: MapViewProps) {
     if (!centerPin) return;
 
     let cancelled = false;
+    const otherCities = trip.cities.map((c) => c.name).filter((n) => n !== city.name);
     setRecsLoading(true);
     setRecs([]);
     (async () => {
       // Ask for both kinds together; either can fail without sinking the other.
       const [acts, rests] = await Promise.all([
-        searchActivities({ city: city.name, country: city.country }).catch(() => []),
-        searchRestaurants({ city: city.name, country: city.country }).catch(() => []),
+        searchActivities({ city: city.name, country: city.country, otherCities }).catch(() => []),
+        searchRestaurants({ city: city.name, country: city.country, otherCities }).catch(() => []),
       ]);
       const suggestions: Suggestion[] = [
         ...acts.map((a) => ({ name: a.name, detail: a.reason ? 'Suggested' : undefined })),

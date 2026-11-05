@@ -1529,6 +1529,7 @@ export default function PlanningChat() {
           ),
         ),
         budget: totalBudget,
+        otherCities: trip.cities.map((c) => c.name).filter((n) => n !== city.name),
       }));
       const picksInFlight = picksRequests.map(requestCityPicks);
 
