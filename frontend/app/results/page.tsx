@@ -19,6 +19,7 @@ import { countryForCity } from '@/data/worldCities';
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
+import NoRailDataNotice from '@/components/results/NoRailDataNotice';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, fetchHomeLegs, updateTrip, compareLeg, type LegComparison } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
@@ -708,6 +709,7 @@ function ResultsPageInner() {
             // not follow a hotel or transport swap.
             <BudgetOverBanner budget={currentTrip.budget} totalCost={liveTripTotal(pricedTrip)} />
           )}
+          <NoRailDataNotice trip={currentTrip} />
           {currentTrip.vibeTierUp && (
             <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
           )}
