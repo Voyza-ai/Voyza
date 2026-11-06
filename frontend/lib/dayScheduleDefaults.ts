@@ -160,7 +160,7 @@ export function buildDayTransportContext(
         notes: t.duration || undefined,
       });
     }
-    return { events, windowStart: 24 * 60, windowEnd: 0, homeSideOnly: true };
+    return { events: tagAuto(events), windowStart: 24 * 60, windowEnd: 0, homeSideOnly: true };
   }
 
   // Resolve the effective inbound transport. For cities[0] (the first
@@ -278,7 +278,131 @@ export function buildDayTransportContext(
   }
 
   events.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-  return { events, windowStart, windowEnd };
+  return { events: tagAuto(events), windowStart, windowEnd };
+}
+
+/**
+ * Fingerprint of a day's generated travel blocks. Everything in them is a
+ * pure function of the transport behind the day, so the blocks themselves
+ * are the cheapest faithful signature of "which flight/train this was".
+ */
+export function transportSignature(events: Pick<ScheduledEvent, 'title' | 'startTime' | 'endTime'>[]): string {
+  return events.map((e) => `${e.title}|${e.startTime}|${e.endTime}`).join(';');
+}
+
+function tagAuto(events: ScheduledEvent[]): ScheduledEvent[] {
+  const sig = transportSignature(events);
+  return events.map((e) => ({ ...e, auto: 'transport' as const, autoSig: sig }));
+}
+
+/** Travel blocks saved before blocks were tagged `auto` — recognised by
+ *  the exact titles `buildDayTransportContext` writes. */
+const LEGACY_AUTO_TITLE = /^(Head to |Flight |Train |Bus |Arrive at )/;
+
+function isAutoTransport(e: ScheduledEvent): boolean {
+  if (e.auto === 'transport') return true;
+  return (
+    !e.auto &&
+    e.category === 'transport' &&
+    e.plannedDurationMin === undefined &&
+    LEGACY_AUTO_TITLE.test(e.title)
+  );
+}
+
+/**
+ * Bring one day's travel blocks in line with the trip's CURRENT transport.
+ *
+ * Returns the new event list, or `null` when nothing needs to change (so the
+ * caller can skip a store write). Rules:
+ *   - Only auto travel blocks are touched. Activities, meals and the user's
+ *     own events are kept as they are — same objects, same ids.
+ *   - Fingerprint unchanged → nothing happens, so blocks the user dragged by
+ *     hand keep their hand-set times until the flight itself changes.
+ *   - Fingerprint changed → the old blocks are replaced by fresh ones built
+ *     from the new transport. Untagged blocks from older saved trips count as
+ *     auto here and are tagged on the way through.
+ *   - A day with no auto blocks at all is left alone: the user deleted them,
+ *     and re-adding on every render would undo that.
+ */
+export function reconcileDayTransport(
+  events: ScheduledEvent[],
+  city: City,
+  date: string,
+  trip: Trip,
+  cityIndex: number,
+): ScheduledEvent[] | null {
+  const existingAuto = events.filter(isAutoTransport);
+  if (existingAuto.length === 0) return null;
+
+  const ctx = buildDayTransportContext(city, date, trip, cityIndex);
+  const fresh = ctx.events;
+  const freshSig = transportSignature(fresh);
+  const allTaggedCurrent = existingAuto.every((e) => e.auto === 'transport' && e.autoSig === freshSig);
+  if (allTaggedCurrent) return null;
+
+  const kept = refitPlannerItems(events.filter((e) => !isAutoTransport(e)), ctx);
+  const next = [...kept, ...fresh];
+  next.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+  return next;
+}
+
+/**
+ * After the travel blocks move, an activity the PLANNER placed can end up
+ * at a time the traveller is not in the city yet (a later train) or has
+ * already left. Those — and only those — are fitted again into the hours
+ * the traveller is actually there.
+ *
+ * "Placed by the planner and untouched" is read from the data: it carries
+ * `plannedDurationMin` and its block still spans exactly that long. Every
+ * hand edit in the day planner drags an edge, which changes the span, so an
+ * edited block is never moved. Items the user added carry no
+ * `plannedDurationMin` at all. An item that no longer fits anywhere stays
+ * where it was rather than being dropped — nothing the user can see
+ * disappears because a train changed.
+ */
+function refitPlannerItems(kept: ScheduledEvent[], ctx: DayTransportContext): ScheduledEvent[] {
+  if (ctx.homeSideOnly) return kept;
+  const dayStart = Math.max(DAY_OPEN_MIN, ctx.windowStart);
+  const dayEnd = Math.min(DAY_CLOSE_MIN, ctx.windowEnd);
+  const travel: Range[] = ctx.events.map((e) => [timeToMinutes(e.startTime), timeToMinutes(e.endTime)]);
+  const span = (e: ScheduledEvent): Range => [timeToMinutes(e.startTime), timeToMinutes(e.endTime)];
+  const overlaps = (a: Range, b: Range) => a[0] < b[1] && b[0] < a[1];
+
+  const isPlannerItem = (e: ScheduledEvent) =>
+    (e.category === 'activity' || e.category === 'restaurant') &&
+    typeof e.plannedDurationMin === 'number' &&
+    span(e)[1] - span(e)[0] === e.plannedDurationMin;
+  const misplaced = (e: ScheduledEvent) => {
+    const r = span(e);
+    return r[0] < dayStart || r[1] > dayEnd || travel.some((t) => overlaps(r, t));
+  };
+
+  const toMove = kept.filter((e) => isPlannerItem(e) && misplaced(e));
+  if (toMove.length === 0) return kept;
+
+  const staying = kept.filter((e) => !toMove.includes(e));
+  const busyRanges: Range[] = [...travel, ...staying.map(span)];
+  const sequence: PlanItem[] = [];
+  const flexible: PlanItem[] = [];
+  for (const e of toMove) {
+    const item = { key: e.id, durationMin: e.plannedDurationMin! };
+    if (e.category === 'restaurant') {
+      const w = span(e)[0] < 16 * 60 ? MEAL_WINDOWS.lunch : MEAL_WINDOWS.dinner;
+      flexible.push({ ...item, earliestStart: w.open, latestEnd: w.close, idealStart: w.ideal });
+    } else {
+      sequence.push({ ...item, earliestStart: Math.max(dayStart, 9 * 60), latestEnd: Math.min(dayEnd, 21 * 60) });
+    }
+  }
+  const plan = planDay({ dayStart, dayEnd, busyRanges, sequence, flexible });
+  const placed = new Map(plan.placements.map((p) => [p.key, p]));
+
+  return kept.map((e) => {
+    const p = placed.get(e.id);
+    if (!p || !toMove.includes(e)) return e;
+    // The measured leg from the previous slot no longer holds once moved.
+    const { travelFromPrev: _stale, ...rest } = e;
+    return { ...rest, startTime: minutesToTime(p.startMin), endTime: minutesToTime(p.endMin) };
+  });
 }
 
 /* ──────────────────────────── Day planning ──────────────────────────── */

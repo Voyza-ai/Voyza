@@ -44,7 +44,7 @@ this file.
 
 **Must do**
 - [ ] Planning-phase conversational revision — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
-- [ ] Calendar reacts to transport changes — *feature heading*
+- [x] Calendar reacts to transport changes — *feature heading*
 - [ ] No-train-data flag — *bullet under "🐛 Bugs / tech debt"*
 - [ ] Saved bookings (`015_bookings.sql`) — *bullet under "Feature: In-app booking"*
 
@@ -949,12 +949,12 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 - [ ] Ferry pill + icon styling in the flowchart Connector (new mode visual)
 
 ### Feature: Calendar reacts to transport changes (calendar view just like flowchart view)
-- [ ] Tag auto-generated travel events ("head to airport" / flight / arrive) with an `auto` flag on `ScheduledEvent`
-- [ ] DayPlanner reconciles tagged events from current `transportIn`/`transportOut` on each open
-- [ ] Live update while planner is open if user swaps a flight on the flowchart
-- [ ] Restaurants, activities, and user-added events stay untouched
-- [ ] Decide: snap user-edited transport blocks back to new flight times, or honor manual edits
-- [ ] Affected dates: arrival day (uses `transportIn`) and departure day (uses `transportOut`)
+- [x] Tag auto-generated travel events ("head to airport" / flight / arrive) with an `auto` flag on `ScheduledEvent` (+ `autoSig` fingerprint)
+- [x] Reconcile tagged events from current `transportIn`/`transportOut` — `reconcileDayTransport`, run by `useTransportBlockSync` on the results page (covers Calendar, Schedule and Day Planner)
+- [x] Live update while planner is open if user swaps a flight on the flowchart
+- [x] User-added and hand-edited events stay untouched; planner-placed items the traveller can no longer make (before arrival / after leaving) are re-fitted, or left in place if nothing fits
+- [x] Decided: honour manual edits while the flight is unchanged; snap to the new times when the flight changes
+- [x] Affected dates: arrival day (uses `transportIn`) and departure day (uses `transportOut`)
 
 ---
 

@@ -139,6 +139,21 @@ export type ScheduledEvent = {
    * placeId no longer matches `travelFromPrev.fromPlaceId` (hand re-ordering).
    */
   travelFromPrev?: TravelInfo;
+  /**
+   * Set on the travel blocks the planner generates from the trip's
+   * transport ("Head to JFK", "Flight JFK → FCO", "Arrive at FCO"). These
+   * are DERIVED data: when the flight or train behind them changes, they are
+   * rebuilt (see `reconcileDayTransport`). Activities, meals and anything the
+   * user added are never tagged and never touched.
+   */
+  auto?: 'transport';
+  /**
+   * Fingerprint of the transport a day's auto blocks were built from. While
+   * it still matches, the blocks are left exactly as they are — including
+   * any times the user dragged by hand. When it stops matching (a different
+   * flight was picked), the blocks snap to the new times.
+   */
+  autoSig?: string;
 };
 
 /**

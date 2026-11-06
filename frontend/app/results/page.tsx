@@ -1,6 +1,7 @@
 'use client';
 
 import { useTripStore, restoreTripSession } from '@/store/tripStore';
+import { useTransportBlockSync } from '@/hooks/useTransportBlockSync';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, Suspense } from 'react';
 import Navbar from '@/components/shared/Navbar';
@@ -42,6 +43,9 @@ export default function ResultsPage() {
 
 function ResultsPageInner() {
   const { currentTrip, setTrip } = useTripStore();
+  // Calendar reacts to transport changes: rebuild auto travel blocks when the
+  // flight/train behind a day changes (lib/dayScheduleDefaults.ts).
+  useTransportBlockSync();
   const router = useRouter();
   const searchParams = useSearchParams();
   const tripId = searchParams.get('tripId');
