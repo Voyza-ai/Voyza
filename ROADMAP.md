@@ -49,7 +49,7 @@ this file.
 - [ ] Saved bookings (`015_bookings.sql`) — *bullet under "Feature: In-app booking"*
 
 **Should do**
-- [ ] Running trip summary — *feature heading ("Running trip summary on the conversation page")*
+- [x] Running trip summary — *feature heading ("Running trip summary on the conversation page")*
 - [x] BlueMurr AI — add / remove / replace cities — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
 - [x] Unique AI suggestions per city — *bullet under "🐛 Bugs / tech debt"*
 
@@ -817,15 +817,16 @@ user answers each question — shows what's been collected so far in a
 clean, readable summary. Helps the user see their inputs accumulating
 before the final "Find my trip" click.
 
-- [ ] Component: small card above the chat input bar (Option 3 from
+- [x] Component: small card above the chat input bar (Option 3 from
   design discussion). Doesn't show until the first answer.
-- [ ] Updates per answer: appends new facts in natural language
+- [x] Updates per answer: appends new facts in natural language
   (e.g. "Adventure trip from NYC · 2 people · $3k budget · June 15-22")
-- [ ] Smart formatting: combines fields into readable phrases rather
+- [x] Smart formatting: combines fields into readable phrases rather
   than a bullet list (e.g. "$3k budget per person · 7 nights" not
   "budget: 3000\nnights: 7")
-- [ ] Inline editable: clicking a fact lets user revise (deferred —
-  the AI chat can already revise; UI affordance later)
+- [x] Inline editable: clicking a fact lets user revise. Guided mode opens
+  that answer's own edit box (cities prefill "Change my cities to " in the
+  bar); free chat prefills the input ("Change the budget to ").
 
 ### Feature: BlueMurr AI — edits beyond current scope
 Tasks deferred from the current chat work:
