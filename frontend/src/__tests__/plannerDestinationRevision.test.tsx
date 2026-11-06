@@ -103,7 +103,7 @@ describe('guided planner — destination correction', () => {
     await waitFor(() => expect(useTripStore.getState().answers.travelers).toBe(3));
     expect(useTripStore.getState().answers.destinations).toEqual(['Caracas', 'Rome']);
     // One bubble for the message, not two.
-    expect(screen.getAllByText('3 people')).toHaveLength(1);
+    expect(screen.getAllByText('3 people', { selector: 'div' })).toHaveLength(1);
     expect(screen.queryByText('I meant 3 of us')).not.toBeInTheDocument();
   });
 

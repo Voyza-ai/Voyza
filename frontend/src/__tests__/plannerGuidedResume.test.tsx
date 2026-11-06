@@ -89,7 +89,7 @@ it('comes back to the guided conversation, ready to search again', async () => {
 
   // The traveller's own answers are on screen, with the search button.
   expect(await screen.findByText('I have a place in mind')).toBeInTheDocument();
-  expect(screen.getByText('Paris')).toBeInTheDocument();
+  expect(screen.getByText('Paris', { selector: 'div' })).toBeInTheDocument();
   expect(screen.getByText("Perfect — I've got everything I need. Ready to find your trip?")).toBeInTheDocument();
   const findMyTrip = await screen.findByText('Find my trip');
   // Not the blank picker.

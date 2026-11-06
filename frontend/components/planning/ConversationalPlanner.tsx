@@ -23,6 +23,8 @@ import { useTripStore } from '@/store/tripStore';
 import { humanDay, humanDayRange } from '@/lib/dateHelpers';
 import VibePills from './VibePills';
 import BudgetPicker from './BudgetPicker';
+import TripSummaryCard from './TripSummaryCard';
+import { CHAT_EDIT_PREFILL } from '@/lib/tripSummary';
 
 type ChatMsg = {
   id: string;
@@ -79,6 +81,7 @@ export default function ConversationalPlanner({
       : [],
   );
   const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [widget, setWidget] = useState<Widget>(null);
   const [showRecap, setShowRecap] = useState(false);
@@ -635,6 +638,26 @@ export default function ConversationalPlanner({
       {/* ── Quick replies + input bar ── */}
       <div className="relative z-10 flex-shrink-0 px-6 pb-6">
         <div className="max-w-3xl mx-auto flex flex-col gap-3">
+          {/* Running trip summary — hidden until the first answer, and once the
+              recap card (the same facts, in full) takes over. Clicking a fact
+              starts the revision in the input: this planner already
+              understands "change the budget to …". */}
+          {!showRecap && !findTripLoading && (
+            <TripSummaryCard
+              answers={answers}
+              onEdit={(field) => {
+                setInput(CHAT_EDIT_PREFILL[field]);
+                requestAnimationFrame(() => {
+                  const el = inputRef.current;
+                  if (el) {
+                    el.focus();
+                    el.setSelectionRange(el.value.length, el.value.length);
+                  }
+                });
+              }}
+              editable={() => !isTyping}
+            />
+          )}
           {/* Location offer — visible until an origin is known */}
           {!answers.origin && !isTyping && (
             <div className="flex">
@@ -677,6 +700,7 @@ export default function ConversationalPlanner({
             className="flex items-center gap-2"
           >
             <input
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Say anything — destinations, dates, changes of heart…"

@@ -23,6 +23,8 @@ import { vibesFromAnswer } from '@/lib/vibeMap';
 // each call site below, so the long-tail path stays lazy.
 import { originAirportsForCity, type LocationAnswer } from '@/lib/locationResolver';
 import { stripOriginFiller } from '@/lib/originPhrase';
+import TripSummaryCard from './TripSummaryCard';
+import type { SummaryField } from '@/lib/tripSummary';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
@@ -229,6 +231,20 @@ let guidedSession: GuidedSnapshot | null = null;
 const DESTINATION_EDIT_WORDS =
   /\b(actually|instead|rather|meant|typo|misspel\w*|wrong|swap|replace|switch|change|add|remove|drop|skip|scratch|forget|also|cities|city|destinations?)\b/i;
 const NOT_A_PLACE = /\bnot\s+[A-Z]/;
+
+/** Guided-mode steps whose answer bubble holds each summary fact. Cities
+ *  have none: they are revised through the bar (see editSummaryField). */
+const SUMMARY_FIELD_STEPS: Record<SummaryField, string[]> = {
+  vibe: ['vibe'],
+  destinations: [],
+  origin: ['origin'],
+  returnToHome: ['roundtrip'],
+  travelers: ['travelers'],
+  budget: ['budget', 'budgetPerPerson'],
+  dates: ['dates'],
+  nights: ['nights'],
+  notes: ['notes'],
+};
 
 export function looksLikeDestinationEdit(text: string, destinations: string[] | undefined): boolean {
   if (!destinations || destinations.length === 0) return false;
@@ -659,7 +675,7 @@ export default function PlanningChat() {
       const { city } = result;
       setMessages((prev) => [
         ...prev,
-        { id: nextId(), role: 'user', content: `📍 ${city.city}` },
+        { id: nextId(), role: 'user', content: `📍 ${city.city}`, stepId: 'origin' },
         {
           id: nextId(),
           role: 'assistant',
@@ -688,7 +704,7 @@ export default function PlanningChat() {
 
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: value },
+      { id: nextId(), role: 'user', content: value, stepId: step.id },
     ]);
     setTextInput('');
 
@@ -824,7 +840,7 @@ export default function PlanningChat() {
     setAnswer('vibe', selectedVibe);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: selectedVibe },
+      { id: nextId(), role: 'user', content: selectedVibe, stepId: 'vibe' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -849,7 +865,7 @@ export default function PlanningChat() {
       !flexible && ISO_DAY.test(end) && start !== end ? humanDayRange(start, end) : humanDay(start);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: echo },
+      { id: nextId(), role: 'user', content: echo, stepId: 'dates' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -883,7 +899,7 @@ export default function PlanningChat() {
     setAnswer('budgetPerPerson', perPerson);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: `$${budget.toLocaleString()}${perPerson ? ' per person' : ' total'}` },
+      { id: nextId(), role: 'user', content: `$${budget.toLocaleString()}${perPerson ? ' per person' : ' total'}`, stepId: 'budget' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -894,7 +910,7 @@ export default function PlanningChat() {
     setAnswer('budgetPerPerson', perPerson);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: perPerson ? 'Per person' : 'Total for the trip' },
+      { id: nextId(), role: 'user', content: perPerson ? 'Per person' : 'Total for the trip', stepId: 'budgetPerPerson' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -964,6 +980,69 @@ export default function PlanningChat() {
       if (/round/.test(t)) { setAnswer('returnToHome', true); return true; }
       if (/one[\s-]?way/.test(t)) { setAnswer('returnToHome', false); return true; }
       return false;
+    }
+
+    // The rest became editable with the running trip summary, which opens
+    // these bubbles when a fact is clicked: an edit that changed only the
+    // bubble would leave the summary (and the search) on the old answer.
+    if (stepId === 'vibe') {
+      setVibe(text.trim());
+      setAnswer('vibe', text.trim());
+      return true;
+    }
+
+    if (stepId === 'notes') {
+      setAnswer('extraNotes', text.trim());
+      return true;
+    }
+
+    if (stepId === 'budget') {
+      const match = text.replace(/[, ]/g, '').match(/\d+/);
+      const amount = match ? parseInt(match[0], 10) : 0;
+      if (!amount) return false;
+      setAnswer('budget', amount);
+      if (/per\s*person|each|pp\b/.test(t)) setAnswer('budgetPerPerson', true);
+      else if (/total|combined|overall/.test(t)) setAnswer('budgetPerPerson', false);
+      return true;
+    }
+
+    if (stepId === 'budgetPerPerson') {
+      if (/per\s*person|each|pp\b/.test(t) && !/total|combined/.test(t)) { setAnswer('budgetPerPerson', true); return true; }
+      if (/total|combined|whole|overall/.test(t)) { setAnswer('budgetPerPerson', false); return true; }
+      return false;
+    }
+
+    if (stepId === 'dates') {
+      const range = parseDateRangeInput(text);
+      if (range) {
+        setAnswer('dateRange', { start: range.start, end: range.end });
+        setAnswer('flexible', false);
+        if (ISO_DAY.test(range.start) && ISO_DAY.test(range.end) && range.start !== range.end) {
+          const ms = new Date(range.end).getTime() - new Date(range.start).getTime();
+          setAnswer('nights', Math.max(1, Math.round(ms / 86_400_000)));
+        }
+        return true;
+      }
+      const start = parseDateInput(text);
+      if (!start) return false;
+      setAnswer('dateRange', { start, end: start });
+      setAnswer('flexible', true);
+      return true;
+    }
+
+    if (stepId === 'origin') {
+      const value = text.trim().replace(/^📍\s*/, '');
+      setAnswer('origin', stripOriginFiller(value) || value);
+      // Airports follow once the place is resolved, as on first answer.
+      import('@/lib/locationResolver')
+        .then(({ resolveLocation }) =>
+          resolveLocation(value, { tripDestinationNames: useTripStore.getState().answers.destinations }),
+        )
+        .then((answer) => {
+          if (mountedRef.current) setAnswer('originAirports', originAirportsForOrigin(value, answer));
+        })
+        .catch(() => {});
+      return true;
     }
 
     return false;
@@ -1376,7 +1455,7 @@ export default function PlanningChat() {
     const summary = groups.join(' | ');
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: summary || allSelected.join(', ') },
+      { id: nextId(), role: 'user', content: summary || allSelected.join(', '), stepId: 'destination' },
     ]);
 
     // Lock the cities into the store so the rest of the guided flow (and the
@@ -1933,6 +2012,48 @@ export default function PlanningChat() {
   const canReviseDestinations =
     !!intent && intent !== 'chat' && (answers.destinations?.length ?? 0) > 0 && !citySelectionData;
 
+  // ── Running trip summary: clicking a fact revises that answer ─────────
+  //
+  // Guided mode opens the answer's own bubble in its inline editor (the
+  // pencil), so the edit goes through the same parser as the first answer.
+  // Cities go through the bar instead: a city change is an AI revision
+  // (/api/plan/revise-destinations), not a re-parse.
+  const answerBubbleFor = (field: SummaryField): Message | undefined => {
+    for (const id of SUMMARY_FIELD_STEPS[field]) {
+      const found = [...messages].reverse().find((m) => m.role === 'user' && m.stepId === id);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  const canEditSummaryField = (field: SummaryField): boolean => {
+    if (findTripLoading || revising) return false;
+    if (field === 'destinations') return canReviseDestinations && currentStep?.id !== 'destination';
+    return !!answerBubbleFor(field);
+  };
+  const editSummaryField = (field: SummaryField) => {
+    if (!canEditSummaryField(field)) return;
+    if (field === 'destinations') {
+      setTextInput('Change my cities to ');
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      });
+      return;
+    }
+    const bubble = answerBubbleFor(field);
+    if (!bubble) return;
+    setEditingMsgId(bubble.id);
+    setEditingMsgValue(bubble.content.replace(/^📍\s*/, ''));
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-msg-id="${bubble.id}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  };
+
   const reviseOrFallThrough = async (value: string, fallThrough: (() => void) | null) => {
     const bubbleId = nextId();
     setMessages((prev) => [...prev, { id: bubbleId, role: 'user', content: value }]);
@@ -2258,6 +2379,7 @@ export default function PlanningChat() {
             {messages.map((msg) => (
               <motion.div
                 key={msg.id}
+                data-msg-id={msg.id}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
@@ -2384,7 +2506,7 @@ export default function PlanningChat() {
               assistant question for this step has actually appeared in the
               chat, so the widget never shows up before its question. */}
           {!isComplete && intent && currentStep &&
-            messages.some((m) => m.stepId === currentStep.id) && (
+            messages.some((m) => m.role === 'assistant' && m.stepId === currentStep.id) && (
             <motion.div
               key={`input-${currentStepIndex}`}
               initial={{ opacity: 0, y: 8 }}
@@ -2611,6 +2733,23 @@ export default function PlanningChat() {
       {/* Floating chat pill — ALWAYS pinned to the bottom of the viewport
           (until the form is complete). Mounts ONCE; placeholder text just
           swaps in place so we don't get a re-fade on every step change. */}
+      {/* Running trip summary — what's been answered so far, above the bar.
+          Hidden until the first answer (the card renders nothing before). */}
+      {intent && (
+        <div
+          className={`relative z-10 px-6 flex justify-center pointer-events-none ${
+            !isComplete || canReviseDestinations ? '' : 'pb-6'
+          }`}
+        >
+          <TripSummaryCard
+            answers={answers}
+            onEdit={editSummaryField}
+            editable={canEditSummaryField}
+            className="max-w-2xl"
+          />
+        </div>
+      )}
+
       {(!isComplete || canReviseDestinations) && (
         <div className="relative z-10 px-6 pb-6 pt-2 flex justify-center pointer-events-none">
           <motion.div
