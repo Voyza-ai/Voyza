@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 // PenSquare and Link were left over from before the Edit-in-Canvas button
 // got consolidated into ResultsHeader (backend_gohiltalla). Keeping the
@@ -13,6 +14,14 @@ import CityActivitiesCard from './CityActivitiesCard';
 import Connector from './Connector';
 import { useTripStore, cityPicksLoading } from '@/store/tripStore';
 import { useAirportNames } from '@/lib/airportNames';
+import {
+  type FlowchartFilter,
+  parseFlowchartFilter,
+  flowchartFilterCounts,
+  FlowchartFilterChips,
+  CompactCityNode,
+  PlainRoute,
+} from './FlowchartFilter';
 
 /**
  * Kept as a constant because some downstream calculations use it,
@@ -64,6 +73,36 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
   // own object even though they're visually linked.
   const [activeSubIndex, setActiveSubIndex] = useState<number | null>(null);
   const [openConnectors, setOpenConnectors] = useState<Set<number>>(new Set());
+  // ── Type filter (All · Flights · Hotels · Activities) ──────────────
+  // Kept in `?show=` so it survives opening a city guide or another tab.
+  const searchParams = useSearchParams();
+  const [filter, setFilterState] = useState<FlowchartFilter>(() =>
+    parseFlowchartFilter(searchParams?.get('show')),
+  );
+  const setFilter = (next: FlowchartFilter) => {
+    setFilterState(next);
+    try {
+      const url = new URL(window.location.href);
+      if (next === 'all') url.searchParams.delete('show');
+      else url.searchParams.set('show', next);
+      window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+    } catch {
+      // URL sync is a convenience; the filter itself already changed
+    }
+  };
+  // Flights opens every leg; these are the ones the traveller closed there.
+  // All keeps its own open set, so switching back restores it untouched.
+  const [flightsCollapsed, setFlightsCollapsed] = useState<Set<number>>(new Set());
+  const showTransportDetail = filter === 'all' || filter === 'flights';
+  const legExpanded = (key: number) =>
+    filter === 'flights' ? !flightsCollapsed.has(key) : openConnectors.has(key);
+  const toggleLeg = (key: number) =>
+    (filter === 'flights' ? setFlightsCollapsed : setOpenConnectors)((curr) => {
+      const next = new Set(curr);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   const [expandedActivities, setExpandedActivities] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -88,6 +127,19 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
       window.removeEventListener('resize', updateScrollState);
     };
   }, [updateScrollState]);
+
+  // A filter changes every card's width: start the row from the home card
+  // again and re-check the scroll arrows once the legs have resized.
+  const firstFilterRef = useRef(true);
+  useEffect(() => {
+    if (firstFilterRef.current) {
+      firstFilterRef.current = false;
+      return;
+    }
+    scrollRef.current?.scrollTo?.({ left: 0 });
+    const t = window.setTimeout(updateScrollState, 350);
+    return () => window.clearTimeout(t);
+  }, [filter, updateScrollState]);
 
   // Scroll an active card into view smoothly
   const scrollCardIntoView = useCallback((index: number) => {
@@ -131,7 +183,11 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
   };
 
   return (
-    <div className="relative h-full flex flex-col min-h-0">
+    <div className="relative h-full flex flex-col min-h-0" data-testid="flowchart">
+      {/* Type filter — a row above the cards, inside the Flowchart tab */}
+      <div className="flex-shrink-0 px-3 pt-2">
+        <FlowchartFilterChips value={filter} onChange={setFilter} counts={flowchartFilterCounts(trip)} />
+      </div>
 
       {/* Left scroll button */}
       {canScrollLeft && (
@@ -204,17 +260,24 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                 visible: { opacity: 1, y: 0, transition: { duration: 0.45 } },
               }}
             >
-              <HomeCard
-                city={trip.origin.city}
-                airports={trip.origin.airports}
-                label="Home"
-                direction="outbound"
-                leg={trip.origin.outboundLeg ?? null}
-              />
+              {showTransportDetail ? (
+                <HomeCard
+                  city={trip.origin.city}
+                  airports={trip.origin.airports}
+                  label="Home"
+                  direction="outbound"
+                  leg={trip.origin.outboundLeg ?? null}
+                />
+              ) : (
+                <CompactHomeNode city={trip.origin.city} label="Home" />
+              )}
               {/* Always show SOMETHING between home and the first city:
                   the real flight, a searching state while the backfill
-                  runs, or an honest "no flights found" card. */}
-              {trip.origin.outboundLeg ? (
+                  runs, or an honest "no flights found" card. Filtered to
+                  Hotels or Activities, just the dashed route. */}
+              {!showTransportDetail ? (
+                <PlainRoute mode="flight" muted={!trip.origin.outboundLeg} />
+              ) : trip.origin.outboundLeg ? (
                 <div className="flex items-center flex-shrink-0 mx-2">
                   <Connector
                     transport={homeLegToTransport(
@@ -224,15 +287,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     )}
                     index={-1}
                     cityIndex={-1}
-                    isExpanded={openConnectors.has(-1)}
-                    onToggle={() =>
-                      setOpenConnectors((curr) => {
-                        const next = new Set(curr);
-                        if (next.has(-1)) next.delete(-1);
-                        else next.add(-1);
-                        return next;
-                      })
-                    }
+                    isExpanded={legExpanded(-1)}
+                    onToggle={() => toggleLeg(-1)}
+                    scrollOnExpand={filter === 'all'}
                     onPickAlternative={(altIdx) =>
                       setHomeLegAlternative('outbound', altIdx)
                     }
@@ -254,15 +311,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     }}
                     index={-1}
                     cityIndex={-1}
-                    isExpanded={openConnectors.has(-1)}
-                    onToggle={() =>
-                      setOpenConnectors((curr) => {
-                        const next = new Set(curr);
-                        if (next.has(-1)) next.delete(-1);
-                        else next.add(-1);
-                        return next;
-                      })
-                    }
+                    isExpanded={legExpanded(-1)}
+                    onToggle={() => toggleLeg(-1)}
+                    scrollOnExpand={filter === 'all'}
                   />
                 </div>
               )}
@@ -278,6 +329,35 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
             // same city is hovered stays bright for both cards.
             const hoveredCity = activeIndex ?? activeSubIndex;
             const isDimmed = hoveredCity !== null && hoveredCity !== idx;
+            const subCard = hasSub ? (
+              <>
+                {/* Small connector line linking main card to sub-card */}
+                <div
+                  className="w-px h-5"
+                  style={{
+                    background:
+                      'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.06) 100%)',
+                  }}
+                />
+                <CityActivitiesCard
+                  city={city}
+                  cityIndex={idx}
+                  loading={picksLoading}
+                  isActive={activeSubIndex === idx}
+                  isDimmed={isDimmed}
+                  expanded={expandedActivities === idx}
+                  onHover={() => setActiveSubIndex(idx)}
+                  onLeave={() => setActiveSubIndex(null)}
+                  onToggleExpand={() => {
+                    if (onActivitiesClick) {
+                      onActivitiesClick(idx);
+                    } else {
+                      setExpandedActivities((prev) => (prev === idx ? null : idx));
+                    }
+                  }}
+                />
+              </>
+            ) : null;
             return (
               <motion.div
                 key={`${city.name}|${city.dates.arrival}`}
@@ -287,51 +367,46 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                   visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 0.61, 0.36, 1] } },
                 }}
               >
-                {/* City column: main card → linker line → sub-card */}
+                {/* City column: main card → linker line → sub-card. The
+                    filter swaps which of them show. */}
                 <div
                   ref={(el) => {
                     cardRefs.current[idx] = el;
                   }}
-                  className="flex flex-col items-center"
+                  className={`flex flex-col items-center${filter === 'flights' ? ' justify-center' : ''}`}
                 >
-                  <CityCard
-                    city={city}
-                    index={idx}
-                    isActive={activeIndex === idx}
-                    isDimmed={isDimmed}
-                    onHover={() => setActiveIndex(idx)}
-                    onLeave={() => setActiveIndex(null)}
-                    onClick={() => onCityClick?.(idx)}
-                  />
-
-                  {hasSub && (
+                  {filter === 'all' || filter === 'hotels' ? (
+                    <CityCard
+                      city={city}
+                      index={idx}
+                      isActive={activeIndex === idx}
+                      isDimmed={isDimmed}
+                      onHover={() => setActiveIndex(idx)}
+                      onLeave={() => setActiveIndex(null)}
+                      onClick={() => onCityClick?.(idx)}
+                    />
+                  ) : (
                     <>
-                      {/* Small connector line linking main card to sub-card */}
-                      <div
-                        className="w-px h-5"
-                        style={{
-                          background:
-                            'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.06) 100%)',
-                        }}
-                      />
-                      <CityActivitiesCard
+                      {/* Activities: the node sits on the spine (the row's
+                          middle, where every leg's dashes run) and its card
+                          hangs below — two equal flex halves around it. */}
+                      {filter === 'activities' && <div className="flex-1" />}
+                      <CompactCityNode
                         city={city}
-                        cityIndex={idx}
-                        loading={picksLoading}
-                        isActive={activeSubIndex === idx}
+                        index={idx}
+                        width={filter === 'activities' ? 300 : 200}
+                        isActive={activeIndex === idx}
                         isDimmed={isDimmed}
-                        expanded={expandedActivities === idx}
-                        onHover={() => setActiveSubIndex(idx)}
-                        onLeave={() => setActiveSubIndex(null)}
-                        onToggleExpand={() => {
-                          if (onActivitiesClick) {
-                            onActivitiesClick(idx);
-                          } else {
-                            setExpandedActivities((prev) => (prev === idx ? null : idx));
-                          }
-                        }}
+                        onHover={() => setActiveIndex(idx)}
+                        onLeave={() => setActiveIndex(null)}
+                        onClick={() => onCityClick?.(idx)}
                       />
                     </>
+                  )}
+
+                  {filter === 'all' && subCard}
+                  {filter === 'activities' && (
+                    <div className="flex-1 flex flex-col items-center">{subCard}</div>
                   )}
                 </div>
 
@@ -342,25 +417,25 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     row has the same height = tallest city column,
                     so every connector's vertical center lands at the
                     same Y on the flowchart. */}
-                {idx < trip.cities.length - 1 && (
-                  <div className="flex items-center flex-shrink-0 mx-2">
-                    <Connector
-                      transport={city.transportOut}
-                      legDate={city.dates?.departure}
-                      index={idx}
-                      cityIndex={idx}
-                      isExpanded={openConnectors.has(idx)}
-                      onToggle={() =>
-                        setOpenConnectors((curr) => {
-                          const next = new Set(curr);
-                          if (next.has(idx)) next.delete(idx);
-                          else next.add(idx);
-                          return next;
-                        })
-                      }
+                {idx < trip.cities.length - 1 &&
+                  (showTransportDetail ? (
+                    <div className="flex items-center flex-shrink-0 mx-2">
+                      <Connector
+                        transport={city.transportOut}
+                        legDate={city.dates?.departure}
+                        index={idx}
+                        cityIndex={idx}
+                        isExpanded={legExpanded(idx)}
+                        onToggle={() => toggleLeg(idx)}
+                        scrollOnExpand={filter === 'all'}
+                      />
+                    </div>
+                  ) : (
+                    <PlainRoute
+                      mode={city.transportOut?.mode}
+                      muted={!city.transportOut || !!city.transportOut.unavailable}
                     />
-                  </div>
-                )}
+                  ))}
               </motion.div>
             );
           })}
@@ -377,7 +452,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                 visible: { opacity: 1, y: 0, transition: { duration: 0.45 } },
               }}
             >
-              {trip.origin.returnLeg ? (
+              {!showTransportDetail ? (
+                <PlainRoute mode="flight" muted={!trip.origin.returnLeg} />
+              ) : trip.origin.returnLeg ? (
                 <div className="flex items-center flex-shrink-0 mx-2">
                   <Connector
                     transport={homeLegToTransport(
@@ -387,15 +464,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     )}
                     index={-2}
                     cityIndex={-2}
-                    isExpanded={openConnectors.has(-2)}
-                    onToggle={() =>
-                      setOpenConnectors((curr) => {
-                        const next = new Set(curr);
-                        if (next.has(-2)) next.delete(-2);
-                        else next.add(-2);
-                        return next;
-                      })
-                    }
+                    isExpanded={legExpanded(-2)}
+                    onToggle={() => toggleLeg(-2)}
+                    scrollOnExpand={filter === 'all'}
                     onPickAlternative={(altIdx) =>
                       setHomeLegAlternative('return', altIdx)
                     }
@@ -417,25 +488,23 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     }}
                     index={-2}
                     cityIndex={-2}
-                    isExpanded={openConnectors.has(-2)}
-                    onToggle={() =>
-                      setOpenConnectors((curr) => {
-                        const next = new Set(curr);
-                        if (next.has(-2)) next.delete(-2);
-                        else next.add(-2);
-                        return next;
-                      })
-                    }
+                    isExpanded={legExpanded(-2)}
+                    onToggle={() => toggleLeg(-2)}
+                    scrollOnExpand={filter === 'all'}
                   />
                 </div>
               )}
-              <HomeCard
-                city={trip.origin.returnCity ?? trip.origin.city}
-                airports={trip.origin.returnAirports ?? trip.origin.airports}
-                label="Back home"
-                direction="inbound"
-                leg={trip.origin.returnLeg ?? null}
-              />
+              {showTransportDetail ? (
+                <HomeCard
+                  city={trip.origin.returnCity ?? trip.origin.city}
+                  airports={trip.origin.returnAirports ?? trip.origin.airports}
+                  label="Back home"
+                  direction="inbound"
+                  leg={trip.origin.returnLeg ?? null}
+                />
+              ) : (
+                <CompactHomeNode city={trip.origin.returnCity ?? trip.origin.city} label="Back home" />
+              )}
             </motion.div>
           )}
         </motion.div>
@@ -460,6 +529,27 @@ function HomeLegSearchingPill() {
       >
         <Loader2 size={13} className="animate-spin" style={{ color: '#2563eb' }} />
         Finding flights…
+      </div>
+    </div>
+  );
+}
+
+/** A home anchor shrunk to its label and city — the HomeCard's palette and
+ *  header strip, without the airport, date and time (flight details). */
+function CompactHomeNode({ city, label }: { city: string; label: string }) {
+  return (
+    <div className="flex-shrink-0 flex items-center justify-center" data-compact-home={label}>
+      <div
+        className="w-[160px] rounded-2xl border-2 overflow-hidden"
+        style={{ background: HOME_COLOR.bg, borderColor: HOME_COLOR.border }}
+      >
+        <div className="px-3 py-1.5 flex items-center gap-1.5" style={{ background: HOME_COLOR.text, color: 'white' }}>
+          <Home size={12} />
+          <div className="text-[10px] uppercase tracking-wider font-semibold">{label}</div>
+        </div>
+        <div className="px-3 py-2.5 text-[16px] font-semibold text-center leading-tight" style={{ color: HOME_COLOR.text }}>
+          {city}
+        </div>
       </div>
     </div>
   );

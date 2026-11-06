@@ -37,6 +37,9 @@ type ConnectorProps = {
   /** The leg's travel date when the Transport itself carries none (city legs
    *  loaded from the DB): the from-city's departure date. */
   legDate?: string;
+  /** Scroll the card into view once it expands (default). Off when a filter
+   *  opens every leg at once — each would pull the flowchart to itself. */
+  scrollOnExpand?: boolean;
 };
 
 const formatDateLong = (iso?: string) => {
@@ -50,7 +53,7 @@ const formatDateLong = (iso?: string) => {
   });
 };
 
-const MODE_COLORS: Record<string, string> = {
+export const MODE_COLORS: Record<string, string> = {
   flight: '#2e6bc4',
   train: '#22c088',
   bus: '#e74c3c',
@@ -63,6 +66,7 @@ export default function Connector({
   onToggle,
   onPickAlternative,
   legDate,
+  scrollOnExpand = true,
 }: ConnectorProps) {
   const setTransportOut = useTripStore((s) => s.setTransportOut);
   const priceMode = useTripStore((s) => s.priceMode);
@@ -86,8 +90,12 @@ export default function Connector({
   // the AI panel (D-14). Once it has widened, scroll it into the flowchart's
   // view; `nearest` leaves a card that is already fully visible where it is.
   const rootRef = useRef<HTMLDivElement>(null);
+  // Read through a ref: only an expand moves the flowchart, not the flag
+  // changing under an already-open card.
+  const scrollOnExpandRef = useRef(scrollOnExpand);
+  scrollOnExpandRef.current = scrollOnExpand;
   useEffect(() => {
-    if (!isExpanded) return;
+    if (!isExpanded || !scrollOnExpandRef.current) return;
     const t = window.setTimeout(() => {
       rootRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     }, 320);
