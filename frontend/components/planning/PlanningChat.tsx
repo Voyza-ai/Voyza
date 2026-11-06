@@ -6,7 +6,8 @@ import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin, LocateFixed, L
 import { useTripStore, requestCityPicks, startTripPicks, type CityPicksRequest } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ApiError, interpretPlan, optimizeTrip, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
+import { ApiError, interpretPlan, optimizeTrip, searchHotels, suggestDestinations, OptimizeResult, reviseDestinations, type DestinationRevision } from '@/lib/api';
+import { mightBeRevision } from '@/lib/destinationRevision';
 import { Trip, City, Transport, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
@@ -618,6 +619,8 @@ export default function PlanningChat() {
   // major airport city (offline coordinate lookup, no API) → submitted
   // through the exact same path as a typed origin answer.
   const [locating, setLocating] = useState(false);
+  // A typed message is being checked as a destination change (see handleBarSubmit).
+  const [revising, setRevising] = useState(false);
   const handleUseMyLocation = async () => {
     if (locating) return;
     setLocating(true);
@@ -1895,9 +1898,9 @@ export default function PlanningChat() {
     }
   })();
 
-  const handleBarSubmit = () => {
+  const handleBarSubmit = async () => {
     const value = textInput.trim();
-    if (!value) return;
+    if (!value || revising) return;
     // Same defensive guard as handleChatSubmit: do nothing if the user
     // has already finished the flow. The input bar is hidden when
     // isComplete is true, but this defends against any race where a
@@ -1929,6 +1932,48 @@ export default function PlanningChat() {
     }
 
     if (!currentStep) return;
+
+    // Planning-phase revision: once destinations are chosen, a message typed
+    // at ANY later step may be a fix to them ("actually Venice not
+    // Venezuela", "drop Milan", "add Nice"). Before this, the text went to
+    // the current step — a correction typed at the origin question became
+    // the origin — and there was no way to change destinations at all. Only
+    // messages with a revision cue (or naming a trip city) are checked, so a
+    // plain answer never waits on the server; a 'none' result, or any
+    // failure, falls through to the step exactly as before. The input stays
+    // filled and disabled while checking, so nothing is lost or doubled.
+    const tripCities: string[] = answers.destinations ?? [];
+    if (currentStep.id !== 'destination' && mightBeRevision(value, tripCities)) {
+      setRevising(true);
+      let revision: DestinationRevision | null = null;
+      try {
+        revision = await reviseDestinations({
+          message: value,
+          destinations: tripCities,
+          currentQuestion: currentStep.question,
+        });
+      } catch {
+        revision = null;
+      } finally {
+        setRevising(false);
+      }
+      if (revision && revision.kind !== 'none') {
+        if (revision.kind === 'revised') setAnswer('destinations', revision.destinations);
+        const reply = (revision.reply ?? '').trim();
+        setMessages((prev) => [
+          ...prev,
+          { id: nextId(), role: 'user', content: value },
+          {
+            id: nextId(),
+            role: 'assistant',
+            // Re-ask the question on screen: the step has not moved.
+            content: reply ? `${reply} ${currentStep.question}` : currentStep.question,
+          },
+        ]);
+        setTextInput('');
+        return;
+      }
+    }
 
     switch (currentStep.type) {
       case 'text':
@@ -2529,6 +2574,7 @@ export default function PlanningChat() {
               rows={1}
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
+              readOnly={revising}
               onKeyDown={(e) => {
                 // Enter submits, Shift+Enter inserts a newline
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -2542,10 +2588,11 @@ export default function PlanningChat() {
             />
             <button
               onClick={handleBarSubmit}
-              disabled={!textInput.trim()}
+              disabled={!textInput.trim() || revising}
+              aria-label={revising ? 'Checking your change' : 'Send'}
               className="p-2.5 rounded-full bg-[#4f8ef7] hover:bg-[#3d7de6] text-white disabled:opacity-30 disabled:hover:bg-[#4f8ef7] transition-all flex-shrink-0"
             >
-              <Send size={18} />
+              {revising ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
             </button>
           </motion.div>
         </div>

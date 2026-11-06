@@ -21,6 +21,7 @@ import {
   NormalizedTimeWindow,
 } from '../services/legOptions';
 import { converse } from '../services/planConverse';
+import { reviseDestinations, MAX_DESTINATIONS } from '../services/reviseDestinations';
 import { compareLeg } from '../services/compareLeg';
 import { getCityCountry } from '../data/cityCountries';
 import { parseDurationMinutes } from '../utils/duration';
@@ -136,6 +137,26 @@ router.post(
     const input = converseSchema.parse(req.body);
     const result = await converse(input);
     res.json(result);
+  }),
+);
+
+const reviseDestinationsSchema = z.object({
+  message: z.string().min(1).max(1000),
+  destinations: z.array(z.string().min(1).max(120)).min(1).max(MAX_DESTINATIONS),
+  currentQuestion: z.string().max(300).optional(),
+});
+
+/**
+ * Planning-phase destination revision — "actually Venice not Venezuela"
+ * typed at any later step of the guided planner. Returns the new list (or
+ * kind 'none' when the message is a normal answer to the current step).
+ * Never 503s: without Claude it falls back to a rule-based parser.
+ */
+router.post(
+  '/revise-destinations',
+  asyncHandler(async (req, res) => {
+    const input = reviseDestinationsSchema.parse(req.body);
+    res.json(await reviseDestinations(input));
   }),
 );
 

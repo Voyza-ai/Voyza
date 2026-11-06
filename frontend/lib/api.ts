@@ -411,6 +411,33 @@ export async function converse(params: {
   });
 }
 
+export type DestinationRevision = {
+  /** revised: list changed · answer: reply only · none: a normal step answer */
+  kind: 'revised' | 'answer' | 'none';
+  destinations: string[];
+  changes: Array<
+    | { type: 'added'; city: string }
+    | { type: 'removed'; city: string }
+    | { type: 'replaced'; from: string; to: string }
+  >;
+  reply?: string;
+  source: 'ai' | 'rules';
+};
+
+/** "Actually Venice not Venezuela" typed at a later step of the guided
+ *  planner. Throws on network failure — the caller then treats the message
+ *  as a normal answer to the current step. */
+export async function reviseDestinations(params: {
+  message: string;
+  destinations: string[];
+  currentQuestion?: string;
+}): Promise<DestinationRevision> {
+  return apiFetch<DestinationRevision>('/api/plan/revise-destinations', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
 export async function interpretPlan(params: {
   rawInput: string;
   userLocation?: string;

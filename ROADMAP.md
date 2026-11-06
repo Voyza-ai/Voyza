@@ -43,7 +43,7 @@ Features to have implemented by the demo. Each item says where it lives in
 this file.
 
 **Must do**
-- [ ] Planning-phase conversational revision — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
+- [x] Planning-phase conversational revision — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
 - [ ] Calendar reacts to transport changes — *feature heading*
 - [ ] No-train-data flag — *bullet under "🐛 Bugs / tech debt"*
 - [ ] Saved bookings (`015_bookings.sql`) — *bullet under "Feature: In-app booking"*
@@ -830,7 +830,7 @@ before the final "Find my trip" click.
 ### Feature: BlueMurr AI — edits beyond current scope
 Tasks deferred from the current chat work:
 
-- [ ] **Planning-phase conversational revision** (task 4): during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
+- [x] **Planning-phase conversational revision** (task 4) — guided planner, `feat/demo-planning-revision`; Claude classifies, a rule-based parser covers no-key/failed calls: during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
 - [ ] **Post-results add/remove/replace cities** (task 5): new tools on `/api/plan/chat` — `add_city(city, afterCity?)`, `remove_city(city)`, `replace_city(old, new)`. Backend rebuilds trip with new city's hotel + transports. Shows diff card for Accept/Reject.
 
 ### Feature: Ownership transfer UX
