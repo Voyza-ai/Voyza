@@ -329,35 +329,58 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
             // same city is hovered stays bright for both cards.
             const hoveredCity = activeIndex ?? activeSubIndex;
             const isDimmed = hoveredCity !== null && hoveredCity !== idx;
+            // Small connector line linking main card to sub-card
+            const linker = (
+              <div
+                className="w-px h-5"
+                style={{
+                  background:
+                    'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.06) 100%)',
+                }}
+              />
+            );
             const subCard = hasSub ? (
-              <>
-                {/* Small connector line linking main card to sub-card */}
-                <div
-                  className="w-px h-5"
-                  style={{
-                    background:
-                      'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.06) 100%)',
-                  }}
-                />
-                <CityActivitiesCard
-                  city={city}
-                  cityIndex={idx}
-                  loading={picksLoading}
-                  isActive={activeSubIndex === idx}
-                  isDimmed={isDimmed}
-                  expanded={expandedActivities === idx}
-                  onHover={() => setActiveSubIndex(idx)}
-                  onLeave={() => setActiveSubIndex(null)}
-                  onToggleExpand={() => {
-                    if (onActivitiesClick) {
-                      onActivitiesClick(idx);
-                    } else {
-                      setExpandedActivities((prev) => (prev === idx ? null : idx));
-                    }
-                  }}
-                />
-              </>
+              <CityActivitiesCard
+                city={city}
+                cityIndex={idx}
+                loading={picksLoading}
+                isActive={activeSubIndex === idx}
+                isDimmed={isDimmed}
+                expanded={expandedActivities === idx}
+                onHover={() => setActiveSubIndex(idx)}
+                onLeave={() => setActiveSubIndex(null)}
+                onToggleExpand={() => {
+                  if (onActivitiesClick) {
+                    onActivitiesClick(idx);
+                  } else {
+                    setExpandedActivities((prev) => (prev === idx ? null : idx));
+                  }
+                }}
+              />
             ) : null;
+            const node = (
+              <CompactCityNode
+                city={city}
+                index={idx}
+                width={filter === 'activities' ? 300 : 200}
+                isActive={activeIndex === idx}
+                isDimmed={isDimmed}
+                onHover={() => setActiveIndex(idx)}
+                onLeave={() => setActiveIndex(null)}
+                onClick={() => onCityClick?.(idx)}
+              />
+            );
+            const cityCard = (
+              <CityCard
+                city={city}
+                index={idx}
+                isActive={activeIndex === idx}
+                isDimmed={isDimmed}
+                onHover={() => setActiveIndex(idx)}
+                onLeave={() => setActiveIndex(null)}
+                onClick={() => onCityClick?.(idx)}
+              />
+            );
             return (
               <motion.div
                 key={`${city.name}|${city.dates.arrival}`}
@@ -368,45 +391,41 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                 }}
               >
                 {/* City column: main card → linker line → sub-card. The
-                    filter swaps which of them show. */}
+                    filter swaps which of them show; whichever card the
+                    filter is about sits on the spine (the row's middle,
+                    where every leg's dashes run). */}
                 <div
                   ref={(el) => {
                     cardRefs.current[idx] = el;
                   }}
-                  className={`flex flex-col items-center${filter === 'flights' ? ' justify-center' : ''}`}
+                  className={`flex flex-col items-center${filter === 'all' ? '' : ' justify-center'}`}
                 >
-                  {filter === 'all' || filter === 'hotels' ? (
-                    <CityCard
-                      city={city}
-                      index={idx}
-                      isActive={activeIndex === idx}
-                      isDimmed={isDimmed}
-                      onHover={() => setActiveIndex(idx)}
-                      onLeave={() => setActiveIndex(null)}
-                      onClick={() => onCityClick?.(idx)}
-                    />
-                  ) : (
+                  {filter === 'all' ? (
                     <>
-                      {/* Activities: the node sits on the spine (the row's
-                          middle, where every leg's dashes run) and its card
-                          hangs below — two equal flex halves around it. */}
-                      {filter === 'activities' && <div className="flex-1" />}
-                      <CompactCityNode
-                        city={city}
-                        index={idx}
-                        width={filter === 'activities' ? 300 : 200}
-                        isActive={activeIndex === idx}
-                        isDimmed={isDimmed}
-                        onHover={() => setActiveIndex(idx)}
-                        onLeave={() => setActiveIndex(null)}
-                        onClick={() => onCityClick?.(idx)}
-                      />
+                      {cityCard}
+                      {subCard && (
+                        <>
+                          {linker}
+                          {subCard}
+                        </>
+                      )}
                     </>
-                  )}
-
-                  {filter === 'all' && subCard}
-                  {filter === 'activities' && (
-                    <div className="flex-1 flex flex-col items-center">{subCard}</div>
+                  ) : filter === 'hotels' ? (
+                    // Natural height (CityCard grows to fill a sized column).
+                    <div className="flex flex-col">{cityCard}</div>
+                  ) : filter === 'activities' && subCard ? (
+                    // Card on the spine, node above it: two equal halves
+                    // around the card, the node at the foot of the top one.
+                    <>
+                      <div className="flex-1 flex flex-col justify-end items-center">
+                        {node}
+                        {linker}
+                      </div>
+                      {subCard}
+                      <div className="flex-1" />
+                    </>
+                  ) : (
+                    node
                   )}
                 </div>
 
