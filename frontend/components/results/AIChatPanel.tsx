@@ -14,8 +14,7 @@ import {
   LegRefresh,
   ModeComparison,
 } from '@/lib/api';
-import { useTripStore, requestPicksForAddedCity, tripPicksSettled } from '@/store/tripStore';
-import { persistSavedTrip } from '@/lib/canvasHandoff';
+import { useTripStore, requestPicksForAddedCity } from '@/store/tripStore';
 import { displayAmount } from '@/lib/tripTotals';
 import { applyCityEdit, cityEditDiff, type CityEditRow } from '@/lib/cityEdit';
 import { getCityColor } from '@/lib/cityColors';
@@ -464,23 +463,8 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
             budget: next.budget,
           });
         }
-        // A saved trip keeps the edit in the database. Written at once, so a
-        // reload straight after Accept still has the city (until its picks
-        // land the save gives it placeholder activities, as Canvas's Save
-        // does), and again once the new city's picks and their coordinates
-        // are in, which replaces them. Unsaved trips persist through the
-        // session snapshot as before.
-        const savedId = next.id;
-        if (savedId && !savedId.startsWith('mock')) {
-          const persistLatest = () => {
-            const latest = useTripStore.getState().currentTrip;
-            if (latest?.id === savedId) persistSavedTrip(latest).catch(() => {});
-          };
-          persistLatest();
-          tripPicksSettled().then((waited) => {
-            if (waited) persistLatest();
-          });
-        }
+        // A saved trip's edit reaches the database through the results
+        // page's autosave (useSavedTripAutosave), as do its picks landing.
       }
     } else {
       applyTrip(msg.proposal.proposedTrip as Trip);

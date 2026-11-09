@@ -29,6 +29,7 @@ import { Hotel, City, Transport, HomeLeg, Trip } from '@/lib/types';
 import { tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
 import { formatMinutes } from '@/lib/dateHelpers';
 import { useAuthStore } from '@/store/authStore';
+import { useSavedTripAutosave } from '@/lib/useSavedTripAutosave';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
 // during the static build pass. We split the page into an outer wrapper that
@@ -43,6 +44,9 @@ export default function ResultsPage() {
 
 function ResultsPageInner() {
   const { currentTrip, setTrip } = useTripStore();
+  // A saved trip's changes made here (legs, schedule, AI city edits) are
+  // written back to the database.
+  useSavedTripAutosave();
   const router = useRouter();
   const searchParams = useSearchParams();
   const tripId = searchParams.get('tripId');
