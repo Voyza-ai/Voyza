@@ -1,4 +1,5 @@
-import { saveTrip, fetchHomeLegs } from './api';
+import { saveTrip, fetchHomeLegs, getCanvasSession, saveCanvas } from './api';
+import type { Trip } from './types';
 
 // Carries an "Edit in Canvas" request across the sign-in step. Google OAuth is
 // a full-page redirect that wipes in-memory trip state, so the intent (and the
@@ -178,4 +179,36 @@ export async function resolveCanvasTripId(intent: CanvasIntent): Promise<string 
   }
 
   return tripId;
+}
+
+/**
+ * Write a results-page edit of a SAVED trip (an accepted AI city edit) to the
+ * database, through the same endpoint as Canvas's Save — it owns the trip's
+ * city, leg and home-flight rows.
+ *
+ * Results-page edits used to reach the database only when the trip was next
+ * opened in Canvas (the `voyza-canvas-sync-*` handoff), so a city added from
+ * the chat on /results?tripId=… was gone after a reload.
+ *
+ * Builds on the trip's saved canvas session (its title, collaborators' view)
+ * with the cities and home flights as they are now. Owner only — the save
+ * endpoint refuses anyone else. Returns whether it saved.
+ */
+export async function persistSavedTrip(trip: Trip): Promise<boolean> {
+  const id = trip.id;
+  if (!id || id.startsWith('mock')) return false;
+  const { session, role } = await getCanvasSession(id);
+  if (role !== 'owner') return false;
+  const prev = session?.state ?? {};
+  const state = {
+    ...prev,
+    cities: trip.cities,
+    trip: {
+      ...(prev.trip ?? {}),
+      travelers: trip.travelers,
+      ...(trip.origin ? { origin: trip.origin, returnToHome: trip.returnToHome ?? true } : {}),
+    },
+  };
+  await saveCanvas(id, state);
+  return true;
 }
