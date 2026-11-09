@@ -51,4 +51,19 @@ describe('parseDurationMinutes', () => {
     expect(parseDurationMinutes('PT7H35M')).toBe(455);
     expect(parseDurationMinutes('P1DT2H30M')).toBe(1590);
   });
+
+  it('reads verbose unit spellings (regression: "3 hours 15 minutes" was 180)', () => {
+    expect(parseDurationMinutes('3 hours 15 minutes')).toBe(195);
+    expect(parseDurationMinutes('1 hour 1 minute')).toBe(61);
+    expect(parseDurationMinutes('2 hrs 5 mins')).toBe(125);
+    expect(parseDurationMinutes('1 hr 30 min')).toBe(90);
+    expect(parseDurationMinutes('3 hours and 15 minutes')).toBe(195);
+    expect(parseDurationMinutes('3 hours, 15 minutes')).toBe(195);
+    expect(parseDurationMinutes('4 hours')).toBe(240);
+    expect(parseDurationMinutes('45 minutes')).toBe(45);
+    expect(parseDurationMinutes('1 day 2 hours')).toBe(1560);
+    expect(parseDurationMinutes('3 h 37 m')).toBe(217);
+    expect(parseDurationMinutes('3h37m')).toBe(217);
+    expect(parseDurationMinutes('1.5 hours')).toBe(90);
+  });
 });

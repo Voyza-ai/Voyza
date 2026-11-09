@@ -59,6 +59,10 @@ export type CompareLegParams = {
    * so the cached flight row — price and duration only — won't do; search
    * instead (searchFlights' own 10-minute memo still dedupes). The optimizer
    * ranks on price and leaves this off.
+   *
+   * The same holds for the TRAIN row: it has no times either, and Canvas
+   * re-pricing a leg after a city swap put the cached train on the card as
+   * "—:— → —:—" with no travel blocks on the arrival day.
    */
   display?: boolean;
 };
@@ -158,7 +162,7 @@ export async function compareLeg(
 
   const [cachedFlightRow, cachedTrain, airports] = await Promise.all([
     flightCacheUsable ? readNewestCached('flight') : Promise.resolve(undefined),
-    readNewestCached('train'),
+    params.display ? Promise.resolve(undefined) : readNewestCached('train'),
     airportsLookup,
   ]);
   const sharedAirport = Array.isArray(airports) && sameAirportArea(airports[0], airports[1]);
