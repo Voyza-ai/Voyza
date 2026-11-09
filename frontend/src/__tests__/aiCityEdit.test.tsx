@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import AIChatPanel from '@/components/results/AIChatPanel';
 import { buildTrip } from './fixtures';
 import { useTripStore } from '@/store/tripStore';
-import { planChat, searchActivities } from '@/lib/api';
+import { planChat, searchActivities, getCanvasSession, saveCanvas } from '@/lib/api';
 import { applyCityEdit, cityEditDiff } from '@/lib/cityEdit';
 import { liveTripTotal } from '@/lib/tripTotals';
 import type { CityEditProposal, HotelResult, LegOption } from '@/lib/api';
@@ -209,6 +209,45 @@ describe('AIChatPanel — city edit card', () => {
     expect(within(card).getByText('✓ Applied to your trip')).toBeInTheDocument();
     expect(useTripStore.getState().tripPicks?.pending.map((r) => r.city)).toEqual(['Venice']);
     await waitFor(() => expect(searchActivities).toHaveBeenCalledWith(expect.objectContaining({ city: 'Venice', nights: 2 })));
+  });
+
+  it('on a SAVED trip, Accept writes the edit to the database once the new city\'s picks are in', async () => {
+    useTripStore.setState({ currentTrip: { ...trip(), id: 'trip-saved-1' } });
+    (getCanvasSession as jest.Mock).mockResolvedValue({ session: { state: { trip: { title: 'My Italy' }, cities: [] } }, role: 'owner' });
+    const card = await propose(addVenice());
+    fireEvent.click(within(card).getByText('Accept'));
+    // Written at once, so a reload straight after keeps the city…
+    await waitFor(() => expect(saveCanvas).toHaveBeenCalledTimes(1));
+    // …and again once the picks settle (empty picks count as a failed
+    // request: the city stops waiting after the grace period).
+    await waitFor(() => expect(saveCanvas).toHaveBeenCalledTimes(2), { timeout: 5000 });
+    const [id, state] = (saveCanvas as jest.Mock).mock.calls[1];
+    expect(id).toBe('trip-saved-1');
+    expect(state.cities.map((c: any) => c.name)).toEqual(['Rome', 'Florence', 'Venice']);
+    expect(state.trip.title).toBe('My Italy');
+    expect(state.trip.origin.city).toBe('New York');
+    expect(getCanvasSession).toHaveBeenCalledWith('trip-saved-1');
+    (getCanvasSession as jest.Mock).mockResolvedValue({ session: { state: null }, role: 'viewer' });
+  });
+
+  it('a saved trip someone else owns is not written', async () => {
+    useTripStore.setState({ currentTrip: { ...trip(), id: 'trip-shared-1' } });
+    (getCanvasSession as jest.Mock).mockResolvedValue({ session: { state: {} }, role: 'editor' });
+    const card = await propose(addVenice());
+    fireEvent.click(within(card).getByText('Accept'));
+    await waitFor(() => expect(getCanvasSession).toHaveBeenCalled(), { timeout: 5000 });
+    expect(saveCanvas).not.toHaveBeenCalled();
+    (getCanvasSession as jest.Mock).mockResolvedValue({ session: { state: null }, role: 'viewer' });
+  });
+
+  it('an unsaved trip is not written to the database', async () => {
+    useTripStore.setState({ currentTrip: { ...trip(), id: undefined as any } });
+    const card = await propose(addVenice());
+    fireEvent.click(within(card).getByText('Accept'));
+    await waitFor(() => expect(searchActivities).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(getCanvasSession).not.toHaveBeenCalled();
+    expect(saveCanvas).not.toHaveBeenCalled();
   });
 
   it('Reject leaves the trip exactly as it was', async () => {
