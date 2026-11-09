@@ -24,7 +24,7 @@ import { checkCityName } from './cityEdit';
  */
 
 export type DestinationChange =
-  | { kind: 'add'; city: string; afterCity?: string }
+  | { kind: 'add'; city: string; afterCity?: string; beforeCity?: string }
   | { kind: 'remove'; city: string }
   | { kind: 'replace'; from: string; to: string };
 
@@ -50,6 +50,10 @@ export const REVISION_TOOLS = [
       properties: {
         city: { type: 'string', description: 'City to add, plain English name.' },
         afterCity: { type: ['string', 'null'], description: 'Existing destination it goes after; omit for the end.' },
+        beforeCity: {
+          type: ['string', 'null'],
+          description: 'Existing destination it goes right BEFORE ("before Florence", "start with Rome"). Set this or afterCity, not both.',
+        },
       },
       required: ['city'],
     },
@@ -136,11 +140,18 @@ export function applyDestinationOps(
         problems.push(check.reply);
         continue;
       }
+      const before = str(input.beforeCity);
+      const bAt = before ? find(before) : -1;
       const after = str(input.afterCity);
-      const at = after ? find(after) : -1;
-      if (at >= 0) list.splice(at + 1, 0, city);
-      else list.push(city);
-      changes.push(at >= 0 ? { kind: 'add', city, afterCity: list[at] } : { kind: 'add', city });
+      const at = bAt < 0 && after ? find(after) : -1;
+      if (bAt >= 0) {
+        changes.push({ kind: 'add', city, beforeCity: list[bAt] });
+        list.splice(bAt, 0, city);
+      } else {
+        if (at >= 0) list.splice(at + 1, 0, city);
+        else list.push(city);
+        changes.push(at >= 0 ? { kind: 'add', city, afterCity: list[at] } : { kind: 'add', city });
+      }
     } else if (call.name === 'remove_destination') {
       const at = find(input.city);
       if (at < 0) {
@@ -190,7 +201,7 @@ function describeChanges(changes: DestinationChange[]): string {
         ? `${c.to} instead of ${c.from}`
         : c.kind === 'remove'
           ? `${c.city} removed`
-          : `${c.city} added${c.afterCity ? ` after ${c.afterCity}` : ''}`,
+          : `${c.city} added${c.beforeCity ? ` before ${c.beforeCity}` : c.afterCity ? ` after ${c.afterCity}` : ''}`,
     )
     .join(', ');
 }

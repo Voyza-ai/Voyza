@@ -40,20 +40,24 @@ export function relayMovedStay(
   const stay = stayDays(city.dates.arrival, city.dates.departure);
   if (stay.length === 0) return null;
   const old = city.schedule ?? {};
-  if (stay.every((d) => old[d] !== undefined)) return null;
+  // The days this city's schedule has to hold: its nights, plus the fly-home
+  // morning when it is the last city.
+  const isLast = cityIndex === trip.cities.length - 1;
+  const cover = isLast && !stay.includes(city.dates.departure) ? [...stay, city.dates.departure] : stay;
+  if (cover.every((d) => old[d] !== undefined)) return null;
 
   const hasOwn = (d: string) => (old[d] ?? []).some((e) => e.category !== 'transport');
   // Days that legitimately sit outside the nights of the stay: the fly-home
   // morning of the last city and the home-departure day of the first.
   const ownDays = new Set(stay);
-  if (cityIndex === trip.cities.length - 1) ownDays.add(city.dates.departure);
+  if (isLast) ownDays.add(city.dates.departure);
   const homeDeparture = cityIndex === 0 ? homeDepartureDay(trip) : null;
   if (homeDeparture) ownDays.add(homeDeparture);
   // Moved: the city's planned stops sit on dates that are no longer its own,
   // or none of its stay is planned at all. A stay the planner merely left a
   // day empty in is not re-planned.
   const movedAway = Object.keys(old).some((d) => !ownDays.has(d) && hasOwn(d));
-  if (!movedAway && stay.some(hasOwn)) return fillGaps(trip, cityIndex, stay);
+  if (!movedAway && stay.some(hasOwn)) return fillGaps(trip, cityIndex, cover);
 
   // The traveller's own blocks (added by hand) on days still in the stay
   // stay where they are; every planned stop is re-planned.
@@ -132,7 +136,7 @@ export function relayMovedStay(
   }
   // Every stay day gets a key, so a day the planner left empty is not
   // re-planned on the next render.
-  for (const d of stay) if (schedule[d] === undefined) schedule[d] = [];
+  for (const d of cover) if (schedule[d] === undefined) schedule[d] = [];
   return { schedule, unscheduled: built.unscheduled };
 }
 
@@ -143,10 +147,10 @@ export function relayMovedStay(
  * again, which is what repeated the same stops on every unplanned day. A day
  * nothing is left for keeps just its transport, or stays empty.
  */
-function fillGaps(trip: Trip, cityIndex: number, stay: string[]): ReturnType<typeof relayMovedStay> {
+function fillGaps(trip: Trip, cityIndex: number, cover: string[]): ReturnType<typeof relayMovedStay> {
   const city = trip.cities[cityIndex];
   const old = city.schedule ?? {};
-  const missing = stay.filter((d) => old[d] === undefined);
+  const missing = cover.filter((d) => old[d] === undefined);
   if (missing.length === 0) return null;
 
   const placed = new Set<string>();

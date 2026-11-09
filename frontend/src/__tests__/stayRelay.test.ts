@@ -108,7 +108,10 @@ describe('relayMovedStay', () => {
     // is added, and then nothing more.
     const t = plannedTrip();
     const once = relayMovedStay(t, 1)!;
-    expect(Object.keys(once.schedule).sort()).toEqual([...Object.keys(t.cities[1].schedule!), '2026-12-13'].sort());
+    // (and the fly-home day, Dec 14, which this transport-less fixture never built)
+    expect(Object.keys(once.schedule).sort()).toEqual(
+      Array.from(new Set([...Object.keys(t.cities[1].schedule!), '2026-12-13', '2026-12-14'])).sort(),
+    );
     expect(relayMovedStay({ ...t, cities: [t.cities[0], { ...t.cities[1], ...once }] }, 1)).toBeNull();
   });
 

@@ -701,6 +701,11 @@ const CHAT_TOOLS = [
           type: ['string', 'null'],
           description: 'Existing trip city the new one goes right after. Null/omitted = add it at the end.',
         },
+        beforeCity: {
+          type: ['string', 'null'],
+          description:
+            'Existing trip city the new one goes right BEFORE — use for "before Florence", "start with Rome", "at the beginning" (the first city). Set this or afterCity, not both.',
+        },
         nights: {
           type: ['number', 'null'],
           description: 'Nights in the new city, only if the user said ("3 days in Lisbon" → 3). Omit otherwise (default 2).',

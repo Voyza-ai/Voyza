@@ -28,14 +28,15 @@ import { originIndex } from './location/originAirports';
  *  - remove: the trip keeps its length. The previous city keeps the removed
  *    city's nights (the next city, when the first one goes), so the flights
  *    home stay on their days.
- *  - add: the new city gets `nights` (default 2) after `afterCity` (default:
- *    the last city) and everything after it moves later by that much — the
+ *  - add: the new city gets `nights` (default 2) after `afterCity`, or right
+ *    before `beforeCity` (at the very start when that is the first city), by
+ *    default after the last city; everything after it moves later by that much — the
  *    trip gets longer rather than taking nights from a city the user didn't
  *    mention.
  */
 
 export type CityEditOp =
-  | { kind: 'add'; city: string; afterCity?: string | null; nights?: number | null }
+  | { kind: 'add'; city: string; afterCity?: string | null; beforeCity?: string | null; nights?: number | null }
   | { kind: 'remove'; city: string }
   | { kind: 'replace'; oldCity: string; newCity: string };
 
@@ -157,8 +158,13 @@ export function planCityEdit(
   // add
   const dup = indexOf(op.city);
   if (dup >= 0) return { ok: false, reason: `${stops[dup].name} is already in this trip` };
+  // -1 = before the first city: the new city opens the trip.
   let afterIdx = last;
-  if (op.afterCity) {
+  if (op.beforeCity) {
+    const b = indexOf(op.beforeCity);
+    if (b < 0) return { ok: false, reason: `${op.beforeCity} isn't in this trip (it has ${names})` };
+    afterIdx = b - 1;
+  } else if (op.afterCity) {
     afterIdx = indexOf(op.afterCity);
     if (afterIdx < 0) return { ok: false, reason: `${op.afterCity} isn't in this trip (it has ${names})` };
   }
@@ -170,9 +176,10 @@ export function planCityEdit(
     };
   }
   const n = requested;
-  const arrival = stops[afterIdx].departure;
+  const first = afterIdx < 0;
+  const arrival = first ? stops[0].arrival : stops[afterIdx].departure;
   const added: PlannedStop = { name: op.city, arrival, departure: addDays(arrival, n), status: 'added' };
-  const after: PlannedStop[] = [];
+  const after: PlannedStop[] = first ? [added] : [];
   stops.forEach((s, i) => {
     if (i <= afterIdx) after.push(kept(s, i));
     else after.push({ name: s.name, arrival: addDays(s.arrival, n), departure: addDays(s.departure, n), status: 'moved', fromIndex: i });
@@ -182,7 +189,7 @@ export function planCityEdit(
   const hotels = after.map((_, i) => i).filter((i) => i >= newIdx);
   // Every leg from the city before the new one onwards: the two that touch
   // it, plus the later ones whose day moved.
-  const legs = after.map((_, i) => i).filter((i) => i >= afterIdx && i < after.length - 1);
+  const legs = after.map((_, i) => i).filter((i) => i >= Math.max(0, afterIdx) && i < after.length - 1);
   const shifted = after.length - 1 - newIdx;
   return {
     ok: true,
@@ -191,10 +198,14 @@ export function planCityEdit(
       removed: [],
       hotels,
       legs,
-      outbound: false,
+      // A new first city is where the flight from home now lands.
+      outbound: first,
       ret: true,
-      note:
-        shifted === 1
+      note: first
+        ? `${op.city} opens the trip with ${plural(n, 'night')}, so ${
+            stops.length === 1 ? stops[0].name : `the ${stops.length} cities after it`
+          } ${stops.length === 1 ? 'moves' : 'move'} ${plural(n, 'day')} later.`
+        : shifted === 1
           ? `${op.city} adds ${plural(n, 'night')} after ${stops[afterIdx].name}, so ${after[after.length - 1].name} moves ${plural(n, 'day')} later.`
           : shifted > 1
           ? `${op.city} adds ${plural(n, 'night')} after ${stops[afterIdx].name}, so the ${shifted} cities after it move ${plural(n, 'day')} later.`
@@ -459,7 +470,13 @@ export function cityEditOpFromTool(toolName: string, input: any): CityEditOp | n
     const city = str(input?.city);
     if (!city) return null;
     const nights = input?.nights;
-    return { kind: 'add', city, afterCity: str(input?.afterCity), nights: nights == null ? null : nights };
+    return {
+      kind: 'add',
+      city,
+      afterCity: str(input?.afterCity),
+      beforeCity: str(input?.beforeCity),
+      nights: nights == null ? null : nights,
+    };
   }
   if (toolName === 'remove_city') {
     const city = str(input?.city);
