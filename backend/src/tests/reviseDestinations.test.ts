@@ -90,6 +90,18 @@ describe('POST /api/plan/revise-destinations', () => {
     expect(res.body.changes).toEqual([{ kind: 'add', city: 'Florence', afterCity: 'Rome' }]);
   });
 
+  it('add_destination before the first city puts it first', async () => {
+    const res = await revise(app, ['Rome', 'Venice'], ['add_destination', { city: 'Naples', beforeCity: 'rome' }]);
+    expect(res.body.destinations).toEqual(['Naples', 'Rome', 'Venice']);
+    expect(res.body.changes).toEqual([{ kind: 'add', city: 'Naples', beforeCity: 'Rome' }]);
+    expect(res.body.reply).toMatch(/Naples added before Rome/);
+  });
+
+  it('add_destination before a middle city', async () => {
+    const res = await revise(app, ['Rome', 'Venice'], ['add_destination', { city: 'Florence', beforeCity: 'Venice' }]);
+    expect(res.body.destinations).toEqual(['Rome', 'Florence', 'Venice']);
+  });
+
   it('add_destination without afterCity appends', async () => {
     const res = await revise(app, ['Rome'], ['add_destination', { city: 'Naples' }]);
     expect(res.body.destinations).toEqual(['Rome', 'Naples']);

@@ -14,6 +14,7 @@
  *   - "in 2 weeks"            → today + 14
  *   - "April 7-30"            → YYYY-04-07 (current or next year)
  *   - "summer"                → July 1 of current/next year
+ *   - "sometime in April"     → April 1 (early → 1st, mid → 10th, late → 20th)
  *   - anything else           → today + 30
  */
 
@@ -146,11 +147,39 @@ export function parseDateInput(raw: string | undefined | null): string {
     return toISO(candidate);
   }
 
+  // A month or season inside a phrase — "sometime in April", "early June
+  // 2027", "late summer", "mid-October". Without this the phrase fell
+  // through to "a month from today", which is a date the traveller never said.
+  const inPhrase = monthOrSeasonInPhrase(input, today);
+  if (inPhrase) return inPhrase;
+
   // Last resort: try native Date constructor — works for many formats.
   const native = new Date(raw);
   if (!Number.isNaN(native.getTime())) return toISO(native);
 
   return defaultFallback();
+}
+
+function monthOrSeasonInPhrase(input: string, today: Date): string | null {
+  const words = input.replace(/[^a-z0-9]+/g, ' ').trim().split(' ');
+  // "may" is also a verb ("we may go in June"): only a month when nothing else
+  // is, and it reads like one ("in May", "early May", "May 2027").
+  const month =
+    words.find((w) => MONTHS[w] !== undefined && w !== 'may') ??
+    (/\b(in|early|mid|late|end of|start of|during|of)\s+may\b|\bmay\s+20\d\d\b/.test(input) ? 'may' : undefined);
+  const season = words.find((w) => SEASONS[w] !== undefined);
+  const m = month !== undefined ? MONTHS[month] : season !== undefined ? SEASONS[season] : undefined;
+  if (m === undefined) return null;
+  const day = /\blate\b|\bend of\b/.test(input) ? 20 : /\bmid\b/.test(input) ? 10 : 1;
+  const year = input.match(/\b(20\d\d)\b/);
+  if (year) {
+    const d = new Date(parseInt(year[1], 10), m, day);
+    // A year already past is read as the next one of that month.
+    if (d >= today) return toISO(d);
+  }
+  const candidate = new Date(today.getFullYear(), m, day);
+  if (candidate < today) candidate.setFullYear(today.getFullYear() + 1);
+  return toISO(candidate);
 }
 
 // ─── Ranges ─────────────────────────────────────────────────────────────────

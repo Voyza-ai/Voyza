@@ -229,7 +229,7 @@ let guidedSession: GuidedSnapshot | null = null;
  * number, a date, "round-trip" — never match, so they cost no extra call.
  */
 const DESTINATION_EDIT_WORDS =
-  /\b(actually|instead|rather|meant|typo|misspel\w*|wrong|swap|replace|switch|change|add|remove|drop|skip|scratch|forget|also|cities|city|destinations?)\b/i;
+  /\b(actually|instead|rather|meant|typo|misspel\w*|wrong|swap|replace|switch|change|add|remove|drop|skip|scratch|forget|also|cities|city|destinations?|start|begin|first|last|before|after|between|order|move|put|include|visit)\b/i;
 const NOT_A_PLACE = /\bnot\s+[A-Z]/;
 
 /** Guided-mode steps whose answer bubble holds each summary fact. Cities

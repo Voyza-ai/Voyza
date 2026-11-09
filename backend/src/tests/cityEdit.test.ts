@@ -187,6 +187,36 @@ describe('planCityEdit — dates and what has to be re-priced', () => {
     expect(r.plan.ret).toBe(true);
   });
 
+  it('add before the FIRST city opens the trip: everything moves later and the flight from home is re-priced', () => {
+    const r = planCityEdit(stops(), { kind: 'add', city: 'Naples', beforeCity: 'rome' });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.plan.after.map((s) => [s.name, s.arrival, s.departure, s.status])).toEqual([
+      ['Naples', '2026-12-08', '2026-12-10', 'added'],
+      ['Rome', '2026-12-10', '2026-12-12', 'moved'],
+      ['Florence', '2026-12-12', '2026-12-14', 'moved'],
+      ['Venice', '2026-12-14', '2026-12-16', 'moved'],
+    ]);
+    expect(r.plan.hotels).toEqual([0, 1, 2, 3]);
+    expect(r.plan.legs).toEqual([0, 1, 2]);
+    expect(r.plan.outbound).toBe(true);
+    expect(r.plan.ret).toBe(true);
+    expect(r.plan.note).toMatch(/Naples opens the trip/);
+  });
+
+  it('add before a middle city is the same as after the one before it', () => {
+    const before = planCityEdit(stops(), { kind: 'add', city: 'Bologna', beforeCity: 'Florence', nights: 3 });
+    const after = planCityEdit(stops(), { kind: 'add', city: 'Bologna', afterCity: 'Rome', nights: 3 });
+    expect(before).toEqual(after);
+  });
+
+  it('add before a single-city trip', () => {
+    const r = planCityEdit([{ name: 'Florence', arrival: '2026-12-10', departure: '2026-12-16' }], { kind: 'add', city: 'Rome', beforeCity: 'Florence' });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.plan.after.map((s) => s.name)).toEqual(['Rome', 'Florence']);
+    expect(r.plan.after[1]).toMatchObject({ arrival: '2026-12-12', departure: '2026-12-18' });
+    expect(r.plan.outbound).toBe(true);
+  });
+
   it('add with no afterCity goes at the end with 2 nights', () => {
     const r = planCityEdit(stops(), { kind: 'add', city: 'Milan' });
     if (!r.ok) throw new Error(r.reason);
@@ -198,6 +228,7 @@ describe('planCityEdit — dates and what has to be re-priced', () => {
   it.each([
     [{ kind: 'add', city: 'Rome' }, /already in this trip/],
     [{ kind: 'add', city: 'Milan', afterCity: 'Paris' }, /Paris isn't in this trip/],
+    [{ kind: 'add', city: 'Milan', beforeCity: 'Paris' }, /Paris isn't in this trip/],
     [{ kind: 'add', city: 'Milan', nights: 0 }, /whole number of nights/],
     [{ kind: 'remove', city: 'Paris' }, /Paris isn't in this trip/],
     [{ kind: 'replace', oldCity: 'Paris', newCity: 'Lyon' }, /Paris isn't in this trip/],
@@ -229,7 +260,8 @@ describe('checkCityName', () => {
 
 describe('cityEditOpFromTool', () => {
   it('maps each tool and rejects a missing city', () => {
-    expect(cityEditOpFromTool('add_city', { city: 'Nice', afterCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: 'Rome', nights: null });
+    expect(cityEditOpFromTool('add_city', { city: 'Nice', afterCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: 'Rome', beforeCity: null, nights: null });
+    expect(cityEditOpFromTool('add_city', { city: 'Nice', beforeCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: null, beforeCity: 'Rome', nights: null });
     expect(cityEditOpFromTool('remove_city', { city: 'Nice' })).toEqual({ kind: 'remove', city: 'Nice' });
     expect(cityEditOpFromTool('replace_city', { old: 'Rome', new: 'Naples' })).toEqual({ kind: 'replace', oldCity: 'Rome', newCity: 'Naples' });
     expect(cityEditOpFromTool('replace_city', { old: 'Rome' })).toBeNull();

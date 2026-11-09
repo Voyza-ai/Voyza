@@ -422,7 +422,7 @@ export type ReviseDestinationsResponse =
       reply: string;
       destinations: string[];
       changes: Array<
-        | { kind: 'add'; city: string; afterCity?: string }
+        | { kind: 'add'; city: string; afterCity?: string; beforeCity?: string }
         | { kind: 'remove'; city: string }
         | { kind: 'replace'; from: string; to: string }
       >;
@@ -543,7 +543,7 @@ export type CityEditProposal = {
   kind: 'city_edit';
   toolName: 'add_city' | 'remove_city' | 'replace_city';
   op:
-    | { kind: 'add'; city: string; afterCity?: string | null; nights?: number | null }
+    | { kind: 'add'; city: string; afterCity?: string | null; beforeCity?: string | null; nights?: number | null }
     | { kind: 'remove'; city: string }
     | { kind: 'replace'; oldCity: string; newCity: string };
   before: Array<{ name: string; arrival: string; departure: string }>;

@@ -185,7 +185,10 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
       if (!match) return; // travel-only day with no city mapping
       if (relaid.has(match.index)) return;
       const existing = match.city.schedule?.[iso];
-      if (existing && existing.length > 0) {
+      // A day with a key is planned — an empty one too (the stay ran out of
+      // stops before it ran out of days): filling it from the city's whole
+      // list is what repeated the same stops day after day.
+      if (existing !== undefined) {
         // Built already: bring its generated travel blocks onto the
         // current transport (legacy days included), nothing else.
         const next = reconcileDayTransport(trip, match.index, iso);
