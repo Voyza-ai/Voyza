@@ -17,6 +17,7 @@ import {
 import { Trip, City, ScheduledEvent } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
+import { relayMovedStay } from '@/lib/stayRelay';
 import { reconcileDayTransport } from '@/lib/transportReconcile';
 import { useTripStore } from '@/store/tripStore';
 import { homeDepartureDay } from '@/lib/tripSpan';
@@ -97,6 +98,7 @@ export default function DayPlanner({
   const updateScheduledEvent = useTripStore((s) => s.updateScheduledEvent);
   const removeScheduledEvent = useTripStore((s) => s.removeScheduledEvent);
   const setDaySchedule = useTripStore((s) => s.setDaySchedule);
+  const updateCity = useTripStore((s) => s.updateCity);
 
   // Initialize schedule for this day if it doesn't exist
   const existingSchedule = city.schedule?.[date];
@@ -104,13 +106,20 @@ export default function DayPlanner({
 
   useEffect(() => {
     if (!initialized && !existingSchedule) {
-      const defaults = buildDefaultSchedule(city, date, trip, cityIndex);
-      setDaySchedule(cityIndex, date, defaults);
+      // A moved stay is re-planned whole (located, spread across its days);
+      // only a day that still has nothing after that gets the plain build.
+      const relaid = relayMovedStay(trip, cityIndex);
+      if (relaid && relaid.schedule[date] !== undefined) {
+        updateCity(cityIndex, relaid);
+      } else {
+        const defaults = buildDefaultSchedule(city, date, trip, cityIndex);
+        setDaySchedule(cityIndex, date, defaults);
+      }
       setInitialized(true);
     } else {
       setInitialized(true);
     }
-  }, [initialized, existingSchedule, city, date, trip, cityIndex, setDaySchedule]);
+  }, [initialized, existingSchedule, city, date, trip, cityIndex, setDaySchedule, updateCity]);
 
   // Keep the day's generated travel blocks on the current transport — on
   // open, and live whenever the trip changes while the planner is up (a

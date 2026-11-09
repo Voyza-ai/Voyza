@@ -739,6 +739,7 @@ export function buildDefaultSchedule(
       endTime: minutesToTime(endMin),
       category: 'restaurant',
       notes: `${r.cuisine} · ${r.priceRange}`,
+      ...coordsOf(r),
     }));
     return {
       key,
