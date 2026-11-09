@@ -197,6 +197,23 @@ describe('a caller that shows the flight gets its times', () => {
     expect(shown.flightOption?.arrival).toBe('2026-06-01T09:10:00Z');
   });
 
+  it('display: true also skips the cached TRAIN row (it has no times either)', async () => {
+    const train = { id: 't1', price: 80, currency: 'USD', departure: '2026-06-01T07:15:00', arrival: '2026-06-01T10:40:00', durationMinutes: 205, operator: 'Eurostar', trainType: '', bookingUrl: null, limitedCoverage: false };
+    searchTrains.mockResolvedValue([train]);
+    searchFlights.mockResolvedValue([flightOffer(600)]);
+    await compareLeg(leg(2)); // writes both rows
+    searchTrains.mockClear();
+
+    const shown = await compareLeg({ ...leg(2), display: true });
+    expect(searchTrains).toHaveBeenCalledTimes(1);
+    expect(shown.trainOption?.departure).toBe('2026-06-01T07:15:00');
+
+    searchTrains.mockClear();
+    const ranked = await compareLeg(leg(2));
+    expect(searchTrains).not.toHaveBeenCalled();
+    expect(ranked.trainOption?.departure).toBe('');
+  });
+
   it('without display the cached row still serves (the optimizer ranks on price alone)', async () => {
     searchFlights.mockResolvedValue([flightOffer(600)]);
     await compareLeg(leg(2));
