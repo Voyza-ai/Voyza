@@ -11,6 +11,7 @@ import { Trip, HomeLeg, Transport } from '@/lib/types';
 import CityCard from './CityCard';
 import CityActivitiesCard from './CityActivitiesCard';
 import Connector from './Connector';
+import { legNoRailRegion } from '@/lib/railCoverage';
 import { useTripStore, cityPicksLoading } from '@/store/tripStore';
 import { useAirportNames } from '@/lib/airportNames';
 
@@ -346,6 +347,12 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                   <div className="flex items-center flex-shrink-0 mx-2">
                     <Connector
                       transport={city.transportOut}
+                      legDate={city.dates?.departure}
+                      noRailRegion={legNoRailRegion(
+                        city.country,
+                        trip.cities[idx + 1]?.country,
+                        city.transportOut,
+                      )}
                       index={idx}
                       cityIndex={idx}
                       isExpanded={openConnectors.has(idx)}

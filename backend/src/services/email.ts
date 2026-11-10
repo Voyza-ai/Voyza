@@ -12,19 +12,23 @@ import { logger } from '../utils/logger';
  *
  * Preferences live in user_profiles.preferences.email:
  *   { unsubscribed?: boolean, canvas_invite?: boolean, digest?: boolean }
- * - deletion_scheduled / grace_reminder: account-critical, ALWAYS sent
+ * - deletion_confirm / deletion_scheduled / grace_reminder: account-critical, ALWAYS sent
  *   (unsubscribe never blocks "your account is being deleted").
  * - canvas_invite: opt-out (default ON), blocked by unsubscribed.
  * - digest: opt-IN (default OFF), blocked by unsubscribed.
  */
 
 export type EmailType =
+  | 'deletion_confirm'
   | 'deletion_scheduled'
   | 'grace_reminder'
   | 'canvas_invite'
-  | 'digest';
+  | 'digest'
+  | 'booking_confirmation';
 
-const CRITICAL: EmailType[] = ['deletion_scheduled', 'grace_reminder'];
+// Transactional: a booking confirmation is the receipt for money taken, and
+// a deletion confirm is a security step, so unsubscribe never suppresses them.
+const CRITICAL: EmailType[] = ['deletion_confirm', 'deletion_scheduled', 'grace_reminder', 'booking_confirmation'];
 
 export function isEmailEnabled(): boolean {
   return Boolean(env.RESEND_API_KEY);
@@ -91,6 +95,23 @@ const btn = (href: string, label: string) =>
   `<a href="${href}" style="display:inline-block;margin-top:12px;padding:10px 18px;background:${BLUE};color:#fff;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600">${label}</a>`;
 
 export const emailTemplates = {
+  deletionConfirm(link: string) {
+    return {
+      subject: 'Confirm your BlueMurr account deletion',
+      html: shell(
+        'Confirm account deletion',
+        `<p>We received a request to delete your BlueMurr account. Nothing has
+         happened yet — your account is only scheduled for deletion once you
+         confirm below.</p>
+         <p>After confirming you get a 30-day grace period to change your mind
+         from Settings. This link expires in 24 hours.</p>
+         ${btn(link, 'Confirm deletion')}
+         <p style="margin-top:16px">If you didn't ask for this, ignore this
+         email — your account stays as it is. Consider changing your password.</p>`,
+      ),
+    };
+  },
+
   deletionScheduled(dateNice: string) {
     return {
       subject: 'Your BlueMurr account deletion is scheduled',
@@ -98,7 +119,7 @@ export const emailTemplates = {
         'Account deletion scheduled',
         `<p>Your account will be permanently deleted on <strong>${dateNice}</strong>.</p>
          <p>Until then everything keeps working, and you can cancel any time from
-         your profile menu in the app. After that date your personal details are
+         Settings → Account in the app. After that date your personal details are
          permanently erased and this cannot be undone.</p>
          <p>If this wasn't you, sign in and cancel the deletion now.</p>`,
       ),
@@ -136,6 +157,42 @@ export const emailTemplates = {
     };
   },
 
+  bookingConfirmation(b: {
+    bookingReference: string;
+    airline: string;
+    flights: Array<{ flightNumber: string; from: string; to: string; departs: string; arrives: string }>;
+    travellers: string[];
+    total: string;
+    testMode: boolean;
+    link: string;
+  }) {
+    const esc = (v: string) =>
+      v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+    const rows = b.flights
+      .map(
+        (f) =>
+          `<tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb"><strong>${esc(f.from)} → ${esc(f.to)}</strong>
+           <span style="color:#6b7280"> · ${esc(f.flightNumber)}</span><br>
+           <span style="color:#6b7280">${esc(f.departs)} – ${esc(f.arrives)}</span></td></tr>`,
+      )
+      .join('');
+    return {
+      subject: `${b.testMode ? '[TEST] ' : ''}Your flight is booked — ${b.bookingReference}`,
+      html: shell(
+        'Your flight is booked',
+        `${b.testMode ? '<p style="color:#b45309"><strong>Test booking</strong> — no real ticket was issued.</p>' : ''}
+         <p>Booking reference</p>
+         <div style="font-family:Menlo,Consolas,monospace;font-size:24px;font-weight:700;color:${BLUE};letter-spacing:2px">${esc(b.bookingReference)}</div>
+         <p style="margin-top:12px">${esc(b.airline)}</p>
+         <table style="width:100%;border-collapse:collapse;font-size:14px">${rows}</table>
+         <p style="margin-top:12px">Travellers: ${b.travellers.map(esc).join(', ')}<br>
+         Total paid: <strong>${esc(b.total)}</strong></p>
+         <p>Your itinerary PDF is attached. Times are local to each airport.</p>
+         ${btn(b.link, 'Open BlueMurr')}`,
+      ),
+    };
+  },
+
   digest(items: Array<{ title: string; body: string | null }>, unsubscribeUrl?: string) {
     const rows = items
       .map(
@@ -167,6 +224,8 @@ export type SendEmailInput = {
   /** When set, the recipient's stored preferences are enforced. Absent
    *  (e.g. inviting an email with no account) type defaults apply. */
   userId?: string;
+  /** Resend attachments: base64 content. */
+  attachments?: Array<{ filename: string; content: string }>;
 };
 
 /** Returns true only when the email was accepted by the transport. */
@@ -199,6 +258,7 @@ export async function sendEmail(input: SendEmailInput): Promise<boolean> {
           to: [input.to],
           subject: input.subject,
           html: input.html,
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
         }),
         signal: controller.signal,
       });
@@ -206,6 +266,9 @@ export async function sendEmail(input: SendEmailInput): Promise<boolean> {
         logger.warn('sendEmail: transport rejected (non-fatal)', {
           status: res.status,
           type: input.type,
+          // Resend says why (e.g. the sandbox sender only delivers to the
+          // account owner's address). Server log only.
+          reason: (await res.text().catch(() => '')).slice(0, 300),
         });
         return false;
       }

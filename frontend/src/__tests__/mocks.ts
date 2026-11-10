@@ -135,6 +135,7 @@ jest.mock('@/lib/api', () => ({
   removeMember: jest.fn().mockResolvedValue({ success: true }),
   interpretPlan: jest.fn().mockResolvedValue({}),
   converse: jest.fn().mockResolvedValue({ reply: 'Sounds great!', updates: {}, action: 'ask' }),
+  reviseDestinations: jest.fn().mockResolvedValue({ type: 'answer', reply: '', aboutDestinations: false }),
   editPlan: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
   planChat: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
   planChatSuggestions: jest.fn().mockResolvedValue({
@@ -165,13 +166,23 @@ jest.mock('@/lib/api', () => ({
     accountStatus: 'active',
     scheduledDeletionAt: null,
   }),
-  deleteCurrentUser: jest.fn().mockResolvedValue({
+  requestAccountDeletion: jest.fn().mockResolvedValue({
+    success: true,
+    confirmationSent: true,
+    alreadyScheduled: false,
+    accountStatus: 'active',
+    email: 'test@test.com',
+    expiresAt: '2026-09-30T00:00:00Z',
+  }),
+  confirmAccountDeletion: jest.fn().mockResolvedValue({
     success: true,
     accountStatus: 'pending_deletion',
     deletedAt: '2026-09-29T00:00:00Z',
     scheduledDeletionAt: '2026-10-29T00:00:00Z',
     alreadyScheduled: false,
   }),
+  applyRecommendationsToMyTrips: jest.fn().mockResolvedValue({ success: true, updated: 0 }),
+  exportMyData: jest.fn().mockResolvedValue({ blob: new Blob(['{}']), filename: 'bluemurr-export-u1.json' }),
   cancelAccountDeletion: jest.fn().mockResolvedValue({ success: true }),
   getPopularTrips: jest.fn().mockResolvedValue({ trips: [] }),
   // Empty catalog → Browse keeps its bundled presets (the offline fallback).
@@ -193,8 +204,23 @@ jest.mock('@/lib/api', () => ({
   AI_PICKS_TIMEOUT_MS: 30_000,
   searchActivities: jest.fn().mockResolvedValue([]),
   searchRestaurants: jest.fn().mockResolvedValue([]),
+  resolvePlaces: jest.fn().mockResolvedValue({ provider: 'osm', places: [] }),
+  getHub: jest.fn().mockResolvedValue(null),
+  suggestLocations: jest.fn().mockResolvedValue([]),
   suggestDestinationsForVibe: jest.fn().mockResolvedValue([]),
   updateCurrentUser: jest.fn().mockResolvedValue({}),
+  // In-app booking — tests that drive the modal script these per case.
+  getBookingQuote: jest.fn().mockResolvedValue({ quote: null }),
+  startBookingPayment: jest.fn().mockResolvedValue({
+    paymentIntentId: 'pit_test',
+    clientToken: 'tok',
+    amount: '0.00',
+    currency: 'USD',
+    liveMode: false,
+  }),
+  confirmBooking: jest.fn().mockResolvedValue(null),
+  getBookings: jest.fn().mockResolvedValue({ bookings: [], persistence: false }),
+  fetchItineraryPdf: jest.fn().mockResolvedValue(new Blob()),
   ApiError: class ApiError extends Error {
     status: number;
     details?: unknown;

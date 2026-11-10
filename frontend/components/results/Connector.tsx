@@ -2,7 +2,9 @@
 
 // Plain conditional rendering — no AnimatePresence (it gets stuck mid-exit
 // when the tab is throttled or not visible). The morph is now an instant swap.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import BookingModal from '@/components/booking/BookingModal';
 import { motion } from 'framer-motion';
 import {
   Plane,
@@ -32,6 +34,12 @@ type ConnectorProps = {
    * instead, since cityIndex is a sentinel (-1, -2) for those.
    */
   onPickAlternative?: (alternativeIndex: number) => void;
+  /** The leg's travel date when the Transport itself carries none (city legs
+   *  loaded from the DB): the from-city's departure date. */
+  legDate?: string;
+  /** Set when this leg is in a region we have no train data for (see
+   *  lib/railCoverage) — the pill and the card say so. */
+  noRailRegion?: string | null;
 };
 
 const formatDateLong = (iso?: string) => {
@@ -57,6 +65,8 @@ export default function Connector({
   isExpanded,
   onToggle,
   onPickAlternative,
+  legDate,
+  noRailRegion,
 }: ConnectorProps) {
   const setTransportOut = useTripStore((s) => s.setTransportOut);
   const priceMode = useTripStore((s) => s.priceMode);
@@ -68,6 +78,12 @@ export default function Connector({
   const accentColor = MODE_COLORS[transport.mode] ?? '#2e6bc4';
   const modeLabel = isFlight ? 'Flight' : isTrain ? 'Train' : 'Bus';
   const alternatives = transport.alternatives ?? [];
+  const tripId = useTripStore((s) => s.currentTrip?.id ?? null);
+  const [booking, setBooking] = useState(false);
+  // In-app booking (Duffel) for a flight we can date. Trains and undated
+  // legs keep the plain deep link below.
+  const bookDate = transport.departDate ?? legDate;
+  const canBookInApp = isFlight && !transport.unavailable && Boolean(bookDate) && Boolean(transport.from && transport.to);
 
   // An expanded card widens in place (transition-[width], 300ms). Near the
   // flowchart's right edge that pushed part of it past the scroller, behind
@@ -202,7 +218,7 @@ export default function Connector({
             </div>
 
             <div className="text-[9px] uppercase tracking-wider text-gray-500">
-              Click for details
+              {noRailRegion ? 'No train data' : 'Click for details'}
             </div>
           </button>
 
@@ -370,7 +386,33 @@ export default function Connector({
               <div className="text-gray-900 text-[17px] font-semibold tabular-nums">
                 ${displayAmount(transport.price, priceMode, travelers).toLocaleString()}
               </div>
-              {transport.bookingUrl ? (
+              {canBookInApp ? (
+                <>
+                  {transport.bookingUrl && (
+                    <a
+                      href={transport.bookingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Compare on Google Flights"
+                      aria-label="Compare on Google Flights"
+                      className="text-gray-400 hover:text-gray-700 transition-colors"
+                    >
+                      <ExternalLink size={13} />
+                    </a>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setBooking(true);
+                    }}
+                    className="flex items-center gap-1 text-[12px] font-medium text-white px-3.5 py-1.5 rounded-full transition-all hover:brightness-110"
+                    style={{ background: '#2563eb' }}
+                  >
+                    Book
+                  </button>
+                </>
+              ) : transport.bookingUrl ? (
                 <a
                   href={transport.bookingUrl}
                   target="_blank"
@@ -390,14 +432,16 @@ export default function Connector({
 
           {/* Honest note: we searched for a train on this (short) route and
               found none, so we say so instead of silently showing only flights. */}
-          {transport.noTrainData && (
+          {(noRailRegion || transport.noTrainData) && (
             <div
               className="px-4 py-2.5 border-t flex items-center gap-1.5"
               style={{ borderColor: 'rgba(0,0,0,0.08)' }}
             >
               <TrainFront size={12} style={{ color: '#888', opacity: 0.6 }} />
               <span className="text-gray-500 text-[11px]">
-                No live train data for this leg — showing flights only.
+                {noRailRegion
+                  ? `We don't have train data for ${noRailRegion} yet — showing flights only.`
+                  : 'No live train data for this leg — showing flights only.'}
               </span>
             </div>
           )}
@@ -473,6 +517,25 @@ export default function Connector({
 
         </div>
       )}
+      {/* Portalled: the flowchart's motion wrappers carry transforms, which
+          would make a fixed-position overlay position against them. */}
+      {booking &&
+        bookDate &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          // React events bubble through portals to this card's own click
+          // handlers (expand/collapse); stop them at the portal boundary.
+          <div onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+            <BookingModal
+              transport={transport}
+              date={bookDate}
+              travelers={travelers}
+              tripId={tripId}
+              onClose={() => setBooking(false)}
+            />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

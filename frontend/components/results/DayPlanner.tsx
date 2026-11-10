@@ -17,8 +17,12 @@ import {
 import { Trip, City, ScheduledEvent } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
+import { relayMovedStay } from '@/lib/stayRelay';
+import { reconcileDayTransport } from '@/lib/transportReconcile';
 import { useTripStore } from '@/store/tripStore';
 import { homeDepartureDay } from '@/lib/tripSpan';
+import TravelConnectors from './TravelConnectors';
+import { useDayHubs } from '@/lib/tripHubs';
 
 type DayPlannerProps = {
   trip: Trip;
@@ -88,11 +92,13 @@ export default function DayPlanner({
 }: DayPlannerProps) {
   const color = getCityColor(city.colorIndex ?? cityIndex);
   const accent = color.text;
+  const hubs = useDayHubs(trip, cityIndex, date);
 
   const addScheduledEvent = useTripStore((s) => s.addScheduledEvent);
   const updateScheduledEvent = useTripStore((s) => s.updateScheduledEvent);
   const removeScheduledEvent = useTripStore((s) => s.removeScheduledEvent);
   const setDaySchedule = useTripStore((s) => s.setDaySchedule);
+  const updateCity = useTripStore((s) => s.updateCity);
 
   // Initialize schedule for this day if it doesn't exist
   const existingSchedule = city.schedule?.[date];
@@ -100,13 +106,30 @@ export default function DayPlanner({
 
   useEffect(() => {
     if (!initialized && !existingSchedule) {
-      const defaults = buildDefaultSchedule(city, date, trip, cityIndex);
-      setDaySchedule(cityIndex, date, defaults);
+      // A moved stay is re-planned whole (located, spread across its days);
+      // only a day that still has nothing after that gets the plain build.
+      const relaid = relayMovedStay(trip, cityIndex);
+      if (relaid && relaid.schedule[date] !== undefined) {
+        updateCity(cityIndex, relaid);
+      } else {
+        const defaults = buildDefaultSchedule(city, date, trip, cityIndex);
+        setDaySchedule(cityIndex, date, defaults);
+      }
       setInitialized(true);
     } else {
       setInitialized(true);
     }
-  }, [initialized, existingSchedule, city, date, trip, cityIndex, setDaySchedule]);
+  }, [initialized, existingSchedule, city, date, trip, cityIndex, setDaySchedule, updateCity]);
+
+  // Keep the day's generated travel blocks on the current transport — on
+  // open, and live whenever the trip changes while the planner is up (a
+  // flight swapped on the flowchart, a home leg that finished loading).
+  // Activities, meals, the user's own events and any travel block they
+  // moved are left alone; `null` means already in step, so no write.
+  useEffect(() => {
+    const next = reconcileDayTransport(trip, cityIndex, date);
+    if (next) setDaySchedule(cityIndex, date, next);
+  }, [trip, cityIndex, date, setDaySchedule]);
 
   const events = city.schedule?.[date] ?? [];
 
@@ -401,6 +424,15 @@ export default function DayPlanner({
                 </div>
               );
             })}
+
+            {/* Travel time between consecutive located stops (POI coordinates). */}
+            <TravelConnectors
+              events={events}
+              minuteToPx={(m) => ((m - startHour * 60) / 60) * HOUR_HEIGHT}
+              accent={accent}
+              left={8}
+              hubs={hubs}
+            />
 
             {/* Current time indicator (if today) */}
             <CurrentTimeIndicator accent={accent} startHour={startHour} />

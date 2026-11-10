@@ -1,10 +1,20 @@
+import { dedupeAcrossCities } from '@/lib/picksDedupe';
 import { create } from 'zustand';
 import { Trip, PlanningAnswers, City, CustomHotel, Transport, Restaurant, ScheduledEvent } from '@/lib/types';
 import { firstStayArrival, tripStartDate } from '@/lib/tripSpan';
-import { searchActivities, searchRestaurants, type ActivitySuggestion, type RestaurantSuggestion } from '@/lib/api';
+import {
+  searchActivities,
+  searchRestaurants,
+  resolvePlaces,
+  type ActivitySuggestion,
+  type RestaurantSuggestion,
+  type ResolvedPlace,
+} from '@/lib/api';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
+import { applyUserEdit, reconcileTripTransport } from '@/lib/transportReconcile';
 import { liveTripTotal } from '@/lib/tripTotals';
 import type { CanvasIntent } from '@/lib/canvasHandoff';
+import { coordsOf, hasCoords, type TravelLegs } from '@/lib/geoSchedule';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -14,10 +24,14 @@ type ChatMessage = {
 /** What one city's AI picks are asked with — kept so a reload can ask again. */
 export type CityPicksRequest = {
   city: string;
+  /** Optional (snapshots from before it existed have none). */
+  country?: string;
   vibe?: string;
   travelers: number;
   nights: number;
   budget?: number;
+  /** The trip's other stops, so this city's picks stay in this city. */
+  otherCities?: string[];
 };
 
 /** One city's AI picks. Both empty when the requests failed. */
@@ -36,6 +50,14 @@ export type TripPicks = {
   pending: CityPicksRequest[];
   /** Picks that have landed, by city — put back if an older copy of the trip is set. */
   landed: Record<string, CityPicks>;
+  /**
+   * Cities whose landed picks are still being located (POI coordinates, see
+   * `awaitCityGeo`). The picks are already on screen; this only holds a
+   * save back briefly so the saved trip carries the coordinates.
+   */
+  geoPending?: string[];
+  /** Measured travel legs per city, when the backend had a Google key. */
+  legs?: Record<string, TravelLegs>;
 };
 
 type TripStore = {
@@ -241,7 +263,8 @@ export const useTripStore = create<TripStore>((set) => ({
           transportIn: chosenFlat,
         };
       }
-      return { currentTrip: { ...state.currentTrip, cities } };
+      // Generated travel blocks on every built day follow the new pick.
+      return { currentTrip: reconcileTripTransport({ ...state.currentTrip, cities }) };
     }),
 
   setHomeLegAlternative: (direction, alternativeIndex) =>
@@ -280,11 +303,11 @@ export const useTripStore = create<TripStore>((set) => ({
         }
       }
       return {
-        currentTrip: {
+        currentTrip: reconcileTripTransport({
           ...state.currentTrip,
           cities,
           origin: { ...state.currentTrip.origin, [slot]: newLeg },
-        },
+        }),
       };
     }),
 
@@ -391,8 +414,9 @@ export const useTripStore = create<TripStore>((set) => ({
       const cities = [...state.currentTrip.cities];
       const c = cities[cityIndex];
       if (!c) return state;
+      // A user edit to a generated travel block makes it theirs (drops `auto`).
       const dayEvents = (c.schedule?.[date] ?? []).map((e) =>
-        e.id === eventId ? { ...e, ...updates } : e
+        e.id === eventId ? applyUserEdit(e, updates) : e
       );
       const schedule = { ...(c.schedule ?? {}), [date]: dayEvents };
       cities[cityIndex] = { ...c, schedule };
@@ -450,10 +474,10 @@ const NO_PICKS: CityPicks = { activities: [], restaurants: [] };
 /** Ask for one city's AI picks. Never rejects: a failed call is an empty list. */
 export async function requestCityPicks(req: CityPicksRequest): Promise<CityPicks> {
   const [activities, restaurants] = await Promise.all([
-    searchActivities({ city: req.city, vibe: req.vibe, travelers: req.travelers, nights: req.nights }).catch(
+    searchActivities({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, nights: req.nights, otherCities: req.otherCities }).catch(
       () => [] as ActivitySuggestion[],
     ),
-    searchRestaurants({ city: req.city, vibe: req.vibe, travelers: req.travelers, budget: req.budget }).catch(
+    searchRestaurants({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, budget: req.budget, otherCities: req.otherCities }).catch(
       () => [] as RestaurantSuggestion[],
     ),
   ]);
@@ -484,7 +508,31 @@ export function startTripPicks(
   requests.forEach((req, i) => awaitCityPicks(run, req, inFlight[i]));
 }
 
+/**
+ * Ask for the AI picks of ONE city just put on the trip on screen — a city the
+ * AI chat added or swapped in. Joins the trip's current picks run when there
+ * is one (so its landed picks and waiting list survive), else starts one.
+ * Lands like the planner's picks (landCityPicks).
+ */
+export function requestPicksForAddedCity(req: CityPicksRequest): void {
+  const { currentTrip: trip, tripPicks: tp } = useTripStore.getState();
+  if (!trip) return;
+  const joined = !!trip.picksRun && tp?.run === trip.picksRun;
+  const run = joined ? trip.picksRun! : newRun();
+  useTripStore.setState({
+    currentTrip: joined ? trip : { ...trip, picksRun: run },
+    tripPicks: joined
+      ? { ...tp!, pending: [...tp!.pending.filter((r) => r.city !== req.city), req] }
+      : { run, pending: [req], landed: {} },
+  });
+  awaitCityPicks(run, req);
+}
+
+/** The country each city's picks were asked with — the /places call must use the same key. */
+const picksCountry = new Map<string, string | undefined>();
+
 function awaitCityPicks(run: string, req: CityPicksRequest, inFlight?: Promise<CityPicks>) {
+  picksCountry.set(run + '|' + req.city, req.country);
   (inFlight ?? requestCityPicks(req))
     .catch(() => NO_PICKS)
     .then((picks) => landCityPicks(run, req.city, picks));
@@ -523,12 +571,17 @@ function landCityPicks(run: string, cityName: string, picks: CityPicks) {
   }, FAILED_PICKS_GRACE_MS);
 }
 
-function settleCityPicks(run: string, cityName: string, picks: CityPicks) {
+function settleCityPicks(run: string, cityName: string, rawPicks: CityPicks) {
+  // A pick another stop already has goes to that stop only (ROADMAP: the
+  // Uffizi on Rome's list as well as Florence's).
+  const current = useTripStore.getState().currentTrip;
+  const picks = current && current.picksRun === run ? dedupeAcrossCities(current, cityName, rawPicks) : rawPicks;
   const got = picks.activities.length > 0 || picks.restaurants.length > 0;
   useTripStore.setState((state) => {
     const tp = state.tripPicks;
     if (!tp || tp.run !== run) return state; // a search since replaced, or planning reset
     const tripPicks: TripPicks = {
+      ...tp,
       run,
       pending: tp.pending.filter((r) => r.city !== cityName),
       landed: got ? { ...tp.landed, [cityName]: picks } : tp.landed,
@@ -537,8 +590,12 @@ function settleCityPicks(run: string, cityName: string, picks: CityPicks) {
     // A failure leaves the city as it is: no lists, its transport-only
     // schedule — what the planner always produced when the AI call failed.
     if (!got || !trip || trip.picksRun !== run) return { tripPicks };
+    tripPicks.geoPending = [...(tp.geoPending ?? []), cityName];
     return { tripPicks, currentTrip: withCityPicks(trip, cityName, picks) };
   });
+  if (got && useTripStore.getState().tripPicks?.geoPending?.includes(cityName)) {
+    awaitCityGeo(run, cityName, picks, picksCountry.get(run + '|' + cityName));
+  }
 }
 
 /**
@@ -549,7 +606,7 @@ function settleCityPicks(run: string, cityName: string, picks: CityPicks) {
  * keeps their version; a day holding only transport blocks (all a stay has
  * before its picks) or nothing takes the new one.
  */
-function withCityPicks(trip: Trip, cityName: string, picks: CityPicks): Trip {
+function withCityPicks(trip: Trip, cityName: string, picks: CityPicks, legs?: TravelLegs | null): Trip {
   const idx = trip.cities.findIndex((c) => c.name === cityName);
   if (idx < 0) return trip;
   const old = trip.cities[idx];
@@ -560,11 +617,13 @@ function withCityPicks(trip: Trip, cityName: string, picks: CityPicks): Trip {
     restaurants:
       old.restaurants.length > 0
         ? old.restaurants
-        : picks.restaurants.map((r): Restaurant => ({ name: r.name, cuisine: r.cuisine, priceRange: r.priceRange })),
+        : picks.restaurants.map(
+            (r): Restaurant => ({ name: r.name, cuisine: r.cuisine, priceRange: r.priceRange, ...coordsOf(r) }),
+          ),
   };
   cities[idx] = city;
   const next: Trip = { ...trip, cities };
-  const built = buildCityScheduleFromSuggestions(picks.activities, picks.restaurants, city, idx, next);
+  const built = buildCityScheduleFromSuggestions(picks.activities, picks.restaurants, city, idx, next, { legs });
   const schedule = { ...(old.schedule ?? {}) };
   for (const [day, events] of Object.entries(built.schedule)) {
     const mine = schedule[day];
@@ -572,6 +631,146 @@ function withCityPicks(trip: Trip, cityName: string, picks: CityPicks): Trip {
   }
   cities[idx] = { ...city, schedule, unscheduled: built.unscheduled };
   return next;
+}
+
+// ─── Real coordinates for landed picks ───────────────────────────────────────
+//
+// The picks land with whatever coordinates the backend already had cached;
+// the rest are located by its POI provider (keyless OpenStreetMap paces that
+// at one lookup a second) and arrive here a few seconds later. When they do,
+// each day the traveller has not touched since the planner built it is
+// re-planned geographically — morning activity, then the nearest lunch, then
+// the nearest afternoon activity — and every located stop keeps its
+// coordinates, which is what the map pins and the saved trip use.
+
+/** How long the client waits for one /places answer (the backend's own deadline is 15 s). */
+const GEO_TIMEOUT_MS = 20_000;
+const GEO_DEADLINE_MS = 15_000;
+/**
+ * Keyless OpenStreetMap answers one lookup a second for the whole server, so
+ * a cold two-city trip can outlast the first answer. Items still `pending`
+ * get one more round; a save does not wait for it.
+ */
+const GEO_SECOND_ROUND_DEADLINE_MS = 20_000;
+
+/** Fingerprint of a day as the planner built it — a different one means the traveller edited it. */
+const daySignature = (events: ScheduledEvent[] | undefined): string =>
+  (events ?? []).map((e) => `${e.id}|${e.startTime}|${e.endTime}|${e.title}`).join('\n');
+
+/** Picks with the located coordinates merged in (by position — /places answers in input order). */
+export function mergePlaces(picks: CityPicks, places: ResolvedPlace[]): CityPicks {
+  const nA = picks.activities.length;
+  const at = (i: number) => {
+    const p = places[i];
+    return p && hasCoords(p) && p.name ? coordsOf(p) : null;
+  };
+  return {
+    activities: picks.activities.map((a, i) => (hasCoords(a) ? a : { ...a, ...(at(i) ?? {}) })),
+    restaurants: picks.restaurants.map((r, i) => (hasCoords(r) ? r : { ...r, ...(at(nA + i) ?? {}) })),
+  };
+}
+
+/**
+ * `trip` after one city's picks gained coordinates: its restaurants pick up
+ * theirs (matched by name), and each day still exactly as the planner built
+ * it from the un-located picks is re-planned with geography. A day the
+ * traveller changed meanwhile is left alone.
+ */
+export function withCityGeo(
+  trip: Trip,
+  cityName: string,
+  before: CityPicks,
+  after: CityPicks,
+  legs?: TravelLegs | null,
+  /** The legs `before` was scheduled with (a second round's baseline). */
+  beforeLegs?: TravelLegs | null,
+): Trip {
+  const idx = trip.cities.findIndex((c) => c.name === cityName);
+  if (idx < 0) return trip;
+  const old = trip.cities[idx];
+  const located = new Map(after.restaurants.filter(hasCoords).map((r) => [r.name, coordsOf(r)!]));
+  const restaurants = old.restaurants.map((r) => (hasCoords(r) || !located.has(r.name) ? r : { ...r, ...located.get(r.name)! }));
+  const city: City = { ...old, restaurants };
+  const cities = [...trip.cities];
+  cities[idx] = city;
+  const next: Trip = { ...trip, cities };
+
+  // What the planner produced from the picks as they were — the baseline a
+  // day must still match to be re-planned.
+  const prior = buildCityScheduleFromSuggestions(before.activities, before.restaurants, city, idx, next, {
+    legs: beforeLegs,
+  });
+  const built = buildCityScheduleFromSuggestions(after.activities, after.restaurants, city, idx, next, { legs });
+  const schedule = { ...(old.schedule ?? {}) };
+  let changed = false;
+  for (const [day, events] of Object.entries(built.schedule)) {
+    const mine = schedule[day];
+    const untouched =
+      !mine ||
+      mine.every((e) => e.category === 'transport') ||
+      sameDayAsBuilt(mine, prior.schedule[day]);
+    if (untouched) {
+      schedule[day] = events;
+      changed = true;
+    }
+  }
+  if (!changed && restaurants === old.restaurants) return trip;
+  cities[idx] = { ...city, schedule, unscheduled: changed ? built.unscheduled : old.unscheduled };
+  return next;
+}
+
+/**
+ * Same day modulo event ids: the planner numbers its events from a counter,
+ * so two builds of the same picks differ only there.
+ */
+function sameDayAsBuilt(mine: ScheduledEvent[], built: ScheduledEvent[] | undefined): boolean {
+  if (!built) return false;
+  const strip = (es: ScheduledEvent[]) => daySignature(es.map((e) => ({ ...e, id: '' })));
+  return strip(mine) === strip(built);
+}
+
+/** Ask the backend to locate one city's landed picks, then re-plan its untouched days. */
+function awaitCityGeo(run: string, cityName: string, picks: CityPicks, askedCountry?: string, round = 1) {
+  const items = [
+    ...picks.activities.map((a) => ({ name: a.name, placeQuery: a.placeQuery ?? null, kind: 'activity' as const })),
+    ...picks.restaurants.map((r) => ({ name: r.name, placeQuery: r.placeQuery ?? null, kind: 'restaurant' as const })),
+  ];
+  // The country the picks were asked with, so the lookups their responses
+  // already started on the server are the ones this call joins.
+  const country =
+    round === 1 && askedCountry === undefined
+      ? useTripStore.getState().currentTrip?.cities.find((c) => c.name === cityName)?.country || undefined
+      : askedCountry;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEO_TIMEOUT_MS + (round > 1 ? 5_000 : 0));
+  resolvePlaces(
+    { city: cityName, country, items, deadlineMs: round > 1 ? GEO_SECOND_ROUND_DEADLINE_MS : GEO_DEADLINE_MS },
+    controller.signal,
+  )
+    .catch(() => null)
+    .then((res) => {
+      clearTimeout(timer);
+      let again: CityPicks | null = null;
+      useTripStore.setState((state) => {
+        const tp = state.tripPicks;
+        if (!tp || tp.run !== run) return state;
+        const geoPending = (tp.geoPending ?? []).filter((c) => c !== cityName);
+        if (!res) return { tripPicks: { ...tp, geoPending } };
+        const located = mergePlaces(picks, res.places ?? []);
+        if (round === 1 && (res.places ?? []).some((p) => p.pending)) again = located;
+        const legs = res.travel?.legs ?? null;
+        const tripPicks: TripPicks = {
+          ...tp,
+          geoPending,
+          landed: { ...tp.landed, [cityName]: located },
+          legs: legs ? { ...(tp.legs ?? {}), [cityName]: legs } : tp.legs,
+        };
+        const trip = state.currentTrip;
+        if (!trip || trip.picksRun !== run) return { tripPicks };
+        return { tripPicks, currentTrip: withCityGeo(trip, cityName, picks, located, legs ?? tp.legs?.[cityName], tp.legs?.[cityName]) };
+      });
+      if (again) awaitCityGeo(run, cityName, again, country, 2);
+    });
 }
 
 /**
@@ -587,7 +786,7 @@ function keepLandedPicks(trip: Trip, tp: TripPicks | null, onScreen: Trip | null
     const landed = tp.landed[c.name];
     if (!landed || hasPicks(c)) continue;
     if (!hasPicks(onScreen?.cities.find((s) => s.name === c.name))) continue;
-    next = withCityPicks(next, c.name, landed);
+    next = withCityPicks(next, c.name, landed, tp.legs?.[c.name]);
   }
   return next;
 }
@@ -603,7 +802,11 @@ export function cityPicksLoading(tp: TripPicks | null, trip: Trip | null | undef
 /** True while the trip on screen still has AI picks on their way. */
 function picksPending(): boolean {
   const { tripPicks, currentTrip } = useTripStore.getState();
-  return !!tripPicks && tripPicks.pending.length > 0 && currentTrip?.picksRun === tripPicks.run;
+  return (
+    !!tripPicks &&
+    (tripPicks.pending.length > 0 || (tripPicks.geoPending?.length ?? 0) > 0) &&
+    currentTrip?.picksRun === tripPicks.run
+  );
 }
 
 /**

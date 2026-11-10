@@ -325,6 +325,16 @@ function framePadding(
 const cityCacheKey = (city?: { name: string; country: string }) =>
   city ? `${city.name}|${city.country}` : '';
 
+/** Places in a city the trip already holds POI coordinates for (restaurants + scheduled events). */
+const locatedCount = (city?: Trip['cities'][number]): number => {
+  if (!city) return 0;
+  let n = (city.restaurants ?? []).filter((r) => typeof r?.lat === 'number').length;
+  for (const events of Object.values(city.schedule ?? {})) {
+    n += (events ?? []).filter((e) => typeof e?.lat === 'number').length;
+  }
+  return n;
+};
+
 /**
  * Bounds that take the SHORT way round the globe.
  *
@@ -1153,8 +1163,12 @@ export default function MapView({ trip }: MapViewProps) {
     // reordering the trip (or inserting a city) leaves index 2 pointing at a
     // different city, and an index-keyed cache then hands the newcomer the
     // previous occupant's places — Osaka's panel listing Kyoto's temples.
-    const cacheKey = cityCacheKey(trip.cities[activeCityIndex]);
-    if (!cacheKey) return;
+    // Plus how many of its places the trip has located: when the planner's
+    // POI coordinates land after the map first drew this city, its spots are
+    // rebuilt from them rather than served from the earlier, geocoded set.
+    const baseKey = cityCacheKey(trip.cities[activeCityIndex]);
+    if (!baseKey) return;
+    const cacheKey = `${baseKey}|${locatedCount(trip.cities[activeCityIndex])}`;
     const cached = spotCacheRef.current.get(cacheKey);
     if (cached) {
       setSpots(cached.spots);
@@ -1176,7 +1190,11 @@ export default function MapView({ trip }: MapViewProps) {
     let cancelled = false;
     setSpotsLoading(true);
     setSpots([]);
-    geocodeSpots(seeds, centerPin.point)
+    // Places the planner already located pin straight away; the rest (the
+    // hotel, the airport, anything unlocated) follow from the geocoder.
+    geocodeSpots(seeds, centerPin.point, (early) => {
+      if (!cancelled) setSpots(early);
+    })
       .then((res) => {
         // Cache regardless of cancellation — the work is done and valid.
         spotCacheRef.current.set(cacheKey, res);
@@ -1224,13 +1242,14 @@ export default function MapView({ trip }: MapViewProps) {
     if (!centerPin) return;
 
     let cancelled = false;
+    const otherCities = trip.cities.map((c) => c.name).filter((n) => n !== city.name);
     setRecsLoading(true);
     setRecs([]);
     (async () => {
       // Ask for both kinds together; either can fail without sinking the other.
       const [acts, rests] = await Promise.all([
-        searchActivities({ city: city.name, country: city.country }).catch(() => []),
-        searchRestaurants({ city: city.name, country: city.country }).catch(() => []),
+        searchActivities({ city: city.name, country: city.country, otherCities }).catch(() => []),
+        searchRestaurants({ city: city.name, country: city.country, otherCities }).catch(() => []),
       ]);
       const suggestions: Suggestion[] = [
         ...acts.map((a) => ({ name: a.name, detail: a.reason ? 'Suggested' : undefined })),

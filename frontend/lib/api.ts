@@ -2,6 +2,7 @@ import { getAuthHeader, refreshAuthHeader } from './supabase';
 import { rankHotels } from './hotelScore';
 import { tripStartDate } from './tripSpan';
 import { withLiveTotal } from './tripTotals';
+import type { TravelLegs } from './geoSchedule';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -410,6 +411,36 @@ export async function converse(params: {
   });
 }
 
+/**
+ * Planning-phase destination correction ("actually Venice not Venezuela").
+ * Returns only the new destination list — every other answer stays where it
+ * is. Throws on failure (503 = assistant unavailable).
+ */
+export type ReviseDestinationsResponse =
+  | {
+      type: 'revision';
+      reply: string;
+      destinations: string[];
+      changes: Array<
+        | { kind: 'add'; city: string; afterCity?: string; beforeCity?: string }
+        | { kind: 'remove'; city: string }
+        | { kind: 'replace'; from: string; to: string }
+      >;
+    }
+  | { type: 'answer'; reply: string; aboutDestinations: boolean };
+
+export async function reviseDestinations(params: {
+  message: string;
+  destinations: string[];
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  currentQuestion?: string;
+}): Promise<ReviseDestinationsResponse> {
+  return apiFetch<ReviseDestinationsResponse>('/api/plan/revise-destinations', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
 export async function interpretPlan(params: {
   rawInput: string;
   userLocation?: string;
@@ -482,13 +513,48 @@ export type LegOption = {
  * Transport changes (show_transport_options, set_transport_window) use a
  * different pattern: type='leg_refresh'. See ChatResponse below.
  */
-export type ChatProposal = {
-  kind: 'date_shift';
-  toolName: 'pin_city_dates' | 'set_min_days';
-  toolInput: any;
-  diff: ChatProposalDiff[];
-  proposedConstraints: any;
-  proposedTrip: any;
+export type ChatProposal =
+  | {
+      kind: 'date_shift';
+      toolName: 'pin_city_dates' | 'set_min_days';
+      toolInput: any;
+      diff: ChatProposalDiff[];
+      proposedConstraints: any;
+      proposedTrip: any;
+    }
+  | CityEditProposal;
+
+/**
+ * add_city / remove_city / replace_city — the backend's planned and priced
+ * city edit (backend services/cityEdit.ts). Applied on Accept by
+ * lib/cityEdit.ts `applyCityEdit`.
+ */
+export type CityEditStop = {
+  name: string;
+  arrival: string;
+  departure: string;
+  status: 'kept' | 'moved' | 'added' | 'replaced';
+  replaces?: string;
+  /** Searched for this stop's dates; absent = not re-searched. */
+  hotels?: HotelResult[];
+};
+
+export type CityEditProposal = {
+  kind: 'city_edit';
+  toolName: 'add_city' | 'remove_city' | 'replace_city';
+  op:
+    | { kind: 'add'; city: string; afterCity?: string | null; beforeCity?: string | null; nights?: number | null }
+    | { kind: 'remove'; city: string }
+    | { kind: 'replace'; oldCity: string; newCity: string };
+  before: Array<{ name: string; arrival: string; departure: string }>;
+  after: CityEditStop[];
+  removed: string[];
+  /** `index` i is the leg after[i] → after[i + 1]. Empty options = nothing found. */
+  legs: Array<{ index: number; from: string; to: string; date: string; options: LegOption[] }>;
+  /** Present only when re-searched; null = searched, nothing found. */
+  outboundLeg?: any;
+  returnLeg?: any;
+  note: string;
 };
 
 /**
@@ -573,6 +639,12 @@ export type ActivitySuggestion = {
   timeOfDay: 'morning' | 'afternoon' | 'evening';
   durationHours: number;
   reason: string;
+  /** The AI's map name for the venue, used as the geocoder query. */
+  placeQuery?: string;
+  /** Real coordinates from the backend's POI provider, when it has them. */
+  lat?: number;
+  lng?: number;
+  placeId?: string;
 };
 
 /**
@@ -602,6 +674,7 @@ export async function searchActivities(params: {
   vibe?: string;
   travelers?: number;
   nights?: number;
+  otherCities?: string[];
 }): Promise<ActivitySuggestion[]> {
   const data = await withTimeout(AI_PICKS_TIMEOUT_MS, (signal) =>
     apiFetch<{ activities: ActivitySuggestion[] }>('/api/plan/activities', {
@@ -620,6 +693,10 @@ export type RestaurantSuggestion = {
   priceRange: '$' | '$$' | '$$$' | '$$$$';
   mealType: 'breakfast' | 'lunch' | 'dinner' | 'any';
   reason: string;
+  placeQuery?: string;
+  lat?: number;
+  lng?: number;
+  placeId?: string;
 };
 
 export async function searchRestaurants(params: {
@@ -628,6 +705,7 @@ export async function searchRestaurants(params: {
   vibe?: string;
   travelers?: number;
   budget?: number;
+  otherCities?: string[];
 }): Promise<RestaurantSuggestion[]> {
   const data = await withTimeout(AI_PICKS_TIMEOUT_MS, (signal) =>
     apiFetch<{ restaurants: RestaurantSuggestion[] }>('/api/plan/restaurants', {
@@ -637,6 +715,44 @@ export async function searchRestaurants(params: {
     }),
   );
   return data.restaurants;
+}
+
+// ─── Places (real coordinates for the AI picks) ──────────────
+export type ResolvedPlace = {
+  name: string;
+  lat?: number;
+  lng?: number;
+  placeId?: string;
+  /** The provider had not answered by the deadline (Nominatim queue). */
+  pending?: boolean;
+};
+
+export type PlacesResponse = {
+  provider: 'google' | 'foursquare' | 'osm';
+  places: ResolvedPlace[];
+  /** Measured walk/transit legs, keyed "fromPlaceId>toPlaceId" — Google key only. */
+  travel?: { source: 'google'; legs: TravelLegs };
+};
+
+/**
+ * Locate a city's activities and restaurants with the backend's POI
+ * provider. Answers within the backend's deadline; anything not yet located
+ * comes back without coordinates (and `pending`).
+ */
+export async function resolvePlaces(
+  params: {
+    city: string;
+    country?: string;
+    items: Array<{ name: string; placeQuery?: string | null; kind?: 'activity' | 'restaurant' }>;
+    deadlineMs?: number;
+  },
+  signal?: AbortSignal,
+): Promise<PlacesResponse> {
+  return apiFetch<PlacesResponse>('/api/plan/places', {
+    method: 'POST',
+    body: JSON.stringify(params),
+    signal,
+  });
 }
 
 // ─── Canvas API ──────────────────────────────────────────────
@@ -795,11 +911,23 @@ export type UserProfile = {
     preferredCurrency?: string;
     defaultTravelers?: number;
     emailNotifications?: boolean;
+    /** In-app notification types; absent/true = on (opt-out). */
+    notifications?: Partial<Record<MutableNotificationType, boolean>>;
+    /** Email: invites opt-out, digest opt-in, unsubscribed blocks both. */
+    email?: { unsubscribed?: boolean; canvas_invite?: boolean; digest?: boolean };
+    /** Default for allow_recommendations on new trips (opt-out). */
+    privacy?: { allowRecommendations?: boolean };
   };
   /** 'pending_deletion' during the 30-day grace window. */
   accountStatus?: 'active' | 'pending_deletion' | 'anonymized';
   scheduledDeletionAt?: string | null;
 };
+
+export type MutableNotificationType =
+  | 'trip_owner_anonymized'
+  | 'ownership_transferred'
+  | 'suggestion_decided'
+  | 'canvas_invite';
 
 export async function getCurrentUser(): Promise<UserProfile> {
   return apiFetch<UserProfile>('/api/users/me');
@@ -814,17 +942,63 @@ export async function updateCurrentUser(
   });
 }
 
-export async function deleteCurrentUser(reason?: string): Promise<{
+export type DeletionRequestResult = {
   success: boolean;
-  accountStatus: string;
+  /** true → a confirmation link was emailed; nothing is scheduled yet. */
+  confirmationSent: boolean;
+  alreadyScheduled: boolean;
+  accountStatus: 'active' | 'pending_deletion';
+  email?: string;
+  expiresAt?: string;
+  scheduledDeletionAt?: string;
+};
+
+/** Step 1 of account deletion: emails a single-use confirmation link. */
+export async function requestAccountDeletion(reason?: string): Promise<DeletionRequestResult> {
+  return apiFetch('/api/users/me/deletion-request', {
+    method: 'POST',
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+/** Step 2: the emailed link's page confirms with its token (no session needed). */
+export async function confirmAccountDeletion(token: string): Promise<{
+  success: boolean;
+  accountStatus: 'pending_deletion';
   deletedAt: string;
   scheduledDeletionAt: string;
   alreadyScheduled: boolean;
 }> {
-  return apiFetch('/api/users/me', {
-    method: 'DELETE',
-    body: JSON.stringify(reason ? { reason } : {}),
+  return apiFetch('/api/email/confirm-deletion', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
   });
+}
+
+/** Copy the privacy default onto every trip the user owns. */
+export async function applyRecommendationsToMyTrips(
+  allowRecommendations: boolean,
+): Promise<{ success: boolean; updated: number }> {
+  return apiFetch('/api/users/me/privacy/apply-to-trips', {
+    method: 'POST',
+    body: JSON.stringify({ allowRecommendations }),
+  });
+}
+
+/** GDPR export — the raw JSON download plus the server's filename. */
+export async function exportMyData(): Promise<{ blob: Blob; filename: string }> {
+  let res = await fetch(`${BASE_URL}/api/users/me/export`, { headers: await getAuthHeader() });
+  if (res.status === 401) {
+    const refreshed = await refreshAuthHeader();
+    if (refreshed) res = await fetch(`${BASE_URL}/api/users/me/export`, { headers: refreshed });
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.error ?? `API error ${res.status}`);
+  }
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'bluemurr-export.json';
+  return { blob: await res.blob(), filename };
 }
 
 export async function cancelAccountDeletion(): Promise<{ success: boolean }> {
@@ -1097,4 +1271,165 @@ export function sendPresetEvents(events: Array<{ slug: string; kind: 'impression
   } catch {
     // no-op
   }
+}
+
+// ─── In-app flight booking (Duffel Orders + Duffel Payments) ─────────
+export type FareCondition = {
+  allowed: boolean;
+  penaltyAmount: string | null;
+  penaltyCurrency: string | null;
+} | null;
+
+export type BookingQuote = {
+  offerId: string;
+  expiresAt: string;
+  liveMode: boolean;
+  totalAmount: string;
+  totalCurrency: string;
+  baseAmount: string | null;
+  taxAmount: string | null;
+  /** exact = same carrier + time as the card; carrier = same airline, other time; cheapest = neither. */
+  match: 'exact' | 'carrier' | 'cheapest';
+  priceChange: null | { previous: number; current: number; currency: string; difference: number };
+  airline: { name: string; iataCode: string | null; conditionsOfCarriageUrl: string | null; logoUrl: string | null };
+  slices: Array<{
+    origin: string;
+    originName: string;
+    destination: string;
+    destinationName: string;
+    departingAt: string;
+    arrivingAt: string;
+    duration: string | null;
+    fareBrandName: string | null;
+    segments: Array<{
+      flightNumber: string;
+      carrier: string;
+      origin: string;
+      destination: string;
+      departingAt: string;
+      arrivingAt: string;
+      aircraft: string | null;
+      cabinClass: string | null;
+      baggages: Array<{ type: string; quantity: number }>;
+    }>;
+  }>;
+  passengers: Array<{ id: string; type: string; age: number | null }>;
+  requirements: {
+    identityDocumentsRequired: boolean;
+    supportedDocumentTypes: string[];
+    requiresInstantPayment: boolean;
+  };
+  conditions: { refundBeforeDeparture: FareCondition; changeBeforeDeparture: FareCondition };
+};
+
+export type BookingPassenger = {
+  title: 'mr' | 'ms' | 'mrs' | 'miss' | 'dr' | '';
+  given_name: string;
+  family_name: string;
+  gender: 'm' | 'f' | '';
+  born_on: string;
+  passport?: { number: string; issuing_country_code: string; expires_on: string } | null;
+};
+
+export type BookingContact = { email: string; phone_number: string };
+
+export async function getBookingQuote(params: {
+  origin: string;
+  destination: string;
+  originAirport?: string;
+  destinationAirport?: string;
+  date: string;
+  travelers: number;
+  carrierCode?: string;
+  operator?: string;
+  departTime?: string;
+  previousPrice?: number;
+  /** Per traveller: age if under 18 (child fare), null for an adult. */
+  ages?: Array<number | null>;
+}): Promise<{ quote: BookingQuote }> {
+  return apiFetch('/api/bookings/quote', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function startBookingPayment(params: {
+  offerId: string;
+  expectedAmount: string;
+  expectedCurrency: string;
+  passengers: BookingPassenger[];
+  contact: BookingContact;
+  termsAccepted: boolean;
+  tripId?: string | null;
+}): Promise<{ paymentIntentId: string; clientToken: string; amount: string; currency: string; liveMode: boolean }> {
+  return apiFetch('/api/bookings/payment-intent', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export type BookingConfirmation = {
+  orderId: string;
+  bookingReference: string;
+  status: 'confirmed';
+  totalAmount: string;
+  totalCurrency: string;
+  liveMode: boolean;
+  emailSent: boolean;
+  emailTo: string | null;
+  persisted: boolean;
+};
+
+export async function confirmBooking(paymentIntentId: string): Promise<BookingConfirmation> {
+  return apiFetch('/api/bookings/confirm', { method: 'POST', body: JSON.stringify({ paymentIntentId }) });
+}
+
+export async function getBookings(): Promise<{ bookings: any[]; persistence: boolean }> {
+  return apiFetch('/api/bookings');
+}
+
+/** The itinerary PDF as a Blob (authenticated, so not a plain link). */
+export async function fetchItineraryPdf(orderId: string): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}/api/bookings/${encodeURIComponent(orderId)}/itinerary.pdf`, {
+    headers: await getAuthHeader(),
+  });
+  if (!res.ok) throw new ApiError(res.status, 'Could not load the itinerary');
+  return res.blob();
+}
+
+// ─── Settings type-ahead (home city / home airport) ─────────────────────────
+
+export type CitySuggestion = { label: string; name: string; country: string; airport: string | null };
+export type AirportSuggestion = { iata: string; name: string; city: string | null; country: string | null; label: string };
+
+export async function suggestLocations(
+  kind: 'city',
+  q: string,
+  signal?: AbortSignal,
+): Promise<CitySuggestion[]>;
+export async function suggestLocations(
+  kind: 'airport',
+  q: string,
+  signal?: AbortSignal,
+): Promise<AirportSuggestion[]>;
+export async function suggestLocations(kind: 'city' | 'airport', q: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ kind, q });
+  const res = await apiFetch<{ suggestions: unknown[] }>(`/api/locations/suggest?${params}`, { signal });
+  return res.suggestions;
+}
+
+// ─── Arrival / departure hubs (airport or station) for the day schedule ─────
+
+export type Hub = {
+  kind: 'airport' | 'station';
+  name: string;
+  code?: string;
+  lat: number;
+  lng: number;
+  approximate: boolean;
+};
+
+export async function getHub(
+  params: { city: string; country?: string; mode: 'flight' | 'train'; code?: string },
+  signal?: AbortSignal,
+): Promise<Hub | null> {
+  const q = new URLSearchParams({ city: params.city, mode: params.mode });
+  if (params.country) q.set('country', params.country);
+  if (params.code) q.set('code', params.code);
+  const res = await apiFetch<{ hub: Hub | null }>(`/api/locations/hub?${q}`, { signal });
+  return res.hub;
 }

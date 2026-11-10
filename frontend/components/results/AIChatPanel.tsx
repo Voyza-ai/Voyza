@@ -9,18 +9,22 @@ import {
   planChatSuggestions,
   ChatProposal,
   ChatTurn,
+  CityEditProposal,
   LegOption,
   LegRefresh,
   ModeComparison,
 } from '@/lib/api';
-import { useTripStore } from '@/store/tripStore';
+import { useTripStore, requestPicksForAddedCity } from '@/store/tripStore';
 import { displayAmount } from '@/lib/tripTotals';
+import { applyCityEdit, cityEditDiff, type CityEditRow } from '@/lib/cityEdit';
+import { getCityColor } from '@/lib/cityColors';
+import { nightsBetween } from '@/lib/hotelScore';
 
 type Message = {
   id: number;
   role: 'user' | 'ai';
   content: string;
-  /** Present on AI messages that carry a proposal card (date_shift only). */
+  /** Present on AI messages that carry a proposal card (date_shift or city_edit). */
   proposal?: ChatProposal;
   /** UI state for proposal cards so Accept/Reject hide the buttons. */
   proposalState?: 'pending' | 'accepted' | 'rejected';
@@ -146,7 +150,10 @@ function cacheSuggestions(key: string, suggestions: string[]) {
 /** Short date like "Mar 5" from YYYY-MM-DD. */
 function fmt(iso: string | null | undefined): string {
   if (!iso) return '—';
-  const d = new Date(iso);
+  // Read YYYY-MM-DD as a LOCAL day: `new Date('2026-12-10')` is UTC
+  // midnight, which west of UTC printed the day before ("Dec 9").
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
@@ -343,10 +350,23 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
 
     const userMsg: Message = { id: idRef.current++, role: 'user', content: trimmed };
 
-    // Build history from current text messages only (proposal cards are UI state).
-    const history: ChatTurn[] = messages
-      .filter((m) => !m.proposal)
-      .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: messageText(m, priceMode, trip.travelers) }));
+    // History for the model. A proposal's reply goes in with what the user
+    // did with it: left out, the model saw "swap Venice for Milan" with no
+    // answer, then the next request — two user turns in a row — and redid
+    // the first one (re-proposed Milan for "replace Venice with X").
+    const history: ChatTurn[] = messages.map((m) => {
+      let content = messageText(m, priceMode, trip.travelers);
+      if (m.proposal) {
+        const outcome =
+          m.proposalState === 'accepted'
+            ? 'The user ACCEPTED this change; it is applied.'
+            : m.proposalState === 'rejected'
+              ? 'The user REJECTED this change; the trip is unchanged.'
+              : 'The user has not accepted this change yet; the trip is unchanged.';
+        content = `${content} [${outcome}]`;
+      }
+      return { role: m.role === 'user' ? 'user' : 'assistant', content };
+    });
 
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
@@ -421,9 +441,34 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     // during render (twice under StrictMode), and applying the trip there
     // updated the page that hosts this panel mid-render.
     const msg = messages.find((m) => m.id === messageId);
-    if (!msg?.proposal || msg.proposalState === 'accepted') return;
-    // date_shift is the only proposal kind now — apply the prebuilt trip.
-    applyTrip(msg.proposal.proposedTrip as Trip);
+    if (!msg?.proposal || msg.proposalState !== 'pending') return;
+    if (msg.proposal.kind === 'city_edit') {
+      // Built on the trip as it is NOW (picks may have landed since the card
+      // appeared); the priced pieces are the proposal's.
+      const current = latestTrip() ?? trip;
+      const next = applyCityEdit(current, msg.proposal);
+      applyTrip(next);
+      // A new city's AI picks, the way the planner asks for them. Results
+      // page only: the canvas keeps its own state and its save fills them.
+      if (!onTripUpdate) {
+        for (const stop of msg.proposal.after) {
+          if (stop.status !== 'added' && stop.status !== 'replaced') continue;
+          const city = next.cities.find((c) => c.name === stop.name);
+          requestPicksForAddedCity({
+            city: stop.name,
+            country: city?.country || undefined,
+            vibe: useTripStore.getState().answers.vibe ?? undefined,
+            travelers: next.travelers,
+            nights: Math.max(1, nightsBetween(stop.arrival, stop.departure)),
+            budget: next.budget,
+          });
+        }
+        // A saved trip's edit reaches the database through the results
+        // page's autosave (useSavedTripAutosave), as do its picks landing.
+      }
+    } else {
+      applyTrip(msg.proposal.proposedTrip as Trip);
+    }
     setMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, proposalState: 'accepted' } : m)),
     );
@@ -494,6 +539,19 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
                 <DateShiftProposalCard
                   proposal={msg.proposal}
                   state={msg.proposalState ?? 'pending'}
+                  onAccept={() => acceptProposal(msg.id)}
+                  onReject={() => rejectProposal(msg.id)}
+                />
+              )}
+
+              {/* City edit (add / remove / replace) — a before → after diff
+                  of the whole route, priced, with Accept / Reject. */}
+              {msg.proposal && msg.proposal.kind === 'city_edit' && (
+                <CityEditProposalCard
+                  proposal={msg.proposal}
+                  trip={trip}
+                  state={msg.proposalState ?? 'pending'}
+                  priceMode={priceMode}
                   onAccept={() => acceptProposal(msg.id)}
                   onReject={() => rejectProposal(msg.id)}
                 />
@@ -685,6 +743,189 @@ function DateShiftProposalCard({
         </div>
       )}
     </motion.div>
+  );
+}
+
+// ─── City-edit proposal card ────────────────────────────────
+// add_city / remove_city / replace_city. The route before → after, one row
+// per city on the dashed-route line, priced from the backend's searches,
+// with the trip total before → after. Dark #0f0f1a AI surface (the
+// planner's), pastel city chips from the trip's own palette.
+type CityEditProposalCardProps = {
+  proposal: CityEditProposal;
+  trip: Trip;
+  state: 'pending' | 'accepted' | 'rejected';
+  priceMode: 'total' | 'perPerson';
+  onAccept: () => void;
+  onReject: () => void;
+};
+
+const EDIT_TITLE: Record<CityEditProposal['toolName'], string> = {
+  add_city: 'Add a city',
+  remove_city: 'Remove a city',
+  replace_city: 'Swap a city',
+};
+
+function CityEditProposalCard({ proposal, trip, state, priceMode, onAccept, onReject }: CityEditProposalCardProps) {
+  // The preview is fixed when the card appears: it is what Accept was offered.
+  const [diff] = useState(() => cityEditDiff(trip, proposal));
+  const isPending = state === 'pending';
+  const travelers = trip.travelers;
+  const money = (n: number) => `$${displayAmount(Math.round(n), priceMode, travelers).toLocaleString()}`;
+  const delta = Math.round(diff.after - diff.before);
+  const colorOf = (row: CityEditRow, i: number) => {
+    const c = diff.preview.cities.find((x) => x.name === row.name) ?? trip.cities.find((x) => x.name === row.name);
+    return getCityColor(c?.colorIndex ?? i);
+  };
+  const newLegs = proposal.legs.map((l) => {
+    const best = l.options[0];
+    return { key: `${l.from}-${l.to}`, label: `${l.from} → ${l.to}`, best };
+  });
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.1, duration: 0.25 }}
+      className="mt-2 max-w-[92%] w-full overflow-hidden"
+      style={{ background: '#0f0f1a', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)' }}
+      data-testid="city-edit-card"
+    >
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+        <div className="text-[12px] font-medium text-white">{EDIT_TITLE[proposal.toolName]}</div>
+        <div className="text-[10px] uppercase tracking-wide text-white/40">Proposed</div>
+      </div>
+
+      {/* The route: one row per city on a dashed line. */}
+      <div className="relative px-4 pb-3">
+        <div
+          className="absolute top-2 bottom-4 border-l-[1.5px] border-dashed"
+          style={{ left: 22, borderColor: 'rgba(79,142,247,0.45)' }}
+        />
+        <div className="flex flex-col gap-2">
+          {diff.rows.map((row, i) => {
+            const color = colorOf(row, i);
+            const removed = row.kind === 'removed';
+            const isNew = row.kind === 'added' || row.kind === 'replaced';
+            return (
+              <div key={`${row.kind}-${row.name}`} className="relative flex items-start gap-2.5" data-testid={`diff-row-${row.kind}`}>
+                <div
+                  className="relative z-10 mt-0.5 w-3 h-3 rounded-full flex-shrink-0"
+                  style={{
+                    background: removed ? '#0f0f1a' : color.bg,
+                    border: `1.5px solid ${removed ? 'rgba(255,255,255,0.3)' : color.border}`,
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span
+                      className={`text-[12px] font-medium ${removed ? 'line-through text-white/40' : 'text-white'}`}
+                    >
+                      {row.name}
+                    </span>
+                    {row.kind === 'added' && <Tag text="New" />}
+                    {row.kind === 'replaced' && <Tag text={`Instead of ${row.replaces}`} />}
+                    {removed && <Tag text="Removed" muted />}
+                  </div>
+                  <div className="text-[11px] text-white/50">
+                    {removed ? (
+                      <>{fmt(row.oldDates.arrival)} – {fmt(row.oldDates.departure)}</>
+                    ) : row.kind === 'moved' && row.oldDates ? (
+                      <>
+                        <span className="line-through text-white/30">{fmt(row.oldDates.arrival)} – {fmt(row.oldDates.departure)}</span>
+                        <span className="mx-1">→</span>
+                        <span className="text-white/80">{fmt(row.dates.arrival)} – {fmt(row.dates.departure)}</span>
+                      </>
+                    ) : (
+                      <>
+                        {fmt(row.dates.arrival)} – {fmt(row.dates.departure)} · {nightsBetween(row.dates.arrival, row.dates.departure)}n
+                      </>
+                    )}
+                  </div>
+                  {isNew && 'hotel' in row && (
+                    <div className="text-[11px] text-white/60 truncate">
+                      {row.hotel ? `${row.hotel.name} · ${money(row.hotel.pricePerNight)}/night` : 'No hotel found yet'}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {newLegs.length > 0 && (
+        <div className="px-4 py-2 flex flex-col gap-1" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          {newLegs.map((l) => (
+            <div key={l.key} className="flex items-center gap-1.5 text-[11px] text-white/60">
+              {l.best?.mode === 'train' ? <TrainFront size={11} /> : <Plane size={11} />}
+              <span className="flex-1 truncate">{l.label}</span>
+              <span className="text-white/80">
+                {l.best ? `${l.best.operator ? `${l.best.operator} · ` : ''}${l.best.price > 0 ? money(l.best.price) : '—'}` : 'No option found'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="px-4 py-2.5 flex items-center justify-between" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="text-[11px] text-white/50">
+          Trip total{priceMode === 'perPerson' && travelers > 1 ? ' per person' : ''}
+        </div>
+        <div className="text-[12px] text-white" data-testid="city-edit-total">
+          <span className="text-white/40">{money(diff.before)}</span>
+          <span className="mx-1 text-white/40">→</span>
+          <span className="font-semibold">{money(diff.after)}</span>
+          {delta !== 0 && (
+            <span className="ml-1.5 text-[11px]" style={{ color: delta > 0 ? '#f5b098' : '#a0dfc0' }}>
+              {delta > 0 ? '+' : '−'}{money(Math.abs(delta))}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {isPending ? (
+        <div className="px-4 py-2.5 flex justify-end gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <button
+            onClick={onReject}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-white/60 hover:text-white hover:bg-white/5 transition"
+          >
+            <X size={13} className="inline mr-1 -mt-0.5" />
+            Reject
+          </button>
+          <button
+            onClick={onAccept}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-white transition hover:opacity-90"
+            style={{ background: '#2e6bc4' }}
+          >
+            <Check size={13} className="inline mr-1 -mt-0.5" />
+            Accept
+          </button>
+        </div>
+      ) : (
+        <div
+          className="px-4 py-2 text-[11px]"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.06)', color: state === 'accepted' ? '#a0dfc0' : 'rgba(255,255,255,0.4)' }}
+        >
+          {state === 'accepted' ? '✓ Applied to your trip' : '× Dismissed — your trip is unchanged'}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function Tag({ text, muted }: { text: string; muted?: boolean }) {
+  return (
+    <span
+      className="text-[10px] px-1.5 py-0.5 rounded-full"
+      style={
+        muted
+          ? { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.45)' }
+          : { background: 'rgba(79,142,247,0.18)', color: '#9cc0ff' }
+      }
+    >
+      {text}
+    </span>
   );
 }
 

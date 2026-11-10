@@ -4,6 +4,7 @@ import { homeDepartureDay } from './tripSpan';
 // `import type` only — keeps the fetch layer in lib/api out of this
 // module's runtime graph while still typing the AI's suggestion shapes.
 import type { ActivitySuggestion, RestaurantSuggestion } from './api';
+import { coordsOf, hasCoords, nearestIndex, travelBetween, type Located, type TravelLegs } from './geoSchedule';
 
 /**
  * Auto-build the default schedule for a single trip day.
@@ -148,6 +149,8 @@ export function buildDayTransportContext(
         startTime: minutesToTime(Math.max(0, departMins - (BUFFER_MIN[t.mode] ?? 60))),
         endTime: minutesToTime(departMins),
         category: 'transport',
+        auto: true,
+        autoRole: 'in-head',
         notes: 'Allow 2h for check-in & security',
       });
       events.push({
@@ -156,6 +159,8 @@ export function buildDayTransportContext(
         startTime: t.departTime,
         endTime: t.arriveTime ?? minutesToTime(Math.min(departMins + 60, 24 * 60)),
         category: 'transport',
+        auto: true,
+        autoRole: 'in-travel',
         notes: t.duration || undefined,
       });
     }
@@ -215,6 +220,8 @@ export function buildDayTransportContext(
         startTime: minutesToTime(headStart),
         endTime: minutesToTime(departMins),
         category: 'transport',
+        auto: true,
+        autoRole: 'in-head',
         notes: t.mode === 'flight' ? 'Allow 2h for check-in & security' : undefined,
       });
       events.push({
@@ -223,6 +230,8 @@ export function buildDayTransportContext(
         startTime: t.departTime!,
         endTime: t.arriveTime!,
         category: 'transport',
+        auto: true,
+        autoRole: 'in-travel',
         notes: t.duration || undefined,
       });
     }
@@ -233,6 +242,8 @@ export function buildDayTransportContext(
       startTime: t.arriveTime!,
       endTime: minutesToTime(Math.min(arrMins + 15, 24 * 60)),
       category: 'transport',
+      auto: true,
+      autoRole: 'in-arrive',
     });
 
     // No activities/restaurants until the user has actually landed and
@@ -259,6 +270,8 @@ export function buildDayTransportContext(
       startTime: minutesToTime(headStart),
       endTime: t.departTime!,
       category: 'transport',
+      auto: true,
+      autoRole: 'out-head',
       notes: t.mode === 'flight' ? 'Allow 2h for check-in & security' : undefined,
     });
 
@@ -269,6 +282,8 @@ export function buildDayTransportContext(
       startTime: t.departTime!,
       endTime,
       category: 'transport',
+      auto: true,
+      autoRole: 'out-travel',
       notes: t.duration || undefined,
     });
 
@@ -394,6 +409,20 @@ export type DayPlan = {
 
 type Range = [number, number];
 
+/**
+ * An occupied stretch of the day. `key` names the planned item it holds (a
+ * transport block has none), so travel time to and from it can be looked up.
+ */
+type Block = { range: Range; key?: string };
+
+/**
+ * Minutes needed between a block and a candidate placed next to it, given
+ * which side the candidate is on. Never less than `SLOT_BUFFER_MIN`.
+ */
+type PadFor = (block: Block, side: 'before' | 'after') => number;
+
+const uniformPad: PadFor = () => SLOT_BUFFER_MIN;
+
 /** Collapse overlapping ranges into disjoint ones, sorted by start. */
 const mergeRanges = (ranges: Range[]): Range[] => {
   const sorted = ranges.filter(([s, e]) => e > s).sort((a, b) => a[0] - b[0]);
@@ -414,9 +443,20 @@ const mergeRanges = (ranges: Range[]): Range[] => {
  * cushion from its neighbours — that is how the buffer survives the move
  * away from fixed slots.
  */
-const freeGaps = (occupied: Range[], from: number, until: number): Range[] => {
+const freeGaps = (
+  occupied: Block[],
+  from: number,
+  until: number,
+  pad: PadFor = uniformPad,
+): Range[] => {
+  // A block is widened by the travel time FROM the candidate on its start
+  // side (the candidate would end before it) and TO the candidate on its end
+  // side (the candidate would start after it). Both are at least the plain
+  // buffer, so geography only ever adds room — it can never create overlap.
   const blocked = mergeRanges(
-    occupied.map(([s, e]): Range => [s - SLOT_BUFFER_MIN, e + SLOT_BUFFER_MIN]),
+    occupied.map(
+      (b): Range => [b.range[0] - pad(b, 'before'), b.range[1] + pad(b, 'after')],
+    ),
   );
   const gaps: Range[] = [];
   let cursor = from;
@@ -435,12 +475,13 @@ const freeGaps = (occupied: Range[], from: number, until: number): Range[] => {
 
 /** Earliest minute at or after `from` where `dur` fits whole. */
 const earliestFit = (
-  occupied: Range[],
+  occupied: Block[],
   from: number,
   until: number,
   dur: number,
+  pad?: PadFor,
 ): number | null => {
-  for (const [gs, ge] of freeGaps(occupied, from, until)) {
+  for (const [gs, ge] of freeGaps(occupied, from, until, pad)) {
     if (ge - gs >= dur) return gs;
   }
   return null;
@@ -448,15 +489,16 @@ const earliestFit = (
 
 /** Free minute closest to `ideal` where `dur` fits whole. */
 const nearestFit = (
-  occupied: Range[],
+  occupied: Block[],
   from: number,
   until: number,
   dur: number,
   ideal: number,
+  pad?: PadFor,
 ): number | null => {
   let best: number | null = null;
   let bestDistance = Infinity;
-  for (const [gs, ge] of freeGaps(occupied, from, until)) {
+  for (const [gs, ge] of freeGaps(occupied, from, until, pad)) {
     if (ge - gs < dur) continue;
     const start = Math.min(Math.max(ideal, gs), ge - dur);
     const distance = Math.abs(start - ideal);
@@ -508,8 +550,21 @@ export function planDay(params: {
   sequence: PlanItem[];
   /** Window-bound items fitted around the backbone. Never shortened. */
   flexible: PlanItem[];
+  /**
+   * Minutes to get from one planned item to another, when both have a
+   * location. Null / absent = unknown, and the plain `SLOT_BUFFER_MIN` is
+   * kept. Anything longer than the buffer widens the gap between the two.
+   */
+  travelMin?: (fromKey: string, toKey: string) => number | null;
 }): DayPlan {
-  const { dayStart, dayEnd, busyRanges, sequence, flexible } = params;
+  const { dayStart, dayEnd, busyRanges, sequence, flexible, travelMin } = params;
+
+  /** Gap rule for placing `candidate` next to each occupied block. */
+  const padFor = (candidate: string): PadFor => (block, side) => {
+    if (!travelMin || !block.key) return SLOT_BUFFER_MIN;
+    const t = side === 'after' ? travelMin(block.key, candidate) : travelMin(candidate, block.key);
+    return Math.max(SLOT_BUFFER_MIN, t ?? 0);
+  };
 
   const placements: PlanPlacement[] = [];
   const dropped: PlanDrop[] = [];
@@ -519,7 +574,7 @@ export function planDay(params: {
   // as-is made the flight invisible: the planner put a 3-hour evening
   // activity at 19:40 on the day of a 19:25 departure (production trip,
   // JFK → Paris, 2026-10-29).
-  const occupied: Range[] = busyRanges.map(([s, e]): Range => [s, e < s ? 24 * 60 : e]);
+  const occupied: Block[] = busyRanges.map(([s, e]): Block => ({ range: [s, e < s ? 24 * 60 : e] }));
 
   const bounds = (item: PlanItem): Range => [
     Math.max(dayStart, item.earliestStart),
@@ -531,15 +586,15 @@ export function planDay(params: {
    * Simulated in window order, because seating breakfast can be what
    * leaves lunch nowhere to sit.
    */
-  const survivingFlexible = (probe: Range[]): string[] => {
-    const sim: Range[] = probe.map(([s, e]): Range => [s, e]);
+  const survivingFlexible = (probe: Block[]): string[] => {
+    const sim: Block[] = probe.map((b): Block => ({ range: [b.range[0], b.range[1]], key: b.key }));
     const alive: string[] = [];
     for (const item of flexible) {
       const [from, until] = bounds(item);
-      const hit = nearestFit(sim, from, until, item.durationMin, item.idealStart ?? from);
+      const hit = nearestFit(sim, from, until, item.durationMin, item.idealStart ?? from, padFor(item.key));
       if (hit !== null) {
         alive.push(item.key);
-        sim.push([hit, hit + item.durationMin]);
+        sim.push({ range: [hit, hit + item.durationMin], key: item.key });
       }
     }
     return alive;
@@ -552,7 +607,8 @@ export function planDay(params: {
     const from = cursor === null ? itemFrom : Math.max(itemFrom, cursor + SLOT_BUFFER_MIN);
     const dur = item.durationMin;
 
-    const plainFit = earliestFit(occupied, from, until, dur);
+    const pad = padFor(item.key);
+    const plainFit = earliestFit(occupied, from, until, dur, pad);
     let chosen = plainFit;
 
     if (plainFit !== null) {
@@ -560,13 +616,13 @@ export function planDay(params: {
       const before = survivingFlexible(occupied);
       let scan: number | null = plainFit;
       while (scan !== null) {
-        const after = survivingFlexible([...occupied, [scan, scan + dur] as Range]);
+        const after = survivingFlexible([...occupied, { range: [scan, scan + dur], key: item.key }]);
         const starves = before.some((key) => after.indexOf(key) === -1);
         if (!starves) {
           chosen = scan;
           break;
         }
-        scan = earliestFit(occupied, scan + 1, until, dur);
+        scan = earliestFit(occupied, scan + 1, until, dur, pad);
       }
       // scan === null → no start spares every meal. Keep `plainFit`: the
       // activity is real and keeps its length; a meal gives way and is
@@ -580,20 +636,27 @@ export function planDay(params: {
 
     const end = chosen + dur;
     placements.push({ key: item.key, startMin: chosen, endMin: end, durationMin: dur });
-    occupied.push([chosen, end]);
+    occupied.push({ range: [chosen, end], key: item.key });
     cursor = end;
   }
 
   for (const item of flexible) {
     const [from, until] = bounds(item);
-    const start = nearestFit(occupied, from, until, item.durationMin, item.idealStart ?? from);
+    const start = nearestFit(
+      occupied,
+      from,
+      until,
+      item.durationMin,
+      item.idealStart ?? from,
+      padFor(item.key),
+    );
     if (start === null) {
       dropped.push({ key: item.key, durationMin: item.durationMin });
       continue;
     }
     const end = start + item.durationMin;
     placements.push({ key: item.key, startMin: start, endMin: end, durationMin: item.durationMin });
-    occupied.push([start, end]);
+    occupied.push({ range: [start, end], key: item.key });
   }
 
   placements.sort((a, b) => a.startMin - b.startMin);
@@ -676,6 +739,7 @@ export function buildDefaultSchedule(
       endTime: minutesToTime(endMin),
       category: 'restaurant',
       notes: `${r.cuisine} · ${r.priceRange}`,
+      ...coordsOf(r),
     }));
     return {
       key,
@@ -703,6 +767,24 @@ export function buildDefaultSchedule(
 
 /* ────────────────── Trip-creation path (AI suggestions) ────────────────── */
 
+/**
+ * Record, on each located event, the leg from the event right before it —
+ * when that one is located too. Transport blocks break the chain (the
+ * traveller's position around a flight is the airport, not a POI).
+ * Mutates and returns `events`, which must be sorted by start time.
+ */
+export function annotateTravel(events: ScheduledEvent[], legs?: TravelLegs | null): ScheduledEvent[] {
+  for (let i = 0; i < events.length; i++) {
+    const evt = events[i];
+    delete evt.travelFromPrev;
+    const prev = events[i - 1];
+    if (!prev || prev.category === 'transport' || evt.category === 'transport') continue;
+    const leg = travelBetween(prev, evt, legs);
+    if (leg) evt.travelFromPrev = leg;
+  }
+  return events;
+}
+
 /** What `buildCityScheduleFromSuggestions` produces for one city stay. */
 export type CitySchedule = {
   /** Per-day events, keyed by ISO date. Same shape `City.schedule` holds. */
@@ -729,6 +811,16 @@ export type CitySchedule = {
  * cannot hold one, the activity is NOT shortened: it goes back on its
  * queue for a later day, and if no day of the stay can take it, it is
  * reported in `unscheduled`. Same for a meal the day had no room for.
+ *
+ * Geography: when picks carry real coordinates (from the backend's POI
+ * provider), each day is chained by distance — the morning activity, then
+ * the lunch spot NEAREST it, then the afternoon activity nearest lunch, the
+ * evening one nearest that, and breakfast / dinner nearest their neighbours.
+ * The gap between two located slots is at least the travel time between
+ * them (`opts.legs` when the backend measured it, else an estimate), and
+ * each located event records that leg in `travelFromPrev`. A pick without
+ * coordinates is taken in queue order, exactly as before, so a city with no
+ * located picks schedules identically to the non-geographic planner.
  */
 export function buildCityScheduleFromSuggestions(
   activities: ActivitySuggestion[],
@@ -736,7 +828,9 @@ export function buildCityScheduleFromSuggestions(
   city: City,
   cityIndex: number,
   trip: Trip,
+  opts: { legs?: TravelLegs | null } = {},
 ): CitySchedule {
+  const legs = opts.legs ?? null;
   const schedule: Record<string, ScheduledEvent[]> = {};
 
   // parseLocal avoids the UTC-vs-local-midnight off-by-one that bare
@@ -769,14 +863,40 @@ export function buildCityScheduleFromSuggestions(
     any: restaurants.filter((r) => r.mealType === 'any'),
   };
 
+  /**
+   * The next restaurant for a meal. With a located `near`, the closest
+   * located one in the meal's own queue or the 'any' queue; otherwise (or
+   * when none of them is located) queue order, preferred queue first.
+   */
   const takeRestaurant = (
     preferred: Exclude<RestBucket, 'any'>,
+    near: Located | null = null,
   ): { suggestion: RestaurantSuggestion; bucket: RestBucket } | undefined => {
+    if (hasCoords(near)) {
+      const pool: Array<{ suggestion: RestaurantSuggestion; bucket: RestBucket }> = [
+        ...restBuckets[preferred].map((r) => ({ suggestion: r, bucket: preferred as RestBucket })),
+        ...restBuckets.any.map((r) => ({ suggestion: r, bucket: 'any' as RestBucket })),
+      ];
+      const at = nearestIndex(near, pool.map((c) => c.suggestion));
+      if (at >= 0) {
+        const chosen = pool[at];
+        const queue = restBuckets[chosen.bucket];
+        queue.splice(queue.indexOf(chosen.suggestion), 1);
+        return chosen;
+      }
+    }
     const fromPreferred = restBuckets[preferred].shift();
     if (fromPreferred) return { suggestion: fromPreferred, bucket: preferred };
     const fromAny = restBuckets.any.shift();
     if (fromAny) return { suggestion: fromAny, bucket: 'any' };
     return undefined;
+  };
+
+  /** The next activity for a time of day: nearest `near` when both are located, else queue order. */
+  const takeActivity = (bucket: ActBucket, near: Located | null): ActivitySuggestion | undefined => {
+    const queue = actBuckets[bucket];
+    const at = nearestIndex(near, queue);
+    return at >= 0 ? queue.splice(at, 1)[0] : queue.shift();
   };
 
   /**
@@ -831,13 +951,41 @@ export function buildCityScheduleFromSuggestions(
 
     const sequence: PlanItem[] = [];
     const flexible: PlanItem[] = [];
+    /** Where each offered item is, for travel time between them. */
+    const located = new Map<string, Located>();
+
+    // ── Choose the day's picks, chained by distance where located:
+    //    morning → lunch nearest it → afternoon nearest lunch → evening
+    //    nearest that; breakfast nearest the morning, dinner nearest the
+    //    last activity. `anchor` is the latest located stop in that chain.
+    let anchor: Located | null = null;
+    const advance = (p: Located | undefined) => {
+      if (hasCoords(p)) anchor = p;
+    };
+    const morning = takeActivity('morning', null);
+    advance(morning);
+    const breakfast = takeRestaurant('breakfast', morning ?? null);
+    const lunch = takeRestaurant('lunch', anchor);
+    advance(lunch?.suggestion);
+    const afternoon = takeActivity('afternoon', anchor);
+    advance(afternoon);
+    const evening = takeActivity('evening', anchor);
+    advance(evening);
+    const dinner = takeRestaurant('dinner', anchor);
+    const chosenActivities: Record<ActBucket, ActivitySuggestion | undefined> = { morning, afternoon, evening };
+    const chosenMeals: Record<'breakfast' | 'lunch' | 'dinner', ReturnType<typeof takeRestaurant>> = {
+      breakfast,
+      lunch,
+      dinner,
+    };
 
     // ── The day's backbone: one activity per time-of-day, in order.
     (['morning', 'afternoon', 'evening'] as const).forEach((bucket) => {
-      const suggestion = actBuckets[bucket].shift();
+      const suggestion = chosenActivities[bucket];
       if (!suggestion) return;
       const key = `${bucket}-activity`;
       offered.set(key, { kind: 'activity', suggestion, bucket });
+      if (hasCoords(suggestion)) located.set(key, suggestion);
       makers.set(key, (startMin, endMin) => ({
         id: `sched-${++idCounter}`,
         title: suggestion.name,
@@ -848,6 +996,7 @@ export function buildCityScheduleFromSuggestions(
             ? 'restaurant'
             : 'activity',
         notes: suggestion.reason,
+        ...coordsOf(suggestion),
       }));
       sequence.push({
         key,
@@ -861,12 +1010,13 @@ export function buildCityScheduleFromSuggestions(
 
     // ── Meals, fitted into whatever gaps the backbone leaves.
     (['breakfast', 'lunch', 'dinner'] as const).forEach((meal) => {
-      const taken = takeRestaurant(meal);
+      const taken = chosenMeals[meal];
       if (!taken) return;
       const { suggestion, bucket } = taken;
       const key = `${meal}-restaurant`;
       const window = MEAL_WINDOWS[meal];
       offered.set(key, { kind: 'restaurant', suggestion, bucket });
+      if (hasCoords(suggestion)) located.set(key, suggestion);
       makers.set(key, (startMin, endMin) => ({
         id: `sched-${++idCounter}`,
         title: `${suggestion.name} (${suggestion.cuisine})`,
@@ -874,6 +1024,7 @@ export function buildCityScheduleFromSuggestions(
         endTime: minutesToTime(endMin),
         category: 'restaurant',
         notes: `${suggestion.priceRange} · ${suggestion.reason}`,
+        ...coordsOf(suggestion),
       }));
       flexible.push({
         key,
@@ -884,7 +1035,9 @@ export function buildCityScheduleFromSuggestions(
       });
     });
 
-    const plan = planDay({ dayStart, dayEnd, busyRanges, sequence, flexible });
+    const travelMin = (fromKey: string, toKey: string): number | null =>
+      travelBetween(located.get(fromKey), located.get(toKey), legs)?.minutes ?? null;
+    const plan = planDay({ dayStart, dayEnd, busyRanges, sequence, flexible, travelMin });
 
     for (const placement of plan.placements) {
       const make = makers.get(placement.key);
@@ -920,6 +1073,7 @@ export function buildCityScheduleFromSuggestions(
 
     // Sort once at the end so transport blocks interleave correctly.
     events.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+    annotateTravel(events, legs);
 
     if (events.length > 0) schedule[dateKey] = events;
   }

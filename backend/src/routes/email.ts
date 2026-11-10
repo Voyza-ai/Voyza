@@ -4,6 +4,7 @@ import { AppError } from '../middleware/error';
 import { getSupabase } from '../services/supabase';
 import { verifyUnsubscribeToken } from '../services/email';
 import { runEmailJobs } from '../services/emailJobs';
+import { confirmDeletion } from '../services/accountDeletion';
 import { env } from '../config/env';
 
 const router = Router();
@@ -12,6 +13,10 @@ const router = Router();
  * Public email endpoints — mounted WITHOUT requireAuth:
  *  - GET /unsubscribe is clicked from an email, no session exists.
  *  - POST /run-jobs is for schedulers, guarded by the CRON_SECRET header.
+ *  - POST /confirm-deletion is step 2 of account deletion; the emailed
+ *    single-use token is the credential (the link may be opened signed out,
+ *    on another device). It's a POST behind a confirm button on the
+ *    frontend page so mail scanners that prefetch links can't trigger it.
  */
 
 const page = (title: string, body: string) =>
@@ -55,6 +60,16 @@ router.get(
         'You will no longer receive invite or digest emails. Account-critical notices (like deletion confirmations) still apply.',
       ),
     );
+  }),
+);
+
+// ─── POST /api/email/confirm-deletion ────────────────────────
+router.post(
+  '/confirm-deletion',
+  asyncHandler(async (req, res) => {
+    const token = typeof req.body?.token === 'string' ? req.body.token : '';
+    const result = await confirmDeletion(token);
+    res.json({ success: true, accountStatus: 'pending_deletion', ...result });
   }),
 );
 

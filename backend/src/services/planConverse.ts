@@ -1,4 +1,5 @@
 import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
+import { stripOriginFiller } from './location/originPhrase';
 import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
 
@@ -92,7 +93,7 @@ const RESPOND_TOOL = {
               required: ['country', 'cities'],
             },
           },
-          origin: { type: ['string', 'null'], description: 'Home/departure city, plain name.' },
+          origin: { type: ['string', 'null'], description: 'Home/departure city, plain name. A US state or region ("New Jersey", "Long Island") is fine as written.' },
           dates: {
             type: ['object', 'null'],
             properties: {
@@ -211,6 +212,8 @@ export async function converse(params: {
         updates[key] = null;
       }
     }
+    // "from New Jersey" -> "New Jersey": the origin lookup reads this string.
+    if (typeof updates.origin === 'string') updates.origin = stripOriginFiller(updates.origin) || null;
 
     return {
       reply: input.reply,

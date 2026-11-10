@@ -6,7 +6,7 @@ import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin, LocateFixed, L
 import { useTripStore, requestCityPicks, startTripPicks, type CityPicksRequest } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ApiError, interpretPlan, optimizeTrip, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
+import { ApiError, interpretPlan, optimizeTrip, reviseDestinations, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
 import { Trip, City, Transport, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
@@ -22,6 +22,9 @@ import { vibesFromAnswer } from '@/lib/vibeMap';
 // The async `resolveLocation` still arrives through the `await import()` at
 // each call site below, so the long-tail path stays lazy.
 import { originAirportsForCity, type LocationAnswer } from '@/lib/locationResolver';
+import { stripOriginFiller } from '@/lib/originPhrase';
+import TripSummaryCard from './TripSummaryCard';
+import type { SummaryField } from '@/lib/tripSummary';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
@@ -216,6 +219,41 @@ type GuidedSnapshot = {
   msgCounter: number;
 };
 let guidedSession: GuidedSnapshot | null = null;
+
+/**
+ * Does a message typed AFTER the destinations were given look like it might
+ * change them ("actually Venice not Venezuela", "drop Milan", "add Rome")?
+ * Only such messages go to /api/plan/revise-destinations first; the AI there
+ * decides, and a message that wasn't about destinations comes back marked so
+ * and is handed to the question on screen as before. Plain answers — a
+ * number, a date, "round-trip" — never match, so they cost no extra call.
+ */
+const DESTINATION_EDIT_WORDS =
+  /\b(actually|instead|rather|meant|typo|misspel\w*|wrong|swap|replace|switch|change|add|remove|drop|skip|scratch|forget|also|cities|city|destinations?|start|begin|first|last|before|after|between|order|move|put|include|visit)\b/i;
+const NOT_A_PLACE = /\bnot\s+[A-Z]/;
+
+/** Guided-mode steps whose answer bubble holds each summary fact. Cities
+ *  have none: they are revised through the bar (see editSummaryField). */
+const SUMMARY_FIELD_STEPS: Record<SummaryField, string[]> = {
+  vibe: ['vibe'],
+  destinations: [],
+  origin: ['origin'],
+  returnToHome: ['roundtrip'],
+  travelers: ['travelers'],
+  budget: ['budget', 'budgetPerPerson'],
+  dates: ['dates'],
+  nights: ['nights'],
+  notes: ['notes'],
+};
+
+export function looksLikeDestinationEdit(text: string, destinations: string[] | undefined): boolean {
+  if (!destinations || destinations.length === 0) return false;
+  const t = text.trim();
+  if (!t || /^[\d\s$.,€£-]+$/.test(t)) return false;
+  if (DESTINATION_EDIT_WORDS.test(t) || NOT_A_PLACE.test(t)) return true;
+  const lower = t.toLowerCase();
+  return destinations.some((d) => d && lower.includes(d.toLowerCase()));
+}
 
 export default function PlanningChat() {
   const router = useRouter();
@@ -637,7 +675,7 @@ export default function PlanningChat() {
       const { city } = result;
       setMessages((prev) => [
         ...prev,
-        { id: nextId(), role: 'user', content: `📍 ${city.city}` },
+        { id: nextId(), role: 'user', content: `📍 ${city.city}`, stepId: 'origin' },
         {
           id: nextId(),
           role: 'assistant',
@@ -659,14 +697,14 @@ export default function PlanningChat() {
     }
   };
 
-  const handleTextSubmit = async () => {
-    if (!textInput.trim() || !steps.length) return;
+  const handleTextSubmit = async (typed?: string) => {
+    const value = (typed ?? textInput).trim();
+    if (!value || !steps.length) return;
     const step = steps[currentStepIndex];
-    const value = textInput.trim();
 
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: value },
+      { id: nextId(), role: 'user', content: value, stepId: step.id },
     ]);
     setTextInput('');
 
@@ -786,7 +824,8 @@ export default function PlanningChat() {
       // `answer.candidates` carries the `label` to show and the `placeId` to
       // persist. Taking the best reading until that UI is approved.
       const airports = originAirportsForOrigin(value, answer);
-      setAnswer('origin', value);
+      // "from New Jersey" is shown and saved as "New Jersey".
+      setAnswer('origin', stripOriginFiller(value) || value);
       setAnswer('originAirports', airports);
     }
 
@@ -801,7 +840,7 @@ export default function PlanningChat() {
     setAnswer('vibe', selectedVibe);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: selectedVibe },
+      { id: nextId(), role: 'user', content: selectedVibe, stepId: 'vibe' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -826,7 +865,7 @@ export default function PlanningChat() {
       !flexible && ISO_DAY.test(end) && start !== end ? humanDayRange(start, end) : humanDay(start);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: echo },
+      { id: nextId(), role: 'user', content: echo, stepId: 'dates' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -860,7 +899,7 @@ export default function PlanningChat() {
     setAnswer('budgetPerPerson', perPerson);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: `$${budget.toLocaleString()}${perPerson ? ' per person' : ' total'}` },
+      { id: nextId(), role: 'user', content: `$${budget.toLocaleString()}${perPerson ? ' per person' : ' total'}`, stepId: 'budget' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -871,7 +910,7 @@ export default function PlanningChat() {
     setAnswer('budgetPerPerson', perPerson);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: perPerson ? 'Per person' : 'Total for the trip' },
+      { id: nextId(), role: 'user', content: perPerson ? 'Per person' : 'Total for the trip', stepId: 'budgetPerPerson' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -941,6 +980,69 @@ export default function PlanningChat() {
       if (/round/.test(t)) { setAnswer('returnToHome', true); return true; }
       if (/one[\s-]?way/.test(t)) { setAnswer('returnToHome', false); return true; }
       return false;
+    }
+
+    // The rest became editable with the running trip summary, which opens
+    // these bubbles when a fact is clicked: an edit that changed only the
+    // bubble would leave the summary (and the search) on the old answer.
+    if (stepId === 'vibe') {
+      setVibe(text.trim());
+      setAnswer('vibe', text.trim());
+      return true;
+    }
+
+    if (stepId === 'notes') {
+      setAnswer('extraNotes', text.trim());
+      return true;
+    }
+
+    if (stepId === 'budget') {
+      const match = text.replace(/[, ]/g, '').match(/\d+/);
+      const amount = match ? parseInt(match[0], 10) : 0;
+      if (!amount) return false;
+      setAnswer('budget', amount);
+      if (/per\s*person|each|pp\b/.test(t)) setAnswer('budgetPerPerson', true);
+      else if (/total|combined|overall/.test(t)) setAnswer('budgetPerPerson', false);
+      return true;
+    }
+
+    if (stepId === 'budgetPerPerson') {
+      if (/per\s*person|each|pp\b/.test(t) && !/total|combined/.test(t)) { setAnswer('budgetPerPerson', true); return true; }
+      if (/total|combined|whole|overall/.test(t)) { setAnswer('budgetPerPerson', false); return true; }
+      return false;
+    }
+
+    if (stepId === 'dates') {
+      const range = parseDateRangeInput(text);
+      if (range) {
+        setAnswer('dateRange', { start: range.start, end: range.end });
+        setAnswer('flexible', false);
+        if (ISO_DAY.test(range.start) && ISO_DAY.test(range.end) && range.start !== range.end) {
+          const ms = new Date(range.end).getTime() - new Date(range.start).getTime();
+          setAnswer('nights', Math.max(1, Math.round(ms / 86_400_000)));
+        }
+        return true;
+      }
+      const start = parseDateInput(text);
+      if (!start) return false;
+      setAnswer('dateRange', { start, end: start });
+      setAnswer('flexible', true);
+      return true;
+    }
+
+    if (stepId === 'origin') {
+      const value = text.trim().replace(/^📍\s*/, '');
+      setAnswer('origin', stripOriginFiller(value) || value);
+      // Airports follow once the place is resolved, as on first answer.
+      import('@/lib/locationResolver')
+        .then(({ resolveLocation }) =>
+          resolveLocation(value, { tripDestinationNames: useTripStore.getState().answers.destinations }),
+        )
+        .then((answer) => {
+          if (mountedRef.current) setAnswer('originAirports', originAirportsForOrigin(value, answer));
+        })
+        .catch(() => {});
+      return true;
     }
 
     return false;
@@ -1353,7 +1455,7 @@ export default function PlanningChat() {
     const summary = groups.join(' | ');
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: summary || allSelected.join(', ') },
+      { id: nextId(), role: 'user', content: summary || allSelected.join(', '), stepId: 'destination' },
     ]);
 
     // Lock the cities into the store so the rest of the guided flow (and the
@@ -1516,6 +1618,9 @@ export default function PlanningChat() {
       // optimizer failed, they would be rate-limited calls spent on nothing.
       const picksRequests: CityPicksRequest[] = trip.cities.map((city) => ({
         city: city.name,
+        // Scopes the picks AND the backend's POI lookups it starts for them,
+        // so the later /places call finds that work under the same key.
+        country: city.country || undefined,
         vibe: parsed.vibe ?? answers.vibe,
         travelers,
         nights: Math.max(
@@ -1526,6 +1631,7 @@ export default function PlanningChat() {
           ),
         ),
         budget: totalBudget,
+        otherCities: trip.cities.map((c) => c.name).filter((n) => n !== city.name),
       }));
       const picksInFlight = picksRequests.map(requestCityPicks);
 
@@ -1877,6 +1983,7 @@ export default function PlanningChat() {
   // user can always type a free-form answer for whatever question is showing.
   const barPlaceholder = (() => {
     if (!intent) return 'Or just tell me everything at once...';
+    if (isComplete) return 'Need to change a city? e.g. "Venice instead of Rome"';
     if (!currentStep) return 'Type a message...';
     switch (currentStep.type) {
       case 'text':    return currentStep.placeholder || 'Type a destination...';
@@ -1892,14 +1999,117 @@ export default function PlanningChat() {
     }
   })();
 
+  // ── Destination corrections after the destination step ──────────────
+  //
+  // Typed text used to go only to the question on screen, so "actually
+  // Venice not Venezuela" at the dates step was read as a date and the
+  // destination could not be corrected (ROADMAP bug). A message that looks
+  // like a destination edit goes to /api/plan/revise-destinations first.
+  // Only `destinations` is ever written from its answer: dates, budget, vibe
+  // and the rest are untouched. A message the AI says wasn't about
+  // destinations falls through to the question on screen, unchanged.
+  const [revising, setRevising] = useState(false);
+  const canReviseDestinations =
+    !!intent && intent !== 'chat' && (answers.destinations?.length ?? 0) > 0 && !citySelectionData;
+
+  // ── Running trip summary: clicking a fact revises that answer ─────────
+  //
+  // Guided mode opens the answer's own bubble in its inline editor (the
+  // pencil), so the edit goes through the same parser as the first answer.
+  // Cities go through the bar instead: a city change is an AI revision
+  // (/api/plan/revise-destinations), not a re-parse.
+  const answerBubbleFor = (field: SummaryField): Message | undefined => {
+    for (const id of SUMMARY_FIELD_STEPS[field]) {
+      const found = [...messages].reverse().find((m) => m.role === 'user' && m.stepId === id);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  const canEditSummaryField = (field: SummaryField): boolean => {
+    if (findTripLoading || revising) return false;
+    if (field === 'destinations') return canReviseDestinations && currentStep?.id !== 'destination';
+    return !!answerBubbleFor(field);
+  };
+  const editSummaryField = (field: SummaryField) => {
+    if (!canEditSummaryField(field)) return;
+    if (field === 'destinations') {
+      setTextInput('Change my cities to ');
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      });
+      return;
+    }
+    const bubble = answerBubbleFor(field);
+    if (!bubble) return;
+    setEditingMsgId(bubble.id);
+    setEditingMsgValue(bubble.content.replace(/^📍\s*/, ''));
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-msg-id="${bubble.id}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  };
+
+  const reviseOrFallThrough = async (value: string, fallThrough: (() => void) | null) => {
+    const bubbleId = nextId();
+    setMessages((prev) => [...prev, { id: bubbleId, role: 'user', content: value }]);
+    setTextInput('');
+    setRevising(true);
+    const dropBubble = () => setMessages((prev) => prev.filter((m) => m.id !== bubbleId));
+    const say = (content: string) =>
+      setMessages((prev) => [...prev, { id: nextId(), role: 'assistant', content }]);
+    try {
+      const res = await reviseDestinations({
+        message: value,
+        destinations: useTripStore.getState().answers.destinations ?? [],
+        history: guidedStateRef.current.messages
+          .slice(-8)
+          .map((m) => ({ role: m.role, content: m.content })),
+        currentQuestion: isComplete ? undefined : currentStep?.question,
+      });
+      if (!mountedRef.current) return;
+      if (res.type === 'revision') {
+        setAnswer('destinations', res.destinations);
+        say(res.reply);
+        return;
+      }
+      if (res.aboutDestinations || !fallThrough) {
+        say(
+          res.aboutDestinations || !res.reply
+            ? res.reply || 'Here I can change your cities — to change another answer, edit its message above.'
+            : 'Here I can change your cities — to change another answer, edit its message above.',
+        );
+        return;
+      }
+      dropBubble();
+      fallThrough();
+    } catch {
+      if (!mountedRef.current) return;
+      if (fallThrough) {
+        dropBubble();
+        fallThrough();
+      } else {
+        say("Sorry — I couldn't reach the assistant to change your cities. Try again in a moment.");
+      }
+    } finally {
+      if (mountedRef.current) setRevising(false);
+    }
+  };
+
   const handleBarSubmit = () => {
     const value = textInput.trim();
-    if (!value) return;
-    // Same defensive guard as handleChatSubmit: do nothing if the user
-    // has already finished the flow. The input bar is hidden when
-    // isComplete is true, but this defends against any race where a
-    // stale event fires after completion.
-    if (isComplete) return;
+    if (!value || revising) return;
+    // After "Perfect — I've got everything" the bar stays only for
+    // destination corrections; any other text gets a pointer to the
+    // message edit buttons.
+    if (isComplete) {
+      if (canReviseDestinations && !findTripLoading) reviseOrFallThrough(value, null);
+      return;
+    }
 
     // Pre-intent — typing here opens the AI conversation, seeded with the
     // sentence. It has to hand off through `chatSeedRef` (the same path the
@@ -1927,13 +2137,27 @@ export default function PlanningChat() {
 
     if (!currentStep) return;
 
+    if (
+      canReviseDestinations &&
+      currentStep.id !== 'destination' &&
+      looksLikeDestinationEdit(value, answers.destinations)
+    ) {
+      reviseOrFallThrough(value, () => answerCurrentStep(value));
+      return;
+    }
+    answerCurrentStep(value);
+  };
+
+  /** The typed `value` as the answer to the question on screen. */
+  const answerCurrentStep = (value: string) => {
+    if (!currentStep) return;
     switch (currentStep.type) {
       case 'text':
       case 'notes':
       case 'origin':
         // Origin uses the same free-text input path as destination/notes;
         // handleTextSubmit dispatches on step.id to store it correctly.
-        handleTextSubmit();
+        handleTextSubmit(value);
         return;
       case 'roundtrip': {
         // Allow the user to just type "one way" or "round trip" as text
@@ -2155,6 +2379,7 @@ export default function PlanningChat() {
             {messages.map((msg) => (
               <motion.div
                 key={msg.id}
+                data-msg-id={msg.id}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
@@ -2281,7 +2506,7 @@ export default function PlanningChat() {
               assistant question for this step has actually appeared in the
               chat, so the widget never shows up before its question. */}
           {!isComplete && intent && currentStep &&
-            messages.some((m) => m.stepId === currentStep.id) && (
+            messages.some((m) => m.role === 'assistant' && m.stepId === currentStep.id) && (
             <motion.div
               key={`input-${currentStepIndex}`}
               initial={{ opacity: 0, y: 8 }}
@@ -2508,7 +2733,24 @@ export default function PlanningChat() {
       {/* Floating chat pill — ALWAYS pinned to the bottom of the viewport
           (until the form is complete). Mounts ONCE; placeholder text just
           swaps in place so we don't get a re-fade on every step change. */}
-      {!isComplete && (
+      {/* Running trip summary — what's been answered so far, above the bar.
+          Hidden until the first answer (the card renders nothing before). */}
+      {intent && (
+        <div
+          className={`relative z-10 px-6 flex justify-center pointer-events-none ${
+            !isComplete || canReviseDestinations ? '' : 'pb-6'
+          }`}
+        >
+          <TripSummaryCard
+            answers={answers}
+            onEdit={editSummaryField}
+            editable={canEditSummaryField}
+            className="max-w-2xl"
+          />
+        </div>
+      )}
+
+      {(!isComplete || canReviseDestinations) && (
         <div className="relative z-10 px-6 pb-6 pt-2 flex justify-center pointer-events-none">
           <motion.div
             initial={{ opacity: 0, y: 8 }}
@@ -2539,7 +2781,7 @@ export default function PlanningChat() {
             />
             <button
               onClick={handleBarSubmit}
-              disabled={!textInput.trim()}
+              disabled={!textInput.trim() || revising}
               className="p-2.5 rounded-full bg-[#4f8ef7] hover:bg-[#3d7de6] text-white disabled:opacity-30 disabled:hover:bg-[#4f8ef7] transition-all flex-shrink-0"
             >
               <Send size={18} />

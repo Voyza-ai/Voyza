@@ -3,9 +3,11 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, Utensils, Plane, TrainFront, Clock } from 'lucide-react';
-import { City, ScheduledEvent, TransportMode } from '@/lib/types';
+import { City, ScheduledEvent, TransportMode, Trip } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { parseLocal } from '@/lib/dateHelpers';
+import TravelConnectors from './TravelConnectors';
+import { useDayHubs } from '@/lib/tripHubs';
 
 /**
  * Read-only single-day column rendered side-by-side with peers in
@@ -30,6 +32,8 @@ type DayCardProps = {
   date: string; // ISO YYYY-MM-DD
   city: City | null;
   cityIndex: number | null;
+  /** The trip, for locating the day's arrival / departure airport or station. */
+  trip?: Trip | null;
   events: ScheduledEvent[];
   /**
    * Transport mode for the day's primary travel event, when the user
@@ -75,10 +79,12 @@ export default function DayCard({
   date,
   city,
   cityIndex,
+  trip = null,
   events,
   travelMode = null,
   onOpenEditor,
 }: DayCardProps) {
+  const hubs = useDayHubs(trip, cityIndex, date);
   const theme =
     city && cityIndex != null ? getCityColor(city.colorIndex ?? cityIndex) : null;
   const accent = theme?.text ?? '#9ca3af';
@@ -219,6 +225,14 @@ export default function DayCard({
               </div>
             );
           })}
+
+          {/* Travel time between consecutive located stops (POI coordinates). */}
+          <TravelConnectors
+            events={events}
+            minuteToPx={(m) => (m / 60) * HOUR_HEIGHT}
+            accent={accent}
+            hubs={hubs}
+          />
         </div>
       </div>
 

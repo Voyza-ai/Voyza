@@ -37,6 +37,36 @@ Check this section before any public release.
 
 ---
 
+## 🎯 Demo — Junction (Hervé), Wed 2026-11-11 6:30 am
+
+Features to have implemented by the demo. Each item says where it lives in
+this file.
+
+**Must do**
+- [x] Planning-phase conversational revision — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
+- [x] Calendar reacts to transport changes — *feature heading*
+- [x] No-train-data flag — *bullet under "🐛 Bugs / tech debt"*
+- [ ] Saved bookings (`015_bookings.sql`) — *bullet under "Feature: In-app booking"*
+
+**Should do**
+- [x] Running trip summary — *feature heading ("Running trip summary on the conversation page")*
+- [x] BlueMurr AI — add / remove / replace cities — *bullet under "Feature: BlueMurr AI — edits beyond current scope"*
+- [x] Unique AI suggestions per city — *bullet under "🐛 Bugs / tech debt"*
+
+**Strongly recommended**
+- [ ] Door-to-door time comparison (train vs flight) — *new, not elsewhere in the roadmap yet*
+- [ ] CO₂ per leg — *new, not elsewhere in the roadmap yet*
+- [ ] Rail price source labels (live / estimated) — *new, not elsewhere in the roadmap yet*
+- [ ] Rail partner booking slot — *new, not elsewhere in the roadmap yet*
+- [ ] Instant demo trips — *new, not elsewhere in the roadmap yet*
+
+**Nice to have**
+- [ ] Read-only share links — *bullet under "Feature: Clone UX"*
+- [ ] Rail demand stat — *new, not elsewhere in the roadmap yet*
+- [ ] Live search progress — *new, not elsewhere in the roadmap yet*
+
+---
+
 ## ✅ Done (shipped to `claude_code_backend`)
 
 ### Planning flow & AI
@@ -740,45 +770,46 @@ for long-tail queries like "adventure trips from NYC under $1500".
 >   maps, flags, and crests are filtered out.
 > - **Row layout (owner decision 2026-10-21):** instead of horizontal-scroll rows, the
 >   category headers live inside the main grid as sections, 3 cards per row.
-- [ ] **Taxonomy**: lock the final list of vibes (beach, adventure, culture, romance, family, food+wine, etc.), budget tiers ($, $$, $$$, $$$$), duration buckets (weekend, 1 wk, 2 wk, month), origin regions (US-East, US-West, Europe, Asia). Decide combinatorially how many category pages we support vs. dynamic filters
-- [ ] **Page structure decision**: input-at-top-of-home with browse rows below, OR separate `/browse` page linked from nav. Affects how much the landing page has to do on first paint
-- [ ] **DB schema**: `preset_trips` table — inputs (vibe/budget/duration/origin-region), generated trip JSON, category tag(s), `created_at`, `refresh_status`, `hero_image_url`, `clone_count`, `impression_count`, `view_count`
-- [ ] **Editorial + SEO strategy**: which categories get dedicated landing pages (`/adventure-trips-from-nyc`), category description copy style, trending-row heuristic (last-7-day impressions? clicks? handoff rate?), staff-pick criteria
-- [ ] **SEO plan**: URL shape for category pages, meta tag strategy, sitemap entry, schema.org TravelAction markup
+- [x] **Taxonomy**: lock the final list of vibes (beach, adventure, culture, romance, family, food+wine, etc.), budget tiers ($, $$, $$$, $$$$), duration buckets (weekend, 1 wk, 2 wk, month), origin regions (US-East, US-West, Europe, Asia). Decide combinatorially how many category pages we support vs. dynamic filters
+- [x] **Page structure decision**: input-at-top-of-home with browse rows below, OR separate `/browse` page linked from nav. Affects how much the landing page has to do on first paint
+- [x] **DB schema**: `preset_trips` table — inputs (vibe/budget/duration/origin-region), generated trip JSON, category tag(s), `created_at`, `refresh_status`, `hero_image_url`, `clone_count`, `impression_count`, `view_count`
+- [x] **Editorial + SEO strategy**: which categories get dedicated landing pages (`/adventure-trips-from-nyc`), category description copy style, trending-row heuristic (last-7-day impressions? clicks? handoff rate?), staff-pick criteria
+- [x] **SEO plan**: URL shape for category pages, meta tag strategy, sitemap entry, schema.org TravelAction markup
 
 **Phase 2 — Generation pipeline**
-- [ ] **Bulk-generation prompt**: single Claude prompt that takes taxonomy inputs and produces a realistic trip (cities + activities + restaurants + budget estimate). Batch-run across all taxonomy combinations to seed the catalog
-- [ ] **Refresh job**: weekly cron to regenerate pricing on all preset trips (flights/hotels go stale). Separately update a "trending" row from real user impressions + click-through
-- [ ] **Hero image sourcing**: either stock photos keyed by first city, or a separate image-generation pass (decide in Phase 1)
+- [x] **Bulk-generation prompt**: single Claude prompt that takes taxonomy inputs and produces a realistic trip (cities + activities + restaurants + budget estimate). Batch-run across all taxonomy combinations to seed the catalog
+- [x] **Refresh job**: weekly cron to regenerate pricing on all preset trips (flights/hotels go stale). Separately update a "trending" row from real user impressions + click-through
+- [x] **Hero image sourcing**: either stock photos keyed by first city, or a separate image-generation pass (decide in Phase 1)
 
 **Phase 3 — User-facing UI**
-- [ ] **Preset trip card**: hero image, title, price range, duration, mini-flowchart preview (just the city sequence, no flight detail), category badge
-- [ ] **Browse row layout**: horizontal scroll by category ("Adventure trips from NYC", "Romance in Europe", "Culture under $2k"), matching the landing-page structure decision
-- [ ] **"Plan a similar trip" handoff**: preset click pre-fills planner answers (origin, destinations, dates, vibe, budget) and immediately runs a fresh `/api/optimize` call with today's prices. User can tweak before saving
-- [ ] **Editorial surfaces**: staff-picks row, trending-this-week row, category landing pages with editorial copy
-- [ ] **SEO implementation**: server-rendered category pages, sitemap generation, canonical URLs, rich snippet markup
+- [x] **Preset trip card**: hero image, title, price range, duration, mini-flowchart preview (just the city sequence, no flight detail), category badge
+- [x] **Browse row layout** (shipped as in-grid category sections, 3 cards per row — owner decision 2026-10-21): horizontal scroll by category ("Adventure trips from NYC", "Romance in Europe", "Culture under $2k"), matching the landing-page structure decision
+- [x] **"Plan a similar trip" handoff**: preset click pre-fills planner answers (origin, destinations, dates, vibe, budget) and immediately runs a fresh `/api/optimize` call with today's prices. User can tweak before saving
+- [x] **Editorial surfaces**: staff-picks row, trending-this-week row, category landing pages with editorial copy
+- [x] **SEO implementation**: server-rendered category pages, sitemap generation, canonical URLs, rich snippet markup
 
 ### Feature: Settings page
-- [ ] `/settings` route
-- [ ] Profile tab (name, avatar, preferences)
-- [ ] Account tab (change password, change email via Supabase, delete account with 2-step email confirm)
-- [ ] Notifications tab (preferences)
-- [ ] Privacy tab (allow trips to be used for recommendations toggle — global default)
-- [ ] Data export button (calls `/api/users/me/export`)
+- [x] `/settings` route
+- [x] Profile tab (name, avatar, preferences)
+- [x] Account tab (change password, change email via Supabase, delete account with 2-step email confirm)
+- [x] Notifications tab (preferences)
+- [x] Privacy tab (allow trips to be used for recommendations toggle — global default)
+- [x] Data export button (calls `/api/users/me/export`)
 
 ### Feature: Intra-city geographic scheduling
-- [ ] POI API integration (Google Places or Foursquare) for real coordinates
-- [ ] Update activities/restaurants to include `{ lat, lng, placeId }`
-- [ ] Geo-aware day scheduler: morning activity → nearest lunch spot → nearest afternoon activity
-- [ ] Optional: integrate Distance Matrix for walking/transit time between slots
+- [x] POI API integration (Google Places or Foursquare) for real coordinates — `backend/src/services/places` (Google / Foursquare when keyed, keyless Nominatim fallback)
+- [x] Update activities/restaurants to include `{ lat, lng, placeId }`
+- [x] Geo-aware day scheduler: morning activity → nearest lunch spot → nearest afternoon activity
+- [x] Optional: integrate Distance Matrix for walking/transit time between slots (Google key only; estimate otherwise)
 
 ### Feature: In-app booking
-- [ ] Duffel Orders API integration
-- [ ] Passenger info form (name, DOB, gender, passport, contact)
-- [ ] Payment flow (Duffel Payments or Stripe with Duffel marketplace)
-- [ ] Airline T&Cs acceptance per booking
-- [ ] Seller-of-travel compliance research (varies by US state, UK ATOL, etc.)
-- [ ] Booking confirmation email + itinerary PDF
+- [x] Duffel Orders API integration (test mode; `services/booking.ts`, live token refused unless `BOOKING_LIVE_ENABLED=true`)
+- [x] Passenger info form (name, DOB, gender, passport, contact) — passport only when the offer requires it
+- [x] Payment flow (Duffel Payments) — Duffel says the product takes no new customers; confirm live access before launch
+- [x] Airline T&Cs acceptance per booking
+- [x] Seller-of-travel compliance research (varies by US state, UK ATOL, etc.) — `docs/SELLER_OF_TRAVEL.md`
+- [x] Booking confirmation email + itinerary PDF — email needs a verified Resend domain to reach anyone but the Resend owner
+- [ ] Apply `015_bookings.sql` (bookings persist in memory until then)
 
 ### Feature: Running trip summary on the conversation page
 A floating "trip card" on the conversation page that updates as the
@@ -786,21 +817,22 @@ user answers each question — shows what's been collected so far in a
 clean, readable summary. Helps the user see their inputs accumulating
 before the final "Find my trip" click.
 
-- [ ] Component: small card above the chat input bar (Option 3 from
+- [x] Component: small card above the chat input bar (Option 3 from
   design discussion). Doesn't show until the first answer.
-- [ ] Updates per answer: appends new facts in natural language
+- [x] Updates per answer: appends new facts in natural language
   (e.g. "Adventure trip from NYC · 2 people · $3k budget · June 15-22")
-- [ ] Smart formatting: combines fields into readable phrases rather
+- [x] Smart formatting: combines fields into readable phrases rather
   than a bullet list (e.g. "$3k budget per person · 7 nights" not
   "budget: 3000\nnights: 7")
-- [ ] Inline editable: clicking a fact lets user revise (deferred —
-  the AI chat can already revise; UI affordance later)
+- [x] Inline editable: clicking a fact lets user revise. Guided mode opens
+  that answer's own edit box (cities prefill "Change my cities to " in the
+  bar); free chat prefills the input ("Change the budget to ").
 
 ### Feature: BlueMurr AI — edits beyond current scope
 Tasks deferred from the current chat work:
 
-- [ ] **Planning-phase conversational revision** (task 4): during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
-- [ ] **Post-results add/remove/replace cities** (task 5): new tools on `/api/plan/chat` — `add_city(city, afterCity?)`, `remove_city(city)`, `replace_city(old, new)`. Backend rebuilds trip with new city's hotel + transports. Shows diff card for Accept/Reject.
+- [x] **Planning-phase conversational revision** (task 4): during the planning flow, the user can type "actually Venice not Venezuela" and AI updates destinations without losing prior answers (dates/budget/vibe). New endpoint `/api/plan/revise-destinations` with Claude tools: `add_destination`, `remove_destination`, `replace_destination`, `answer_only`.
+- [x] **Post-results add/remove/replace cities** (task 5): new tools on `/api/plan/chat` — `add_city(city, afterCity?)`, `remove_city(city)`, `replace_city(old, new)`. Backend rebuilds trip with new city's hotel + transports. Shows diff card for Accept/Reject.
 
 ### Feature: Ownership transfer UX
 - [ ] Frontend flow: owner picks a collaborator (or invites one) to transfer to
@@ -918,27 +950,27 @@ provider registry as a third `mode` — see TRANSPORT_ARCHITECTURE.md.
 - [ ] Ferry pill + icon styling in the flowchart Connector (new mode visual)
 
 ### Feature: Calendar reacts to transport changes (calendar view just like flowchart view)
-- [ ] Tag auto-generated travel events ("head to airport" / flight / arrive) with an `auto` flag on `ScheduledEvent`
-- [ ] DayPlanner reconciles tagged events from current `transportIn`/`transportOut` on each open
-- [ ] Live update while planner is open if user swaps a flight on the flowchart
-- [ ] Restaurants, activities, and user-added events stay untouched
-- [ ] Decide: snap user-edited transport blocks back to new flight times, or honor manual edits
-- [ ] Affected dates: arrival day (uses `transportIn`) and departure day (uses `transportOut`)
+- [x] Tag auto-generated travel events ("head to airport" / flight / arrive) with an `auto` flag on `ScheduledEvent`
+- [x] DayPlanner reconciles tagged events from current `transportIn`/`transportOut` on each open
+- [x] Live update while planner is open if user swaps a flight on the flowchart
+- [x] Restaurants, activities, and user-added events stay untouched
+- [x] Decide: snap user-edited transport blocks back to new flight times, or honor manual edits — **honor**: a moved block drops `auto` and stays put
+- [x] Affected dates: arrival day (uses `transportIn`) and departure day (uses `transportOut`)
 
 ---
 
 ## 🐛 Bugs / tech debt
 
-- [ ] Verbose duration format "3 hours 15 minutes" parses to 180 not 195 (low priority — not in our code paths)
-- [ ] Hotel `pricePerNight` may report total-for-stay as per-night when room occupancy differs from requested adults
-- [ ] Train unavailable regions (US, Canada, Australia, Africa, S. America) show flights-only silently — should flag to user
-- [ ] Duplicate AI suggestions across nearby cities (Uffizi recommended for Rome + Florence)
-- [ ] Activity duration clipping: 4h activities render as 2h blocks because morning slot caps at 12:00 (full duration in notes only)
-- [ ] Intent picker animation timing on rapid interactions (currently fixed via StrictMode refs, watch for regressions)
-- [ ] Canvas → Back → Flights gone — partially fixed by DB persistence work (pending full verification)
+- [x] Verbose duration format "3 hours 15 minutes" parses to 180 not 195 — fixed: unit-tagged durations are summed (`utils/duration.ts`)
+- [x] Hotel `pricePerNight` may report total-for-stay as per-night when room occupancy differs from requested adults — fixed: stay total cross-checked against Booking's own per-night rate; under-occupied rows flagged `occupancy-short`
+- [x] Train unavailable regions (US, Canada, Australia, Africa, S. America) show flights-only silently — fixed: "No train data" on the leg + one line on the trip (`lib/railCoverage.ts`)
+- [x] Duplicate AI suggestions across nearby cities (Uffizi recommended for Rome + Florence) — fixed: picks prompt names the other stops, backend drops other-stop picks, store drops cross-city repeats
+- [x] Activity duration clipping: 4h activities render as 2h blocks because morning slot caps at 12:00 (full duration in notes only) — fixed: the day planner places activities at their real length (`ScheduledEvent.plannedDurationMin`)
+- [x] Intent picker animation timing on rapid interactions — re-verified 2026-11-05 with double-clicks, fast intent switching, clicks mid-entrance and /plan bounces: no duplicates
+- [x] Canvas → Back → Flights gone — verified 2026-11-05: flights survive Back, a canvas AI edit + save + Back, and a hard reload
 - [x] ~~Canvas save silently drops transports~~ — FIXED in feat/db-persistence
-- [ ] Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice). No back button, no edit-previous-message. Partial workaround exists via city picker's "+ another city" but it's awkward. Full fix = task 4 (planning-phase conversational revision).
-- [ ] Origin-location lookup misses non-city inputs (states, regions, neighborhoods). User typing "from New Jersey" / "Newark" / "Long Island" / "Connecticut" → AI returns the literal string → `getOriginAirports()` lookup misses → empty `originAirports` → home flight search never runs → schedule view shows no transport blocks for day 1. Already partially fixed for "<City> City" suffix variants (commit `0f24996`). Need: state-name aliases (NJ → EWR or NYC metro, CT → BDL, etc.), region aliases (Long Island → JFK/LGA, Bay Area is already in), and a smarter normalization layer at the AI-parse step that resolves vague locations to canonical metro keys before the lookup table is queried. Affects both `frontend/lib/originAirports.ts` and `backend/src/data/originAirports.ts`.
+- [x] ~~Planning flow: no way to correct a destination typo once submitted (Venezuela when user meant Venice).~~ — FIXED: a correction typed after the destination step goes to `/api/plan/revise-destinations`, which changes only the destination list.
+- [x] Origin-location lookup misses non-city inputs (states, regions, neighborhoods). User typing "from New Jersey" / "Newark" / "Long Island" / "Connecticut" → AI returns the literal string → `getOriginAirports()` lookup misses → empty `originAirports` → home flight search never runs → schedule view shows no transport blocks for day 1. Already partially fixed for "<City> City" suffix variants (commit `0f24996`). Need: state-name aliases (NJ → EWR or NYC metro, CT → BDL, etc.), region aliases (Long Island → JFK/LGA, Bay Area is already in), and a smarter normalization layer at the AI-parse step that resolves vague locations to canonical metro keys before the lookup table is queried. Affects both `frontend/lib/originAirports.ts` and `backend/src/data/originAirports.ts`. — fixed: shared `originPhrase.ts` (frontend + backend, byte-identical) strips "from …" phrasing and maps informal regions/old abbreviations to metros before both lookups; all 50 states covered by tests
 - [x] ~~AI chat: "are there more flights?" returns an answer-only response instead of showing options~~ — FIXED in 1704365 (leg_refresh + `show_transport_options` tool + clarifying "which leg?" routing).
 - [x] ~~AI chat: transport-window proposal card says "Applied the next time we re-pick this leg"~~ — FIXED in 1704365 (card-refresh pattern replaces the inline card entirely).
 

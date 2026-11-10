@@ -12,6 +12,7 @@ import notifications from './notifications';
 import locations from './locations';
 import email from './email';
 import presets from './presets';
+import bookings from './bookings';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
@@ -36,6 +37,7 @@ router.use('/canvas', requireAuth, canvas);
 router.use('/trips', requireAuth, trips);
 router.use('/users', requireAuth, users);
 router.use('/notifications', requireAuth, notifications);
+router.use('/bookings', requireAuth, bookings);
 // No requireAuth: resolving a place name is the first thing the planner does,
 // before anyone has signed in, and the answer is derived from a checked-in
 // public dataset. Nothing user-scoped is readable through it.

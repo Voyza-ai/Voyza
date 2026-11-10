@@ -1,3 +1,4 @@
+import type { TravelInfo } from './geoSchedule';
 export type TransportMode = 'flight' | 'train';
 
 export type Transport = {
@@ -79,6 +80,11 @@ export type Restaurant = {
   cuisine: string;
   priceRange: string;
   link?: string;
+  /** Real coordinates from the POI provider (never the AI). Absent = not located. */
+  lat?: number;
+  lng?: number;
+  /** Provider-scoped id: "google:…", "fsq:…" or "osm:N123". */
+  placeId?: string;
 };
 
 export type Activity = {
@@ -119,7 +125,44 @@ export type ScheduledEvent = {
    * transport blocks, whose length comes from the carrier.
    */
   plannedDurationMin?: number;
+  /**
+   * Where the event happens, from the POI provider (never the AI). Set on
+   * planner-placed activities and meals that resolved; absent otherwise, and
+   * an event without them is scheduled the old, non-geographic way.
+   */
+  lat?: number;
+  lng?: number;
+  placeId?: string;
+  /**
+   * Travel from the previous slot, as the planner measured or estimated it
+   * when it placed this event. Views recompute it when the previous event's
+   * placeId no longer matches `travelFromPrev.fromPlaceId` (hand re-ordering).
+   */
+  travelFromPrev?: TravelInfo;
+  /**
+   * Travel blocks generated from the trip's transport ("Head to …", the
+   * flight / train / bus, "Arrive at …").
+   *
+   *   true      — generated and untouched: `reconcileDayTransport` rewrites
+   *               it whenever the transport behind it changes.
+   *   false     — was generated, then the user moved or edited it. Left
+   *               where they put it, and its `autoRole` stays claimed so no
+   *               second block is generated for the same slot.
+   *   undefined — user-added, or a legacy block saved before the flag
+   *               existed (recognised by title and shape at reconcile time).
+   */
+  auto?: boolean;
+  /** Which generated slot this block fills. Set alongside `auto`. */
+  autoRole?: AutoTransportRole;
 };
+
+/** The slots `buildDayTransportContext` fills on a travel day. */
+export type AutoTransportRole =
+  | 'in-head'
+  | 'in-travel'
+  | 'in-arrive'
+  | 'out-head'
+  | 'out-travel';
 
 /**
  * Something the planner could not fit into a stay at its real length.

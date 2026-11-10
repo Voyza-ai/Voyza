@@ -25,6 +25,7 @@
 import type { Candidate, Place, Resolution, ResolveContext } from './types';
 import { buildIndex, type BuiltIndex } from './buildIndex';
 import { resolve } from './resolve';
+import { originQueries } from './originPhrase';
 import { locationArtifact } from '../../data/locationArtifact';
 
 /** Matches the cap the hand-written table has always applied. */
@@ -236,5 +237,14 @@ export function resolveOriginAirports(
   max = DEFAULT_MAX_AIRPORTS,
 ): OriginResolution {
   if (!cityName || !cityName.trim()) return EMPTY;
-  return fromResolution(resolve(cityName, context, originIndex()), max);
+  // "from New Jersey", "Northern Virginia", "Conn." — see originPhrase.ts.
+  // The first reading that finds airports wins; if none does, the answer for
+  // the text as given (with its suggestions) is what the caller gets.
+  let first: OriginResolution | null = null;
+  for (const query of originQueries(cityName)) {
+    const answer = fromResolution(resolve(query, context, originIndex()), max);
+    if (answer.airports.length > 0) return answer;
+    first ??= answer;
+  }
+  return first ?? EMPTY;
 }
