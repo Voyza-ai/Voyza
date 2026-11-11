@@ -1,0 +1,362 @@
+{
+ "title": "Paris → London",
+ "status": "planning",
+ "totalCost": 1576,
+ "savings": 0,
+ "travelers": 2,
+ "cities": [
+  {
+   "name": "Paris",
+   "country": "France",
+   "dates": {
+    "arrival": "2027-01-12",
+    "departure": "2027-01-15"
+   },
+   "transportIn": {
+    "mode": "flight",
+    "operator": "",
+    "duration": "",
+    "price": 0
+   },
+   "transportOut": {
+    "mode": "flight",
+    "operator": "American Airlines",
+    "duration": "58m",
+    "price": 79.84,
+    "from": "Paris",
+    "to": "London",
+    "departTime": "10:50",
+    "arriveTime": "10:48",
+    "layovers": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+    "flightNumber": "AA",
+    "alternatives": [
+     {
+      "mode": "flight",
+      "operator": "British Airways",
+      "duration": "58m",
+      "price": 80.4,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:50",
+      "arriveTime": "10:48",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "BA"
+     },
+     {
+      "mode": "flight",
+      "operator": "Iberia",
+      "duration": "58m",
+      "price": 80.86,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:50",
+      "arriveTime": "10:48",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "IB"
+     },
+     {
+      "mode": "flight",
+      "operator": "easyJet",
+      "duration": "1h 5m",
+      "price": 134.23,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "17:10",
+      "arriveTime": "17:15",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "U2"
+     }
+    ],
+    "noTrainData": true
+   },
+   "hotel": {
+    "name": "Ibis Styles Paris Batignolles",
+    "rating": 8.3,
+    "pricePerNight": 131.57,
+    "area": "",
+    "bookingUrl": "https://www.booking.com/hotel/fr/mirific.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+    "reviewCount": 3222,
+    "taxesPerNight": 0
+   },
+   "hotels": [
+    {
+     "name": "Ibis Styles Paris Batignolles",
+     "rating": 8.3,
+     "pricePerNight": 131.57,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/mirific.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 3222,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Hotel Monterosa - Astotel",
+     "rating": 8.7,
+     "pricePerNight": 163.39,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/hotel-monterosa.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 746,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Novotel Paris 14 Porte d'Orléans",
+     "rating": 8.2,
+     "pricePerNight": 169.32,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/paris-porte-d-orleans.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 4000,
+     "taxesPerNight": 0
+    }
+   ],
+   "selectedHotelIndex": 0
+  },
+  {
+   "name": "London",
+   "country": "United Kingdom",
+   "dates": {
+    "arrival": "2027-01-15",
+    "departure": "2027-01-17"
+   },
+   "transportIn": {
+    "mode": "flight",
+    "operator": "American Airlines",
+    "duration": "58m",
+    "price": 79.84,
+    "from": "Paris",
+    "to": "London",
+    "departTime": "10:50",
+    "arriveTime": "10:48",
+    "layovers": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+    "flightNumber": "AA",
+    "alternatives": [
+     {
+      "mode": "flight",
+      "operator": "British Airways",
+      "duration": "58m",
+      "price": 80.4,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:50",
+      "arriveTime": "10:48",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "BA"
+     },
+     {
+      "mode": "flight",
+      "operator": "Iberia",
+      "duration": "58m",
+      "price": 80.86,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:50",
+      "arriveTime": "10:48",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "IB"
+     },
+     {
+      "mode": "flight",
+      "operator": "easyJet",
+      "duration": "1h 5m",
+      "price": 134.23,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "17:10",
+      "arriveTime": "17:15",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "U2"
+     }
+    ],
+    "noTrainData": true
+   },
+   "transportOut": {
+    "mode": "flight",
+    "operator": "",
+    "duration": "",
+    "price": 0
+   },
+   "hotel": {
+    "name": "hub London - Marylebone",
+    "rating": 8.1,
+    "pricePerNight": 109.6,
+    "area": "",
+    "bookingUrl": "https://www.booking.com/hotel/gb/hub-london-marylebone.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+    "reviewCount": 965,
+    "taxesPerNight": 0
+   },
+   "hotels": [
+    {
+     "name": "hub London - Marylebone",
+     "rating": 8.1,
+     "pricePerNight": 109.6,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/hub-london-marylebone.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 965,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "hub London Clerkenwell",
+     "rating": 8.1,
+     "pricePerNight": 110.27,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/hub-london-clerkenwell.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 127,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Brit Hotels Earls Court",
+     "rating": 8.4,
+     "pricePerNight": 132.41,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/brit-hotels-earls-court.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 801,
+     "taxesPerNight": 0
+    }
+   ],
+   "selectedHotelIndex": 0
+  }
+ ],
+ "savingsTips": [],
+ "dateShiftChecked": true,
+ "origin": {
+  "city": "New York",
+  "airports": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "outboundLeg": {
+   "originAirport": "JFK",
+   "destAirport": "PAR",
+   "price": 449.76,
+   "currency": "USD",
+   "durationMinutes": 498,
+   "operator": "British Airways",
+   "carrierCode": "BA",
+   "departTime": "08:30",
+   "arriveTime": "22:48",
+   "departDate": "2027-01-12",
+   "arriveDate": "2027-01-12",
+   "stops": 0,
+   "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20JFK%20on%202027-01-12",
+   "alternatives": [
+    {
+     "originAirport": "LGA",
+     "destAirport": "PAR",
+     "price": 450.12,
+     "currency": "USD",
+     "durationMinutes": 498,
+     "operator": "American Airlines",
+     "carrierCode": "AA",
+     "departTime": "08:30",
+     "arriveTime": "22:48",
+     "departDate": "2027-01-12",
+     "arriveDate": "2027-01-12",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20LGA%20on%202027-01-12"
+    },
+    {
+     "originAirport": "JFK",
+     "destAirport": "PAR",
+     "price": 452.48,
+     "currency": "USD",
+     "durationMinutes": 498,
+     "operator": "Iberia",
+     "carrierCode": "IB",
+     "departTime": "08:30",
+     "arriveTime": "22:48",
+     "departDate": "2027-01-12",
+     "arriveDate": "2027-01-12",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20JFK%20on%202027-01-12"
+    },
+    {
+     "originAirport": "JFK",
+     "destAirport": "PAR",
+     "price": 464.16,
+     "currency": "USD",
+     "durationMinutes": 498,
+     "operator": "American Airlines",
+     "carrierCode": "AA",
+     "departTime": "08:30",
+     "arriveTime": "22:48",
+     "departDate": "2027-01-12",
+     "arriveDate": "2027-01-12",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20JFK%20on%202027-01-12"
+    }
+   ]
+  },
+  "returnLeg": {
+   "originAirport": "LON",
+   "destAirport": "JFK",
+   "price": 432.18,
+   "currency": "USD",
+   "durationMinutes": 481,
+   "operator": "American Airlines",
+   "carrierCode": "AA",
+   "departTime": "12:23",
+   "arriveTime": "15:24",
+   "departDate": "2027-01-17",
+   "arriveDate": "2027-01-17",
+   "stops": 0,
+   "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20JFK%20from%20LON%20on%202027-01-17",
+   "alternatives": [
+    {
+     "originAirport": "LON",
+     "destAirport": "EWR",
+     "price": 435.36,
+     "currency": "USD",
+     "durationMinutes": 482,
+     "operator": "British Airways",
+     "carrierCode": "BA",
+     "departTime": "12:23",
+     "arriveTime": "15:25",
+     "departDate": "2027-01-17",
+     "arriveDate": "2027-01-17",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20EWR%20from%20LON%20on%202027-01-17"
+    },
+    {
+     "originAirport": "LON",
+     "destAirport": "JFK",
+     "price": 438.66,
+     "currency": "USD",
+     "durationMinutes": 481,
+     "operator": "Iberia",
+     "carrierCode": "IB",
+     "departTime": "12:23",
+     "arriveTime": "15:24",
+     "departDate": "2027-01-17",
+     "arriveDate": "2027-01-17",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20JFK%20from%20LON%20on%202027-01-17"
+    },
+    {
+     "originAirport": "LON",
+     "destAirport": "EWR",
+     "price": 443.66,
+     "currency": "USD",
+     "durationMinutes": 482,
+     "operator": "American Airlines",
+     "carrierCode": "AA",
+     "departTime": "12:23",
+     "arriveTime": "15:25",
+     "departDate": "2027-01-17",
+     "arriveDate": "2027-01-17",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20EWR%20from%20LON%20on%202027-01-17"
+    }
+   ]
+  }
+ },
+ "returnToHome": true,
+ "picksRun": "picks-mwboma4g-1",
+ "_source": "Production results page, New York -> Paris -> London, Jan 12-17 2027, 2 travellers: sessionStorage bluemurr-current-trip, 2026-11-11. Hotel lists trimmed to 3; schedules and picks dropped."
+}

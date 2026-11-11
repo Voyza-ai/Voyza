@@ -1,0 +1,952 @@
+{
+ "title": "Paris → London",
+ "status": "planning",
+ "totalCost": 1576,
+ "savings": 0,
+ "travelers": 2,
+ "cities": [
+  {
+   "name": "Paris",
+   "country": "France",
+   "dates": {
+    "arrival": "2027-01-12",
+    "departure": "2027-01-15"
+   },
+   "transportIn": {
+    "mode": "flight",
+    "operator": "",
+    "duration": "",
+    "price": 0
+   },
+   "transportOut": {
+    "mode": "flight",
+    "operator": "American Airlines",
+    "duration": "58m",
+    "price": 79.84,
+    "from": "Paris",
+    "to": "London",
+    "departTime": "10:50",
+    "arriveTime": "10:48",
+    "layovers": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+    "flightNumber": "AA",
+    "alternatives": [
+     {
+      "mode": "flight",
+      "operator": "British Airways",
+      "duration": "58m",
+      "price": 80.4,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:50",
+      "arriveTime": "10:48",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "BA"
+     },
+     {
+      "mode": "flight",
+      "operator": "Iberia",
+      "duration": "58m",
+      "price": 80.86,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:50",
+      "arriveTime": "10:48",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "IB"
+     },
+     {
+      "mode": "flight",
+      "operator": "easyJet",
+      "duration": "1h 5m",
+      "price": 134.23,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "17:10",
+      "arriveTime": "17:15",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "U2"
+     }
+    ],
+    "noTrainData": true
+   },
+   "hotel": {
+    "name": "Ibis Styles Paris Batignolles",
+    "rating": 8.3,
+    "pricePerNight": 131.57,
+    "area": "",
+    "bookingUrl": "https://www.booking.com/hotel/fr/mirific.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+    "reviewCount": 3222,
+    "taxesPerNight": 0
+   },
+   "hotels": [
+    {
+     "name": "Ibis Styles Paris Batignolles",
+     "rating": 8.3,
+     "pricePerNight": 131.57,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/mirific.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 3222,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Hotel Monterosa - Astotel",
+     "rating": 8.7,
+     "pricePerNight": 163.39,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/hotel-monterosa.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 746,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Novotel Paris 14 Porte d'Orléans",
+     "rating": 8.2,
+     "pricePerNight": 169.32,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/paris-porte-d-orleans.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 4000,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Ibis Paris Gare Montparnasse Catalogne",
+     "rating": 8.6,
+     "pricePerNight": 207.35,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/ibis-paris-gare-montparnasse-catalogne.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 5441,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Hotel Abbatial Saint Germain",
+     "rating": 8.8,
+     "pricePerNight": 229.77,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/abbatial-st-germain.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 2980,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Hilton Garden Inn Paris La Villette",
+     "rating": 8.3,
+     "pricePerNight": 203.24,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/hilton-garden-inn-paris-la-villette.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 867,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Mercure Tour Eiffel Grenelle",
+     "rating": 8.1,
+     "pricePerNight": 195.09,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/toureiffelparis.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 1033,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Hotel Mercure La Sorbonne Saint-Germain-des-Prés",
+     "rating": 8.8,
+     "pricePerNight": 304.33,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/paris-la-sorbonne.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 369,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Courtyard by Marriott Paris Gare de Lyon",
+     "rating": 8.3,
+     "pricePerNight": 277.54,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/courtyard-by-marriott-paris-gare-de-lyon.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 1001,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Conde Chic Studio",
+     "rating": 8,
+     "pricePerNight": 271.83,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/holiday-inside-city-apart.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 509,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "336 Saint-Honore Hotel By Chapitre Collection",
+     "rating": 9.2,
+     "pricePerNight": 349.99,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/336-saint-honore-by-chapitre-collection.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 22,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Hyatt Regency Paris Etoile",
+     "rating": 8.4,
+     "pricePerNight": 357.49,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/hyatt-regency-paris-etoile.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 2280,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Pullman Paris Tour Eiffel",
+     "rating": 8.1,
+     "pricePerNight": 394.77,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/tour-eiffel.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 4943,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Hilton Paris Opera",
+     "rating": 7.7,
+     "pricePerNight": 395.29,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/fr/hilton-paris-opera.html?checkin=2027-01-12&checkout=2027-01-15&group_adults=2&no_rooms=1",
+     "reviewCount": 666,
+     "taxesPerNight": 0
+    }
+   ],
+   "selectedHotelIndex": 0,
+   "activities": [
+    "Musée d'Orsay",
+    "Sainte-Chapelle",
+    "Marché des Enfants Rouges",
+    "Palais Garnier opera house tour",
+    "Musée Rodin sculpture gardens",
+    "Le Comptoir Général",
+    "Père Lachaise Cemetery"
+   ],
+   "restaurants": [
+    {
+     "name": "L'Ami Jean",
+     "cuisine": "Basque-French bistro",
+     "priceRange": "$$"
+    },
+    {
+     "name": "Bouillon Chartier",
+     "cuisine": "Traditional French brasserie",
+     "priceRange": "$"
+    },
+    {
+     "name": "Frenchie",
+     "cuisine": "Modern French",
+     "priceRange": "$$$"
+    },
+    {
+     "name": "Septime",
+     "cuisine": "Contemporary French",
+     "priceRange": "$$$$"
+    },
+    {
+     "name": "Breizh Café",
+     "cuisine": "Breton crêperie",
+     "priceRange": "$$"
+    }
+   ],
+   "vibes": [
+    "history",
+    "art"
+   ],
+   "schedule": {
+    "2027-01-12": [
+     {
+      "id": "evt-1794375131507-14",
+      "title": "Head to JFK",
+      "startTime": "06:30",
+      "endTime": "08:30",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-head",
+      "notes": "Allow 2h for check-in & security"
+     },
+     {
+      "id": "evt-1794375131507-15",
+      "title": "Flight JFK → PAR",
+      "startTime": "08:30",
+      "endTime": "22:48",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-travel"
+     },
+     {
+      "id": "evt-1794375131507-16",
+      "title": "Arrive at PAR",
+      "startTime": "22:48",
+      "endTime": "23:03",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-arrive"
+     }
+    ],
+    "2027-01-13": [
+     {
+      "id": "sched-1",
+      "title": "Bouillon Chartier (Traditional French brasserie)",
+      "startTime": "08:00",
+      "endTime": "08:45",
+      "category": "restaurant",
+      "notes": "$ · Historic Belle Époque dining hall serving classic French dishes at remarkably affordable prices since 1896.",
+      "plannedDurationMin": 45
+     },
+     {
+      "id": "sched-2",
+      "title": "Palais Garnier opera house tour",
+      "startTime": "09:00",
+      "endTime": "11:00",
+      "category": "activity",
+      "notes": "Opulent 19th-century architecture and Marc Chagall's ceiling reveal Paris's theatrical heritage.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-3",
+      "title": "Breizh Café (Breton crêperie)",
+      "startTime": "11:30",
+      "endTime": "13:00",
+      "category": "restaurant",
+      "notes": "$$ · Authentic galettes and crêpes made with organic buckwheat flour, paired with exceptional French ciders.",
+      "plannedDurationMin": 90
+     },
+     {
+      "id": "sched-4",
+      "title": "Marché des Enfants Rouges",
+      "startTime": "13:15",
+      "endTime": "15:15",
+      "category": "restaurant",
+      "notes": "Paris's oldest covered market offers authentic international street food in a lively atmosphere.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-5",
+      "title": "Frenchie (Modern French)",
+      "startTime": "18:00",
+      "endTime": "20:00",
+      "category": "restaurant",
+      "notes": "$$$ · Innovative tasting menus showcasing seasonal ingredients in an intimate setting from acclaimed chef Gregory Marchand.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-6",
+      "title": "Le Comptoir Général",
+      "startTime": "20:15",
+      "endTime": "23:15",
+      "category": "restaurant",
+      "notes": "Eclectic cultural space along Canal Saint-Martin blending art exhibitions, tropical decor, and cocktails.",
+      "plannedDurationMin": 180
+     }
+    ],
+    "2027-01-14": [
+     {
+      "id": "sched-7",
+      "title": "Père Lachaise Cemetery",
+      "startTime": "09:00",
+      "endTime": "11:00",
+      "category": "activity",
+      "notes": "Wander cobblestone paths past ornate tombs of Chopin, Wilde, and Morrison in Paris's most atmospheric cemetery.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-8",
+      "title": "Septime (Contemporary French)",
+      "startTime": "11:30",
+      "endTime": "13:00",
+      "category": "restaurant",
+      "notes": "$$$$ · Michelin-starred temple of modern French cuisine in a minimalist space, epitomizing Paris's new culinary direction.",
+      "plannedDurationMin": 90
+     },
+     {
+      "id": "sched-9",
+      "title": "Musée Rodin sculpture gardens",
+      "startTime": "13:15",
+      "endTime": "15:15",
+      "category": "activity",
+      "notes": "Intimate museum with The Thinker and The Gates of Hell set in serene rose gardens.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-10",
+      "title": "L'Ami Jean (Basque-French bistro)",
+      "startTime": "19:00",
+      "endTime": "21:00",
+      "category": "restaurant",
+      "notes": "$$ · Lively neighborhood spot serving hearty French classics with a Basque twist in a convivial atmosphere.",
+      "plannedDurationMin": 120
+     }
+    ]
+   },
+   "unscheduled": [
+    {
+     "title": "Musée d'Orsay",
+     "kind": "activity",
+     "durationMin": 180,
+     "date": "2027-01-12"
+    },
+    {
+     "title": "Sainte-Chapelle",
+     "kind": "activity",
+     "durationMin": 60,
+     "date": "2027-01-12"
+    }
+   ]
+  },
+  {
+   "name": "London",
+   "country": "United Kingdom",
+   "dates": {
+    "arrival": "2027-01-15",
+    "departure": "2027-01-17"
+   },
+   "transportIn": {
+    "mode": "flight",
+    "operator": "American Airlines",
+    "duration": "58m",
+    "price": 79.84,
+    "from": "Paris",
+    "to": "London",
+    "departTime": "10:50",
+    "arriveTime": "10:48",
+    "layovers": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+    "flightNumber": "AA",
+    "alternatives": [
+     {
+      "mode": "flight",
+      "operator": "British Airways",
+      "duration": "58m",
+      "price": 80.4,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:50",
+      "arriveTime": "10:48",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "BA"
+     },
+     {
+      "mode": "flight",
+      "operator": "Iberia",
+      "duration": "58m",
+      "price": 80.86,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:50",
+      "arriveTime": "10:48",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "IB"
+     },
+     {
+      "mode": "flight",
+      "operator": "easyJet",
+      "duration": "1h 5m",
+      "price": 134.23,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "17:10",
+      "arriveTime": "17:15",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-15",
+      "flightNumber": "U2"
+     }
+    ],
+    "noTrainData": true
+   },
+   "transportOut": {
+    "mode": "flight",
+    "operator": "",
+    "duration": "",
+    "price": 0
+   },
+   "hotel": {
+    "name": "hub London - Marylebone",
+    "rating": 8.1,
+    "pricePerNight": 109.6,
+    "area": "",
+    "bookingUrl": "https://www.booking.com/hotel/gb/hub-london-marylebone.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+    "reviewCount": 965,
+    "taxesPerNight": 0
+   },
+   "hotels": [
+    {
+     "name": "hub London - Marylebone",
+     "rating": 8.1,
+     "pricePerNight": 109.6,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/hub-london-marylebone.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 965,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "hub London Clerkenwell",
+     "rating": 8.1,
+     "pricePerNight": 110.27,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/hub-london-clerkenwell.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 127,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Brit Hotels Earls Court",
+     "rating": 8.4,
+     "pricePerNight": 132.41,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/brit-hotels-earls-court.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 801,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "ibis London Blackfriars",
+     "rating": 8.3,
+     "pricePerNight": 139.34,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/ibis-london-blackfriars.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 6467,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "hub London - Paddington",
+     "rating": 7.7,
+     "pricePerNight": 114.28,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/hub-london-paddington.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 139,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "ABC Hyde Park Hotel",
+     "rating": 8.1,
+     "pricePerNight": 134.25,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/abc-hyde-park.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 2628,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Aparthotel Adagio London City East",
+     "rating": 8.8,
+     "pricePerNight": 167.61,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/aparthotel-adagio-london-city-east.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 711,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "The Residence",
+     "rating": 8.2,
+     "pricePerNight": 153.63,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/msk-the-residence.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 106,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "ibis London City - Shoreditch",
+     "rating": 8.1,
+     "pricePerNight": 149.87,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/ibis-london-city.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 6475,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "The Belgrave London Victoria",
+     "rating": 8.6,
+     "pricePerNight": 177.79,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/the-belgrave.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 3651,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Novotel London Bridge",
+     "rating": 8.6,
+     "pricePerNight": 185.46,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/novotellondonctiysouth.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 3506,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Sunborn London Yacht Hotel",
+     "rating": 8.8,
+     "pricePerNight": 198.49,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/sunborn-london.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 6086,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "The Buxton",
+     "rating": 8.5,
+     "pricePerNight": 185.79,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/the-buxton-greater-london.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 344,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Citadines Islington London",
+     "rating": 8.9,
+     "pricePerNight": 223.22,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/citadines-islington.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 1539,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Riu Plaza London The Westminster",
+     "rating": 8.4,
+     "pricePerNight": 227.42,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/cityinnwestminster.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 8797,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "The Cloud One London-Hyde Park",
+     "rating": 7.2,
+     "pricePerNight": 150.37,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/lancaster-gate.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 8916,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Riu Plaza London Victoria",
+     "rating": 8.6,
+     "pricePerNight": 309.84,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/riu-plaza-london-victoria.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 14680,
+     "taxesPerNight": 0
+    },
+    {
+     "name": "Radisson Blu Hotel, London Bloomsbury",
+     "rating": 8.1,
+     "pricePerNight": 313.13,
+     "area": "",
+     "bookingUrl": "https://www.booking.com/hotel/gb/radissonblubloomsbury.html?checkin=2027-01-15&checkout=2027-01-17&group_adults=2&no_rooms=1",
+     "reviewCount": 4233,
+     "taxesPerNight": 0
+    }
+   ],
+   "selectedHotelIndex": 0,
+   "activities": [
+    "Explore the British Museum's Mesopotamia and Ancient Egypt galleries",
+    "Attend a matinee performance at Shakespeare's Globe Theatre",
+    "Browse rare books and manuscripts at the Sir John Soane's Museum",
+    "Dinner at Dishoom King's Cross",
+    "Evening recital at Wigmore Hall"
+   ],
+   "restaurants": [
+    {
+     "name": "Dishoom Covent Garden",
+     "cuisine": "Bombay café",
+     "priceRange": "$$"
+    },
+    {
+     "name": "St. JOHN Smithfield",
+     "cuisine": "British nose-to-tail",
+     "priceRange": "$$$"
+    },
+    {
+     "name": "Bocca di Lupo",
+     "cuisine": "regional Italian",
+     "priceRange": "$$"
+    },
+    {
+     "name": "E Pellicci",
+     "cuisine": "traditional café",
+     "priceRange": "$"
+    },
+    {
+     "name": "The Ledbury",
+     "cuisine": "modern European",
+     "priceRange": "$$$$"
+    }
+   ],
+   "vibes": [
+    "history",
+    "art"
+   ],
+   "schedule": {
+    "2027-01-15": [
+     {
+      "id": "evt-1794375131448-9",
+      "title": "Head to the airport",
+      "startTime": "08:50",
+      "endTime": "10:50",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-head",
+      "notes": "Allow 2h for check-in & security"
+     },
+     {
+      "id": "evt-1794375131448-11",
+      "title": "Arrive at London",
+      "startTime": "10:48",
+      "endTime": "11:03",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-arrive"
+     },
+     {
+      "id": "evt-1794375131448-10",
+      "title": "Flight the airport → London",
+      "startTime": "10:50",
+      "endTime": "10:48",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-travel",
+      "notes": "58m"
+     }
+    ],
+    "2027-01-17": [
+     {
+      "id": "sched-7",
+      "title": "Dishoom Covent Garden (Bombay café)",
+      "startTime": "08:00",
+      "endTime": "08:45",
+      "category": "restaurant",
+      "notes": "$$ · Vibrant all-day Indian café celebrating Bombay's Irani cafés with exceptional breakfast bacon naan and house chai.",
+      "plannedDurationMin": 45
+     },
+     {
+      "id": "evt-1794375131455-12",
+      "title": "Head to LON",
+      "startTime": "10:23",
+      "endTime": "12:23",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "out-head",
+      "notes": "Allow 2h for check-in & security"
+     },
+     {
+      "id": "evt-1794375131455-13",
+      "title": "Flight LON → JFK",
+      "startTime": "12:23",
+      "endTime": "15:24",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "out-travel"
+     }
+    ],
+    "2027-01-16": [
+     {
+      "id": "sched-1",
+      "title": "E Pellicci (traditional café)",
+      "startTime": "08:00",
+      "endTime": "08:45",
+      "category": "restaurant",
+      "notes": "$ · Family-run East End institution since 1900 with stunning Art Deco interior and proper full English breakfasts.",
+      "plannedDurationMin": 45
+     },
+     {
+      "id": "sched-2",
+      "title": "Explore the British Museum's Mesopotamia and Ancient Egypt galleries",
+      "startTime": "09:00",
+      "endTime": "12:00",
+      "category": "activity",
+      "notes": "Home to the Rosetta Stone and unparalleled ancient collections that shaped human civilization.",
+      "plannedDurationMin": 180
+     },
+     {
+      "id": "sched-3",
+      "title": "St. JOHN Smithfield (British nose-to-tail)",
+      "startTime": "12:15",
+      "endTime": "13:45",
+      "category": "restaurant",
+      "notes": "$$$ · Pioneering restaurant showcasing British culinary heritage through whole-animal butchery and iconic bone marrow dishes.",
+      "plannedDurationMin": 90
+     },
+     {
+      "id": "sched-4",
+      "title": "Browse rare books and manuscripts at the Sir John Soane's Museum",
+      "startTime": "14:00",
+      "endTime": "16:00",
+      "category": "activity",
+      "notes": "An eccentric architect's townhouse frozen in time, packed with antiquities and curiosities in atmospheric candlelit rooms.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-5",
+      "title": "The Ledbury (modern European)",
+      "startTime": "18:00",
+      "endTime": "20:00",
+      "category": "restaurant",
+      "notes": "$$$$ · Two-Michelin-starred Notting Hill gem offering inventive seasonal tasting menus in an elegant yet unpretentious setting.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-6",
+      "title": "Evening recital at Wigmore Hall",
+      "startTime": "20:15",
+      "endTime": "22:15",
+      "category": "activity",
+      "notes": "Intimate chamber music venue with world-class acoustics showcasing classical performers in a gorgeous art nouveau setting.",
+      "plannedDurationMin": 120
+     }
+    ]
+   },
+   "unscheduled": [
+    {
+     "title": "Attend a matinee performance at Shakespeare's Globe Theatre",
+     "kind": "activity",
+     "durationMin": 180,
+     "date": "2027-01-17"
+    },
+    {
+     "title": "Dinner at Dishoom King's Cross",
+     "kind": "activity",
+     "durationMin": 120,
+     "date": "2027-01-17"
+    },
+    {
+     "title": "Bocca di Lupo",
+     "kind": "restaurant",
+     "durationMin": 120,
+     "date": "2027-01-17"
+    }
+   ]
+  }
+ ],
+ "savingsTips": [],
+ "dateShiftChecked": true,
+ "origin": {
+  "city": "New York",
+  "airports": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "outboundLeg": {
+   "originAirport": "JFK",
+   "destAirport": "PAR",
+   "price": 449.76,
+   "currency": "USD",
+   "durationMinutes": 498,
+   "operator": "British Airways",
+   "carrierCode": "BA",
+   "departTime": "08:30",
+   "arriveTime": "22:48",
+   "departDate": "2027-01-12",
+   "arriveDate": "2027-01-12",
+   "stops": 0,
+   "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20JFK%20on%202027-01-12",
+   "alternatives": [
+    {
+     "originAirport": "LGA",
+     "destAirport": "PAR",
+     "price": 450.12,
+     "currency": "USD",
+     "durationMinutes": 498,
+     "operator": "American Airlines",
+     "carrierCode": "AA",
+     "departTime": "08:30",
+     "arriveTime": "22:48",
+     "departDate": "2027-01-12",
+     "arriveDate": "2027-01-12",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20LGA%20on%202027-01-12"
+    },
+    {
+     "originAirport": "JFK",
+     "destAirport": "PAR",
+     "price": 452.48,
+     "currency": "USD",
+     "durationMinutes": 498,
+     "operator": "Iberia",
+     "carrierCode": "IB",
+     "departTime": "08:30",
+     "arriveTime": "22:48",
+     "departDate": "2027-01-12",
+     "arriveDate": "2027-01-12",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20JFK%20on%202027-01-12"
+    },
+    {
+     "originAirport": "JFK",
+     "destAirport": "PAR",
+     "price": 464.16,
+     "currency": "USD",
+     "durationMinutes": 498,
+     "operator": "American Airlines",
+     "carrierCode": "AA",
+     "departTime": "08:30",
+     "arriveTime": "22:48",
+     "departDate": "2027-01-12",
+     "arriveDate": "2027-01-12",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20JFK%20on%202027-01-12"
+    }
+   ]
+  },
+  "returnLeg": {
+   "originAirport": "LON",
+   "destAirport": "JFK",
+   "price": 432.18,
+   "currency": "USD",
+   "durationMinutes": 481,
+   "operator": "American Airlines",
+   "carrierCode": "AA",
+   "departTime": "12:23",
+   "arriveTime": "15:24",
+   "departDate": "2027-01-17",
+   "arriveDate": "2027-01-17",
+   "stops": 0,
+   "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20JFK%20from%20LON%20on%202027-01-17",
+   "alternatives": [
+    {
+     "originAirport": "LON",
+     "destAirport": "EWR",
+     "price": 435.36,
+     "currency": "USD",
+     "durationMinutes": 482,
+     "operator": "British Airways",
+     "carrierCode": "BA",
+     "departTime": "12:23",
+     "arriveTime": "15:25",
+     "departDate": "2027-01-17",
+     "arriveDate": "2027-01-17",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20EWR%20from%20LON%20on%202027-01-17"
+    },
+    {
+     "originAirport": "LON",
+     "destAirport": "JFK",
+     "price": 438.66,
+     "currency": "USD",
+     "durationMinutes": 481,
+     "operator": "Iberia",
+     "carrierCode": "IB",
+     "departTime": "12:23",
+     "arriveTime": "15:24",
+     "departDate": "2027-01-17",
+     "arriveDate": "2027-01-17",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20JFK%20from%20LON%20on%202027-01-17"
+    },
+    {
+     "originAirport": "LON",
+     "destAirport": "EWR",
+     "price": 443.66,
+     "currency": "USD",
+     "durationMinutes": 482,
+     "operator": "American Airlines",
+     "carrierCode": "AA",
+     "departTime": "12:23",
+     "arriveTime": "15:25",
+     "departDate": "2027-01-17",
+     "arriveDate": "2027-01-17",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20EWR%20from%20LON%20on%202027-01-17"
+    }
+   ]
+  }
+ },
+ "returnToHome": true,
+ "picksRun": "picks-mwboma4g-1"
+}
