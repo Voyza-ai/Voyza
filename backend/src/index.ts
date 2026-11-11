@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { env } from './config/env';
 import { logger } from './utils/logger';
+import { startTextBot } from './services/textbot/runtime';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/error';
 import {
@@ -117,6 +118,8 @@ function warmLocationIndex(): void {
 
 const server = app.listen(env.PORT, () => {
   logger.info('Backend listening', { port: env.PORT, env: env.NODE_ENV });
+  // Group-text bot: off unless TEXTBOT_MODE is set (services/textbot/runtime.ts).
+  startTextBot();
   // Weekly Browse price refresh (see services/presets.ts).
   if (env.NODE_ENV !== 'test') startPresetRefreshScheduler();
   warmLocationIndex();

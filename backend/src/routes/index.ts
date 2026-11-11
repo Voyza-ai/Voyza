@@ -13,6 +13,7 @@ import locations from './locations';
 import email from './email';
 import presets from './presets';
 import bookings from './bookings';
+import textbot from './textbot';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
@@ -47,6 +48,9 @@ router.use('/locations', locations);
 router.use('/email', email);
 // Public: backs the server-rendered SEO category pages (crawlers are signed out).
 router.use('/presets', presets);
+// Group-text assistant. Auth is per route: the Sendblue webhook has none
+// (it checks its own secret header); the code/phone routes requireAuth.
+router.use('/textbot', textbot);
 
 // ─── Compare Leg ─────────────────────────────────────────────
 const compareLegSchema = z.object({

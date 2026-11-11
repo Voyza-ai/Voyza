@@ -54,6 +54,8 @@ export interface TextStore {
 
   userForPhone(phone: Phone): Promise<PhoneLink | null>;
   linkPhone(userId: string, phone: Phone): Promise<void>;
+  phoneForUser(userId: string): Promise<PhoneLink | null>;
+  unlinkPhone(userId: string): Promise<void>;
 
   createCode(kind: LinkCode['kind'], tripId: string, userId: string, ttlMs?: number): Promise<LinkCode>;
   /** Single use: returns the code and marks it used, or null if absent/expired/used. */
@@ -119,8 +121,18 @@ export class MemoryTextStore implements TextStore {
     return this.phones.get(phone) ?? null;
   }
   async linkPhone(userId: string, phone: Phone) {
-    // One phone → one user. A phone moving accounts replaces the old link.
-    this.phones.set(phone, { userId, phone, verifiedAt: new Date().toISOString() });
+    // One phone → one user, one user → one phone (migration 016's two unique
+    // keys). A phone moving accounts, or a user changing number, replaces
+    // the old link rather than leaving a second one behind.
+    for (const [p, l] of this.phones) if (l.userId === userId) this.phones.delete(p);
+    this.phones.set(phone, { userId, phone, verifiedAt: new Date(this.clock()).toISOString() });
+  }
+  async phoneForUser(userId: string) {
+    for (const l of this.phones.values()) if (l.userId === userId) return l;
+    return null;
+  }
+  async unlinkPhone(userId: string) {
+    for (const [p, l] of this.phones) if (l.userId === userId) this.phones.delete(p);
   }
 
   async createCode(kind: LinkCode['kind'], tripId: string, userId: string, ttlMs = CODE_TTL_MS) {
