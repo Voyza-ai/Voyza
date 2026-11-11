@@ -686,7 +686,8 @@ function stayCost(c: any): number {
   const nights = nightsBetween(arrivalOf(c), departureOf(c));
   const custom = c?.customHotel;
   if (custom) return custom.mode === 'total' ? Number(custom.amount) || 0 : (Number(custom.amount) || 0) * nights;
-  const h = (Array.isArray(c?.hotels) ? c.hotels[c.selectedHotelIndex ?? 0] : undefined) ?? c?.hotel;
+  // `hotels[selectedHotelIndex] ?? hotel`, exactly: no index means `hotel`.
+  const h = (Array.isArray(c?.hotels) ? c.hotels[c.selectedHotelIndex] : undefined) ?? c?.hotel;
   if (!h) return 0;
   return ((Number(h.pricePerNight) || 0) + (Number(h.taxesPerNight) || 0)) * nights;
 }

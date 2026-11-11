@@ -150,15 +150,11 @@ function expectOnlyChanged(before: Trip, next: Trip, paths: Array<(t: any) => vo
   expect(b).toEqual(a);
 }
 
-describe('the fixture', () => {
-  it('is the production trip at its $1,576 header total', () => {
-    expect(liveTripTotal(trip())).toBe(1576);
-  });
-});
-
 describe('applyTransportChange', () => {
   it('flight home → the British Airways card option: exactly that flight, +$3 on the header, nothing else moved', () => {
     const t = trip();
+    // The production trip, at its $1,576 header total.
+    expect(liveTripTotal(t)).toBe(1576);
     const p = toBritishAirways();
     const next = applyTransportChange(t, p);
     expect(next.origin!.returnLeg).toMatchObject({

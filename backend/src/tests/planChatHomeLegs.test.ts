@@ -168,15 +168,12 @@ beforeEach(() => {
 
 const app = createApp();
 
-describe('the fixture is the production trip', () => {
-  it('totals $1,576 the way the header does (hotels + legs + both home flights)', () => {
-    expect(trip().totalCost).toBe(1576);
-    expect(headerTotal(trip())).toBe(1576);
-  });
-});
-
 describe('the model sees home, every leg, and every option on its card', () => {
   it('lists home, the three legs with ids, their current options and card options with ids', async () => {
+    // The production trip totals $1,576 on the header (hotels + legs + both
+    // home flights), and the server sums it the same way.
+    expect(trip().totalCost).toBe(1576);
+    expect(headerTotal(trip())).toBe(1576);
     await chat(app, 'answer_only', { answer: 'ok' });
     const system: string = mockCreate.mock.calls[0][0].system;
     const ctx = JSON.parse(system.slice(system.indexOf('TRIP CONTEXT (read-only):') + 'TRIP CONTEXT (read-only):'.length));
