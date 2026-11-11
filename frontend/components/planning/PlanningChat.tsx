@@ -2332,7 +2332,7 @@ export default function PlanningChat() {
   }, [findTripLoading, findTripError, intent]);
 
   return (
-    <div className="relative flex flex-col h-screen dot-grid-bg">
+    <div className="relative flex flex-col h-screen" style={{ background: '#f0f4f8' }}>
       {/* Subtle vibe background shift */}
       <motion.div
         className="absolute inset-0 pointer-events-none"
