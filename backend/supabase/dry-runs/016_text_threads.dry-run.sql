@@ -3,8 +3,8 @@
 -- ============================================================================
 -- Changes NOTHING. Paste this whole file into the Supabase SQL editor and
 -- Run. It applies 016 inside one transaction, probes every behaviour it adds
--- — happy paths, the SECOND write (same phone, same thread, same code, same
--- pending edit, same delivery), the stale-row cases (a phone moving
+-- — happy paths, the SECOND write (same phone, same thread, same code),
+-- the stale-row cases (a phone moving
 -- accounts, a thread re-linked to another trip), bad values, privileges and
 -- RLS, the delete rules, and running 016 twice — then ROLLS BACK. Every row
 -- in the Results tab must say PASS.
@@ -25,8 +25,7 @@ grant all on _checks to authenticated;
 insert into _checks
   select 0, 'no 016 tables before apply',
          (to_regclass('public.user_phones') is null and to_regclass('public.text_threads') is null
-          and to_regclass('public.text_link_codes') is null and to_regclass('public.text_pending_edits') is null
-          and to_regclass('public.text_inbound_seen') is null)::text, 'true';
+          and to_regclass('public.text_link_codes') is null)::text, 'true';
 
 -- ═══ APPLY 016_text_threads.sql (verbatim, comments trimmed) ═══════════════
 
@@ -57,28 +56,9 @@ create table if not exists public.text_link_codes (
   check (expires_at > created_at)
 );
 create index if not exists text_link_codes_expiry_idx on public.text_link_codes (expires_at);
-create table if not exists public.text_pending_edits (
-  thread_id uuid primary key references public.text_threads(id) on delete cascade,
-  trip_id uuid not null references public.trips(id) on delete cascade,
-  requested_by uuid references auth.users(id) on delete set null,
-  result jsonb not null,
-  summary text not null,
-  trip_updated_at timestamptz,
-  expires_at timestamptz not null,
-  created_at timestamptz not null default now()
-);
-create table if not exists public.text_inbound_seen (
-  provider text not null,
-  provider_message_id text not null,
-  seen_at timestamptz not null default now(),
-  primary key (provider, provider_message_id)
-);
-create index if not exists text_inbound_seen_at_idx on public.text_inbound_seen (seen_at);
 alter table public.user_phones        enable row level security;
 alter table public.text_threads       enable row level security;
 alter table public.text_link_codes    enable row level security;
-alter table public.text_pending_edits enable row level security;
-alter table public.text_inbound_seen  enable row level security;
 do $$
 begin
   if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'user_phones' and policyname = 'user_phones_owner_select') then
@@ -86,8 +66,7 @@ begin
   end if;
 end $$;
 revoke insert, update, delete, truncate on public.user_phones from anon, authenticated;
-revoke all on public.text_threads, public.text_link_codes, public.text_pending_edits,
-              public.text_inbound_seen from anon, authenticated;
+revoke all on public.text_threads, public.text_link_codes from anon, authenticated;
 
 -- ═══ FIXTURES (rolled back) ═════════════════════════════════════════════════
 
@@ -204,30 +183,6 @@ exception when check_violation then
   insert into _checks values (14, 'bad code kind', 'rejected', 'rejected');
 end $$;
 
--- 15) Pending edit: second insert for a thread fails; the upsert replaces it.
-insert into public.text_pending_edits (thread_id, trip_id, requested_by, result, summary, expires_at)
-  select t.id, trip_b, u1, '{"type":"proposal"}', 'first', now() + interval '10 minutes'
-    from public.text_threads t, _ids where t.provider = 'sendblue' and t.provider_thread_id = 'grp_dry';
-do $$ begin
-  insert into public.text_pending_edits (thread_id, trip_id, result, summary, expires_at)
-    select t.id, trip_b, '{}', 'second', now() + interval '10 minutes'
-      from public.text_threads t, _ids where t.provider = 'sendblue' and t.provider_thread_id = 'grp_dry';
-  insert into _checks values (15, 'second pending edit, same thread', 'ACCEPTED', 'rejected');
-exception when unique_violation then
-  insert into _checks values (15, 'second pending edit, same thread', 'rejected', 'rejected');
-end $$;
-insert into public.text_pending_edits (thread_id, trip_id, result, summary, expires_at)
-  select t.id, trip_b, '{}', 'second', now() + interval '10 minutes'
-    from public.text_threads t, _ids where t.provider = 'sendblue' and t.provider_thread_id = 'grp_dry'
-  on conflict (thread_id) do update set summary = excluded.summary, result = excluded.result;
-insert into _checks select 16, 'pending upsert keeps one row', string_agg(summary, ','), 'second' from public.text_pending_edits;
-
--- 17) Dedupe: the second delivery of a message id inserts nothing.
-insert into public.text_inbound_seen (provider, provider_message_id) values ('sendblue', 'msg_dry');
-with s as (insert into public.text_inbound_seen (provider, provider_message_id) values ('sendblue', 'msg_dry')
-           on conflict do nothing returning 1)
-insert into _checks select 17, 'redelivered message id', count(*)::text, '0' from s;
-
 -- 18–21) Privileges: browser roles cannot write anything here or read the bot tables.
 insert into _checks values
   (18, 'authenticated may NOT insert user_phones', has_table_privilege('authenticated', 'public.user_phones', 'insert')::text, 'false'),
@@ -245,11 +200,10 @@ reset role;
 insert into _checks select 23, 'u2 owns the moved phone (service view)', count(*)::text, '1'
   from public.user_phones, _ids where user_id = u2;
 
--- 24) Delete rules: deleting a trip removes its threads, codes and pending edits.
+-- 24) Delete rules: deleting a trip removes its threads and codes.
 delete from public.trips t using _ids where t.id = _ids.trip_b;
-insert into _checks select 24, 'trip delete cascades thread + pending',
-       ((select count(*) from public.text_threads where provider = 'sendblue' and provider_thread_id = 'grp_dry') = 0
-        and (select count(*) from public.text_pending_edits) = 0)::text, 'true';
+insert into _checks select 24, 'trip delete cascades thread',
+       (select count(*) from public.text_threads where provider = 'sendblue' and provider_thread_id = 'grp_dry')::text, '0';
 delete from public.trips t using _ids where t.id = _ids.trip_a;
 insert into _checks select 25, 'trip delete cascades codes', count(*)::text, '0' from public.text_link_codes;
 
@@ -273,7 +227,7 @@ exception when others then
 end $$;
 insert into _checks
   select 28, 'exactly one policy across 016 tables', count(*)::text, '1' from pg_policies
-   where tablename in ('user_phones','text_threads','text_link_codes','text_pending_edits','text_inbound_seen');
+   where tablename in ('user_phones','text_threads','text_link_codes');
 
 select n, check_name, result, expected,
        case when result = expected then 'PASS' else 'FAIL' end as status

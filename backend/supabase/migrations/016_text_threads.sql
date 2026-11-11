@@ -1,6 +1,6 @@
 -- ============================================================================
--- 016: Group-text trip assistant (iMessage / SMS bot) — threads, verified
---      phones, one-time codes, pending edits, delivery dedupe
+-- 016: Text-your-trip assistant (iMessage / SMS) — verified phones,
+--      threads linked to trips, one-time codes
 -- ============================================================================
 -- NOT APPLIED. Run by hand in the Supabase SQL editor (Dashboard → SQL
 -- Editor → paste → Run), after first running the rehearsal
@@ -16,8 +16,26 @@
 -- only; written only by the service-role backend after the user proved the
 -- number by texting a one-time code from it. Deleted with the account
 -- (ON DELETE CASCADE from auth.users). No message bodies are stored except
--- the last few bot turns per linked thread (text_threads.history), which go
+-- the last 12 bot turns per linked thread (text_threads.history), which go
 -- when the thread is unlinked or the trip is deleted.
+--
+-- WHY EACH TABLE / COLUMN (nothing here that today's feature doesn't use):
+--   user_phones.user_id, phone_e164  who is texting: a text arrives as a
+--       phone number; this maps it to a BlueMurr account so the bot knows
+--       which trips the sender may see. One phone per user, one user per phone.
+--   user_phones.verified_at          shown in Settings ("verified on …").
+--   text_threads.provider, provider_thread_id  which chat (a 1:1 or group on
+--       Sendblue/Twilio) a text came from; unique per provider.
+--   text_threads.trip_id             the trip that chat asks about / edits.
+--   text_threads.linked_by, linked_at  who linked it and when (audit; only
+--       owner/editor may link).
+--   text_threads.history             the last 12 turns, so "do the first one"
+--       works across texts and across a container restart.
+--   text_link_codes.*                the one-time code that proves "this phone
+--       belongs to this signed-in account" (and, for kind=link, picks the
+--       trip). expires_at/used_at make it 15-min single use.
+-- Deferred (NOT created): pending edits and delivery dedupe stay in memory
+-- until texted edits are saved to trips; they get their own migration then.
 --
 -- Access: users may SELECT their own phone row. Everything else has NO
 -- policies: only the service-role backend reads or writes it.
@@ -65,39 +83,12 @@ create table if not exists public.text_link_codes (
 );
 create index if not exists text_link_codes_expiry_idx on public.text_link_codes (expires_at);
 
--- 4) At most one edit waiting for YES per thread.
--- SAFE ON PRODUCTION: new, empty table.
-create table if not exists public.text_pending_edits (
-  thread_id         uuid        primary key references public.text_threads(id) on delete cascade,
-  trip_id           uuid        not null references public.trips(id) on delete cascade,
-  requested_by      uuid        references auth.users(id) on delete set null,
-  result            jsonb       not null,
-  summary           text        not null,
-  -- trips.updated_at when the edit was proposed: the apply refuses if the
-  -- trip changed since (e.g. saved from an open website tab).
-  trip_updated_at   timestamptz,
-  expires_at        timestamptz not null,
-  created_at        timestamptz not null default now()
-);
-
--- 5) Provider message ids already handled (webhook retries / poll overlap).
--- SAFE ON PRODUCTION: new, empty table.
-create table if not exists public.text_inbound_seen (
-  provider             text        not null,
-  provider_message_id  text        not null,
-  seen_at              timestamptz not null default now(),
-  primary key (provider, provider_message_id)
-);
-create index if not exists text_inbound_seen_at_idx on public.text_inbound_seen (seen_at);
-
--- 6) RLS on all five. The rls_auto_enable event trigger would do this anyway;
+-- 4) RLS on all three. The rls_auto_enable event trigger would do this anyway;
 --    declared for intent.
 -- SAFE ON PRODUCTION: affects only the new tables.
 alter table public.user_phones        enable row level security;
 alter table public.text_threads       enable row level security;
 alter table public.text_link_codes    enable row level security;
-alter table public.text_pending_edits enable row level security;
-alter table public.text_inbound_seen  enable row level security;
 
 -- SAFE ON PRODUCTION: one SELECT policy on a new table. Guarded so a second
 -- run does not fail on "policy already exists".
@@ -112,23 +103,20 @@ begin
   end if;
 end $$;
 
--- 7) Browser roles: read own phone only; never write anything here.
+-- 5) Browser roles: read own phone only; never write anything here.
 -- SAFE ON PRODUCTION: revokes on the new tables only; service_role keeps all.
 revoke insert, update, delete, truncate on public.user_phones from anon, authenticated;
-revoke all on public.text_threads, public.text_link_codes, public.text_pending_edits,
-              public.text_inbound_seen from anon, authenticated;
+revoke all on public.text_threads, public.text_link_codes from anon, authenticated;
 
 -- ============================================================================
--- Housekeeping (run from the backend, not here): delete text_link_codes and
--- text_inbound_seen rows older than 7 days.
+-- Housekeeping (run from the backend, not here): delete text_link_codes
+-- rows older than 7 days.
 -- ============================================================================
 
 -- ============================================================================
 -- REVERSAL (run only to undo; unlinks every texting thread and forgets every
 -- verified phone — users would re-verify by texting a new code):
 --
---   drop table if exists public.text_pending_edits;
---   drop table if exists public.text_inbound_seen;
 --   drop table if exists public.text_link_codes;
 --   drop table if exists public.text_threads;
 --   drop table if exists public.user_phones;
