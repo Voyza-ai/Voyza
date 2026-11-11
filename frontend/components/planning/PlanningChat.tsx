@@ -2557,7 +2557,7 @@ export default function PlanningChat() {
                 <button
                   onClick={handleUseMyLocation}
                   disabled={locating}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 text-[13px]"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.02] active:scale-[0.98] text-[13px]"
                   style={{ background: '#ffffff' }}
                 >
                   {locating ? (
@@ -2708,7 +2708,7 @@ export default function PlanningChat() {
               <button
                 onClick={handleFindTrip}
                 disabled={findTripLoading}
-                className="flex items-center gap-3 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold px-12 py-5 rounded-full text-[18px] shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-60 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                className="flex items-center gap-3 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold px-12 py-5 rounded-full text-[18px] shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:hover:scale-100 disabled:cursor-not-allowed"
               >
                 {findTripLoading ? (
                   <>

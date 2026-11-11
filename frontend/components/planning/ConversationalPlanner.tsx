@@ -664,7 +664,7 @@ export default function ConversationalPlanner({
               <button
                 onClick={handleUseMyLocation}
                 disabled={locating}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all disabled:opacity-60"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all"
                 style={{ background: '#eff6ff' }}
               >
                 {locating ? (
