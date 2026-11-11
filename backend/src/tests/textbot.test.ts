@@ -229,15 +229,16 @@ describe('textbot: edits need confirmation', () => {
     expect(env.applied).toHaveLength(0);
   });
 
-  it('a viewer YES is refused; an editor YES applies once', async () => {
+  it('viewer and editor YES are refused; the owner YES applies once', async () => {
     const env = setup({ chat: proposal });
     await linkedGroup(env);
     await env.send(P_VIEWER, 'BlueMurr add a night in London', GROUP);
-    expect((await env.send(P_VIEWER, 'yes', GROUP))[0]).toMatch(/Only the trip owner or an editor/);
+    expect((await env.send(P_VIEWER, 'yes', GROUP))[0]).toMatch(/Only the trip owner can confirm/);
+    expect((await env.send(P_EDITOR, 'yes', GROUP))[0]).toMatch(/Only the trip owner can confirm/);
     expect(env.applied).toHaveLength(0);
-    const out = await env.send(P_EDITOR, 'Yes!', GROUP);
+    const out = await env.send(P_OWNER, 'Yes!', GROUP);
     expect(out[0]).toMatch(/^Done: Here's your trip with London added/);
-    expect(env.applied).toEqual([{ tripId: TRIP, result: expect.objectContaining({ type: 'proposal' }), by: EDITOR }]);
+    expect(env.applied).toEqual([{ tripId: TRIP, result: expect.objectContaining({ type: 'proposal' }), by: OWNER }]);
     // A second YES does nothing: the pending edit is gone and "yes" alone isn't addressed.
     expect(await env.send(P_OWNER, 'yes', GROUP)).toEqual([]);
     expect(env.applied).toHaveLength(1);

@@ -46,7 +46,8 @@ export type BotConfig = {
 export const DEFAULT_BOT_CONFIG: BotConfig = {
   name: 'BlueMurr',
   wakeWords: ['bluemurr', 'murr'],
-  confirmRoles: ['owner', 'editor'],
+  // Website saves are owner-only (canvas.ts), so texted edits match.
+  confirmRoles: ['owner'],
   linkRoles: ['owner', 'editor'],
   pendingTtlMs: 10 * 60_000,
   siteUrl: 'http://localhost:3000',
