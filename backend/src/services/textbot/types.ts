@@ -55,8 +55,8 @@ export interface ChatEngine {
 /** Loads a saved trip in the shape the chat expects (`currentTrip`). */
 export interface TripLoader {
   load(tripId: string): Promise<{ trip: unknown; title: string } | null>;
-  /** user ids allowed to see the trip: owner + accepted group members. */
-  memberUserIds(tripId: string): Promise<string[]>;
+  /** Who may see the trip, with their role: owner + accepted group members. */
+  members(tripId: string): Promise<Map<string, 'owner' | 'editor' | 'viewer'>>;
 }
 
 /** Applies an accepted proposal to the saved trip. Null until wired. */

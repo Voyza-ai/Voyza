@@ -88,6 +88,9 @@ export class MemoryTextStore implements TextStore {
   private hist = new Map<string, ChatTurn[]>();
   private pending = new Map<string, PendingEdit>();
 
+  /** Clock is injectable so tests and the bot agree on "now". */
+  constructor(private clock: () => number = () => Date.now()) {}
+
   threadKey(provider: ProviderName, providerThreadId: string) {
     return `${provider}:${providerThreadId}`;
   }
@@ -121,11 +124,11 @@ export class MemoryTextStore implements TextStore {
   async createCode(kind: LinkCode['kind'], tripId: string, userId: string, ttlMs = CODE_TTL_MS) {
     let code = newCode();
     while (this.codes.has(code)) code = newCode();
-    const row: LinkCode = { code, kind, tripId, userId, expiresAt: Date.now() + ttlMs, usedAt: null };
+    const row: LinkCode = { code, kind, tripId, userId, expiresAt: this.clock() + ttlMs, usedAt: null };
     this.codes.set(code, row);
     return row;
   }
-  async consumeCode(code: string, now = Date.now()) {
+  async consumeCode(code: string, now = this.clock()) {
     const row = this.codes.get(code.toUpperCase());
     if (!row || row.usedAt !== null || row.expiresAt <= now) return null;
     row.usedAt = now;
@@ -149,7 +152,7 @@ export class MemoryTextStore implements TextStore {
     this.hist.set(threadKey, h.slice(-HISTORY_TURNS));
   }
 
-  async getPending(threadKey: string, now = Date.now()) {
+  async getPending(threadKey: string, now = this.clock()) {
     const p = this.pending.get(threadKey);
     if (!p) return null;
     if (p.expiresAt <= now) {
