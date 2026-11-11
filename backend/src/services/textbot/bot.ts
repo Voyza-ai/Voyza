@@ -78,6 +78,9 @@ export class TextBot {
   private cfg: BotConfig;
   private limiter: SlidingLimiter;
   private now: () => number;
+  /** Per-thread queue: one message at a time per thread, so two quick YESes
+   *  (or YES racing a new request) can't both act on the same pending edit. */
+  private queues = new Map<string, Promise<unknown>>();
 
   constructor(private deps: BotDeps) {
     this.cfg = { ...DEFAULT_BOT_CONFIG, ...(deps.config ?? {}) };
@@ -103,11 +106,21 @@ export class TextBot {
       }
     };
 
+    const key = `${msg.provider}:${msg.threadId}`;
+    const prev = this.queues.get(key) ?? Promise.resolve();
+    const run = prev.then(async () => {
+      try {
+        await this.process(msg, reply);
+      } catch (err: any) {
+        logger.error('textbot handle failed', { provider: msg.provider, message: err?.message });
+        await reply("Sorry, something went wrong on my side. Try again in a minute.");
+      }
+    });
+    this.queues.set(key, run);
     try {
-      await this.process(msg, reply);
-    } catch (err: any) {
-      logger.error('textbot handle failed', { provider: msg.provider, message: err?.message });
-      await reply("Sorry, something went wrong on my side. Try again in a minute.");
+      await run;
+    } finally {
+      if (this.queues.get(key) === run) this.queues.delete(key);
     }
     return out;
   }
@@ -197,7 +210,7 @@ export class TextBot {
         await store.clearPending(threadKey);
         return reply(`I can't apply changes from texts yet. Open the trip to accept it: ${this.tripUrl(thread.tripId)}`);
       }
-      const res = await this.deps.applier.apply(thread.tripId, pending.result, sender.userId);
+      const res = await this.deps.applier.apply(thread.tripId, pending.result, sender.userId, pending.tripUpdatedAt);
       await store.clearPending(threadKey);
       if (!res.ok) return reply(`I couldn't apply it: ${res.reason}. Nothing was changed.`);
       return reply(`Done: ${pending.summary} It's saved to the trip: ${this.tripUrl(thread.tripId)}`);
@@ -227,6 +240,7 @@ export class TextBot {
         requestedByUserId: sender.userId,
         result,
         summary: firstSentence(replyText),
+        tripUpdatedAt: loaded.updatedAt ?? null,
         expiresAt: now + this.cfg.pendingTtlMs,
       });
       const who = this.roleList(this.cfg.confirmRoles);

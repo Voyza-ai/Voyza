@@ -41,6 +41,8 @@ export type PendingEdit = {
   requestedByUserId: string;
   result: ChatResult;
   summary: string;
+  /** trips.updated_at when proposed; the applier refuses if it moved. */
+  tripUpdatedAt: string | null;
   expiresAt: number;
 };
 

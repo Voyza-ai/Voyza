@@ -37,7 +37,7 @@ function setup(opts: { chat?: (m: string) => ChatResult; applier?: ProposalAppli
   ]);
   const trips: TripLoader = {
     async load(id) {
-      return id === TRIP ? { trip: { title: 'Paris & London' }, title: 'Paris & London' } : null;
+      return id === TRIP ? { trip: { title: 'Paris & London' }, title: 'Paris & London', updatedAt: '2026-11-11T10:00:00Z' } : null;
     },
     async members(id) {
       return id === TRIP ? members : new Map();
@@ -48,8 +48,8 @@ function setup(opts: { chat?: (m: string) => ChatResult; applier?: ProposalAppli
     opts.applier !== undefined
       ? opts.applier
       : {
-          async apply(tripId, result, by) {
-            applied.push({ tripId, result, by });
+          async apply(tripId, result, by, expected) {
+            applied.push({ tripId, result, by, expected });
             return { ok: true };
           },
         };
@@ -238,10 +238,37 @@ describe('textbot: edits need confirmation', () => {
     expect(env.applied).toHaveLength(0);
     const out = await env.send(P_OWNER, 'Yes!', GROUP);
     expect(out[0]).toMatch(/^Done: Here's your trip with London added/);
-    expect(env.applied).toEqual([{ tripId: TRIP, result: expect.objectContaining({ type: 'proposal' }), by: OWNER }]);
+    expect(env.applied).toEqual([
+      { tripId: TRIP, result: expect.objectContaining({ type: 'proposal' }), by: OWNER, expected: '2026-11-11T10:00:00Z' },
+    ]);
     // A second YES does nothing: the pending edit is gone and "yes" alone isn't addressed.
     expect(await env.send(P_OWNER, 'yes', GROUP)).toEqual([]);
     expect(env.applied).toHaveLength(1);
+  });
+
+  it('two YES texts arriving at once apply the edit only once', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const applied: string[] = [];
+    const env = setup({
+      chat: proposal,
+      applier: {
+        async apply(_t, _r, by) {
+          await gate; // slow save: the second YES arrives while the first is applying
+          applied.push(by);
+          return { ok: true };
+        },
+      },
+    });
+    await linkedGroup(env);
+    await env.send(P_OWNER, 'BlueMurr add a night in London', GROUP);
+    const a = env.send(P_OWNER, 'yes', GROUP);
+    const b = env.send(P_OWNER, 'YES', GROUP);
+    release();
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(applied).toEqual([OWNER]);
+    expect(ra[0]).toMatch(/^Done/);
+    expect(rb).toEqual([]);
   });
 
   it('NO drops it', async () => {

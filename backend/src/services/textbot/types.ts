@@ -54,12 +54,22 @@ export interface ChatEngine {
 
 /** Loads a saved trip in the shape the chat expects (`currentTrip`). */
 export interface TripLoader {
-  load(tripId: string): Promise<{ trip: unknown; title: string } | null>;
+  load(tripId: string): Promise<{ trip: unknown; title: string; updatedAt?: string } | null>;
   /** Who may see the trip, with their role: owner + accepted group members. */
   members(tripId: string): Promise<Map<string, 'owner' | 'editor' | 'viewer'>>;
 }
 
 /** Applies an accepted proposal to the saved trip. Null until wired. */
 export interface ProposalApplier {
-  apply(tripId: string, result: ChatResult, byUserId: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * Must refuse (ok:false) when the trip's updated_at is no longer
+   * `expectedUpdatedAt` — someone saved it (e.g. an open website tab) after
+   * the edit was proposed, so the proposal was priced on a stale trip.
+   */
+  apply(
+    tripId: string,
+    result: ChatResult,
+    byUserId: string,
+    expectedUpdatedAt: string | null,
+  ): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
