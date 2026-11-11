@@ -1,7 +1,7 @@
 /**
  * BlueMurr AI chat — the core behind POST /api/plan/chat.
  *
- * ── Service seam (stable; the iMessage bot calls this too) ──────────────
+ * ── Service seam (stable; for other callers, e.g. a future iMessage bot) ─
  *
  *   runTripChat({ message, currentTrip, history? }) → Promise<TripChatResult>
  *

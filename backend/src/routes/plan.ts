@@ -571,7 +571,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { message, currentTrip, history } = chatSchema.parse(req.body);
     // The chat's core lives in services/tripChat.ts (runTripChat), shared
-    // with other callers such as the iMessage bot.
+    // with other callers (e.g. a future iMessage bot; none in this repo yet).
     res.json(await runTripChat({ message, currentTrip, history }));
   }),
 );
