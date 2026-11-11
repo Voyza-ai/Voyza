@@ -216,7 +216,7 @@ describe('the two production asks', () => {
     expect(p.priceDelta).toBe(22.92);
     expect(p.totals).toEqual({ before: 1576, after: 1599, delta: 23 });
     expect(p.firstStay).toBeNull();
-    expect(res.body.reply).toContain('Virgin Atlantic LON 18:05 → EWR 21:15');
+    expect(res.body.reply).toMatch(/^The cheapest later evening flight home \(London → New York\) I found: Virgin Atlantic LON 18:05 → EWR 21:15 on Jan 17, \$455 instead of American Airlines LON 12:23 → JFK 15:24 at \$432\./);
     expect(res.body.reply).toContain('Trip total $1,576 → $1,599 (+$23)');
     expect(res.body.reply).not.toMatch(/isn't a leg/);
     // Every home airport was searched, from London, on the return day.
@@ -292,6 +292,7 @@ describe('"cheaper" and "later" on the other legs', () => {
     expect(p.after).toMatchObject({ operator: 'Delta', departTime: '07:10', toAirport: 'LGA', price: 399 });
     expect(p.priceDelta).toBe(-33.18);
     expect(p.totals).toEqual({ before: 1576, after: 1543, delta: -33 });
+    expect(res.body.reply).toMatch(/^A cheaper flight home \(London → New York\): Delta LON 07:10 → LGA 10:05/);
     expect(res.body.reply).toContain('(−$33)');
   });
 

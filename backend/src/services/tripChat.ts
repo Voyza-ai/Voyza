@@ -581,7 +581,12 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
     };
   }
 
-  const lead = `The cheapest ${what} I found for ${legPhrase(leg)}:`;
+  // "A cheaper flight home (London → New York):" / "The cheapest later
+  // evening flight home (London → New York) I found:".
+  const label = legLabel(leg);
+  const subject =
+    leg.kind === 'return' ? `${what} home (${label})` : leg.kind === 'outbound' ? `${what} out (${label})` : `${what} for ${label}`;
+  const lead = request.cheaper ? `A ${subject}:` : `The cheapest ${subject} I found:`;
   return propose(currentTrip, leg, matches[0], request, toolName, lead);
 }
 
