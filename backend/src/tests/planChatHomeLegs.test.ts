@@ -252,6 +252,12 @@ describe('the two production asks', () => {
     // The current AA 12:23 is not listed as an "option" to itself.
     expect(res.body.legOptions.options[0]).toMatchObject({ operator: 'Delta', departTime: '07:10', price: 399 });
     expect(res.body.legOptions.options.some((o: any) => o.operator === 'American Airlines' && o.departTime === '12:23' && o.toAirport === 'JFK')).toBe(false);
+    // No more than the card keeps (frontend MAX_ALTERNATIVES = 4): the reply
+    // says they are all on the card, so every listed option must fit there.
+    expect(res.body.legOptions.totalFound).toBe(7);
+    expect(res.body.legOptions.options).toHaveLength(4);
+    expect(res.body.reply).toContain('(7 found, cheapest 4 shown)');
+    expect(res.body.reply).not.toMatch(/^5\. /m);
   });
 });
 
@@ -375,6 +381,20 @@ describe('vague and impossible requests', () => {
     expect(res.body.type).toBe('answer');
     expect(res.body.reply).toContain('only search flights to and from home');
     expect(mockCompareLeg).not.toHaveBeenCalled();
+  });
+
+  it('a train with no fare is not proposed (it would read as a −$80 saving)', async () => {
+    // Rail answers Paris → London with a Eurostar no provider priced.
+    require('../services/trains').searchTrains.mockResolvedValueOnce([
+      {
+        id: 'trn_1', price: null, currency: 'USD', departure: '2027-01-15T13:01:00', arrival: '2027-01-15T14:30:00',
+        durationMinutes: 149, operator: 'Eurostar', trainType: 'high-speed', bookingUrl: null, limitedCoverage: true,
+      },
+    ]);
+    const res = await chat(app, 'find_transport_option', { leg: 'Paris→London', mode: 'train' });
+    expect(res.body.type).toBe('answer');
+    expect(res.body.proposal).toBeUndefined();
+    expect(res.body.reply).toBe("Eurostar train 13:01 → 14:30 on Jan 15 has no fare I can price, so I haven't proposed it — nothing changed.");
   });
 
   it('an unreadable time is refused, not dropped', async () => {

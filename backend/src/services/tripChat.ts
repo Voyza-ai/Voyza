@@ -487,6 +487,15 @@ function propose(
   toolName: string,
   lead: string,
 ): TripChatResult {
+  // A price of 0 means the fare is unknown (a train no provider priced). The
+  // header counts it as $0, so the proposal would announce the old fare as a
+  // saving. Not offered.
+  if (!(after.price > 0)) {
+    return {
+      type: 'answer',
+      reply: `${describeChoice(after)} on ${shortDate(after.departDate ?? leg.date)} has no fare I can price, so I haven't proposed it — nothing changed.`,
+    };
+  }
   const proposal = buildTransportProposal(currentTrip, leg, after, request, toolName);
   const problems = verifyTransportProposal(proposal, leg);
   if (problems.length > 0) {
@@ -524,7 +533,12 @@ function selectOption(currentTrip: any, legs: TripLeg[], input: any): TripChatRe
   return propose(currentTrip, leg, option, { optionId: option.optionId }, 'select_transport_option', `Switch ${legPhrase(leg)} to`);
 }
 
-const LIST_LIMIT = 5;
+/**
+ * Options a listing shows. No more than the card keeps (frontend
+ * lib/transportChange.ts MAX_ALTERNATIVES = 4): the reply says they are all
+ * on the card, and at 5 the fifth was cut from it.
+ */
+const LIST_LIMIT = 4;
 
 /**
  * find_transport_option (and set_transport_window / show_transport_options on
