@@ -1974,7 +1974,7 @@ export default function PlanningChat() {
       case 'Architecture': return 'radial-gradient(ellipse at 50% 80%, rgba(200,160,255,0.06) 0%, transparent 60%)';
       case 'Adventure': return 'radial-gradient(ellipse at 50% 80%, rgba(80,220,140,0.06) 0%, transparent 60%)';
       case 'Culture': return 'radial-gradient(ellipse at 50% 80%, rgba(244,114,182,0.06) 0%, transparent 60%)';
-      default: return vibe ? 'radial-gradient(ellipse at 50% 80%, rgba(79,142,247,0.05) 0%, transparent 60%)' : 'none';
+      default: return vibe ? 'radial-gradient(ellipse at 50% 80%, rgba(37,99,235,0.05) 0%, transparent 60%)' : 'none';
     }
   })();
 
@@ -2332,7 +2332,7 @@ export default function PlanningChat() {
   }, [findTripLoading, findTripError, intent]);
 
   return (
-    <div className="relative flex flex-col h-screen" style={{ background: '#0f0f1a' }}>
+    <div className="relative flex flex-col h-screen dot-grid-bg">
       {/* Subtle vibe background shift */}
       <motion.div
         className="absolute inset-0 pointer-events-none"
@@ -2343,7 +2343,7 @@ export default function PlanningChat() {
 
       {/* Header */}
       <div className="relative z-10 flex items-center justify-center pt-10 pb-5">
-        <Link href="/main" className="text-4xl font-bold tracking-tight hover:opacity-80 transition-opacity" style={{ color: '#4f8ef7' }}>
+        <Link href="/main" className="text-4xl font-bold tracking-tight hover:opacity-80 transition-opacity" style={{ color: '#2563eb' }}>
           BlueMurr
         </Link>
       </div>
@@ -2409,14 +2409,14 @@ export default function PlanningChat() {
                         }
                         if (e.key === 'Escape') setEditingMsgId(null);
                       }}
-                      className="w-full bg-[#4f8ef7]/80 text-white rounded-2xl rounded-br-md px-5 py-3.5 text-[17px] leading-relaxed resize-none outline-none border-2 border-white/30 focus:border-white/60"
+                      className="w-full bg-[#2563eb] text-white rounded-2xl rounded-br-md px-5 py-3.5 text-[17px] leading-relaxed resize-none outline-none border-2 border-blue-300 focus:border-blue-800"
                       rows={2}
                     />
                     <div className="flex items-center justify-end gap-2">
                       <button
                         type="button"
                         onClick={() => setEditingMsgId(null)}
-                        className="flex items-center gap-1 text-[12px] text-white/50 hover:text-white/80 transition-colors px-2 py-1"
+                        className="flex items-center gap-1 text-[12px] text-gray-500 hover:text-gray-800 transition-colors px-2 py-1"
                       >
                         <X size={12} />
                         Cancel
@@ -2435,7 +2435,7 @@ export default function PlanningChat() {
                           }
                           setEditingMsgId(null);
                         }}
-                        className="flex items-center gap-1 text-[12px] text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1 transition-all"
+                        className="flex items-center gap-1 text-[12px] text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-1 transition-all"
                       >
                         <Check size={12} />
                         Save
@@ -2448,10 +2448,10 @@ export default function PlanningChat() {
                     <div
                       className={`w-fit px-5 py-3.5 rounded-2xl text-[17px] leading-relaxed ${
                         msg.role === 'user'
-                          ? 'bg-[#4f8ef7] text-white rounded-br-md ml-auto'
-                          : 'text-white/80'
+                          ? 'bg-[#2563eb] text-white rounded-br-md ml-auto'
+                          : 'text-gray-800'
                       }`}
-                      style={msg.role === 'assistant' ? { background: 'rgba(255,255,255,0.05)' } : undefined}
+                      style={msg.role === 'assistant' ? { background: '#ffffff', boxShadow: 'inset 0 0 0 1px #e5e7eb' } : undefined}
                     >
                       {msg.content}
                     </div>
@@ -2464,10 +2464,10 @@ export default function PlanningChat() {
                           setEditingMsgValue(msg.content);
                         }}
                         className="absolute -left-8 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ background: 'rgba(255,255,255,0.1)' }}
+                        style={{ background: '#ffffff', boxShadow: 'inset 0 0 0 1px #e5e7eb' }}
                         title="Edit message"
                       >
-                        <Pencil size={11} className="text-white/60" />
+                        <Pencil size={11} className="text-gray-500" />
                       </button>
                     )}
                   </div>
@@ -2495,9 +2495,9 @@ export default function PlanningChat() {
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-3 flex items-center gap-2.5 text-sm text-gray-400"
+              className="mt-3 flex items-center gap-2.5 text-sm text-gray-500"
             >
-              <Loader2 size={16} className="animate-spin" style={{ color: '#4f8ef7' }} />
+              <Loader2 size={16} className="animate-spin" style={{ color: '#2563eb' }} />
               <span>{findTripStatus || 'Searching flights, trains, and hotels...'}</span>
             </motion.div>
           )}
@@ -2533,19 +2533,19 @@ export default function PlanningChat() {
                 <div className="flex gap-3 w-full">
                   <button
                     onClick={() => handleBudgetPerPersonConfirm(true)}
-                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: '#ffffff' }}
                   >
                     <span className="text-[15px] font-medium">Per person</span>
-                    <span className="text-white/40 text-[12px]">Each traveler has that much to spend</span>
+                    <span className="text-gray-500 text-[12px]">Each traveler has that much to spend</span>
                   </button>
                   <button
                     onClick={() => handleBudgetPerPersonConfirm(false)}
-                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: '#ffffff' }}
                   >
                     <span className="text-[15px] font-medium">Total for the trip</span>
-                    <span className="text-white/40 text-[12px]">Combined for everyone</span>
+                    <span className="text-gray-500 text-[12px]">Combined for everyone</span>
                   </button>
                 </div>
               )}
@@ -2557,13 +2557,13 @@ export default function PlanningChat() {
                 <button
                   onClick={handleUseMyLocation}
                   disabled={locating}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 text-[13px]"
-                  style={{ background: 'rgba(255,255,255,0.04)' }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 text-[13px]"
+                  style={{ background: '#ffffff' }}
                 >
                   {locating ? (
-                    <Loader2 size={14} className="animate-spin" style={{ color: '#4f8ef7' }} />
+                    <Loader2 size={14} className="animate-spin" style={{ color: '#2563eb' }} />
                   ) : (
-                    <LocateFixed size={14} style={{ color: '#4f8ef7' }} />
+                    <LocateFixed size={14} style={{ color: '#2563eb' }} />
                   )}
                   {locating ? 'Finding your nearest airport…' : 'Use my location'}
                 </button>
@@ -2575,19 +2575,19 @@ export default function PlanningChat() {
                 <div className="flex gap-3 w-full">
                   <button
                     onClick={() => handleRoundTripSelect(true)}
-                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: '#ffffff' }}
                   >
                     <span className="text-[15px] font-medium">Round-trip</span>
-                    <span className="text-white/40 text-[12px]">Return to where I started</span>
+                    <span className="text-gray-500 text-[12px]">Return to where I started</span>
                   </button>
                   <button
                     onClick={() => handleRoundTripSelect(false)}
-                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: '#ffffff' }}
                   >
                     <span className="text-[15px] font-medium">One-way</span>
-                    <span className="text-white/40 text-[12px]">No return flight needed</span>
+                    <span className="text-gray-500 text-[12px]">No return flight needed</span>
                   </button>
                 </div>
               )}
@@ -2605,8 +2605,8 @@ export default function PlanningChat() {
               {citySelectionData.countries.map((countryData) => (
                 <div key={countryData.country} className="mb-5">
                   <div className="flex items-center gap-2 mb-3">
-                    <MapPin size={16} className="text-[#4f8ef7]" />
-                    <span className="text-white/90 font-medium text-[15px]">{countryData.country}</span>
+                    <MapPin size={16} className="text-[#2563eb]" />
+                    <span className="text-gray-900 font-medium text-[15px]">{countryData.country}</span>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center">
                     {countryData.cities.map((city) => {
@@ -2617,8 +2617,8 @@ export default function PlanningChat() {
                           onClick={() => handleCityToggle(countryData.country, city)}
                           className={`px-4 py-2 rounded-full text-[13px] font-medium transition-all border ${
                             isSelected
-                              ? 'bg-[#4f8ef7] border-[#4f8ef7] text-white shadow-md shadow-blue-500/20'
-                              : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:border-white/25'
+                              ? 'bg-[#2563eb] border-[#2563eb] text-white shadow-md shadow-blue-600/20'
+                              : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'
                           }`}
                         >
                           {city}
@@ -2643,7 +2643,7 @@ export default function PlanningChat() {
                         }
                       }}
                       placeholder="+ another city"
-                      className="bg-transparent border border-dashed border-white/20 text-white/70 placeholder-white/30 text-[13px] rounded-full px-4 py-2 outline-none focus:border-[#4f8ef7]/60 min-w-[140px]"
+                      className="bg-white border border-dashed border-gray-300 text-gray-700 placeholder-gray-500 text-[13px] rounded-full px-4 py-2 outline-none focus:border-[#2563eb]/60 min-w-[140px]"
                     />
                   </div>
                 </div>
@@ -2656,8 +2656,8 @@ export default function PlanningChat() {
                 citySelectionData.selectedCities['_direct'].length > 0 && (
                 <div className="mb-5">
                   <div className="flex items-center gap-2 mb-3">
-                    <MapPin size={16} className="text-[#4f8ef7]" />
-                    <span className="text-white/90 font-medium text-[15px]">Also visiting</span>
+                    <MapPin size={16} className="text-[#2563eb]" />
+                    <span className="text-gray-900 font-medium text-[15px]">Also visiting</span>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center">
                     {citySelectionData.selectedCities['_direct'].map((city) => (
@@ -2674,7 +2674,7 @@ export default function PlanningChat() {
                             selectedCities: { ...citySelectionData.selectedCities, _direct: updated },
                           });
                         }}
-                        className="px-4 py-2 rounded-full text-[13px] font-medium transition-all border bg-[#4f8ef7] border-[#4f8ef7] text-white shadow-md shadow-blue-500/20"
+                        className="px-4 py-2 rounded-full text-[13px] font-medium transition-all border bg-[#2563eb] border-[#2563eb] text-white shadow-md shadow-blue-600/20"
                       >
                         {city}
                         <Check size={12} className="inline ml-1.5 -mt-0.5" />
@@ -2688,7 +2688,7 @@ export default function PlanningChat() {
                 <button
                   onClick={handleCitySelectionConfirm}
                   disabled={Object.values(citySelectionData.selectedCities).flat().length === 0}
-                  className="flex items-center gap-3 bg-[#4f8ef7] hover:bg-[#3d7de6] text-white font-semibold px-10 py-4 rounded-full text-[16px] shadow-lg shadow-blue-500/25 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex items-center gap-3 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold px-10 py-4 rounded-full text-[16px] shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Continue with these cities
                   <ArrowRight size={20} />
@@ -2708,7 +2708,7 @@ export default function PlanningChat() {
               <button
                 onClick={handleFindTrip}
                 disabled={findTripLoading}
-                className="flex items-center gap-3 bg-[#4f8ef7] hover:bg-[#3d7de6] text-white font-semibold px-12 py-5 rounded-full text-[18px] shadow-lg shadow-blue-500/25 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-60 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                className="flex items-center gap-3 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold px-12 py-5 rounded-full text-[18px] shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-60 disabled:hover:scale-100 disabled:cursor-not-allowed"
               >
                 {findTripLoading ? (
                   <>
@@ -2723,7 +2723,7 @@ export default function PlanningChat() {
                 )}
               </button>
               {findTripError && (
-                <p className="text-red-400 text-sm text-center max-w-md">{findTripError}</p>
+                <p className="text-red-600 text-sm text-center max-w-md">{findTripError}</p>
               )}
             </motion.div>
           )}
@@ -2756,12 +2756,8 @@ export default function PlanningChat() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, ease: 'easeOut' }}
-            className="pointer-events-auto w-full max-w-2xl flex items-end gap-3 px-5 py-3 rounded-3xl border border-white/15 shadow-2xl shadow-black/40"
-            style={{
-              background: 'rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(16px)',
-              WebkitBackdropFilter: 'blur(16px)',
-            }}
+            className="pointer-events-auto w-full max-w-2xl flex items-end gap-3 px-5 py-3 rounded-3xl border border-gray-200 shadow-2xl shadow-slate-900/10"
+            style={{ background: '#ffffff' }}
           >
             <textarea
               ref={inputRef}
@@ -2776,13 +2772,13 @@ export default function PlanningChat() {
                 }
               }}
               placeholder={barPlaceholder}
-              className="flex-1 min-w-0 w-full bg-transparent border-none outline-none resize-none text-white text-[16px] placeholder-white/35 py-1.5 leading-[1.4] max-h-[102px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              style={{ caretColor: 'rgba(255,255,255,0.7)' }}
+              className="flex-1 min-w-0 w-full bg-transparent border-none outline-none resize-none text-gray-900 text-[16px] placeholder-gray-500 py-1.5 leading-[1.4] max-h-[102px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              style={{ caretColor: '#374151' }}
             />
             <button
               onClick={handleBarSubmit}
               disabled={!textInput.trim() || revising}
-              className="p-2.5 rounded-full bg-[#4f8ef7] hover:bg-[#3d7de6] text-white disabled:opacity-30 disabled:hover:bg-[#4f8ef7] transition-all flex-shrink-0"
+              className="p-2.5 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white disabled:opacity-30 disabled:hover:bg-[#2563eb] transition-all flex-shrink-0"
             >
               <Send size={18} />
             </button>
@@ -2800,7 +2796,7 @@ export default function PlanningChat() {
         >
           <button
             onClick={handleSkip}
-            className="flex items-center gap-1.5 text-white/25 hover:text-white/40 text-[15px] transition-colors"
+            className="flex items-center gap-1.5 text-gray-500 hover:text-gray-700 text-[15px] transition-colors"
           >
             Skip this <SkipForward size={16} />
           </button>

@@ -33,33 +33,33 @@ export default function TripSummaryCard({ answers, onEdit, editable, className =
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 8 }}
           transition={{ duration: 0.25, ease: 'easeOut' }}
-          className={`pointer-events-auto w-full rounded-2xl border border-white/10 px-4 py-2.5 ${className}`}
-          style={{ background: 'rgba(15,15,26,0.92)' }}
+          className={`pointer-events-auto w-full rounded-2xl border border-gray-200 px-4 py-2.5 ${className}`}
+          style={{ background: '#ffffff' }}
         >
           <div className="flex items-center gap-2 mb-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#4f8ef7]" aria-hidden />
-            <span className="text-white/40 text-[11px] uppercase tracking-[0.18em] font-medium">Trip so far</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2563eb]" aria-hidden />
+            <span className="text-gray-500 text-[11px] uppercase tracking-[0.18em] font-medium">Trip so far</span>
           </div>
-          <p className="text-[15px] leading-relaxed text-white/85">
+          <p className="text-[15px] leading-relaxed text-gray-800">
             {groups.map((g, gi) => (
               // Short facts never break inside; the dot rides on the end of
               // the fact before it (no-break space) so a wrapped line never
               // starts with "·".
               <Fragment key={g.key}>
                 {gi > 0 && (
-                  <span className="text-white/25" aria-hidden>
+                  <span className="text-gray-400" aria-hidden>
                     {' ·'}
                   </span>
                 )}
                 {gi > 0 && ' '}
                 <span className={g.key === 'lead' ? '' : 'whitespace-nowrap'}>
                 {g.pieces.map((p, pi) => {
-                  if (typeof p === 'string') return <span key={pi} className="text-white/55">{p}</span>;
+                  if (typeof p === 'string') return <span key={pi} className="text-gray-500">{p}</span>;
                   const canEdit = !!onEdit && (editable ? editable(p.field) : true);
                   // Keyed by its text so a changed answer re-mounts and fades in.
                   const fade = {
-                    initial: { color: '#7fb0ff' },
-                    animate: { color: 'rgba(255,255,255,0.88)' },
+                    initial: { color: '#2563eb' },
+                    animate: { color: '#1f2937' },
                     transition: { duration: 1.4, ease: 'easeOut' as const },
                   };
                   return canEdit ? (
@@ -70,7 +70,7 @@ export default function TripSummaryCard({ answers, onEdit, editable, className =
                       {...fade}
                       onClick={() => onEdit!(p.field)}
                       title="Click to change"
-                      className="inline font-medium underline decoration-dotted decoration-white/20 underline-offset-4 hover:decoration-[#4f8ef7] hover:!text-[#9db9f0] transition-[text-decoration-color] cursor-pointer"
+                      className="inline font-medium underline decoration-dotted decoration-gray-300 underline-offset-4 hover:decoration-[#2563eb] hover:!text-[#2563eb] transition-[text-decoration-color] cursor-pointer"
                     >
                       {p.text}
                     </motion.button>
