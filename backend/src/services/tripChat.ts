@@ -15,15 +15,20 @@
  *        { type: 'answer' }                                  nothing to apply
  *        { type: 'proposal', proposal }                      Accept / Reject;
  *              proposal.kind: 'date_shift' | 'city_edit' | 'transport_change'
+ *              transport_change = { leg { id, kind, index, from, to, date },
+ *              before, after (LegChoice), priceDelta, firstStay, totals
+ *              { before, after, delta } | null } — tripLegs.ts
+ *              TransportChangeProposal; checked before it is returned
  *        { type: 'leg_refresh', refresh }                    inter-city card
  *              options replaced (applied without Accept, as before)
  *        { type: 'leg_options', legOptions }                 options added to a
  *              leg's card; the selection and total do not change
  *        { type: 'mode_comparison', comparison }             informational
  *
- *   Never throws for an AI or search failure: those come back as an 'answer'
- *   saying so. Nothing here writes anywhere; applying a proposal is the
- *   caller's job (frontend lib/transportChange.ts, lib/cityEdit.ts).
+ *   An unreachable AI comes back as an 'answer' saying so; any other
+ *   unexpected error is thrown (the route answers it with a 500, as before).
+ *   Nothing here writes anywhere; applying a proposal is the caller's job
+ *   (frontend lib/transportChange.ts, lib/cityEdit.ts).
  *
  * ────────────────────────────────────────────────────────────────────────
  *
@@ -418,12 +423,7 @@ export async function runTripChat(input: TripChatInput): Promise<TripChatResult>
     const textBlock = response.content.find((b: any) => b.type === 'text') as any;
     return { type: 'answer', reply: textBlock?.text ?? "I'm not sure how to help with that — could you rephrase?" };
   }
-  try {
-    return await runTool(currentTrip, toolUse.name as string, (toolUse.input ?? {}) as any);
-  } catch (err: any) {
-    logger.error('plan/chat tool failed', { tool: toolUse.name, message: err?.message });
-    return { type: 'answer', reply: "Sorry — something went wrong working that out, so I didn't change anything. Please try again." };
-  }
+  return runTool(currentTrip, toolUse.name as string, (toolUse.input ?? {}) as any);
 }
 
 /** Dispatch one tool call. Exported for tests of a tool without a model. */
@@ -552,8 +552,7 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
   }
   const matches = matchingChoices(searched.choices, request, leg);
   if (matches.length === 0) {
-    const others = searched.choices.filter((c) => !(leg.current && c === leg.current));
-    const why = unmetSummary(others, request, leg);
+    const why = unmetSummary(searched.choices, request, leg);
     return {
       type: 'answer',
       reply: `I searched ${searched.choices.length} option${searched.choices.length === 1 ? '' : 's'} for ${legLabel(leg)} on ${when} and none is a ${what}${why}. Nothing changed — want me to try a different time or day?`,
