@@ -67,8 +67,9 @@ export type BotDeps = {
 
 /** Result types that change the trip and so need a YES before applying. */
 const EDIT_TYPES = new Set(['proposal', 'leg_refresh']);
-/** Result types that only inform. */
-const READ_TYPES = new Set(['answer', 'mode_comparison']);
+/** Result types that only inform. leg_options lists fares found for a leg
+ *  without changing the selection (tripChat.ts seam on fix/ai-chat-home-legs). */
+const READ_TYPES = new Set(['answer', 'mode_comparison', 'leg_options']);
 
 const YES = /^(y|yes|yep|yeah|confirm|do it|apply|ok|okay)[.! ]*$/i;
 const NO = /^(n|no|nope|cancel|stop|don'?t)[.! ]*$/i;
@@ -328,7 +329,9 @@ export class TextBot {
   }
 
   private tripUrl(tripId: string): string {
-    return `${this.cfg.siteUrl.replace(/\/$/, '')}/trips/${tripId}`;
+    // The results page opens a saved trip from ?tripId (frontend app/results/page.tsx);
+    // there is no /trips/<id> route.
+    return `${this.cfg.siteUrl.replace(/\/$/, '')}/results?tripId=${encodeURIComponent(tripId)}`;
   }
 }
 
@@ -366,9 +369,13 @@ function firstSentence(s: string): string {
   return (m ? m[0] : s).trim();
 }
 
-/** The web chat ends proposals with "Accept to apply it." — wrong channel. */
-function stripAcceptHint(s: string): string {
-  return s.replace(/\s*Accept to apply it\.?\s*$/i, '').trim();
+/**
+ * The web chat ends proposals with button wording ("Accept to apply it.",
+ * "Accept to switch, or Reject to keep it as it is.") — wrong in a text,
+ * where the answer is YES/NO. Drop that closing sentence, whatever its wording.
+ */
+export function stripAcceptHint(s: string): string {
+  return s.replace(/\s*Accept to [^.]*(\.|$)\s*$/i, '').trim();
 }
 
 export type { ChatResult };

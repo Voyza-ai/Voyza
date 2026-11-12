@@ -3,7 +3,7 @@
  * memory: the chat engine, trip loader and applier are fakes, the provider is
  * the simulator. Nothing here touches Supabase, Anthropic or a texting API.
  */
-import { TextBot } from '../services/textbot/bot';
+import { stripAcceptHint, TextBot } from '../services/textbot/bot';
 import { MemoryTextStore } from '../services/textbot/store';
 import { SimulatorProvider } from '../services/textbot/providers/simulator';
 import type { ChatEngine, ChatResult, InboundText, ProposalApplier, TripLoader } from '../services/textbot/types';
@@ -305,7 +305,7 @@ describe('textbot: edits need confirmation', () => {
     const env = setup({ chat: proposal, applier: null });
     await linkedGroup(env);
     await env.send(P_OWNER, 'BlueMurr add a night in London', GROUP);
-    expect((await env.send(P_OWNER, 'yes', GROUP))[0]).toMatch(/can't apply changes from texts yet.*\/trips\/trip-1/);
+    expect((await env.send(P_OWNER, 'yes', GROUP))[0]).toMatch(/can't apply changes from texts yet.*http:\/\/localhost:3000\/results\?tripId=trip-1$/);
   });
 });
 
@@ -368,5 +368,18 @@ describe('textbot: abuse and robustness', () => {
       { role: 'user', content: 'first' },
       { role: 'assistant', content: 'Answer to: first' },
     ]);
+  });
+});
+
+describe('textbot: web-only wording', () => {
+  it.each([
+    ["Here's your trip with London added. Accept to apply it.", "Here's your trip with London added."],
+    [
+      'A cheaper flight out: BA $523 instead of AA $546. Trip total $2,345 → $2,322 (−$23). Accept to switch, or Reject to keep it as it is.',
+      'A cheaper flight out: BA $523 instead of AA $546. Trip total $2,345 → $2,322 (−$23).',
+    ],
+    ['No hint here.', 'No hint here.'],
+  ])('strips the Accept/Reject sentence: %s', (input, out) => {
+    expect(stripAcceptHint(input)).toBe(out);
   });
 });

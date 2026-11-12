@@ -55,7 +55,8 @@ const trips: TripLoader = {
 const applier: ProposalApplier = {
   async apply(_id, result) {
     console.log('  [sim] WOULD APPLY (not applied):', JSON.stringify(result).slice(0, 400));
-    return { ok: true };
+    // Never claim a save that didn't happen, even in the simulator.
+    return { ok: false, reason: 'this is the simulator, which never saves' };
   },
 };
 const provider = new SimulatorProvider((m) => console.log(`  BlueMurr ▸ ${m.text.replace(/\n/g, '\n             ')}`));
