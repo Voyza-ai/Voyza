@@ -15,24 +15,24 @@ const paths: { intent: Intent; icon: typeof MapPin; label: string; desc: string;
     icon: MapPin,
     label: 'I know where I want to go',
     desc: 'Name your cities and I\'ll find the cheapest way to connect them — flights, trains, or both.',
-    color: '#4f8ef7',
-    hoverBorder: 'hover:border-[#4f8ef7]/40',
+    color: '#2563eb',
+    hoverBorder: 'hover:border-[#2563eb]/40',
   },
   {
     intent: 'vibe',
     icon: Sparkles,
     label: 'I\'m chasing a vibe',
     desc: 'Tell me the feeling — beachy, adventure, culture — and I\'ll suggest destinations that match.',
-    color: '#f59e0b',
-    hoverBorder: 'hover:border-[#f59e0b]/40',
+    color: '#d97706',
+    hoverBorder: 'hover:border-[#d97706]/40',
   },
   {
     intent: 'budget',
     icon: Wallet,
     label: 'I know my budget',
     desc: 'Tell me what you can spend and I\'ll show you the best trips your money can buy.',
-    color: '#34d399',
-    hoverBorder: 'hover:border-[#34d399]/40',
+    color: '#059669',
+    hoverBorder: 'hover:border-[#059669]/40',
   },
 ];
 
@@ -50,8 +50,8 @@ export default function IntentPicker({ onSelect }: IntentPickerProps) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: i * 0.08 }}
               onClick={() => onSelect(opt.intent)}
-              className={`aspect-square w-full h-full flex flex-col items-center justify-center text-center gap-4 p-6 rounded-3xl border border-white/10 transition-all hover:scale-[1.02] active:scale-[0.97] ${opt.hoverBorder} group`}
-              style={{ background: 'rgba(255,255,255,0.03)' }}
+              className={`aspect-square w-full h-full flex flex-col items-center justify-center text-center gap-4 p-6 rounded-3xl border border-gray-200 transition-all hover:scale-[1.02] active:scale-[0.97] ${opt.hoverBorder} group`}
+              style={{ background: '#ffffff' }}
             >
               <div
                 className="p-4 rounded-2xl flex-shrink-0"
@@ -59,10 +59,10 @@ export default function IntentPicker({ onSelect }: IntentPickerProps) {
               >
                 <Icon size={34} style={{ color: opt.color }} />
               </div>
-              <span className="text-white/90 text-[17px] font-semibold group-hover:text-white transition-colors leading-snug">
+              <span className="text-gray-800 text-[17px] font-semibold group-hover:text-gray-900 transition-colors leading-snug">
                 {opt.label}
               </span>
-              <span className="text-white/40 text-[14px] leading-relaxed">
+              <span className="text-gray-500 text-[14px] leading-relaxed">
                 {opt.desc}
               </span>
             </motion.button>
@@ -76,7 +76,7 @@ export default function IntentPicker({ onSelect }: IntentPickerProps) {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.3, delay: 0.35 }}
         onClick={() => onSelect('chat')}
-        className="flex items-center justify-center gap-2 pt-1 text-white/25 hover:text-white/45 text-[14px] transition-colors"
+        className="flex items-center justify-center gap-2 pt-1 text-gray-500 hover:text-gray-700 text-[14px] transition-colors"
       >
         <MessageCircle size={15} />
         <span>Or just tell me everything at once</span>
