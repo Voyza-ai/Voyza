@@ -287,6 +287,49 @@ describe('switching to a named option', () => {
   });
 });
 
+describe('review fixes', () => {
+  it('finds the evening flight home even when 50 cheaper daytime fares come first (no cap before the filter)', async () => {
+    const cheap = Array.from({ length: 50 }, (_, i) =>
+      offer('Delta', 'DL', 300 + i, '2027-01-17', `${String(8 + (i % 8)).padStart(2, '0')}:${String(i).padStart(2, '0')}`, '15:00'));
+    searchFlights.mockImplementation(async ({ origin, destination, date }: any) => {
+      const k = `${origin}|${destination}|${date}`;
+      if (k === 'LON|JFK|2027-01-17') return [...cheap, offer('British Airways', 'BA', 510.4, '2027-01-17', '19:25', '22:31')];
+      return [];
+    });
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', relative: 'later', timeOfDay: 'evening' });
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after).toMatchObject({ operator: 'British Airways', departTime: '19:25', price: 510.4 });
+  });
+
+  it('an option id from another leg never selects the same-numbered option on this leg', async () => {
+    const res = await chat(app, 'select_transport_option', { leg: 'Paris→London', optionId: 'London→home#2' });
+    expect(res.body.type).toBe('answer');
+    expect(res.body.proposal).toBeUndefined();
+  });
+
+  it('says "an evening flight" when there is none (live run: Paris → New York has nothing after 15:00)', async () => {
+    searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>
+      origin === 'LON' && destination === 'JFK' && date === '2027-01-17' ? [offer('Iberia', 'IB', 438.66, '2027-01-17', '15:00', '18:00')] : []);
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', timeOfDay: 'evening', list: true });
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('none is an evening flight');
+  });
+
+  it('lists one row per flight, at its cheapest fare', async () => {
+    searchFlights.mockImplementation(async ({ origin, destination, date }: any) => {
+      const k = `${origin}|${destination}|${date}`;
+      if (k === 'LON|JFK|2027-01-17') return [
+        offer('British Airways', 'BA', 560, '2027-01-17', '19:25', '22:31'),
+        offer('British Airways', 'BA', 510.4, '2027-01-17', '19:25', '22:31'),
+      ];
+      return [];
+    });
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', timeOfDay: 'evening', list: true });
+    expect(res.body.type).toBe('leg_options');
+    expect(res.body.legOptions.options.map((o: any) => `${o.operator} ${o.departTime} ${o.price}`)).toEqual(['British Airways 19:25 510.4']);
+  });
+});
+
 describe('"cheaper" and "later" on the other legs', () => {
   it('"cheaper flight home" → the cheapest flight under $432 (Delta from LaGuardia), priced', async () => {
     const res = await chat(app, 'find_transport_option', { leg: 'London→home', cheaper: true });

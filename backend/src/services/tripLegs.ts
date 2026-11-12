@@ -486,18 +486,19 @@ export async function searchLeg(trip: any, leg: TripLeg): Promise<LegSearch> {
         originCity: outbound ? home.city : home.returnCity,
         tripCityNames,
       },
-      40,
+      // No cap: the time / "later" / "cheaper" filters run after this, so
+      // cutting to the cheapest N first can drop every evening flight.
+      Infinity,
     );
     raw = rows.map((h, i) => fromHomeLeg(h, `${leg.id}~${i + 1}`, leg.date));
   }
 
   // One row per service, the cheapest fare for it; unknown prices last.
+  const byPrice = [...raw].sort((a, b) => (a.price || Infinity) - (b.price || Infinity));
   const deduped: LegChoice[] = [];
-  for (const c of raw) {
-    const dup = deduped.findIndex((d) => sameService(d, c) && d.price === c.price);
-    if (dup < 0) deduped.push(c);
+  for (const c of byPrice) {
+    if (!deduped.some((d) => sameService(d, c))) deduped.push(c);
   }
-  deduped.sort((a, b) => (a.price || Infinity) - (b.price || Infinity));
   return { ok: true, choices: deduped };
 }
 

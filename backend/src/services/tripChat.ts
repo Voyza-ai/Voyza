@@ -517,7 +517,14 @@ function selectOption(currentTrip: any, legs: TripLeg[], input: any): TripChatRe
   if (lookup.kind !== 'leg') return { type: 'answer', reply: lookupReply(lookup, legs) };
   const leg = lookup.leg;
   const n = /(?:^|[#~])(\d+)$/.exec(optionId)?.[1];
-  const option = leg.options.find((o) => o.optionId === optionId) ?? (n != null ? leg.options.find((o) => o.optionId === `${leg.id}#${n}`) : undefined);
+  // Fall back to "#n on this leg" only when the id names this leg (or none):
+  // "London→home#2" must never pick option 2 of Paris→London.
+  const prefix = optionId.replace(/[#~]?\d+$/, '');
+  const prefixLookup = prefix ? legFor(currentTrip, legs, { leg: prefix }) : null;
+  const sameLeg = !prefix || (prefixLookup?.kind === 'leg' && prefixLookup.leg.id === leg.id);
+  const option =
+    leg.options.find((o) => o.optionId === optionId) ??
+    (n != null && sameLeg ? leg.options.find((o) => o.optionId === `${leg.id}#${n}`) : undefined);
   if (!option) {
     const listed = leg.options.filter((o) => o !== leg.current);
     return {
@@ -569,7 +576,7 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
     const why = unmetSummary(searched.choices, request, leg);
     return {
       type: 'answer',
-      reply: `I searched ${searched.choices.length} option${searched.choices.length === 1 ? '' : 's'} for ${legLabel(leg)} on ${when} and none is a ${what}${why}. Nothing changed — want me to try a different time or day?`,
+      reply: `I searched ${searched.choices.length} option${searched.choices.length === 1 ? '' : 's'} for ${legLabel(leg)} on ${when} and none is ${/^[aeiou]/i.test(what) ? 'an' : 'a'} ${what}${why}. Nothing changed — want me to try a different time or day?`,
     };
   }
 
