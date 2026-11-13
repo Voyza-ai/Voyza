@@ -1,3 +1,4 @@
+import { dedupeAcrossCities } from '@/lib/picksDedupe';
 import { create } from 'zustand';
 import { Trip, PlanningAnswers, City, CustomHotel, Transport, Restaurant, ScheduledEvent } from '@/lib/types';
 import { firstStayArrival, tripStartDate } from '@/lib/tripSpan';
@@ -10,6 +11,7 @@ import {
   type ResolvedPlace,
 } from '@/lib/api';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
+import { applyUserEdit, reconcileTripTransport } from '@/lib/transportReconcile';
 import { liveTripTotal } from '@/lib/tripTotals';
 import type { CanvasIntent } from '@/lib/canvasHandoff';
 import { coordsOf, hasCoords, type TravelLegs } from '@/lib/geoSchedule';
@@ -28,6 +30,8 @@ export type CityPicksRequest = {
   travelers: number;
   nights: number;
   budget?: number;
+  /** The trip's other stops, so this city's picks stay in this city. */
+  otherCities?: string[];
 };
 
 /** One city's AI picks. Both empty when the requests failed. */
@@ -259,7 +263,8 @@ export const useTripStore = create<TripStore>((set) => ({
           transportIn: chosenFlat,
         };
       }
-      return { currentTrip: { ...state.currentTrip, cities } };
+      // Generated travel blocks on every built day follow the new pick.
+      return { currentTrip: reconcileTripTransport({ ...state.currentTrip, cities }) };
     }),
 
   setHomeLegAlternative: (direction, alternativeIndex) =>
@@ -298,11 +303,11 @@ export const useTripStore = create<TripStore>((set) => ({
         }
       }
       return {
-        currentTrip: {
+        currentTrip: reconcileTripTransport({
           ...state.currentTrip,
           cities,
           origin: { ...state.currentTrip.origin, [slot]: newLeg },
-        },
+        }),
       };
     }),
 
@@ -409,8 +414,9 @@ export const useTripStore = create<TripStore>((set) => ({
       const cities = [...state.currentTrip.cities];
       const c = cities[cityIndex];
       if (!c) return state;
+      // A user edit to a generated travel block makes it theirs (drops `auto`).
       const dayEvents = (c.schedule?.[date] ?? []).map((e) =>
-        e.id === eventId ? { ...e, ...updates } : e
+        e.id === eventId ? applyUserEdit(e, updates) : e
       );
       const schedule = { ...(c.schedule ?? {}), [date]: dayEvents };
       cities[cityIndex] = { ...c, schedule };
@@ -468,10 +474,10 @@ const NO_PICKS: CityPicks = { activities: [], restaurants: [] };
 /** Ask for one city's AI picks. Never rejects: a failed call is an empty list. */
 export async function requestCityPicks(req: CityPicksRequest): Promise<CityPicks> {
   const [activities, restaurants] = await Promise.all([
-    searchActivities({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, nights: req.nights }).catch(
+    searchActivities({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, nights: req.nights, otherCities: req.otherCities }).catch(
       () => [] as ActivitySuggestion[],
     ),
-    searchRestaurants({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, budget: req.budget }).catch(
+    searchRestaurants({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, budget: req.budget, otherCities: req.otherCities }).catch(
       () => [] as RestaurantSuggestion[],
     ),
   ]);
@@ -500,6 +506,26 @@ export function startTripPicks(
     tripPicks: { run, pending: requests, landed: {} },
   });
   requests.forEach((req, i) => awaitCityPicks(run, req, inFlight[i]));
+}
+
+/**
+ * Ask for the AI picks of ONE city just put on the trip on screen — a city the
+ * AI chat added or swapped in. Joins the trip's current picks run when there
+ * is one (so its landed picks and waiting list survive), else starts one.
+ * Lands like the planner's picks (landCityPicks).
+ */
+export function requestPicksForAddedCity(req: CityPicksRequest): void {
+  const { currentTrip: trip, tripPicks: tp } = useTripStore.getState();
+  if (!trip) return;
+  const joined = !!trip.picksRun && tp?.run === trip.picksRun;
+  const run = joined ? trip.picksRun! : newRun();
+  useTripStore.setState({
+    currentTrip: joined ? trip : { ...trip, picksRun: run },
+    tripPicks: joined
+      ? { ...tp!, pending: [...tp!.pending.filter((r) => r.city !== req.city), req] }
+      : { run, pending: [req], landed: {} },
+  });
+  awaitCityPicks(run, req);
 }
 
 /** The country each city's picks were asked with — the /places call must use the same key. */
@@ -545,7 +571,11 @@ function landCityPicks(run: string, cityName: string, picks: CityPicks) {
   }, FAILED_PICKS_GRACE_MS);
 }
 
-function settleCityPicks(run: string, cityName: string, picks: CityPicks) {
+function settleCityPicks(run: string, cityName: string, rawPicks: CityPicks) {
+  // A pick another stop already has goes to that stop only (ROADMAP: the
+  // Uffizi on Rome's list as well as Florence's).
+  const current = useTripStore.getState().currentTrip;
+  const picks = current && current.picksRun === run ? dedupeAcrossCities(current, cityName, rawPicks) : rawPicks;
   const got = picks.activities.length > 0 || picks.restaurants.length > 0;
   useTripStore.setState((state) => {
     const tp = state.tripPicks;

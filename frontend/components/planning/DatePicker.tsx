@@ -30,15 +30,15 @@ export default function DatePicker({ onSelect, onSkip }: DatePickerProps) {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.2, delay: i * 0.06 }}
             onClick={() => onSelect(s, '', true)}
-            className="px-5 py-3 rounded-full border border-white/10 text-white/70 hover:text-white hover:border-[#4f8ef7]/40 text-[16px] transition-all hover:scale-[1.04] active:scale-[0.97]"
-            style={{ background: 'rgba(255,255,255,0.04)' }}
+            className="px-5 py-3 rounded-full border border-gray-200 text-gray-700 hover:text-gray-900 hover:border-[#2563eb]/40 text-[16px] transition-all hover:scale-[1.04] active:scale-[0.97]"
+            style={{ background: '#ffffff' }}
           >
             {s}
           </motion.button>
         ))}
         <button
           onClick={onSkip}
-          className="flex items-center gap-1.5 text-white/25 hover:text-white/40 text-[15px] transition-colors whitespace-nowrap ml-1"
+          className="flex items-center gap-1.5 text-gray-500 hover:text-gray-700 text-[15px] transition-colors whitespace-nowrap ml-1"
         >
           Skip <SkipForward size={16} />
         </button>

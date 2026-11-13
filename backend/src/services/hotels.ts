@@ -383,6 +383,76 @@ type SearchHotelsParams = {
 };
 
 /**
+ * The stay total for one Booking search row, in the row's currency.
+ *
+ * `min_total_price` is the whole stay for the whole party — measured on real
+ * Rome rows on 2026-11-04 at 3 adults in 1 room and 3 adults in 2 rooms:
+ * every one of 37 rows had `min_total_price` = `gross_amount_per_night` × 3
+ * nights, including apartments that answered a 2-room ask with one unit.
+ *
+ * So the mapping is right for those rows. What it never did was CHECK: the
+ * ROADMAP worry is a row whose occupancy differs from the ask quoting a
+ * figure on a different basis, and `totalPrice / nights` would then be off by
+ * the night count with nothing noticing. Booking's own per-night figure is
+ * the cross-check: when the "total" equals one night rather than N nights,
+ * the total is rebuilt from it.
+ * A total that agrees with neither is left alone (and logged) — the outlier
+ * guards downstream decide what to do with a price we cannot explain.
+ */
+export function stayTotalFromRow(row: any, nights: number, currency?: string): number {
+  const cpb = row?.composite_price_breakdown;
+  const num = (v: unknown) => {
+    const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
+    return Number.isFinite(n) ? n : NaN;
+  };
+  let total = num(row?.min_total_price);
+  if (!(total > 0)) total = num(cpb?.gross_amount?.value);
+  if (!(total > 0)) total = num(row?.price_breakdown?.gross_price);
+  if (!(total > 0)) return Number.isFinite(total) ? total : 0;
+
+  const perNightField = cpb?.gross_amount_per_night;
+  const perNight = num(perNightField?.value);
+  const sameCurrency =
+    !perNightField?.currency || !currency || String(perNightField.currency).toUpperCase() === String(currency).toUpperCase();
+  if (nights <= 1 || !(perNight > 0) || !sameCurrency) return total;
+
+  const near = (a: number, b: number) => Math.abs(a - b) <= 0.02 * b;
+  if (near(total, perNight * nights)) return total;
+  if (near(total, perNight)) {
+    logger.warn('Hotel row quoted one night as the stay total — rebuilt from its nightly rate', {
+      hotel: row?.hotel_name,
+      quoted: total,
+      perNight,
+      nights,
+    });
+    return perNight * nights;
+  }
+  return total;
+}
+
+/**
+ * True when the room blocks Booking priced sleep fewer guests than we asked
+ * for, so the price covers only part of the party.
+ *
+ * Booking's block ids are `room_policy_guests_meal_…`; the third field is the
+ * guests assigned to that block (seen as 2 + 1 for 3 adults in 2 rooms), and
+ * 0 means not stated. Only a row where EVERY block states its guests can be
+ * judged; a short one is flagged rather than dropped, like every other price
+ * we distrust here, so it can never be the auto-picked hotel.
+ */
+export function occupancyShortfall(row: any, adults: number): boolean {
+  const ids: unknown = row?.block_ids;
+  if (!Array.isArray(ids) || ids.length === 0 || !(adults > 0)) return false;
+  let guests = 0;
+  for (const id of ids) {
+    const n = Number(String(id).split('_')[2]);
+    if (!Number.isInteger(n) || n <= 0) return false;
+    guests += n;
+  }
+  return guests < adults;
+}
+
+/**
  * Rooms for a party when the caller doesn't say: two adults to a room.
  *
  * The default used to be one room, set in the route, and every caller in the
@@ -622,7 +692,8 @@ export type PriceSuspectReason =
   | 'above-tier-median'
   | 'above-search-median-unrated'
   | 'above-star-ceiling'
-  | 'below-tier-median';
+  | 'below-tier-median'
+  | 'occupancy-short';
 
 /** A price that could be a real nightly rate. Not a judgement on how good it is. */
 function isUsablePrice(price: number): boolean {
@@ -1312,8 +1383,8 @@ async function searchVettedHotels(params: {
     );
 
     const mapRow = (h: any): HotelResult => {
-      const totalPrice = parseFloat(h.min_total_price ?? h.price_breakdown?.gross_price ?? '0');
       const currency = h.currency_code ?? h.currencycode ?? 'USD';
+      const totalPrice = stayTotalFromRow(h, nights, currency);
       // In the row's currency and unrounded: converted to USD below, at the
       // same rate as the price, and rounded only then.
       const excluded = excludedChargesTotal(h, totalPrice, currency);
@@ -1333,6 +1404,7 @@ async function searchVettedHotels(params: {
           { checkin, checkout, adults, rooms },
         ),
         amenities: [] as string[],
+        ...(occupancyShortfall(h, adults) ? { priceSuspect: true, priceSuspectReason: 'occupancy-short' as const } : {}),
       };
     };
 

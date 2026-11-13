@@ -40,6 +40,9 @@ type ConnectorProps = {
   /** Scroll the card into view once it expands (default). Off when a filter
    *  opens every leg at once — each would pull the flowchart to itself. */
   scrollOnExpand?: boolean;
+  /** Set when this leg is in a region we have no train data for (see
+   *  lib/railCoverage) — the pill and the card say so. */
+  noRailRegion?: string | null;
 };
 
 const formatDateLong = (iso?: string) => {
@@ -67,6 +70,7 @@ export default function Connector({
   onPickAlternative,
   legDate,
   scrollOnExpand = true,
+  noRailRegion,
 }: ConnectorProps) {
   const setTransportOut = useTripStore((s) => s.setTransportOut);
   const priceMode = useTripStore((s) => s.priceMode);
@@ -222,7 +226,7 @@ export default function Connector({
             </div>
 
             <div className="text-[9px] uppercase tracking-wider text-gray-500">
-              Click for details
+              {noRailRegion ? 'No train data' : 'Click for details'}
             </div>
           </button>
 
@@ -436,14 +440,16 @@ export default function Connector({
 
           {/* Honest note: we searched for a train on this (short) route and
               found none, so we say so instead of silently showing only flights. */}
-          {transport.noTrainData && (
+          {(noRailRegion || transport.noTrainData) && (
             <div
               className="px-4 py-2.5 border-t flex items-center gap-1.5"
               style={{ borderColor: 'rgba(0,0,0,0.08)' }}
             >
               <TrainFront size={12} style={{ color: '#888', opacity: 0.6 }} />
               <span className="text-gray-500 text-[11px]">
-                No live train data for this leg — showing flights only.
+                {noRailRegion
+                  ? `We don't have train data for ${noRailRegion} yet — showing flights only.`
+                  : 'No live train data for this leg — showing flights only.'}
               </span>
             </div>
           )}

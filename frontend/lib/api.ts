@@ -411,6 +411,36 @@ export async function converse(params: {
   });
 }
 
+/**
+ * Planning-phase destination correction ("actually Venice not Venezuela").
+ * Returns only the new destination list — every other answer stays where it
+ * is. Throws on failure (503 = assistant unavailable).
+ */
+export type ReviseDestinationsResponse =
+  | {
+      type: 'revision';
+      reply: string;
+      destinations: string[];
+      changes: Array<
+        | { kind: 'add'; city: string; afterCity?: string; beforeCity?: string }
+        | { kind: 'remove'; city: string }
+        | { kind: 'replace'; from: string; to: string }
+      >;
+    }
+  | { type: 'answer'; reply: string; aboutDestinations: boolean };
+
+export async function reviseDestinations(params: {
+  message: string;
+  destinations: string[];
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  currentQuestion?: string;
+}): Promise<ReviseDestinationsResponse> {
+  return apiFetch<ReviseDestinationsResponse>('/api/plan/revise-destinations', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
 export async function interpretPlan(params: {
   rawInput: string;
   userLocation?: string;
@@ -483,13 +513,48 @@ export type LegOption = {
  * Transport changes (show_transport_options, set_transport_window) use a
  * different pattern: type='leg_refresh'. See ChatResponse below.
  */
-export type ChatProposal = {
-  kind: 'date_shift';
-  toolName: 'pin_city_dates' | 'set_min_days';
-  toolInput: any;
-  diff: ChatProposalDiff[];
-  proposedConstraints: any;
-  proposedTrip: any;
+export type ChatProposal =
+  | {
+      kind: 'date_shift';
+      toolName: 'pin_city_dates' | 'set_min_days';
+      toolInput: any;
+      diff: ChatProposalDiff[];
+      proposedConstraints: any;
+      proposedTrip: any;
+    }
+  | CityEditProposal;
+
+/**
+ * add_city / remove_city / replace_city — the backend's planned and priced
+ * city edit (backend services/cityEdit.ts). Applied on Accept by
+ * lib/cityEdit.ts `applyCityEdit`.
+ */
+export type CityEditStop = {
+  name: string;
+  arrival: string;
+  departure: string;
+  status: 'kept' | 'moved' | 'added' | 'replaced';
+  replaces?: string;
+  /** Searched for this stop's dates; absent = not re-searched. */
+  hotels?: HotelResult[];
+};
+
+export type CityEditProposal = {
+  kind: 'city_edit';
+  toolName: 'add_city' | 'remove_city' | 'replace_city';
+  op:
+    | { kind: 'add'; city: string; afterCity?: string | null; beforeCity?: string | null; nights?: number | null }
+    | { kind: 'remove'; city: string }
+    | { kind: 'replace'; oldCity: string; newCity: string };
+  before: Array<{ name: string; arrival: string; departure: string }>;
+  after: CityEditStop[];
+  removed: string[];
+  /** `index` i is the leg after[i] → after[i + 1]. Empty options = nothing found. */
+  legs: Array<{ index: number; from: string; to: string; date: string; options: LegOption[] }>;
+  /** Present only when re-searched; null = searched, nothing found. */
+  outboundLeg?: any;
+  returnLeg?: any;
+  note: string;
 };
 
 /**
@@ -609,6 +674,7 @@ export async function searchActivities(params: {
   vibe?: string;
   travelers?: number;
   nights?: number;
+  otherCities?: string[];
 }): Promise<ActivitySuggestion[]> {
   const data = await withTimeout(AI_PICKS_TIMEOUT_MS, (signal) =>
     apiFetch<{ activities: ActivitySuggestion[] }>('/api/plan/activities', {
@@ -639,6 +705,7 @@ export async function searchRestaurants(params: {
   vibe?: string;
   travelers?: number;
   budget?: number;
+  otherCities?: string[];
 }): Promise<RestaurantSuggestion[]> {
   const data = await withTimeout(AI_PICKS_TIMEOUT_MS, (signal) =>
     apiFetch<{ restaurants: RestaurantSuggestion[] }>('/api/plan/restaurants', {

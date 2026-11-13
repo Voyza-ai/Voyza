@@ -149,6 +149,8 @@ export function buildDayTransportContext(
         startTime: minutesToTime(Math.max(0, departMins - (BUFFER_MIN[t.mode] ?? 60))),
         endTime: minutesToTime(departMins),
         category: 'transport',
+        auto: true,
+        autoRole: 'in-head',
         notes: 'Allow 2h for check-in & security',
       });
       events.push({
@@ -157,6 +159,8 @@ export function buildDayTransportContext(
         startTime: t.departTime,
         endTime: t.arriveTime ?? minutesToTime(Math.min(departMins + 60, 24 * 60)),
         category: 'transport',
+        auto: true,
+        autoRole: 'in-travel',
         notes: t.duration || undefined,
       });
     }
@@ -216,6 +220,8 @@ export function buildDayTransportContext(
         startTime: minutesToTime(headStart),
         endTime: minutesToTime(departMins),
         category: 'transport',
+        auto: true,
+        autoRole: 'in-head',
         notes: t.mode === 'flight' ? 'Allow 2h for check-in & security' : undefined,
       });
       events.push({
@@ -224,6 +230,8 @@ export function buildDayTransportContext(
         startTime: t.departTime!,
         endTime: t.arriveTime!,
         category: 'transport',
+        auto: true,
+        autoRole: 'in-travel',
         notes: t.duration || undefined,
       });
     }
@@ -234,6 +242,8 @@ export function buildDayTransportContext(
       startTime: t.arriveTime!,
       endTime: minutesToTime(Math.min(arrMins + 15, 24 * 60)),
       category: 'transport',
+      auto: true,
+      autoRole: 'in-arrive',
     });
 
     // No activities/restaurants until the user has actually landed and
@@ -260,6 +270,8 @@ export function buildDayTransportContext(
       startTime: minutesToTime(headStart),
       endTime: t.departTime!,
       category: 'transport',
+      auto: true,
+      autoRole: 'out-head',
       notes: t.mode === 'flight' ? 'Allow 2h for check-in & security' : undefined,
     });
 
@@ -270,6 +282,8 @@ export function buildDayTransportContext(
       startTime: t.departTime!,
       endTime,
       category: 'transport',
+      auto: true,
+      autoRole: 'out-travel',
       notes: t.duration || undefined,
     });
 
@@ -725,6 +739,7 @@ export function buildDefaultSchedule(
       endTime: minutesToTime(endMin),
       category: 'restaurant',
       notes: `${r.cuisine} · ${r.priceRange}`,
+      ...coordsOf(r),
     }));
     return {
       key,

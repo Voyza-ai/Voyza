@@ -5,6 +5,8 @@ import { AnimatePresence } from 'framer-motion';
 import { Trip, City, TransportMode } from '@/lib/types';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
 import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
+import { reconcileDayTransport } from '@/lib/transportReconcile';
+import { relayMovedStay } from '@/lib/stayRelay';
 import { homeDepartureDay } from '@/lib/tripSpan';
 import { useTripStore } from '@/store/tripStore';
 import DayCard from './DayCard';
@@ -165,12 +167,34 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
       : dateToCity.get(iso);
 
   const setDaySchedule = useTripStore((s) => s.setDaySchedule);
+  const updateCity = useTripStore((s) => s.updateCity);
   useEffect(() => {
+    // A city whose dates moved (swapped or re-dated in Canvas) has days its
+    // schedule doesn't cover: re-plan that whole stay with the located,
+    // stay-wide planner rather than filling each day from bare names. Those
+    // cities are skipped below this run; the store write re-runs the effect.
+    const relaid = new Set<number>();
+    trip.cities.forEach((_, index) => {
+      const next = relayMovedStay(trip, index);
+      if (!next) return;
+      relaid.add(index);
+      updateCity(index, next);
+    });
     isoDates.forEach((iso) => {
       const match = scheduleOwner(iso);
       if (!match) return; // travel-only day with no city mapping
+      if (relaid.has(match.index)) return;
       const existing = match.city.schedule?.[iso];
-      if (existing && existing.length > 0) return; // user already has events here
+      // A day with a key is planned — an empty one too (the stay ran out of
+      // stops before it ran out of days): filling it from the city's whole
+      // list is what repeated the same stops day after day.
+      if (existing !== undefined) {
+        // Built already: bring its generated travel blocks onto the
+        // current transport (legacy days included), nothing else.
+        const next = reconcileDayTransport(trip, match.index, iso);
+        if (next) setDaySchedule(match.index, iso, next);
+        return;
+      }
       const events = buildDefaultSchedule(match.city, iso, trip, match.index);
       if (events.length > 0) {
         setDaySchedule(match.index, iso, events);

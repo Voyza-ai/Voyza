@@ -151,7 +151,7 @@ describe('typed dates are echoed back whole, in words', () => {
 
   it('a range across New Year: each end with its year', async () => {
     await typeDates('Dec 28 to Jan 4, 2027');
-    expect(await screen.findByText('Dec 28, 2026 – Jan 4, 2027')).toBeInTheDocument();
+    expect(await screen.findByText('Dec 28, 2026 – Jan 4, 2027', { selector: 'div' })).toBeInTheDocument();
   });
 
   it('a single date: the date it was read as', async () => {

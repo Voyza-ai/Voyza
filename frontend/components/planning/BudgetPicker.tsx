@@ -35,10 +35,10 @@ export default function BudgetPicker({ onSelect, onSkip }: BudgetPickerProps) {
     >
       {/* Live readout */}
       <div className="flex items-baseline justify-center gap-2">
-        <span className="text-[34px] font-bold text-white tabular-nums">
+        <span className="text-[34px] font-bold text-gray-900 tabular-nums">
           ${amount.toLocaleString()}
         </span>
-        <span className="text-white/35 text-[14px]">
+        <span className="text-gray-500 text-[14px]">
           {perPerson ? 'per person' : 'total'}
           {amount >= MAX ? '+' : ''}
         </span>
@@ -57,7 +57,7 @@ export default function BudgetPicker({ onSelect, onSkip }: BudgetPickerProps) {
           className="voyza-budget-slider w-full cursor-pointer"
           style={{
             // filled track up to the thumb
-            background: `linear-gradient(90deg, #4f8ef7 0%, #4f8ef7 ${pct}%, rgba(255,255,255,0.12) ${pct}%, rgba(255,255,255,0.12) 100%)`,
+            background: `linear-gradient(90deg, #2563eb 0%, #2563eb ${pct}%, #e5e7eb ${pct}%, #e5e7eb 100%)`,
           }}
         />
         <style jsx>{`
@@ -75,8 +75,8 @@ export default function BudgetPicker({ onSelect, onSkip }: BudgetPickerProps) {
             height: 22px;
             border-radius: 50%;
             background: #ffffff;
-            border: 3px solid #4f8ef7;
-            box-shadow: 0 2px 10px rgba(79, 142, 247, 0.45);
+            border: 3px solid #2563eb;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.18);
             cursor: grab;
           }
           .voyza-budget-slider::-moz-range-thumb {
@@ -84,12 +84,12 @@ export default function BudgetPicker({ onSelect, onSkip }: BudgetPickerProps) {
             height: 22px;
             border-radius: 50%;
             background: #ffffff;
-            border: 3px solid #4f8ef7;
-            box-shadow: 0 2px 10px rgba(79, 142, 247, 0.45);
+            border: 3px solid #2563eb;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.18);
             cursor: grab;
           }
         `}</style>
-        <div className="flex justify-between text-[12px] text-white/30">
+        <div className="flex justify-between text-[12px] text-gray-500">
           <span>${MIN.toLocaleString()} min</span>
           <span>${MAX.toLocaleString()}+ max</span>
         </div>
@@ -102,15 +102,15 @@ export default function BudgetPicker({ onSelect, onSkip }: BudgetPickerProps) {
             type="checkbox"
             checked={perPerson}
             onChange={(e) => setPerPerson(e.target.checked)}
-            className="w-4 h-4 rounded border-white/20 bg-transparent accent-[#4f8ef7]"
+            className="w-4 h-4 rounded border-gray-300 bg-transparent accent-[#2563eb]"
           />
-          <span className="text-white/40 text-[15px]">Per person</span>
+          <span className="text-gray-600 text-[15px]">Per person</span>
         </label>
         <div className="flex items-center gap-4">
           {onSkip && (
             <button
               onClick={onSkip}
-              className="flex items-center gap-1.5 text-white/25 hover:text-white/40 text-[15px] transition-colors"
+              className="flex items-center gap-1.5 text-gray-500 hover:text-gray-700 text-[15px] transition-colors"
             >
               Skip <SkipForward size={16} />
             </button>
@@ -118,7 +118,7 @@ export default function BudgetPicker({ onSelect, onSkip }: BudgetPickerProps) {
           <button
             onClick={() => onSelect(amount, perPerson)}
             className="px-6 py-2.5 rounded-xl text-[15px] font-medium text-white transition-all hover:brightness-110 hover:scale-[1.03] active:scale-[0.97]"
-            style={{ background: '#4f8ef7' }}
+            style={{ background: '#2563eb' }}
           >
             Set budget
           </button>
