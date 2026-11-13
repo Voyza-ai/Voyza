@@ -20,6 +20,7 @@ import CityDetailPanel from '@/components/results/CityDetailPanel';
 import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import NoRailDataNotice from '@/components/results/NoRailDataNotice';
+import { syncShowParamForTab } from '@/components/results/FlowchartFilter';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
 import { searchHotels, fetchHomeLegs, updateTrip, compareLeg, type LegComparison } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
@@ -697,7 +698,18 @@ function ResultsPageInner() {
       {/* View tabs live in the navbar (next to the auth corner) so the cards
           below get the full viewport height. The date-shift savings tip now
           arrives as a BlueMurr AI chat message instead of a page banner. */}
-      <Navbar tabs={<ViewTabs value={view} onChange={setView} />} />
+      <Navbar
+        tabs={
+          <ViewTabs
+            value={view}
+            onChange={(v) => {
+              // ?show= (the flowchart's filter) only lives on the Flowchart tab.
+              syncShowParamForTab(v);
+              setView(v);
+            }}
+          />
+        }
+      />
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
           except the cards area (left↔right) and the AI chat panel. */}

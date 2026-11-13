@@ -1,50 +1,104 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Plane, Building2, MapPin } from 'lucide-react';
+import { Route, Building2, MapPin, Loader2 } from 'lucide-react';
 import { City, Trip } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { hasStay } from './CityCard';
 import { MODE_COLORS } from './Connector';
 
 /**
- * Type filter inside the Flowchart tab: All · Flights · Hotels · Activities.
+ * Type filter inside the Flowchart tab: All · Travel · Hotels · Activities.
  * The city sequence and the dashed-route spine stay on screen in every state;
- * only the cards change (see Flowchart). MOCK for design approval.
+ * only the cards change (see Flowchart).
  */
-export type FlowchartFilter = 'all' | 'flights' | 'hotels' | 'activities';
+export type FlowchartFilter = 'all' | 'travel' | 'hotels' | 'activities';
 
-export const FLOWCHART_FILTERS: FlowchartFilter[] = ['all', 'flights', 'hotels', 'activities'];
+export const FLOWCHART_FILTERS: FlowchartFilter[] = ['all', 'travel', 'hotels', 'activities'];
 
-/** `?show=` value → filter. Anything unknown is All. */
+/** `?show=` value → filter. `flights` is the chip's old name; anything unknown is All. */
 export function parseFlowchartFilter(value: string | null | undefined): FlowchartFilter {
+  if (value === 'flights') return 'travel';
   return (FLOWCHART_FILTERS as string[]).includes(value ?? '') ? (value as FlowchartFilter) : 'all';
 }
 
 /**
+ * The `?show=` the flowchart opens on. Read from the address bar itself on
+ * the client: a tab switch writes it back just before the flowchart mounts,
+ * and Next's own search params catch up a render later.
+ */
+export function readShowParam(fallback: URLSearchParams | null | undefined): string | null {
+  if (typeof window !== 'undefined') return new URLSearchParams(window.location.search).get('show');
+  return fallback?.get('show') ?? null;
+}
+
+const replaceUrl = (url: URL) =>
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+
+/** Put the filter in `?show=` (none for All). Leaves the URL alone when it already says so. */
+export function writeShowParam(filter: FlowchartFilter): void {
+  try {
+    const url = new URL(window.location.href);
+    const want = filter === 'all' ? null : filter;
+    if (url.searchParams.get('show') === want) return;
+    if (want) url.searchParams.set('show', want);
+    else url.searchParams.delete('show');
+    replaceUrl(url);
+  } catch {
+    // URL sync is a convenience; the filter itself already changed
+  }
+}
+
+// `?show=` taken off the URL while another tab is open, put back on return.
+let parkedShow: string | null = null;
+
+/**
+ * Results-page tab change: `?show=` belongs to the Flowchart tab only.
+ * Calendar, Schedule and Map drop it; coming back to the Flowchart puts it
+ * back, so the flowchart opens on the filter it was left on.
+ */
+export function syncShowParamForTab(view: string): void {
+  try {
+    const url = new URL(window.location.href);
+    if (view === 'flowchart') {
+      if (!parkedShow) return;
+      url.searchParams.set('show', parkedShow);
+      parkedShow = null;
+    } else {
+      const show = url.searchParams.get('show');
+      if (!show) return;
+      parkedShow = show;
+      url.searchParams.delete('show');
+    }
+    replaceUrl(url);
+  } catch {
+    // as above
+  }
+}
+
+/** Tests only: forget a parked `?show=`. */
+export function resetParkedShowParam(): void {
+  parkedShow = null;
+}
+
+/**
  * What each chip would show:
- *  - flights: legs with a transport on them (home legs included, "no direct
- *    option" legs not) — a train leg counts too;
+ *  - travel: every leg of the journey, any mode, the home flights included;
  *  - hotels: stays with a hotel picked;
  *  - activities: activities + restaurants, the same number the cards' badges add up to.
  */
 export function flowchartFilterCounts(trip: Trip): Record<Exclude<FlowchartFilter, 'all'>, number> {
-  let flights = 0;
-  if (trip.origin?.city && trip.origin.outboundLeg) flights += 1;
-  trip.cities.forEach((c, i) => {
-    if (i < trip.cities.length - 1 && c.transportOut && !c.transportOut.unavailable) flights += 1;
-  });
-  if (trip.origin?.city && trip.returnToHome && trip.origin.returnLeg) flights += 1;
+  const home = trip.origin?.city ? 1 + (trip.returnToHome ? 1 : 0) : 0;
   return {
-    flights,
+    travel: Math.max(0, trip.cities.length - 1) + home,
     hotels: trip.cities.filter(hasStay).length,
     activities: trip.cities.reduce((n, c) => n + c.activities.length + c.restaurants.length, 0),
   };
 }
 
-const CHIPS: { id: FlowchartFilter; label: string; icon?: typeof Plane }[] = [
+const CHIPS: { id: FlowchartFilter; label: string; icon?: typeof Route }[] = [
   { id: 'all', label: 'All' },
-  { id: 'flights', label: 'Flights', icon: Plane },
+  { id: 'travel', label: 'Travel', icon: Route },
   { id: 'hotels', label: 'Hotels', icon: Building2 },
   { id: 'activities', label: 'Activities', icon: MapPin },
 ];
@@ -110,6 +164,37 @@ export function FlowchartFilterChips({
   );
 }
 
+const EMPTY_COPY: Record<Exclude<FlowchartFilter, 'all'>, string> = {
+  travel: 'No travel legs on this trip.',
+  hotels: 'No hotels picked yet — open a city to choose one.',
+  activities: 'No activities yet — ask BlueMurr AI to add some.',
+};
+
+/**
+ * One quiet line beside the chips when the chosen filter has nothing to show
+ * (count 0). While the AI picks are still on their way, Activities says so —
+ * the cities' loading cards stay on the spine underneath.
+ */
+export function FlowchartFilterEmpty({
+  filter,
+  loading = false,
+}: {
+  filter: Exclude<FlowchartFilter, 'all'>;
+  loading?: boolean;
+}) {
+  const Icon = CHIPS.find((c) => c.id === filter)?.icon ?? Route;
+  return (
+    <div role="status" data-filter-empty={filter} className="flex items-center gap-1.5 text-[12px] text-gray-500">
+      {loading ? (
+        <Loader2 size={12} className="animate-spin" style={{ color: '#2563eb' }} />
+      ) : (
+        <Icon size={12} className="text-gray-400" />
+      )}
+      <span>{loading ? 'BlueMurr AI is still picking activities…' : EMPTY_COPY[filter]}</span>
+    </div>
+  );
+}
+
 const formatDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -131,6 +216,7 @@ export function CompactCityNode({
   city,
   index,
   width,
+  stacked = false,
   isActive,
   isDimmed,
   onHover,
@@ -139,8 +225,10 @@ export function CompactCityNode({
 }: {
   city: City;
   index: number;
-  /** px — 200 beside expanded flights, 300 to sit over an Activities card. */
+  /** px — 136 between Travel's legs, 300 to sit over an Activities card. */
   width: number;
+  /** Dates and nights on lines of their own, for the narrow Travel node. */
+  stacked?: boolean;
   isActive: boolean;
   isDimmed: boolean;
   onHover: () => void;
@@ -152,6 +240,7 @@ export function CompactCityNode({
   const departure = city.dates.departure ? formatDate(city.dates.departure) : '';
   const nights =
     city.dates.arrival && city.dates.departure ? nightsBetween(city.dates.arrival, city.dates.departure) : 0;
+  const nightsLabel = `${nights} ${nights === 1 ? 'night' : 'nights'}`;
   return (
     <motion.div
       animate={{ opacity: isDimmed ? 0.35 : 1, scale: isActive ? 1.04 : 1 }}
@@ -160,12 +249,18 @@ export function CompactCityNode({
       onMouseLeave={onLeave}
       onClick={onClick}
       tabIndex={0}
+      title={city.name}
       data-compact-city={city.name}
-      className="relative flex-shrink-0 rounded-2xl border-2 cursor-pointer overflow-hidden outline-none px-4 py-3 transition-colors duration-300"
+      className={`relative flex-shrink-0 rounded-2xl border-2 cursor-pointer overflow-hidden outline-none py-3 transition-colors duration-300 ${
+        stacked ? 'px-3' : 'px-4'
+      }`}
       style={{ width, background: color.bg, borderColor: isActive ? color.text : color.border }}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-[17px] font-semibold leading-tight truncate" style={{ color: color.text }}>
+        <h3
+          className={`${stacked ? 'text-[15px]' : 'text-[17px]'} font-semibold leading-tight truncate`}
+          style={{ color: color.text }}
+        >
           {city.name}
         </h3>
         <span className="text-[11px] font-medium leading-none flex-shrink-0" style={{ color: color.text }}>
@@ -176,10 +271,13 @@ export function CompactCityNode({
         <span>{arrival}</span>
         <span style={{ color: `${color.text}88` }}>→</span>
         <span>{departure}</span>
-        <span style={{ color: `${color.text}aa` }}>
-          · {nights} {nights === 1 ? 'night' : 'nights'}
-        </span>
+        {!stacked && <span style={{ color: `${color.text}aa` }}>· {nightsLabel}</span>}
       </div>
+      {stacked && (
+        <div className="mt-0.5 text-[12px] whitespace-nowrap" style={{ color: `${color.text}aa` }}>
+          {nightsLabel}
+        </div>
+      )}
     </motion.div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 // PenSquare and Link were left over from before the Edit-in-Canvas button
@@ -18,8 +18,11 @@ import { useAirportNames } from '@/lib/airportNames';
 import {
   type FlowchartFilter,
   parseFlowchartFilter,
+  readShowParam,
+  writeShowParam,
   flowchartFilterCounts,
   FlowchartFilterChips,
+  FlowchartFilterEmpty,
   CompactCityNode,
   PlainRoute,
 } from './FlowchartFilter';
@@ -45,6 +48,13 @@ const MAIN_CARD_HEIGHT = 320;
  */
 const HOME_CARD_WIDTH = 260;
 const HOME_CARD_HEIGHT = 280;
+/**
+ * The Travel filter's node widths. With the tight leg pills (152px) a
+ * round trip of two cities is 2×124 + 2×136 + 3×152 = 976px — inside the
+ * flowchart beside the AI panel at 1440px (about 1,030px).
+ */
+const TRAVEL_HOME_WIDTH = 124;
+const TRAVEL_CITY_WIDTH = 136;
 /**
  * Flat red palette for the home-anchor cards. Matches the pastel
  * theme in `cityColors.ts` — solid background, darker text color,
@@ -74,36 +84,36 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
   // own object even though they're visually linked.
   const [activeSubIndex, setActiveSubIndex] = useState<number | null>(null);
   const [openConnectors, setOpenConnectors] = useState<Set<number>>(new Set());
-  // ── Type filter (All · Flights · Hotels · Activities) ──────────────
-  // Kept in `?show=` so it survives opening a city guide or another tab.
+  // ── Type filter (All · Travel · Hotels · Activities) ───────────────
+  // Kept in `?show=` so it survives opening a city guide; the results page
+  // parks it while another tab is open (syncShowParamForTab).
   const searchParams = useSearchParams();
-  const [filter, setFilterState] = useState<FlowchartFilter>(() =>
-    parseFlowchartFilter(searchParams?.get('show')),
+  const [filter, setFilter] = useState<FlowchartFilter>(() =>
+    parseFlowchartFilter(readShowParam(searchParams)),
   );
-  const setFilter = (next: FlowchartFilter) => {
-    setFilterState(next);
-    try {
-      const url = new URL(window.location.href);
-      if (next === 'all') url.searchParams.delete('show');
-      else url.searchParams.set('show', next);
-      window.history.replaceState(null, '', `${url.pathname}${url.search}`);
-    } catch {
-      // URL sync is a convenience; the filter itself already changed
-    }
-  };
-  // Flights opens every leg; these are the ones the traveller closed there.
-  // All keeps its own open set, so switching back restores it untouched.
-  const [flightsCollapsed, setFlightsCollapsed] = useState<Set<number>>(new Set());
-  const showTransportDetail = filter === 'all' || filter === 'flights';
-  const legExpanded = (key: number) =>
-    filter === 'flights' ? !flightsCollapsed.has(key) : openConnectors.has(key);
+  // The URL follows the filter — and an old `?show=flights` becomes `travel`.
+  useEffect(() => writeShowParam(filter), [filter]);
+  // All and Travel both show the legs as Connector pills. Each keeps its own
+  // open legs, so Travel starts compact and All comes back as it was left.
+  const [travelOpen, setTravelOpen] = useState<Set<number>>(new Set());
+  const showLegs = filter === 'all' || filter === 'travel';
+  const travel = filter === 'travel';
+  const legExpanded = (key: number) => (travel ? travelOpen : openConnectors).has(key);
   const toggleLeg = (key: number) =>
-    (filter === 'flights' ? setFlightsCollapsed : setOpenConnectors)((curr) => {
+    (travel ? setTravelOpen : setOpenConnectors)((curr) => {
       const next = new Set(curr);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
+  // A leg's slot. Keyed by view, so switching between All and Travel mounts
+  // each view's own pills (Travel's are tight) rather than morphing them — a
+  // leg open in All comes back open without re-opening, or scrolling to, it.
+  const legSlot = (connector: ReactNode) => (
+    <div key={travel ? 'travel' : 'all'} className={`flex items-center flex-shrink-0${travel ? '' : ' mx-2'}`}>
+      {connector}
+    </div>
+  );
   const [expandedActivities, setExpandedActivities] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -183,11 +193,18 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
     el.scrollBy({ left: dir === 'left' ? -480 : 480, behavior: 'smooth' });
   };
 
+  const counts = flowchartFilterCounts(trip);
+  const picksPending = trip.cities.some((c) => cityPicksLoading(tripPicks, trip, c.name));
+
   return (
     <div className="relative h-full flex flex-col min-h-0" data-testid="flowchart">
-      {/* Type filter — a row above the cards, inside the Flowchart tab */}
-      <div className="flex-shrink-0 px-3 pt-2">
-        <FlowchartFilterChips value={filter} onChange={setFilter} counts={flowchartFilterCounts(trip)} />
+      {/* Type filter — a row above the cards, inside the Flowchart tab. A
+          filter with nothing to show says so on the same line. */}
+      <div className="flex-shrink-0 px-3 pt-2 flex items-center gap-3">
+        <FlowchartFilterChips value={filter} onChange={setFilter} counts={counts} />
+        {filter !== 'all' && counts[filter] === 0 && (
+          <FlowchartFilterEmpty filter={filter} loading={filter === 'activities' && picksPending} />
+        )}
       </div>
 
       {/* Left scroll button */}
@@ -239,7 +256,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
         `}</style>
 
         <motion.div
-          className="flex items-stretch px-3 pt-3 pb-4 min-w-max gap-6 h-full"
+          className={`flex items-stretch px-3 pt-3 pb-4 min-w-max h-full ${travel ? 'gap-0' : 'gap-6'}`}
           initial="hidden"
           animate="visible"
           variants={{
@@ -261,13 +278,21 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                 visible: { opacity: 1, y: 0, transition: { duration: 0.45 } },
               }}
             >
-              {showTransportDetail ? (
+              {filter === 'all' ? (
                 <HomeCard
                   city={trip.origin.city}
                   airports={trip.origin.airports}
                   label="Home"
                   direction="outbound"
                   leg={trip.origin.outboundLeg ?? null}
+                />
+              ) : travel ? (
+                <CompactHomeNode
+                  city={trip.origin.city}
+                  label="Home"
+                  width={TRAVEL_HOME_WIDTH}
+                  code={trip.origin.outboundLeg?.originAirport || trip.origin.airports[0]}
+                  date={trip.origin.outboundLeg?.departDate}
                 />
               ) : (
                 <CompactHomeNode city={trip.origin.city} label="Home" />
@@ -276,10 +301,10 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                   the real flight, a searching state while the backfill
                   runs, or an honest "no flights found" card. Filtered to
                   Hotels or Activities, just the dashed route. */}
-              {!showTransportDetail ? (
+              {!showLegs ? (
                 <PlainRoute mode="flight" muted={!trip.origin.outboundLeg} />
               ) : trip.origin.outboundLeg ? (
-                <div className="flex items-center flex-shrink-0 mx-2">
+                legSlot(
                   <Connector
                     transport={homeLegToTransport(
                       trip.origin.outboundLeg,
@@ -290,16 +315,16 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     cityIndex={-1}
                     isExpanded={legExpanded(-1)}
                     onToggle={() => toggleLeg(-1)}
-                    scrollOnExpand={filter === 'all'}
+                    tight={travel}
                     onPickAlternative={(altIdx) =>
                       setHomeLegAlternative('outbound', altIdx)
                     }
-                  />
-                </div>
+                  />,
+                )
               ) : homeLegSearch?.outbound ? (
                 <HomeLegSearchingPill />
               ) : (
-                <div className="flex items-center flex-shrink-0 mx-2">
+                legSlot(
                   <Connector
                     transport={{
                       mode: 'flight',
@@ -314,9 +339,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     cityIndex={-1}
                     isExpanded={legExpanded(-1)}
                     onToggle={() => toggleLeg(-1)}
-                    scrollOnExpand={filter === 'all'}
-                  />
-                </div>
+                    tight={travel}
+                  />,
+                )
               )}
             </motion.div>
           )}
@@ -363,7 +388,8 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
               <CompactCityNode
                 city={city}
                 index={idx}
-                width={filter === 'activities' ? 300 : 200}
+                width={travel ? TRAVEL_CITY_WIDTH : 300}
+                stacked={travel}
                 isActive={activeIndex === idx}
                 isDimmed={isDimmed}
                 onHover={() => setActiveIndex(idx)}
@@ -438,8 +464,8 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     so every connector's vertical center lands at the
                     same Y on the flowchart. */}
                 {idx < trip.cities.length - 1 &&
-                  (showTransportDetail ? (
-                    <div className="flex items-center flex-shrink-0 mx-2">
+                  (showLegs ? (
+                    legSlot(
                       <Connector
                         transport={city.transportOut}
                         legDate={city.dates?.departure}
@@ -452,9 +478,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                         cityIndex={idx}
                         isExpanded={legExpanded(idx)}
                         onToggle={() => toggleLeg(idx)}
-                        scrollOnExpand={filter === 'all'}
-                      />
-                    </div>
+                        tight={travel}
+                      />,
+                    )
                   ) : (
                     <PlainRoute
                       mode={city.transportOut?.mode}
@@ -477,10 +503,10 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                 visible: { opacity: 1, y: 0, transition: { duration: 0.45 } },
               }}
             >
-              {!showTransportDetail ? (
+              {!showLegs ? (
                 <PlainRoute mode="flight" muted={!trip.origin.returnLeg} />
               ) : trip.origin.returnLeg ? (
-                <div className="flex items-center flex-shrink-0 mx-2">
+                legSlot(
                   <Connector
                     transport={homeLegToTransport(
                       trip.origin.returnLeg,
@@ -491,16 +517,16 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     cityIndex={-2}
                     isExpanded={legExpanded(-2)}
                     onToggle={() => toggleLeg(-2)}
-                    scrollOnExpand={filter === 'all'}
+                    tight={travel}
                     onPickAlternative={(altIdx) =>
                       setHomeLegAlternative('return', altIdx)
                     }
-                  />
-                </div>
+                  />,
+                )
               ) : homeLegSearch?.return ? (
                 <HomeLegSearchingPill />
               ) : (
-                <div className="flex items-center flex-shrink-0 mx-2">
+                legSlot(
                   <Connector
                     transport={{
                       mode: 'flight',
@@ -515,17 +541,28 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     cityIndex={-2}
                     isExpanded={legExpanded(-2)}
                     onToggle={() => toggleLeg(-2)}
-                    scrollOnExpand={filter === 'all'}
-                  />
-                </div>
+                    tight={travel}
+                  />,
+                )
               )}
-              {showTransportDetail ? (
+              {filter === 'all' ? (
                 <HomeCard
                   city={trip.origin.returnCity ?? trip.origin.city}
                   airports={trip.origin.returnAirports ?? trip.origin.airports}
                   label="Back home"
                   direction="inbound"
                   leg={trip.origin.returnLeg ?? null}
+                />
+              ) : travel ? (
+                <CompactHomeNode
+                  city={trip.origin.returnCity ?? trip.origin.city}
+                  label="Back home"
+                  width={TRAVEL_HOME_WIDTH}
+                  code={
+                    trip.origin.returnLeg?.destAirport ||
+                    (trip.origin.returnAirports ?? trip.origin.airports)[0]
+                  }
+                  date={trip.origin.returnLeg?.departDate}
                 />
               ) : (
                 <CompactHomeNode city={trip.origin.returnCity ?? trip.origin.city} label="Back home" />
@@ -560,24 +597,49 @@ function HomeLegSearchingPill() {
 }
 
 /** A home anchor shrunk to its label and city — the HomeCard's palette and
- *  header strip, without the airport, date and time (flight details). */
-function CompactHomeNode({ city, label }: { city: string; label: string }) {
+ *  header strip. Travel adds the home airport and the leg's date; Hotels and
+ *  Activities leave the flight details out. */
+function CompactHomeNode({
+  city,
+  label,
+  width = 160,
+  code,
+  date,
+}: {
+  city: string;
+  label: string;
+  width?: number;
+  code?: string;
+  date?: string;
+}) {
+  const detail = [code, date ? formatShortDate(date) : null].filter(Boolean).join(' · ');
   return (
     <div className="flex-shrink-0 flex items-center justify-center" data-compact-home={label}>
       <div
-        className="w-[160px] rounded-2xl border-2 overflow-hidden"
-        style={{ background: HOME_COLOR.bg, borderColor: HOME_COLOR.border }}
+        className="rounded-2xl border-2 overflow-hidden"
+        style={{ width, background: HOME_COLOR.bg, borderColor: HOME_COLOR.border }}
       >
         <div className="px-3 py-1.5 flex items-center gap-1.5" style={{ background: HOME_COLOR.text, color: 'white' }}>
           <Home size={12} />
-          <div className="text-[10px] uppercase tracking-wider font-semibold">{label}</div>
+          <div className="text-[10px] uppercase tracking-wider font-semibold whitespace-nowrap">{label}</div>
         </div>
-        <div className="px-3 py-2.5 text-[16px] font-semibold text-center leading-tight" style={{ color: HOME_COLOR.text }}>
-          {city}
+        <div className="px-3 py-2.5 text-center" style={{ color: HOME_COLOR.text }}>
+          <div className={`${detail ? 'text-[15px]' : 'text-[16px]'} font-semibold leading-tight`}>{city}</div>
+          {detail && (
+            <div className="mt-1 text-[10px] font-mono uppercase tracking-wider whitespace-nowrap" style={{ color: `${HOME_COLOR.text}99` }}>
+              {detail}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+/** "Jan 12" — the compact home node's date. */
+function formatShortDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 // ─── Home anchor cards ──────────────────────────────────────

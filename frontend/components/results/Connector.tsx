@@ -37,9 +37,9 @@ type ConnectorProps = {
   /** The leg's travel date when the Transport itself carries none (city legs
    *  loaded from the DB): the from-city's departure date. */
   legDate?: string;
-  /** Scroll the card into view once it expands (default). Off when a filter
-   *  opens every leg at once — each would pull the flowchart to itself. */
-  scrollOnExpand?: boolean;
+  /** Narrower collapsed pill (shorter dashes either side), for the
+   *  flowchart's Travel filter where the whole journey sits on one screen. */
+  tight?: boolean;
   /** Set when this leg is in a region we have no train data for (see
    *  lib/railCoverage) — the pill and the card say so. */
   noRailRegion?: string | null;
@@ -69,7 +69,7 @@ export default function Connector({
   onToggle,
   onPickAlternative,
   legDate,
-  scrollOnExpand = true,
+  tight = false,
   noRailRegion,
 }: ConnectorProps) {
   const setTransportOut = useTripStore((s) => s.setTransportOut);
@@ -88,18 +88,22 @@ export default function Connector({
   // legs keep the plain deep link below.
   const bookDate = transport.departDate ?? legDate;
   const canBookInApp = isFlight && !transport.unavailable && Boolean(bookDate) && Boolean(transport.from && transport.to);
+  // Collapsed geometry: dashes · gap · pill · gap · dashes.
+  const dashMin = tight ? 'min-w-[10px]' : 'min-w-[16px]';
+  const pillGap = tight ? 'mx-1.5' : 'mx-2';
 
   // An expanded card widens in place (transition-[width], 300ms). Near the
   // flowchart's right edge that pushed part of it past the scroller, behind
   // the AI panel (D-14). Once it has widened, scroll it into the flowchart's
   // view; `nearest` leaves a card that is already fully visible where it is.
   const rootRef = useRef<HTMLDivElement>(null);
-  // Read through a ref: only an expand moves the flowchart, not the flag
-  // changing under an already-open card.
-  const scrollOnExpandRef = useRef(scrollOnExpand);
-  scrollOnExpandRef.current = scrollOnExpand;
+  // Only an expand moves the flowchart: a card that mounts already open (the
+  // flowchart's filter switching back to All) stays where the row puts it.
+  const wasExpandedRef = useRef(isExpanded);
   useEffect(() => {
-    if (!isExpanded || !scrollOnExpandRef.current) return;
+    const opened = isExpanded && !wasExpandedRef.current;
+    wasExpandedRef.current = isExpanded;
+    if (!opened) return;
     const t = window.setTimeout(() => {
       rootRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     }, 320);
@@ -115,15 +119,19 @@ export default function Connector({
     const rome2RioUrl = `https://www.rome2rio.com/s/${encodeURIComponent(fromName)}/${encodeURIComponent(toName)}`;
     const dimGray = '#888888';
     return (
-      <div className="flex-shrink-0 flex items-center justify-center self-center w-[200px] px-0 py-8 relative">
+      <div
+        className={`flex-shrink-0 flex items-center justify-center self-center ${
+          tight ? 'w-[172px]' : 'w-[200px]'
+        } px-0 py-8 relative`}
+      >
         <div className="flex items-center w-full">
           <div
-            className="flex-1 h-[2px] min-w-[16px]"
+            className={`flex-1 h-[2px] ${dashMin}`}
             style={{
               backgroundImage: `repeating-linear-gradient(90deg, ${dimGray}aa 0px, ${dimGray}aa 6px, transparent 6px, transparent 11px)`,
             }}
           />
-          <div className="relative z-10 flex flex-col items-center gap-1.5 mx-2 w-[140px]">
+          <div className={`relative z-10 flex flex-col items-center gap-1.5 ${pillGap} w-[140px]`}>
             <div
               className="flex items-center justify-center w-10 h-10 rounded-full border"
               style={{ background: `${dimGray}25`, borderColor: `${dimGray}55` }}
@@ -149,7 +157,7 @@ export default function Connector({
             </div>
           </div>
           <div
-            className="flex-1 h-[2px] min-w-[16px]"
+            className={`flex-1 h-[2px] ${dashMin}`}
             style={{
               backgroundImage: `repeating-linear-gradient(90deg, ${dimGray}aa 0px, ${dimGray}aa 6px, transparent 6px, transparent 11px)`,
             }}
@@ -163,7 +171,7 @@ export default function Connector({
     <div
       ref={rootRef}
       className={`flex-shrink-0 flex items-center justify-center self-center transition-[width] duration-300 ease-out ${
-        isExpanded ? 'w-[560px] px-3 py-4' : 'w-[200px] px-0 py-8'
+        isExpanded ? 'w-[560px] px-3 py-4' : `${tight ? 'w-[152px]' : 'w-[200px]'} px-0 py-8`
       } relative`}
     >
       {!isExpanded ? (
@@ -175,7 +183,7 @@ export default function Connector({
         <div className="flex items-center w-full">
           {/* Left dashed segment */}
           <motion.div
-            className="flex-1 h-[2px] min-w-[16px] origin-right"
+            className={`flex-1 h-[2px] ${dashMin} origin-right`}
             initial={{ scaleX: 0 }}
             animate={{ scaleX: 1 }}
             transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1], delay: 0.2 }}
@@ -191,7 +199,7 @@ export default function Connector({
               e.stopPropagation();
               onToggle();
             }}
-            className="relative z-10 flex flex-col items-center gap-1.5 outline-none transition-transform duration-150 hover:scale-[1.04] active:scale-[0.97] mx-2 w-[120px]"
+            className={`relative z-10 flex flex-col items-center gap-1.5 outline-none transition-transform duration-150 hover:scale-[1.04] active:scale-[0.97] ${pillGap} w-[120px]`}
             aria-label="Show travel details"
           >
             {/* Icon badge */}
@@ -232,7 +240,7 @@ export default function Connector({
 
           {/* Right dashed segment */}
           <motion.div
-            className="flex-1 h-[2px] min-w-[16px] origin-left"
+            className={`flex-1 h-[2px] ${dashMin} origin-left`}
             initial={{ scaleX: 0 }}
             animate={{ scaleX: 1 }}
             transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1], delay: 0.2 }}
