@@ -273,6 +273,24 @@ describe('switching to a named option', () => {
     expect(searchFlights).not.toHaveBeenCalled();
   });
 
+  it('"the British Airways one" by airline name alone → that card option, no search', async () => {
+    const res = await chat(app, 'select_transport_option', { leg: 'London→home', operator: 'British Airways' });
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after).toMatchObject({ operator: 'British Airways', price: 435.36 });
+    expect(searchFlights).not.toHaveBeenCalled();
+  });
+
+  it('an airline not on the card is searched for, not asked about (live: a listing had replaced the card)', async () => {
+    const t = trip();
+    t.origin.returnLeg.alternatives = t.origin.returnLeg.alternatives.filter((a: any) => !/british/i.test(a.operator));
+    const res = await chat(app, 'select_transport_option', { leg: 'London→home', operator: 'British Airways' }, t);
+    expect(res.body.type).toBe('proposal');
+    // The cheapest British Airways flight home the search finds: EWR 12:23 $435.36.
+    expect(res.body.proposal.after).toMatchObject({ operator: 'British Airways', departTime: '12:23', toAirport: 'EWR', price: 435.36 });
+    expect(res.body.reply).toMatch(/^The cheapest British Airways flight home \(London → New York\) I found:/);
+    expect(searchFlights).toHaveBeenCalled();
+  });
+
   it('finds the leg from the option id alone, and says so when the option is already the current one', async () => {
     const res = await chat(app, 'select_transport_option', { optionId: 'London→home#0' });
     expect(res.body.type).toBe('answer');

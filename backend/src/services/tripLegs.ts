@@ -650,8 +650,10 @@ export function describeRequest(request: ChoiceRequest, leg: TripLeg): string {
   if (request.relative) words.push(request.relative);
   if (request.timeOfDay) words.push(request.timeOfDay);
   const thing = request.mode ?? (leg.current?.mode === 'train' ? 'train' : 'flight');
+  // "cheaper British Airways flight", not "cheaper flight with British Airways"
+  // (which read "the cheapest flight with British Airways home").
+  if (request.operator) words.push(request.operator);
   let s = `${words.length ? words.join(' ') + ' ' : ''}${thing}`;
-  if (request.operator) s += ` with ${request.operator}`;
   const w = request.window;
   if (w && !request.timeOfDay) {
     const bits: string[] = [];

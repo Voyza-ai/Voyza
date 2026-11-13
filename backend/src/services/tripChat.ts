@@ -157,14 +157,18 @@ export const CHAT_TOOLS = [
   {
     name: 'select_transport_option',
     description:
-      'Switch a leg to ONE specific option already listed in that leg\'s cardOptions — "switch to the British Airways one", "take the 19:25", "the second option", "the cheapest one on the card". Pass the leg id and that option\'s optionId. The user sees the change with its exact price difference and must Accept it.',
+      'Switch a leg to ONE specific option already listed in that leg\'s cardOptions — "switch to the British Airways one", "take the 19:25", "the second option", "the cheapest one on the card". Pass the leg id and that option\'s optionId — or, for an airline the user named that is NOT on the card, just the leg and operator (the server searches for it). The user sees the change with its exact price difference and must Accept it. Never ask whether to search.',
     input_schema: {
       type: 'object' as const,
       properties: {
         leg: legParam,
-        optionId: { type: 'string', description: 'The optionId from that leg\'s cardOptions, e.g. "London→home#2".' },
+        optionId: { type: 'string', description: 'The optionId from that leg\'s cardOptions, e.g. "London→home#2". Omit when the user named only an airline.' },
+        operator: {
+          type: 'string',
+          description: 'The airline / operator the user named ("the British Airways one") when you have no optionId for it. The server takes that airline\'s option from the card, or searches the leg for it when the card has none.',
+        },
       },
-      required: ['leg', 'optionId'],
+      required: ['leg'],
     },
   },
   {
@@ -370,7 +374,7 @@ Tools:
 
 ALWAYS pick exactly one tool per turn.
 
-Changing transport: if the option the user names is in that leg's cardOptions, use select_transport_option; otherwise find_transport_option. Pass what they asked ("later in the evening" → relative "later" AND timeOfDay "evening"; "cheaper" → cheaper true). The server searches, checks and words the result — don't promise prices or times yourself.
+Changing transport: if the option the user names is in that leg's cardOptions, use select_transport_option; otherwise find_transport_option — call it straight away (an airline the user names → operator; a time → the matching time fields). Never ask whether to search, and never answer that an option "isn't on the card": search for it. Pass what they asked ("later in the evening" → relative "later" AND timeOfDay "evening"; "cheaper" → cheaper true). The server searches, checks and words the result — don't promise prices or times yourself.
 
 If there is only ONE leg, use it. If the user names a city pair that isn't a leg, call the tool with what they said; the server lists the real legs.
 
@@ -519,7 +523,7 @@ function propose(
 }
 
 /** select_transport_option: exactly the card option the user named. */
-function selectOption(currentTrip: any, legs: TripLeg[], input: any): TripChatResult {
+async function selectOption(currentTrip: any, legs: TripLeg[], input: any): Promise<TripChatResult> {
   const optionId = typeof input?.optionId === 'string' ? input.optionId.trim() : '';
   // The option id carries its leg; use it when the leg wasn't given.
   const ref = input?.leg ?? (optionId ? optionId.replace(/[#~]\d+$/, '') : undefined);
@@ -532,9 +536,23 @@ function selectOption(currentTrip: any, legs: TripLeg[], input: any): TripChatRe
   const prefix = optionId.replace(/[#~]?\d+$/, '');
   const prefixLookup = prefix ? legFor(currentTrip, legs, { leg: prefix }) : null;
   const sameLeg = !prefix || (prefixLookup?.kind === 'leg' && prefixLookup.leg.id === leg.id);
-  const option =
+  let option =
     leg.options.find((o) => o.optionId === optionId) ??
     (n != null && sameLeg ? leg.options.find((o) => o.optionId === `${leg.id}#${n}`) : undefined);
+  // "Switch to the British Airways one" with no optionId: that airline's
+  // cheapest option on the card — or, when the card has none (a listing can
+  // have replaced it), search the leg for that airline instead of asking.
+  const operator = typeof input?.operator === 'string' ? input.operator.trim() : '';
+  if (!option && operator && !optionId) {
+    const named = (c: LegChoice) => !!c.operator && c.operator.toLowerCase().includes(operator.toLowerCase());
+    const onCard = leg.options
+      .filter((o) => named(o) && !(leg.current && o.optionId === leg.current.optionId))
+      .sort((a, b) => (a.price || Infinity) - (b.price || Infinity))[0];
+    if (onCard) option = onCard;
+    else if (leg.current && named(leg.current)) {
+      return { type: 'answer', reply: `${describeChoice(leg.current)} is already ${legPhrase(leg)}, so there's nothing to change.` };
+    } else return findOption(currentTrip, legs, { leg: leg.id, operator }, 'find_transport_option');
+  }
   if (!option) {
     const listed = leg.options.filter((o) => o !== leg.current);
     return {
