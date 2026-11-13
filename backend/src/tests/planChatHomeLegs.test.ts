@@ -326,7 +326,8 @@ describe('date edits are priced before they are proposed', () => {
     expect(p.legs).toEqual([]);
     expect(p.constraints.min_days).toEqual([{ city: 'London', minNights: 3 }]);
     expect(res.body.reply).toBe(
-      'Giving you three nights in London. New dates: London Jan 15–Jan 18 (3 nights). Your flight home moves to Jan 18. Accept to apply it.',
+      'Giving you three nights in London. New dates: London Jan 15–Jan 18 (3 nights). Your flight home moves to Jan 18. ' +
+        'Flight home: American Airlines LON 13:09 → JFK 16:10 on Jan 18, $441 (was American Airlines at $432). Accept to apply it.',
     );
   });
 });

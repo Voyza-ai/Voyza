@@ -190,15 +190,11 @@ describe('B9 — leg tools only act on legs in the trip order', () => {
     expect(mockCompareLeg).not.toHaveBeenCalled();
   });
 
-  it('still refreshes a real leg (control)', async () => {
+  it('still lists options for a real leg (control)', async () => {
     const res = await chat(app, 'show_transport_options', { from: 'Rome', to: 'Venice', explanation: 'x' });
-    expect(res.body.type).toBe('leg_refresh');
-    expect(res.body.refresh.fromCity).toBe('Rome');
-    expect(res.body.refresh.toCity).toBe('Venice');
-    expect(res.body.refresh.date).toBe('2026-12-10');
-    // Both fresh fares are listed. (Whether the leg's current $110 also
-    // leads the list is D-03's rule, tested below.)
-    expect(res.body.refresh.options.map((o: any) => o.price)).toEqual(expect.arrayContaining([110, 120]));
+    expect(res.body.type).toBe('leg_options');
+    expect(res.body.legOptions.leg).toMatchObject({ kind: 'intercity', from: 'Rome', to: 'Venice', date: '2026-12-10' });
+    expect(res.body.legOptions.options.map((o: any) => o.price)).toEqual(expect.arrayContaining([110, 120]));
   });
 
   it('finds the right leg when a city is visited twice (Rome → Florence → Rome)', async () => {
@@ -206,9 +202,9 @@ describe('B9 — leg tools only act on legs in the trip order', () => {
     t.cities[1] = { ...t.cities[2], name: 'Florence', dates: { arrival: '2026-12-10', departure: '2026-12-12' } };
     t.cities[2] = { ...t.cities[0], name: 'Rome', dates: { arrival: '2026-12-12', departure: '2026-12-14' } };
     const res = await chat(app, 'show_transport_options', { from: 'Florence', to: 'Rome', explanation: 'x' }, t);
-    expect(res.body.type).toBe('leg_refresh');
+    expect(res.body.type).toBe('leg_options');
     // Florence's departure, not the first Rome visit's.
-    expect(res.body.refresh.date).toBe('2026-12-12');
+    expect(res.body.legOptions.leg).toMatchObject({ from: 'Florence', to: 'Rome', date: '2026-12-12' });
   });
 
   it('keeps the existing reply for a city that is not in the trip at all', async () => {
@@ -232,13 +228,11 @@ describe('B10 — time windows', () => {
     expect(res.body.reply).not.toContain('5pm');
   });
 
-  it('filters and stores the normalised bound ("3pm" keeps only the 16:00)', async () => {
+  it('filters by the normalised bound ("3pm" → the 16:00) and proposes it for Accept', async () => {
     const res = await chat(app, 'set_transport_window', windowTool({ earliestDepart: '3pm' }));
-    expect(res.body.type).toBe('leg_refresh');
-    expect(res.body.refresh.options.map((o: any) => o.departTime)).toEqual(['16:00']);
-    expect(res.body.refresh.updatedConstraints.transport_windows).toEqual([
-      { from: 'Rome', to: 'Venice', earliestDepart: '15:00', latestDepart: null, earliestArrive: null, latestArrive: null },
-    ]);
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal).toMatchObject({ kind: 'transport_change', leg: { kind: 'intercity', from: 'Rome', to: 'Venice' } });
+    expect(res.body.proposal.after).toMatchObject({ departTime: '16:00', price: 110 });
     expect(res.body.reply).toContain('departing after 15:00');
   });
 
@@ -252,8 +246,8 @@ describe('B10 — time windows', () => {
 
   it('treats a blank bound as unset, not as unreadable', async () => {
     const res = await chat(app, 'set_transport_window', windowTool({ earliestDepart: '15:00', latestArrive: '' }));
-    expect(res.body.type).toBe('leg_refresh');
-    expect(res.body.refresh.updatedConstraints.transport_windows[0].latestArrive).toBeNull();
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after).toMatchObject({ departTime: '16:00' });
   });
 });
 
@@ -417,7 +411,7 @@ describe('B10 — set_min_days', () => {
   });
 });
 
-describe('D-03 — a transport refresh never swaps in a pricier option', () => {
+describe('D-03 — showing options never changes the leg; a change is always a proposal', () => {
   const app = createApp();
   /** baseTrip with Rome → Venice currently at `price`, optionally overriding its fields. */
   const tripWithRomeVenice = (price: number, extra: Record<string, any> = {}) => {
@@ -427,49 +421,41 @@ describe('D-03 — a transport refresh never swaps in a pricier option', () => {
     return t;
   };
 
-  it('keeps the current option when nothing fresh is cheaper, and says so', async () => {
-    // Fresh Rome → Venice: $110 (16:00) and $120 (07:15); current is $105.
-    // Before: options[0] was the $110, which the frontend made the leg's
-    // selection — the "cheaper" request raised the trip total by $5.
-    const res = await chat(app, 'show_transport_options', { from: 'Rome', to: 'Venice', explanation: 'x' }, tripWithRomeVenice(105));
-    expect(res.body.type).toBe('leg_refresh');
-    const [first, ...rest] = res.body.refresh.options;
-    expect(first).toMatchObject({ mode: 'flight', operator: 'X', price: 105, priceDelta: 0, duration: '1h' });
-    expect(rest.map((o: any) => o.price)).toEqual([110, 120]);
-    expect(res.body.reply).toContain('nothing cheaper than your current $105');
-    expect(res.body.reply).toContain('kept it');
-    expect(res.body.reply).not.toMatch(/cheapest is \+/);
+  // Live (New York → Paris → London): an inter-city refresh swapped the
+  // selected leg itself — "Leave Paris after 3pm" added $77 to the header and
+  // "show me options" took it off again, with no Accept and a reply saying
+  // "pick one on the transport card".
+  it('"show options" lists them and changes nothing, whatever they cost', async () => {
+    for (const price of [105, 130]) {
+      const res = await chat(app, 'show_transport_options', { from: 'Rome', to: 'Venice', explanation: 'x' }, tripWithRomeVenice(price));
+      expect(res.body.type).toBe('leg_options');
+      expect(res.body.proposal).toBeUndefined();
+      expect(res.body.refresh).toBeUndefined();
+      expect(res.body.legOptions.options.map((o: any) => o.price)).toEqual([110, 120]);
+      expect(res.body.reply).toContain('Nothing has changed yet');
+    }
   });
 
-  it('keeps the current option on a tie too (no churn for the same price)', async () => {
-    const res = await chat(app, 'show_transport_options', { from: 'Rome', to: 'Venice', explanation: 'x' }, tripWithRomeVenice(110));
-    expect(res.body.refresh.options[0]).toMatchObject({ operator: 'X', price: 110 });
-  });
-
-  it('drops the fresh copy of the current option instead of listing it twice', async () => {
+  it('does not list the current option again', async () => {
     const res = await chat(
       app,
       'show_transport_options',
       { from: 'Rome', to: 'Venice', explanation: 'x' },
       tripWithRomeVenice(110, { operator: 'Mock Air', departTime: '16:00' }),
     );
-    expect(res.body.refresh.options.map((o: any) => `${o.departTime} $${o.price}`)).toEqual(['16:00 $110', '07:15 $120']);
+    expect(res.body.legOptions.options.map((o: any) => `${o.departTime} $${o.price}`)).toEqual(['07:15 $120']);
   });
 
-  it('still switches to a fresh option that is cheaper (control)', async () => {
-    const res = await chat(app, 'show_transport_options', { from: 'Rome', to: 'Venice', explanation: 'x' }, tripWithRomeVenice(130));
-    expect(res.body.refresh.options[0]).toMatchObject({ departTime: '16:00', price: 110, priceDelta: -20 });
-    expect(res.body.reply).toContain('cheapest saves $20');
-  });
-
-  it('does not apply to set_transport_window, which must move off a current option outside the window', async () => {
+  it('a time window moving off a current option outside it is a priced proposal', async () => {
     const res = await chat(
       app,
       'set_transport_window',
       { from: 'Rome', to: 'Venice', earliestDepart: '15:00', latestDepart: null, earliestArrive: null, latestArrive: null, explanation: 'x' },
       tripWithRomeVenice(105),
     );
-    expect(res.body.refresh.options[0]).toMatchObject({ departTime: '16:00', price: 110 });
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after).toMatchObject({ departTime: '16:00', price: 110 });
+    expect(res.body.proposal.priceDelta).toBe(5);
   });
 });
 

@@ -382,6 +382,7 @@ Tools:
 
 ALWAYS pick exactly one tool per turn.
 
+Each request stands on its own: never carry a time bound, airline or other filter over from an earlier message unless the user clearly refers back to it ("the same time", "that one"). "Make it cheaper" with no leg named: ask which leg (ask_which_leg).
 Changing transport: if the option the user names is in that leg's cardOptions, use select_transport_option; otherwise find_transport_option — call it straight away (an airline the user names → operator; a time → the matching time fields). Never ask whether to search, and never answer that an option "isn't on the card": search for it. Pass what they asked ("later in the evening" → relative "later" AND timeOfDay "evening"; "cheaper" → cheaper true). The server searches, checks and words the result — don't promise prices or times yourself.
 
 If there is only ONE leg, use it. If the user names a city pair that isn't a leg, call the tool with what they said; the server lists the real legs.
@@ -471,7 +472,7 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
     // before anything was searched (see compare_modes, D-07).
     return {
       type: 'proposal',
-      reply: `${describeCityEdit(built.proposal)} ${built.proposal.note} Accept to apply it.`,
+      reply: `${describeCityEdit(built.proposal)} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)} Accept to apply it.`,
       proposal: built.proposal,
     };
   }
@@ -794,139 +795,13 @@ async function refreshLeg(currentTrip: any, legs: TripLeg[], toolName: string, t
   if (lookup.kind !== 'leg') return { type: 'answer', reply: lookupReply(lookup, legs) };
   const leg = lookup.leg;
 
-  if (leg.kind !== 'intercity') {
-    if (toolName === 'show_transport_options') return findOption(currentTrip, legs, { leg: leg.id }, toolName, true);
-    return findOption(currentTrip, legs, { ...toolInput, leg: leg.id, list: false }, toolName);
-  }
-
-  const fromCity = currentTrip.cities[leg.index];
-  const toCity = currentTrip.cities[leg.index + 1];
-  const travelDate = fromCity.dates?.departure ?? fromCity.departure_date ?? null;
-  if (!travelDate) {
-    return { type: 'answer', reply: `I need a departure date for ${fromCity.name} before I can find matching options.` };
-  }
-
-  const currentTransport = fromCity.transportOut ?? null;
-  const currentPrice = currentTransport?.price ?? 0;
-  const existingConstraints: TripConstraints = currentTrip.constraints ?? {};
-
-  // Bounds are normalised to HH:MM here ("5pm" → "17:00") so the filter,
-  // the reply and the stored constraint all use the same value. A bound we
-  // can't read is answered as such BEFORE searching (B10).
-  let window: NormalizedTimeWindow | undefined;
-  if (toolName === 'set_transport_window') {
-    const normalized = normalizeTimeWindow({
-      earliestDepart: toolInput.earliestDepart,
-      latestDepart: toolInput.latestDepart,
-      earliestArrive: toolInput.earliestArrive,
-      latestArrive: toolInput.latestArrive,
-    });
-    if (!normalized.ok) {
-      return {
-        type: 'answer',
-        reply: `I couldn\'t set a time window on ${fromCity.name} → ${toCity.name}: ${JSON.stringify(normalized.raw)} isn\'t a clock time I can use for the ${WINDOW_BOUND_LABEL[normalized.bound]}. Give me one like 17:00 or 5pm.`,
-      };
-    }
-    window = normalized.window;
-  }
-
-  const legSearch = await searchLegOptions({
-    from: fromCity.name,
-    to: toCity.name,
-    date: travelDate,
-    travelers: currentTrip.travelers ?? 1,
-    fromCountry: fromCity.country ?? getCityCountry(fromCity.name),
-    toCountry: toCity.country ?? getCityCountry(toCity.name),
-    window,
-    currentPrice,
-    limit: 4,
-  });
-
-  // Count every match (pre-limit) so the summary can say "found 12,
-  // showing top 4" — only when a window is present.
-  let totalFound = legSearch.options.length;
-  if (window) {
-    const unlimited = await searchLegOptions({
-      from: fromCity.name,
-      to: toCity.name,
-      date: travelDate,
-      travelers: currentTrip.travelers ?? 1,
-      fromCountry: fromCity.country ?? getCityCountry(fromCity.name),
-      toCountry: toCity.country ?? getCityCountry(toCity.name),
-      window,
-      currentPrice,
-      limit: 100,
-    }).catch(() => null);
-    if (unlimited) totalFound = unlimited.options.length;
-  }
-
-  if (!legSearch.hasMatches) {
-    const bounds = window ? describeWindow(window) : '';
-    const conflict =
-      window && legSearch.windowFilteredAll
-        ? `No flights or trains from ${fromCity.name} to ${toCity.name} match ${bounds}. Want me to relax the window, or pick a different departure date?`
-        : `I couldn\'t find any flights or trains from ${fromCity.name} to ${toCity.name} on ${travelDate}. Try another date.`;
-    return { type: 'answer', reply: conflict };
-  }
-
-  const shownCount = legSearch.options.length;
-  const cheapest = legSearch.options[0];
-
-  // The frontend makes options[0] the leg's selection, so a refresh whose
-  // fresh cheapest costs MORE than the current option raised the trip on a
-  // "cheaper" request (D-03). show_transport_options keeps the current
-  // option first; set_transport_window is exempt (the current option may
-  // break the window).
-  const keepCurrent =
-    toolName === 'show_transport_options' && currentTransport != null && currentPrice > 0 && cheapest.price >= currentPrice;
-  let options = legSearch.options;
-  if (keepCurrent) {
-    const kept = transportToLegOption(currentTransport, cheapest.currency);
-    options = [kept, ...options.filter((o) => !isSameLegOption(o, kept))].slice(0, 4);
-  }
-
-  const summaryBits: string[] = [];
-  const foundCountPhrase =
-    totalFound > shownCount
-      ? `Found ${totalFound}, showing the top ${shownCount}`
-      : `Found ${shownCount} option${shownCount === 1 ? '' : 's'}`;
-  summaryBits.push(`${foundCountPhrase} for ${fromCity.name} → ${toCity.name}`);
-  if (window) {
-    const windowPhrase = describeWindow(window);
-    if (windowPhrase) summaryBits.push(windowPhrase);
-  }
-  const delta = cheapest.priceDelta;
-  if (keepCurrent) {
-    const nextBest = delta >= 0.5 ? `next best is +$${delta.toFixed(0)}` : 'next best costs the same';
-    summaryBits.push(`nothing cheaper than your current $${currentPrice.toFixed(0)}, so I kept it (${nextBest})`);
-  } else if (currentPrice > 0 && delta < 0) {
-    summaryBits.push(`cheapest saves $${Math.abs(delta).toFixed(0)}`);
-  } else if (currentPrice > 0 && delta > 0) {
-    summaryBits.push(`cheapest is +$${delta.toFixed(0)}`);
-  }
-  const summary = summaryBits.join(' — ') + '. Pick one on the transport card to use it.';
-
-  let updatedConstraints = existingConstraints;
-  if (toolName === 'set_transport_window' && window) {
-    updatedConstraints = mergeConstraints(existingConstraints, {
-      transport_windows: [
-        {
-          from: fromCity.name,
-          to: toCity.name,
-          earliestDepart: window.earliestDepart,
-          latestDepart: window.latestDepart,
-          earliestArrive: window.earliestArrive,
-          latestArrive: window.latestArrive,
-        },
-      ],
-    });
-  }
-
-  return {
-    type: 'leg_refresh',
-    reply: summary,
-    refresh: { fromCity: fromCity.name, toCity: toCity.name, date: travelDate, options, totalFound, updatedConstraints },
-  };
+  // Every leg, inter-city included, the same way: "show me options" adds them
+  // to the leg's card and changes nothing; a time window is a priced proposal
+  // the user Accepts. (Live: an inter-city refresh swapped the selected leg on
+  // its own — "Leave Paris after 3pm" added $77 to the header and "show me
+  // options" took it off again, with no Accept and a reply saying "pick one".)
+  if (toolName === 'show_transport_options') return findOption(currentTrip, legs, { leg: leg.id }, toolName, true);
+  return findOption(currentTrip, legs, { ...toolInput, leg: leg.id, list: false }, toolName);
 }
 
 // ─── pin_city_dates / set_min_days ────────────────────────────────
@@ -1022,7 +897,7 @@ async function dateTool(currentTrip: any, toolName: string, toolInput: any): Pro
     priced.proposal.constraints = proposedConstraints;
     return {
       type: 'proposal',
-      reply: `${replyText} ${plan.note} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
+      reply: `${replyText} ${plan.note}${homeFlightChanges(currentTrip, priced.proposal)} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
       proposal: priced.proposal,
     };
   }
@@ -1073,6 +948,28 @@ function isSameLegOption(a: LegOption, b: LegOption): boolean {
 }
 
 /** "Here's your trip with Venice added after Rome." — from the planned edit. */
+/**
+ * The home flights a city or date edit re-searched, as sentences: the card's
+ * total includes them, so the reply says what they are and what they replace
+ * (live: swapping London for Edinburgh read "−$421" with no word that the
+ * $867 flight home had become a $414 one from Edinburgh).
+ */
+function homeFlightChanges(currentTrip: any, p: CityEditProposal): string {
+  const was = (old: any) => (old && Number(old.price) > 0 ? ` (was ${old.operator || 'a flight'} at ${money(Number(old.price))})` : '');
+  const flight = (l: any) =>
+    `${l.operator || 'a flight'} ${[l.originAirport, l.departTime].filter(Boolean).join(' ')} → ${[l.destAirport, l.arriveTime].filter(Boolean).join(' ')} on ${shortDate(l.departDate)}, ${money(Number(l.price) || 0)}${perPersonWord()}`;
+  const out: string[] = [];
+  const legs: Array<['outboundLeg' | 'returnLeg', string]> = [['outboundLeg', 'Flight out'], ['returnLeg', 'Flight home']];
+  for (const [key, label] of legs) {
+    if (!(key in p)) continue;
+    const next = (p as any)[key];
+    const old = currentTrip?.origin?.[key];
+    if (next == null) out.push(`I found no ${label.toLowerCase()} for the new dates, so the total leaves it out.`);
+    else out.push(`${label}: ${flight(next)}${was(old)}.`);
+  }
+  return out.length ? ` ${out.join(' ')}` : '';
+}
+
 function describeCityEdit(p: CityEditProposal): string {
   const op = p.op;
   if (op.kind === 'replace') {
