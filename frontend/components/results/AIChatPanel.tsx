@@ -387,7 +387,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     setIsTyping(true);
 
     try {
-      const result = await planChat({ message: trimmed, currentTrip: trip, history });
+      const result = await planChat({ message: trimmed, currentTrip: trip, history, priceMode });
 
       if (result.type === 'leg_refresh') {
         // The chat wants to update the transport card directly — no inline

@@ -689,6 +689,8 @@ export async function planChat(params: {
   message: string;
   currentTrip: any;
   history?: ChatTurn[];
+  /** The header's price mode, so the reply quotes amounts as the card does. */
+  priceMode?: 'total' | 'perPerson';
 }): Promise<ChatResponse> {
   return apiFetch<ChatResponse>('/api/plan/chat', {
     method: 'POST',

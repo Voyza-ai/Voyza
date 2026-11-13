@@ -21,6 +21,7 @@
  * passengers; hotels priced for every room) — the unit the results header
  * sums (frontend lib/tripTotals.ts `liveTripTotal`).
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { formatDurationMinutes, parseDurationMinutes } from '../utils/duration';
 import { getCityCountry } from '../data/cityCountries';
 import { logger } from '../utils/logger';
@@ -840,14 +841,46 @@ export function verifyTransportProposal(p: TransportChangeProposal, leg: TripLeg
 
 // ─── Words ────────────────────────────────────────────────────────
 
+/**
+ * The units the chat's words use, per request: the header's. With "Per
+ * person" on (and more than one traveller) every amount is the party amount
+ * ÷ travellers, rounded — exactly as the card and header show it
+ * (frontend lib/tripTotals.ts displayAmount) — and a difference is taken
+ * between the two shown amounts, as the card's is.
+ */
+const priceUnits = new AsyncLocalStorage<{ divisor: number }>();
+
+export function withPriceUnits<T>(priceMode: unknown, travelers: unknown, fn: () => T): T {
+  const t = Number(travelers);
+  const divisor = priceMode === 'perPerson' && Number.isFinite(t) && t > 1 ? Math.round(t) : 1;
+  return priceUnits.run({ divisor }, fn);
+}
+
+const unitDivisor = (): number => priceUnits.getStore()?.divisor ?? 1;
+
+/** " per person" when amounts are per person, else "". */
+export function perPersonWord(): string {
+  return unitDivisor() > 1 ? ' per person' : '';
+}
+
+function signedWhole(r: number): string {
+  if (r === 0) return '±$0';
+  return `${r > 0 ? '+' : '−'}$${Math.abs(r).toLocaleString('en-US')}`;
+}
+
 export function money(n: number): string {
-  return `$${Math.round(Math.abs(n)).toLocaleString('en-US')}`;
+  return `$${Math.round(Math.abs(n) / unitDivisor()).toLocaleString('en-US')}`;
 }
 
 export function signedMoney(n: number): string {
-  const r = Math.round(n);
-  if (r === 0) return '±$0';
-  return `${r > 0 ? '+' : '−'}${money(r)}`;
+  return signedWhole(Math.round(n / unitDivisor()));
+}
+
+/** The difference between two amounts, as the two shown amounts differ. */
+export function moneyDiff(from: number, to: number): string {
+  const d = unitDivisor();
+  if (d === 1) return signedWhole(Math.round(to - from));
+  return signedWhole(Math.round(to / d) - Math.round(from / d));
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -873,7 +906,7 @@ export function describeChoice(c: LegChoice): string {
 export function describeTransportProposal(p: TransportChangeProposal, leg: TripLeg, lead: string): string {
   const parts: string[] = [];
   const now = p.before ? ` instead of ${describeChoice(p.before)} at ${money(p.before.price)}` : '';
-  parts.push(`${lead} ${describeChoice(p.after)} on ${shortDate(p.after.departDate ?? leg.date)}, ${money(p.after.price)}${now}.`);
+  parts.push(`${lead} ${describeChoice(p.after)} on ${shortDate(p.after.departDate ?? leg.date)}, ${money(p.after.price)}${perPersonWord()}${now}.`);
   if (p.firstStay) {
     const fs = p.firstStay;
     parts.push(
@@ -881,9 +914,9 @@ export function describeTransportProposal(p: TransportChangeProposal, leg: TripL
     );
   }
   if (p.totals) {
-    parts.push(`Trip total ${money(p.totals.before)} → ${money(p.totals.after)} (${signedMoney(p.totals.delta)}).`);
+    parts.push(`Trip total${perPersonWord()} ${money(p.totals.before)} → ${money(p.totals.after)} (${moneyDiff(p.totals.before, p.totals.after)}).`);
   } else {
-    parts.push(`The fare changes by ${signedMoney(p.priceDelta)}.`);
+    parts.push(`The fare changes by ${p.before ? moneyDiff(p.before.price, p.after.price) : signedMoney(p.priceDelta)}${perPersonWord()}.`);
   }
   parts.push('Accept to switch, or Reject to keep it as it is.');
   return parts.join(' ');

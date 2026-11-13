@@ -313,6 +313,9 @@ describe('AIChatPanel — transport change card', () => {
     // Header per person: round(1576 / 2) = 788 → round(1599 / 2) = 800.
     expect(within(card).getByTestId('transport-change-total')).toHaveTextContent('$788→$800+$12');
     expect(card).toHaveTextContent('per person');
+    // The chat is told the header's mode, so its words use the same units
+    // (backend: "Trip total per person $788 → $800 (+$12)").
+    expect(mockedPlanChat).toHaveBeenLastCalledWith(expect.objectContaining({ priceMode: 'perPerson' }));
   });
 
   it('Reject leaves the trip exactly as it was', async () => {

@@ -69,10 +69,14 @@ import {
   listLegs,
   matchingChoices,
   money,
+  moneyDiff,
   notALegReply,
+  perPersonWord,
+  withPriceUnits,
   readRequest,
   requestProblem,
   resolveLeg,
+  sameService,
   searchLeg,
   shortDate,
   signedMoney,
@@ -91,6 +95,8 @@ export type TripChatInput = {
   message: string;
   currentTrip: any;
   history?: ChatTurn[];
+  /** The header's price mode; the reply's amounts use the same units. Default 'total'. */
+  priceMode?: 'total' | 'perPerson';
 };
 
 /** Options found for a leg, added to its card (selection unchanged). */
@@ -372,7 +378,7 @@ City edits: ONE city edit per turn. If the user asks for several at once, do the
 
 If the user references a city that isn't in the trip for a pin or a min stay, answer_only and ask them to clarify — do NOT invent a pin.
 
-Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them. Prices are totals for all travellers.
+Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them. Prices in TRIP CONTEXT are totals for all travellers.${perPersonWord() ? ` The user is viewing PER-PERSON prices: quote every amount per person (the total divided by ${currentTrip?.travelers} travellers, rounded) and say "per person".` : ''}
 
 TRIP CONTEXT (read-only):
 ${JSON.stringify(context, null, 2)}
@@ -384,6 +390,10 @@ ${JSON.stringify(context, null, 2)}
  * input and output contract.
  */
 export async function runTripChat(input: TripChatInput): Promise<TripChatResult> {
+  return withPriceUnits(input.priceMode, input.currentTrip?.travelers, () => runTripChatInUnits(input));
+}
+
+async function runTripChatInUnits(input: TripChatInput): Promise<TripChatResult> {
   const { message, currentTrip, history } = input;
   const anthropic = getAnthropicSafe();
   if (!anthropic) {
@@ -583,7 +593,7 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
   if (input?.list === true || forceList) {
     const shown = matches.slice(0, LIST_LIMIT);
     const lines = shown.map((c, i) => {
-      const delta = leg.current ? ` (${signedMoney(c.price - leg.current.price)})` : '';
+      const delta = leg.current ? ` (${moneyDiff(leg.current.price, c.price)})` : '';
       return `${i + 1}. ${describeChoice(c)} — ${money(c.price)}${delta}`;
     });
     const more = matches.length > shown.length ? ` (${matches.length} found, cheapest ${shown.length} shown)` : '';
@@ -620,8 +630,17 @@ function unmetSummary(choices: LegChoice[], request: ChoiceRequest, leg: TripLeg
     return ` (the earliest leaves at ${times[0]})`;
   }
   if (request.cheaper && leg.current) {
-    const cheapest = choices.map((c) => c.price).filter((p) => p > 0).sort((a, b) => a - b)[0];
-    if (cheapest != null) return ` (the cheapest is ${money(cheapest)}, you have ${money(leg.current.price)})`;
+    // The same exclusion the match uses: the user's own flight is never "a
+    // cheaper flight", even when a fresh search prices it lower (Duffel
+    // re-prices on every search) — so it must not be quoted as the cheapest.
+    const cur = leg.current;
+    const byPrice = (cs: LegChoice[]) => cs.map((c) => c.price).filter((p) => p > 0).sort((a, b) => a - b)[0];
+    const other = byPrice(choices.filter((c) => !sameService(c, cur)));
+    const own = byPrice(choices.filter((c) => sameService(c, cur)));
+    const bits: string[] = [];
+    if (other != null) bits.push(`the cheapest other flight is ${money(other)}, you have ${money(cur.price)}`);
+    if (own != null && Math.round(own) < Math.round(cur.price)) bits.push(`your own flight now shows ${money(own)}`);
+    if (bits.length) return ` (${bits.join('; ')})`;
   }
   return '';
 }

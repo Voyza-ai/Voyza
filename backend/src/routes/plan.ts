@@ -528,6 +528,8 @@ const chatSchema = z.object({
    * the array must NOT be the current message; that goes in `message`.
    */
   history: z.array(historyMessageSchema).optional(),
+  /** The header's price mode; the reply's amounts use the same units. */
+  priceMode: z.enum(['total', 'perPerson']).optional(),
 });
 
 /**
@@ -569,10 +571,10 @@ function summarizeTripForChat(trip: any): any {
 router.post(
   '/chat',
   asyncHandler(async (req, res) => {
-    const { message, currentTrip, history } = chatSchema.parse(req.body);
+    const { message, currentTrip, history, priceMode } = chatSchema.parse(req.body);
     // The chat's core lives in services/tripChat.ts (runTripChat), shared
     // with other callers (e.g. a future iMessage bot; none in this repo yet).
-    res.json(await runTripChat({ message, currentTrip, history }));
+    res.json(await runTripChat({ message, currentTrip, history, priceMode }));
   }),
 );
 

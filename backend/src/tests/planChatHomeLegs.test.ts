@@ -330,6 +330,37 @@ describe('review fixes', () => {
   });
 });
 
+describe('per-person view: the reply quotes amounts as the card and header show them', () => {
+  const ask = (input: any, priceMode?: string) => {
+    mockCreate.mockResolvedValueOnce({ content: [{ type: 'tool_use', name: 'find_transport_option', input }] });
+    return request(app).post('/api/plan/chat').send({ message: 'x', currentTrip: trip(), priceMode });
+  };
+
+  it('a proposal: per-person fares and the per-person header move (2 travellers)', async () => {
+    const res = await ask({ leg: 'London→home', relative: 'later', timeOfDay: 'evening' }, 'perPerson');
+    expect(res.body.type).toBe('proposal');
+    // Party: $455.10 vs $432.18, total $1,576 → $1,599. Per person, rounded
+    // as the header rounds: $228 vs $216, $788 → $800, so +$12 (not +$23).
+    expect(res.body.reply).toContain('$228 per person instead of American Airlines LON 12:23 → JFK 15:24 at $216.');
+    expect(res.body.reply).toContain('Trip total per person $788 → $800 (+$12).');
+    // The proposal itself stays in party amounts (the card converts it).
+    expect(res.body.proposal.totals).toEqual({ before: 1576, after: 1599, delta: 23 });
+    expect(mockCreate.mock.calls[0][0].system).toContain('PER-PERSON');
+  });
+
+  it('a listing: per-person prices and differences', async () => {
+    const res = await ask({ leg: 'London→home', timeOfDay: 'evening', list: true }, 'perPerson');
+    expect(res.body.reply).toContain('1. Virgin Atlantic LON 18:05 → EWR 21:15 — $228 (+$12)');
+  });
+
+  it('total view (and no priceMode) is unchanged', async () => {
+    const res = await ask({ leg: 'London→home', relative: 'later', timeOfDay: 'evening' });
+    expect(res.body.reply).toContain('Trip total $1,576 → $1,599 (+$23)');
+    expect(res.body.reply).not.toContain('per person');
+    expect(mockCreate.mock.calls[0][0].system).not.toContain('PER-PERSON');
+  });
+});
+
 describe('"cheaper" and "later" on the other legs', () => {
   it('"cheaper flight home" → the cheapest flight under $432 (Delta from LaGuardia), priced', async () => {
     const res = await chat(app, 'find_transport_option', { leg: 'London→home', cheaper: true });
@@ -408,7 +439,18 @@ describe('vague and impossible requests', () => {
     t.totalCost = headerTotal(t);
     const res = await chat(app, 'find_transport_option', { leg: 'London→home', cheaper: true }, t);
     expect(res.body.type).toBe('answer');
-    expect(res.body.reply).toContain('the cheapest is $399, you have $350');
+    expect(res.body.reply).toContain('the cheapest other flight is $399, you have $350');
+  });
+
+  it('a "cheaper" ask when only the same flight re-prices lower: no contradiction (live: "the cheapest is $223, you have $225")', async () => {
+    searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>
+      origin === 'LON' && destination === 'JFK' && date === '2027-01-17'
+        ? [offer('American Airlines', 'AA', 428.5, '2027-01-17', '12:23', '15:24'), offer('Iberia', 'IB', 438.66, '2027-01-17', '12:23', '15:24')]
+        : []);
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', cheaper: true });
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('the cheapest other flight is $439, you have $432; your own flight now shows $429');
+    expect(res.body.reply).not.toContain('the cheapest is');
   });
 
   it('names the real legs — home ones included — for a pair that is not a leg', async () => {
