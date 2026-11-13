@@ -99,13 +99,17 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
   const showLegs = filter === 'all' || filter === 'travel';
   const travel = filter === 'travel';
   const legExpanded = (key: number) => (travel ? travelOpen : openConnectors).has(key);
-  const toggleLeg = (key: number) =>
+  const toggleLeg = (key: number) => {
     (travel ? setTravelOpen : setOpenConnectors)((curr) => {
       const next = new Set(curr);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
+    // An opened leg can push a row that fit (Travel) past the edge, and a
+    // closed one bring it back: re-check the scroll arrows once it has resized.
+    window.setTimeout(updateScrollState, 350);
+  };
   // A leg's slot. Keyed by view, so switching between All and Travel mounts
   // each view's own pills (Travel's are tight) rather than morphing them — a
   // leg open in All comes back open without re-opening, or scrolling to, it.

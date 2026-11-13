@@ -150,6 +150,33 @@ describe('flowchart type filter', () => {
     expect(screen.queryByLabelText('Minimize')).not.toBeInTheDocument();
   });
 
+  it('Travel: opening a leg that pushes the row past the edge brings up the scroll arrow', () => {
+    jest.useFakeTimers();
+    try {
+      render(<Flowchart trip={trip} />);
+      fireEvent.click(chip('travel'));
+      act(() => jest.advanceTimersByTime(400));
+      const scroller = document.querySelector('[data-testid="flowchart"] .overflow-x-auto') as HTMLElement;
+      const size = (scrollWidth: number) => {
+        Object.defineProperty(scroller, 'scrollWidth', { configurable: true, value: scrollWidth });
+        Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 1032 });
+      };
+      size(1000); // the compact journey fits
+      fireEvent.scroll(scroller);
+      expect(screen.queryByLabelText('Scroll right')).not.toBeInTheDocument();
+      fireEvent.click(screen.getAllByLabelText('Show travel details')[1]);
+      size(1408); // the open card is 408px wider than its pill
+      act(() => jest.advanceTimersByTime(400));
+      expect(screen.getByLabelText('Scroll right')).toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText('Minimize'));
+      size(1000);
+      act(() => jest.advanceTimersByTime(400));
+      expect(screen.queryByLabelText('Scroll right')).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('Hotels: stays only, legs as the bare dashed route', () => {
     render(<Flowchart trip={trip} />);
     fireEvent.click(chip('hotels'));
