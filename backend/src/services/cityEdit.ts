@@ -38,7 +38,9 @@ import { originIndex } from './location/originAirports';
 export type CityEditOp =
   | { kind: 'add'; city: string; afterCity?: string | null; beforeCity?: string | null; nights?: number | null }
   | { kind: 'remove'; city: string }
-  | { kind: 'replace'; oldCity: string; newCity: string };
+  | { kind: 'replace'; oldCity: string; newCity: string }
+  /** pin_city_dates / set_min_days: the same cities on new dates. */
+  | { kind: 'dates'; city: string };
 
 export type Stop = { name: string; arrival: string; departure: string };
 
@@ -80,6 +82,7 @@ export function planCityEdit(
   op: CityEditOp,
 ): { ok: true; plan: CityEditPlan } | { ok: false; reason: string } {
   if (stops.length === 0) return { ok: false, reason: 'this trip has no cities yet' };
+  if (op.kind === 'dates') return { ok: false, reason: 'that is a date change, not a city edit' };
   const names = stops.map((s) => s.name).join(', ');
   const indexOf = (city: string) => stops.findIndex((s) => sameName(s.name, city));
   const kept = (s: Stop, i: number): PlannedStop => ({ ...s, status: 'kept', fromIndex: i });
@@ -278,8 +281,10 @@ export type CityEditLeg = {
 
 export type CityEditProposal = {
   kind: 'city_edit';
-  toolName: 'add_city' | 'remove_city' | 'replace_city';
+  toolName: 'add_city' | 'remove_city' | 'replace_city' | 'pin_city_dates' | 'set_min_days';
   op: CityEditOp;
+  /** pin_city_dates / set_min_days: the trip's constraints once accepted. */
+  constraints?: unknown;
   before: Stop[];
   after: Array<PlannedStop & { hotels?: HotelResult[] }>;
   removed: string[];
@@ -316,6 +321,7 @@ export async function buildCityEditProposal(
   if (before.some((s) => !s.arrival || !s.departure)) {
     return { type: 'answer', reply: "I couldn't change the cities: some of them have no dates yet." };
   }
+  if (op.kind === 'dates') return { type: 'answer', reply: "I couldn't change the dates." };
   const attempt =
     op.kind === 'add' ? `add ${op.city}` : op.kind === 'remove' ? `remove ${op.city}` : `replace ${op.oldCity} with ${op.newCity}`;
 
@@ -329,6 +335,65 @@ export async function buildCityEditProposal(
     const check = checkCityName(newCity, others);
     if (!check.ok) return { type: 'answer', reply: check.reply };
   }
+  return priceCityEditPlan(currentTrip, toolName, op, before, plan, attempt);
+}
+
+/**
+ * The same cities on new dates (an accepted pin or minimum stay), as a plan
+ * to price: every stay whose dates moved has its hotels searched, every leg
+ * whose day moved is re-priced, and a home flight whose day moved is
+ * re-searched — so the card states the exact total Accept gives, instead of
+ * the page re-searching after Accept and the header moving by an amount the
+ * user was never shown (live: "6 nights in Paris" swapped the flight home to
+ * another airline, +$4, with no price on the card).
+ */
+export function planDateEdit(before: Stop[], newDates: Stop[]): CityEditPlan {
+  const fmt = (iso: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}` : iso;
+  };
+  const after: PlannedStop[] = newDates.map((s, i) => ({
+    ...s,
+    status: s.arrival !== before[i].arrival || s.departure !== before[i].departure ? 'moved' : 'kept',
+    fromIndex: i,
+  }));
+  const hotels = after.map((s, i) => (s.status === 'moved' ? i : -1)).filter((i) => i >= 0);
+  const legs: number[] = [];
+  for (let i = 0; i < after.length - 1; i++) if (after[i].departure !== before[i].departure) legs.push(i);
+  const last = after.length - 1;
+  const moved = after
+    .filter((s) => s.status === 'moved')
+    .map((s) => `${s.name} ${fmt(s.arrival)}–${fmt(s.departure)} (${plural(nightsBetween(s.arrival, s.departure), 'night')})`);
+  const bits = [moved.length ? `New dates: ${moved.join(', ')}.` : ''];
+  if (after[0] && after[0].arrival !== before[0].arrival) bits.push(`Your flight out moves to ${fmt(after[0].arrival)}.`);
+  if (after[last] && after[last].departure !== before[last].departure) bits.push(`Your flight home moves to ${fmt(after[last].departure)}.`);
+  return {
+    after,
+    removed: [],
+    hotels,
+    legs,
+    outbound: !!after[0] && after[0].arrival !== before[0].arrival,
+    ret: !!after[last] && after[last].departure !== before[last].departure,
+    note: bits.filter(Boolean).join(' '),
+  };
+}
+
+/**
+ * Price a planned edit: hotels, legs and home flights the plan names. `start`
+ * overrides the day the outbound leaves (a date edit that moves the first
+ * stay moves it by the same number of days).
+ */
+export async function priceCityEditPlan(
+  currentTrip: any,
+  toolName: CityEditProposal['toolName'],
+  op: CityEditOp,
+  before: Stop[],
+  plan: CityEditPlan,
+  attempt: string,
+  startOverride?: string,
+): Promise<{ type: 'proposal'; proposal: CityEditProposal } | { type: 'answer'; reply: string }> {
+  const newCity = op.kind === 'add' ? op.city : op.kind === 'replace' ? op.newCity : null;
 
   const travelers = Number.isInteger(currentTrip?.travelers) && currentTrip.travelers > 0 ? currentTrip.travelers : 1;
   const tripCityNames = plan.after.map((s) => s.name);
@@ -376,7 +441,7 @@ export async function buildCityEditProposal(
   const returnsHome = (currentTrip?.returnToHome ?? true) !== false;
   const wantOutbound = plan.outbound && !!origin?.city && airports.length > 0;
   const wantReturn = plan.ret && returnsHome && !!origin?.city && returnAirports.length > 0;
-  const start = tripStart(currentTrip, before);
+  const start = startOverride ?? tripStart(currentTrip, before);
   const first = plan.after[0];
   const lastStop = plan.after[plan.after.length - 1];
 
@@ -464,6 +529,8 @@ export async function buildCityEditProposal(
 }
 
 /** The chat's tool input → an op, or null when a required field is missing. */
+export { stopsOf, tripStart };
+
 export function cityEditOpFromTool(toolName: string, input: any): CityEditOp | null {
   const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
   if (toolName === 'add_city') {

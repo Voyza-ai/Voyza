@@ -821,6 +821,8 @@ const EDIT_TITLE: Record<CityEditProposal['toolName'], string> = {
   add_city: 'Add a city',
   remove_city: 'Remove a city',
   replace_city: 'Swap a city',
+  pin_city_dates: 'Change dates',
+  set_min_days: 'Change dates',
 };
 
 function CityEditProposalCard({ proposal, trip, state, priceMode, onAccept, onReject }: CityEditProposalCardProps) {

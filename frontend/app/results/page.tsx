@@ -824,6 +824,8 @@ function sameLeg(a: HomeLeg | null | undefined, b: HomeLeg | null | undefined): 
   );
 }
 
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 function datedWork(prev: Trip, next: Trip): DatedWork | null {
   // Only the same itinerary moving in time. Another trip, or stops added,
   // removed or reordered, is a different trip, priced where it was built.
@@ -836,10 +838,18 @@ function datedWork(prev: Trip, next: Trip): DatedWork | null {
   next.cities.forEach((c, i) => {
     const p = prev.cities[i];
     if (!p.dates || !c.dates) return;
-    if (p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) hotels.push(i);
-    if (i < next.cities.length - 1 && p.dates.departure !== c.dates.departure) legs.push(i);
+    // A stay or leg the same update already re-priced (an accepted AI date
+    // edit carries hotels and legs searched for the new dates, so its card
+    // states the exact total) is not searched again: a second search would
+    // move the header by an amount the card never showed.
+    // Compared by content: a copy of the same leg or hotels is not a re-price.
+    if ((p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) && sameJson(c.hotels, p.hotels)) hotels.push(i);
+    if (i < next.cities.length - 1 && p.dates.departure !== c.dates.departure && sameJson(c.transportOut, p.transportOut)) legs.push(i);
   });
-  if (hotels.length === 0) return null;
+  const moved = next.cities.some(
+    (c, i) => !!prev.cities[i].dates && !!c.dates && (prev.cities[i].dates.arrival !== c.dates.arrival || prev.cities[i].dates.departure !== c.dates.departure),
+  );
+  if (!moved) return null;
 
   const origin = next.origin;
   const last = next.cities.length - 1;

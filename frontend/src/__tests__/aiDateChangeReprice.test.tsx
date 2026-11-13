@@ -318,6 +318,76 @@ describe('results page: an accepted AI date change re-prices legs and hotels', (
   });
 });
 
+/**
+ * The same pin as the server now proposes it: a city edit of the same cities
+ * on new dates, with each moved stay's hotels, each moved leg and both home
+ * flights already searched — so the card states the exact total.
+ */
+function pricedPinProposal() {
+  const hotel = (city: string, ppn: number) =>
+    ({ id: city, name: `${city} New`, price: ppn * 2, pricePerNight: ppn, currency: 'USD', rating: 8.8, reviewCount: 10, stars: 4, thumbnail: '', bookingUrl: `https://b/${city}` }) as any;
+  const opt = (price: number) => ({ mode: 'flight', operator: 'Swiss', price, currency: 'USD', departTime: '08:00', arriveTime: '09:15', duration: '1h 15m', durationMinutes: 75, priceDelta: 0 });
+  const after = [
+    { name: 'Paris', arrival: '2027-01-12', departure: '2027-01-14', status: 'moved', hotels: [hotel('Paris', 380)] },
+    { name: 'Zurich', arrival: '2027-01-14', departure: '2027-01-16', status: 'moved', hotels: [hotel('Zurich', 240)] },
+    { name: 'London', arrival: '2027-01-16', departure: '2027-01-18', status: 'moved', hotels: [hotel('London', 310)] },
+  ];
+  return {
+    type: 'proposal',
+    reply: 'Pinning Zurich to Jan 14 – Jan 16. New dates: … Accept to apply it.',
+    proposal: {
+      kind: 'city_edit',
+      toolName: 'pin_city_dates',
+      op: { kind: 'dates', city: 'Zurich' },
+      before: [
+        { name: 'Paris', arrival: '2027-01-11', departure: '2027-01-13' },
+        { name: 'Zurich', arrival: '2027-01-13', departure: '2027-01-15' },
+        { name: 'London', arrival: '2027-01-15', departure: '2027-01-17' },
+      ],
+      after,
+      removed: [],
+      legs: [
+        { index: 0, from: 'Paris', to: 'Zurich', date: '2027-01-14', options: [opt(300)] },
+        { index: 1, from: 'Zurich', to: 'London', date: '2027-01-16', options: [opt(352)] },
+      ],
+      outboundLeg: OUT_JAN11,
+      returnLeg: BACK_JAN18,
+      note: 'New dates: …',
+      constraints: { pinned_cities: [{ city: 'Zurich', arrival: '2027-01-14', departure: '2027-01-16' }] },
+    },
+  } as any;
+}
+
+describe('results page: a priced AI date change (the card states the exact total)', () => {
+  it("Accept gives exactly the card's total, searches nothing again, and keeps the pin", async () => {
+    const trip = ownerTrip();
+    useTripStore.setState({ currentTrip: trip });
+    mockSearches();
+    render(<ResultsPage />);
+    mockedPlanChat.mockResolvedValueOnce(pricedPinProposal());
+    await sendChat('pin Zurich to 2027-01-14 to 2027-01-16');
+    const shown = (await screen.findByTestId('city-edit-total')).textContent!;
+    expect(screen.getByText('Change dates')).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(await screen.findByText('Accept'));
+    });
+    await waitFor(() => expect(useTripStore.getState().currentTrip!.cities[2].dates.departure).toBe('2027-01-18'));
+    // Give any re-pricing the page would start a chance to run.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(mockedCompareLeg).not.toHaveBeenCalled();
+    expect(mockedFetchHomeLegs).not.toHaveBeenCalled();
+    expect(mockedSearchHotels).not.toHaveBeenCalled();
+    const after = useTripStore.getState().currentTrip!;
+    // The card's "after" is the header's total, to the dollar.
+    expect(shown.replace(/\s+/g, '')).toContain(`$${liveTripTotal(after).toLocaleString()}`);
+    expect(after.origin?.returnLeg?.departDate).toBe('2027-01-18');
+    expect(after.cities[0].transportOut.price).toBe(300);
+    expect(after.constraints?.pinned_cities).toEqual([{ city: 'Zurich', arrival: '2027-01-14', departure: '2027-01-16' }]);
+  });
+});
+
 describe('canvas: an accepted AI date change re-prices legs and hotels', () => {
   it('re-prices the moved legs and home flights and re-searches the moved stays', async () => {
     const trip = ownerTrip();

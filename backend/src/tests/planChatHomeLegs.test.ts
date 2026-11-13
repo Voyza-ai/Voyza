@@ -305,6 +305,32 @@ describe('switching to a named option', () => {
   });
 });
 
+describe('date edits are priced before they are proposed', () => {
+  it('"at least 3 nights in London" → London Jan 15–18 and the flight home searched on Jan 18, with the constraint', async () => {
+    searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>
+      origin === 'LON' && destination === 'JFK' && date === '2027-01-18'
+        ? [offer('American Airlines', 'AA', 440.5, '2027-01-18', '13:09', '16:10')]
+        : []);
+    const res = await chat(app, 'set_min_days', { city: 'London', minNights: 3, explanation: 'Giving you three nights in London.' });
+    expect(res.body.type).toBe('proposal');
+    const p = res.body.proposal;
+    expect(p).toMatchObject({ kind: 'city_edit', toolName: 'set_min_days', op: { kind: 'dates', city: 'London' } });
+    expect(p.after.map((s: any) => [s.name, s.arrival, s.departure, s.status])).toEqual([
+      ['Paris', '2027-01-12', '2027-01-15', 'kept'],
+      ['London', '2027-01-15', '2027-01-18', 'moved'],
+    ]);
+    // Live: the date-only card had no price, and the page then swapped the
+    // flight home after Accept (+$4 the user was never shown).
+    expect(p.returnLeg).toMatchObject({ operator: 'American Airlines', departDate: '2027-01-18', price: 440.5 });
+    expect(p.outboundLeg).toBeUndefined();
+    expect(p.legs).toEqual([]);
+    expect(p.constraints.min_days).toEqual([{ city: 'London', minNights: 3 }]);
+    expect(res.body.reply).toBe(
+      'Giving you three nights in London. New dates: London Jan 15–Jan 18 (3 nights). Your flight home moves to Jan 18. Accept to apply it.',
+    );
+  });
+});
+
 describe('review fixes', () => {
   it('finds the evening flight home even when 50 cheaper daytime fares come first (no cap before the filter)', async () => {
     const cheap = Array.from({ length: 50 }, (_, i) =>

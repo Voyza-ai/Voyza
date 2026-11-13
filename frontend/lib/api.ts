@@ -326,7 +326,7 @@ export async function suggestDestinations(params: {
 // schema (why it fits, cost range, best months, caveats) so the UI
 // can render a pickable card list later. Cached 7 days server-side.
 
-import type { VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
+import type { Trip, VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
 
 export type SuggestDestinationsForVibeResult = {
   suggestions: VibeDestinationSuggestion[];
@@ -613,11 +613,15 @@ export type CityEditStop = {
 
 export type CityEditProposal = {
   kind: 'city_edit';
-  toolName: 'add_city' | 'remove_city' | 'replace_city';
+  /** pin_city_dates / set_min_days: the same cities on new dates, priced the same way. */
+  toolName: 'add_city' | 'remove_city' | 'replace_city' | 'pin_city_dates' | 'set_min_days';
   op:
     | { kind: 'add'; city: string; afterCity?: string | null; beforeCity?: string | null; nights?: number | null }
     | { kind: 'remove'; city: string }
-    | { kind: 'replace'; oldCity: string; newCity: string };
+    | { kind: 'replace'; oldCity: string; newCity: string }
+    | { kind: 'dates'; city: string };
+  /** A date edit's constraints (pins, minimum stays), kept on the trip once accepted. */
+  constraints?: Trip['constraints'];
   before: Array<{ name: string; arrival: string; departure: string }>;
   after: CityEditStop[];
   removed: string[];

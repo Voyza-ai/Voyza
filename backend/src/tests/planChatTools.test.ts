@@ -358,11 +358,14 @@ describe('B10 — pin_city_dates', () => {
   it('accepts a valid pin and shifts the other cities around it (control)', async () => {
     const res = await chat(app, 'pin_city_dates', pin('Venice', '2026-12-11', '2026-12-13'));
     expect(res.body.type).toBe('proposal');
-    expect(res.body.proposal.proposedTrip.cities.map((c: any) => [c.dates.arrival, c.dates.departure])).toEqual([
+    // Priced like a city edit of the same cities (the card states the exact total).
+    expect(res.body.proposal).toMatchObject({ kind: 'city_edit', toolName: 'pin_city_dates', op: { kind: 'dates', city: 'Venice' } });
+    expect(res.body.proposal.after.map((c: any) => [c.arrival, c.departure])).toEqual([
       ['2026-12-09', '2026-12-11'],
       ['2026-12-11', '2026-12-13'],
       ['2026-12-13', '2026-12-15'],
     ]);
+    expect(res.body.proposal.constraints.pinned_cities).toEqual([{ city: 'Venice', arrival: '2026-12-11', departure: '2026-12-13' }]);
   });
 });
 
@@ -386,7 +389,7 @@ describe('B10 — set_min_days', () => {
   it('accepts a whole number sent as a string ("3")', async () => {
     const res = await chat(app, 'set_min_days', minDays('Rome', '3'));
     expect(res.body.type).toBe('proposal');
-    expect(res.body.proposal.proposedConstraints.min_days).toEqual([{ city: 'Rome', minNights: 3 }]);
+    expect(res.body.proposal.constraints.min_days).toEqual([{ city: 'Rome', minNights: 3 }]);
   });
 
   it('says so when the city is pinned too short, instead of "Giving you six nights"', async () => {
@@ -407,8 +410,8 @@ describe('B10 — set_min_days', () => {
   it('extends the stay and shifts the rest (control)', async () => {
     const res = await chat(app, 'set_min_days', minDays('Rome', 3, 'Giving you three nights in Rome.'));
     expect(res.body.type).toBe('proposal');
-    expect(res.body.reply).toBe('Giving you three nights in Rome.');
-    expect(res.body.proposal.proposedTrip.cities.map((c: any) => c.dates.departure)).toEqual([
+    expect(res.body.reply).toMatch(/^Giving you three nights in Rome\. New dates: .* Accept to apply it\.$/);
+    expect(res.body.proposal.after.map((c: any) => c.departure)).toEqual([
       '2026-12-11', '2026-12-13', '2026-12-15',
     ]);
   });

@@ -39,7 +39,7 @@
  * written before anything was searched (D-07).
  */
 import { logger } from '../utils/logger';
-import { todayIso } from '../utils/dates';
+import { addDays, todayIso } from '../utils/dates';
 import {
   applyDateConstraints,
   isIsoDate,
@@ -53,7 +53,15 @@ import {
 } from './constraints';
 import { searchLegOptions, LegOption, normalizeTimeWindow, NormalizedTimeWindow } from './legOptions';
 import { compareLeg } from './compareLeg';
-import { buildCityEditProposal, cityEditOpFromTool, type CityEditProposal } from './cityEdit';
+import {
+  buildCityEditProposal,
+  cityEditOpFromTool,
+  planDateEdit,
+  priceCityEditPlan,
+  stopsOf,
+  tripStart,
+  type CityEditProposal,
+} from './cityEdit';
 import { getCityCountry } from '../data/cityCountries';
 import { parseDurationMinutes } from '../utils/duration';
 import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
@@ -222,7 +230,7 @@ export const CHAT_TOOLS = [
   {
     name: 'set_min_days',
     description:
-      'Guarantee a minimum number of nights in a city. Use when user says "at least 3 days in Tokyo", "give me 4 nights in Rome minimum", "don\'t rush Florence".',
+      'Guarantee a minimum number of nights in a city. Use when user says "at least 3 days in Tokyo", "give me 4 nights in Rome minimum", "don\'t rush Florence" — and for "one more night in Paris" / "give Paris 2 more nights" / "stay longer in Paris": minNights = the city\'s current nights + the extra. The trip gets longer if it has to (the flight home moves later); the user sees the new dates and the exact total and must Accept, so do not ask which direction first.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -472,7 +480,7 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
   if (toolName === 'set_transport_window' || toolName === 'show_transport_options') {
     return refreshLeg(currentTrip, legs, toolName, toolInput);
   }
-  if (toolName === 'pin_city_dates' || toolName === 'set_min_days') return dateTool(currentTrip, toolName, toolInput);
+  if (toolName === 'pin_city_dates' || toolName === 'set_min_days') return await dateTool(currentTrip, toolName, toolInput);
 
   logger.warn('plan/chat unknown tool', { toolName });
   return { type: 'answer', reply: "I'm not sure how to help with that — could you rephrase?" };
@@ -931,7 +939,7 @@ async function refreshLeg(currentTrip: any, legs: TripLeg[], toolName: string, t
  * proposal (B10). Each failed check answers instead: "I couldn't <attempt>:
  * <reason>."
  */
-function dateTool(currentTrip: any, toolName: string, toolInput: any): TripChatResult {
+async function dateTool(currentTrip: any, toolName: string, toolInput: any): Promise<TripChatResult> {
   const existingConstraints: TripConstraints = currentTrip.constraints ?? {};
   let constraintUpdate: TripConstraints = {};
   const replyText = toolInput.explanation ?? 'I have a proposed change for you.';
@@ -990,6 +998,33 @@ function dateTool(currentTrip: any, toolName: string, toolInput: any): TripChatR
       const shortfall = minDaysProblem(newCities[(currentTrip.cities ?? []).indexOf(target)], minNights, proposedConstraints);
       if (shortfall) return couldnt(shortfall);
     }
+  }
+
+  // Dates that move are priced before they are proposed, as a city edit of
+  // the same cities: the card then states the exact total Accept gives.
+  if (diff.length > 0) {
+    const before = stopsOf(currentTrip);
+    const moved = before.map((s, i) => ({ name: s.name, arrival: String(newCities[i].arrival_date ?? s.arrival), departure: String(newCities[i].departure_date ?? s.departure) }));
+    const plan = planDateEdit(before, moved);
+    const firstShift = Math.round((Date.parse(`${moved[0].arrival}T00:00:00Z`) - Date.parse(`${before[0].arrival}T00:00:00Z`)) / 86_400_000);
+    const oldStart = tripStart(currentTrip, before);
+    const start = firstShift !== 0 && oldStart ? addDays(oldStart, firstShift) : undefined;
+    const priced = await priceCityEditPlan(
+      currentTrip,
+      toolName as 'pin_city_dates' | 'set_min_days',
+      { kind: 'dates', city: target?.name ?? '' },
+      before,
+      plan,
+      attempt || 'change the dates',
+      start,
+    );
+    if (priced.type === 'answer') return priced;
+    priced.proposal.constraints = proposedConstraints;
+    return {
+      type: 'proposal',
+      reply: `${replyText} ${plan.note} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
+      proposal: priced.proposal,
+    };
   }
 
   const proposedTrip = {
