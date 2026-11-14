@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { env } from './config/env';
+import { isAllowedOrigin, parseOriginList } from './utils/corsOrigins';
 import { logger } from './utils/logger';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/error';
@@ -24,9 +25,13 @@ app.set('trust proxy', 1);
 
 // ─── Core middleware ──────────────────────────────────────────
 app.use(helmet());
+const allowedOrigins = parseOriginList(env.CORS_ORIGIN);
 app.use(
   cors({
-    origin: env.CORS_ORIGIN.split(',').map((s) => s.trim()),
+    // The fixed list plus this project's own Vercel preview deployments
+    // (utils/corsOrigins.ts). No Origin header (server-to-server, curl) gets
+    // no CORS headers, exactly as with the plain list before.
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin, allowedOrigins)),
     credentials: true,
     // Let the browser reuse a preflight answer for 2 hours. Every JSON POST
     // from the frontend is preflighted, and with no Access-Control-Max-Age

@@ -69,6 +69,32 @@ it('still refuses an origin that is not on the list — no allow-origin, so ther
   expect(res.headers['access-control-allow-origin']).toBeUndefined();
 });
 
+it("allows this project's Vercel preview deployments, so a feature branch's preview link can call the API", async () => {
+  for (const origin of [
+    'https://voyza-git-feat-results-type-filter-satwikpeela5s-projects.vercel.app',
+    'https://voyza-7kq2x9abc-satwikpeela5s-projects.vercel.app',
+  ]) {
+    const res = await preflight('/api/optimize', origin);
+    expect(res.status).toBe(204);
+    expect(res.headers['access-control-allow-origin']).toBe(origin);
+    expect(res.headers['access-control-max-age']).toBe('7200');
+  }
+});
+
+it('refuses look-alikes of the preview origin', async () => {
+  for (const origin of [
+    'https://voyza-git-x-otherteam-projects.vercel.app',
+    'https://voyza-git-x-satwikpeela5s-projects.vercel.app.evil.example',
+    'https://evil-satwikpeela5s-projects.vercel.app',
+    'http://voyza-git-x-satwikpeela5s-projects.vercel.app',
+    'https://voyza-git-x-satwikpeela5s-projects.vercel.app:8443',
+    'https://voyza-git-X_y-satwikpeela5s-projects.vercel.app',
+  ]) {
+    const res = await preflight('/api/optimize', origin);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  }
+});
+
 it('preflights are answered before the rate limiters, so they spend no budget', async () => {
   for (let i = 0; i < 5; i++) await preflight('/api/optimize', 'https://bluemurr.com');
   const res = await request(server)
