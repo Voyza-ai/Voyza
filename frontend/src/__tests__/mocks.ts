@@ -128,6 +128,7 @@ jest.mock('@/lib/api', () => ({
   searchHotels: jest.fn().mockResolvedValue([]),
   searchTrains: jest.fn().mockResolvedValue([]),
   optimizeTrip: jest.fn().mockResolvedValue(null),
+  getOptimizeProgress: jest.fn().mockResolvedValue(null),
   compareLeg: jest.fn().mockResolvedValue(null),
   suggestDestinations: jest.fn().mockResolvedValue([]),
   getShareLink: jest.fn().mockResolvedValue({ mode: 'view', token: 'tok', url: 'https://voyza.test/canvas/trip-1?share=tok' }),

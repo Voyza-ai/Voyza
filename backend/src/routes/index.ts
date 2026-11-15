@@ -19,6 +19,7 @@ import { AppError } from '../middleware/error';
 import { compareLeg } from '../services/compareLeg';
 import { getCachedLegPrices } from '../services/legCache';
 import { optimize } from '../services/optimizer';
+import { PROGRESS_ID, readProgress, startProgress } from '../services/optimizeProgress';
 import { getSupabase } from '../services/supabase';
 import { addDays, todayIso } from '../utils/dates';
 
@@ -107,6 +108,8 @@ const optimizeSchema = z.object({
    * 2 nights per city. When set, distributed evenly across cities.
    */
   totalNights: z.number().int().positive().max(180).optional(),
+  /** Client-made id to poll GET /api/optimize/progress/:id with while this runs. */
+  progressId: z.string().regex(PROGRESS_ID).optional(),
 }).superRefine((input, ctx) => {
   // Inputs the optimizer used to accept and quietly turn into a broken trip.
   // Each is a 400 the planner already renders as an error message (zod →
@@ -258,13 +261,33 @@ router.post(
       // (`error` + `details`), with a sentence in `error`.
       throw new AppError(400, optimizeErrorMessage(parsed.error, req.body), parsed.error.flatten().fieldErrors);
     }
-    const input = parsed.data;
+    const { progressId, ...input } = parsed.data;
     // Normalize: strings become { name } objects
     const cities = input.cities.map((c) =>
       typeof c === 'string' ? { name: c } : c,
     );
-    const result = await optimize({ ...input, cities });
-    res.json(result);
+    const onProgress = progressId ? startProgress(progressId) : undefined;
+    try {
+      const result = await optimize({ ...input, cities, onProgress });
+      res.json(result);
+    } finally {
+      onProgress?.({ stage: 'done' });
+    }
+  }),
+);
+
+// ─── GET /api/optimize/progress/:id ──────────────────────────
+// Live counts for a running optimize (services/optimizeProgress.ts). Public
+// like POST /api/optimize itself: the id is the caller's own random string
+// and the answer is counts plus the city order it asked about.
+router.get(
+  '/optimize/progress/:id',
+  asyncHandler(async (req, res) => {
+    const id = String(req.params.id);
+    const progress = PROGRESS_ID.test(id) ? readProgress(id) : null;
+    if (!progress) throw new AppError(404, 'No progress for this id');
+    res.set('Cache-Control', 'no-store');
+    res.json(progress);
   }),
 );
 

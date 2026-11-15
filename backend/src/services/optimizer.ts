@@ -12,6 +12,7 @@ import { addDays, clampToFuture, todayIso } from '../utils/dates';
 import { withDuffelRetryBudget } from './duffelBudget';
 import { AppError } from '../middleware/error';
 import { searchHotels, plannerHotelPick } from './hotels';
+import type { ProgressSink } from './optimizeProgress';
 
 /**
  * Lookups shared by everything ONE optimize() run does (B8).
@@ -96,7 +97,11 @@ type RunContext = {
  */
 type SearchPhase = 'score' | 'screen' | 'exact' | 'home' | 'homeLegs' | 'probe';
 
-function createRunContext(tripCityNames: string[]): RunContext {
+function createRunContext(tripCityNames: string[], report?: ProgressSink): RunContext {
+  // Live counts for the planner's search screen (optimizeProgress.ts): each
+  // distinct leg comparison and flight search this run asks for, counted at
+  // the memo / ledger that already dedupes them.
+  const legCounts = { asked: 0, priced: 0 };
   const flightOutcomes: RunContext['flightOutcomes'] = { answered: 0, threw: 0, firstError: undefined };
   const noteThrow = (err: unknown) => {
     flightOutcomes.threw++;
@@ -117,7 +122,10 @@ function createRunContext(tripCityNames: string[]): RunContext {
   const flightsFor = (phase: SearchPhase): typeof searchFlights => (params) => {
     // flights.ts' cache key: a repeat of any of these is not another request.
     const key = [params.origin, params.destination, params.date, params.travelers, params.cabinClass ?? 'economy'].join('|');
-    if (!searchLedger.has(key)) searchLedger.set(key, phase);
+    if (!searchLedger.has(key)) {
+      searchLedger.set(key, phase);
+      report?.({ flightSearches: searchLedger.size });
+    }
     return counted(params);
   };
 
@@ -151,6 +159,15 @@ function createRunContext(tripCityNames: string[]): RunContext {
       if (!hit) {
         hit = compareLeg(params, { getIataCode: iata, searchFlights: flights });
         compareMemo.set(key, hit);
+        if (report) {
+          legCounts.asked++;
+          report({ legsAsked: legCounts.asked });
+          const done = () => {
+            legCounts.priced++;
+            report({ legsPriced: legCounts.priced });
+          };
+          hit.then(done, done);
+        }
       }
       return hit;
     };
@@ -455,6 +472,8 @@ type OptimizeParams = {
    * 2-nights-per-city default.
    */
   totalNights?: number;
+  /** Live progress for the planner's search screen (optimizeProgress.ts). */
+  onProgress?: ProgressSink;
 };
 
 const DEFAULT_NIGHTS_PER_CITY = 2;
@@ -2012,7 +2031,7 @@ export function firstStayArrival(params: {
 }
 
 export async function optimize(params: OptimizeParams): Promise<OptimizeResult> {
-  const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights } = params;
+  const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights, onProgress } = params;
 
   if (cities.length < 1) {
     throw new Error('Need at least 1 city to optimize');
@@ -2037,7 +2056,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
 
   // One memo of airport codes and leg prices for this whole run (B8), every
   // lookup made with the trip's city names as context.
-  const ctx = createRunContext(cities.map((c) => c.name));
+  const ctx = createRunContext(cities.map((c) => c.name), onProgress);
 
   // Step 1: resolve IATA codes in parallel
   const iataCodes: Record<string, string> = {};
@@ -2164,6 +2183,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // live mode the metro code when the home airports share one (ORD + MDW →
   // CHI) — and the winner's home cards built from the same answers plus its
   // other airports. 1-3 city trips price them exactly as before.
+  onProgress?.({ stage: 'routes', orderings: orderings.length });
+
   const homeKnown = hasOrigin && resolvedOriginAirports.length > 0;
   const outboundDate = clampToFuture(startDate);
   const returnDate = clampToFuture(addDays(startDate, totalNightsResolved));
@@ -2324,6 +2345,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     : 0;
 
   const bestOrdering = topRoutes[0].ordering;
+  onProgress?.({ stage: 'finishing', bestOrder: bestOrdering });
 
   // Steps 7, 7.5 and 8 only READ the winning route and the trip's dates,
   // and none needs another's answer, so they run together. They used to run
