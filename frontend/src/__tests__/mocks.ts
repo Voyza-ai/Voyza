@@ -2,10 +2,11 @@
 
 // Mock next/navigation
 export const mockPush = jest.fn();
+export const mockReplace = jest.fn();
 export const mockSearchParams = new URLSearchParams();
 
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush, replace: jest.fn(), back: jest.fn() }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace, back: jest.fn() }),
   useSearchParams: () => mockSearchParams,
   useParams: () => ({ tripId: 'trip-test-123' }),
   usePathname: () => '/test',
@@ -53,7 +54,7 @@ jest.mock('framer-motion', () => {
     const { axis, ...domProps } = rest;
     return React.createElement(Tag, { ...domProps, ref }, children);
   });
-  const ReorderItem = React.forwardRef(({ children, as: Tag = 'div', value, dragListener, whileDrag, ...rest }: any, ref: any) => {
+  const ReorderItem = React.forwardRef(({ children, as: Tag = 'div', value, dragListener, dragControls, drag, onDragEnd, whileDrag, variants, ...rest }: any, ref: any) => {
     const { transition, ...domProps } = rest;
     return React.createElement(Tag, { ...domProps, ref }, children);
   });
@@ -64,6 +65,7 @@ jest.mock('framer-motion', () => {
     Reorder: { Group: ReorderGroup, Item: ReorderItem },
     useAnimation: () => ({ start: jest.fn() }),
     useMotionValue: (val: number) => ({ get: () => val, set: jest.fn() }),
+    useDragControls: () => ({ start: jest.fn() }),
   };
 });
 
@@ -114,6 +116,9 @@ jest.mock('@/hooks/useCanvasRealtime', () => ({
     broadcastRoleChange: jest.fn(),
     cursorEvent: null,
     broadcastCursor: jest.fn(),
+    suggestionsTick: 0,
+    suggestionDecision: null,
+    broadcastSuggestionsChanged: jest.fn(),
   }),
 }));
 

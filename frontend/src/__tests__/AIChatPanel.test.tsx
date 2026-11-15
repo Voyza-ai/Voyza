@@ -31,6 +31,18 @@ describe('AIChatPanel', () => {
     expect(screen.getByText(/\$249/)).toBeInTheDocument();
   });
 
+  it('the greeting follows the trip: a removed city and a dropped saving show at once', () => {
+    // Found live: after a city was removed it still said "this 4-city trip … save you $X".
+    const trip = buildTrip({ savings: 249, dateShiftSuggestion: { dayOffset: 1, newStartDate: '2026-06-16', newTotalCost: 1, savings: 80 } as any });
+    const { rerender } = render(<AIChatPanel trip={trip} />);
+    expect(screen.getByText(/2-city trip/)).toBeInTheDocument();
+    expect(screen.getByText(/Heads up/)).toBeInTheDocument();
+    rerender(<AIChatPanel trip={{ ...trip, cities: trip.cities.slice(0, 1), savings: 0, dateShiftSuggestion: undefined }} />);
+    expect(screen.getByText(/1-city trip/)).toBeInTheDocument();
+    expect(screen.queryByText(/\$249/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Heads up/)).not.toBeInTheDocument();
+  });
+
   it('renders trip-aware fallback suggestions before the AI call lands', () => {
     // Fallback chips (computed locally from trip shape) should appear
     // immediately, before the async chat-suggestions call resolves.

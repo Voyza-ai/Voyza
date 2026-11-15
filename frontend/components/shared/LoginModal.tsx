@@ -7,14 +7,24 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
+import { isUnconfirmedEmailError, safeReturnPath } from '@/lib/authEmail';
+import UnconfirmedEmailNotice from './UnconfirmedEmailNotice';
+
+/** The page the modal is open on, if it's one worth coming back to. */
+const here = (): string | null =>
+  typeof window === 'undefined' ? null : safeReturnPath(window.location.pathname + window.location.search);
 
 type LoginModalProps = {
   isOpen: boolean;
-  onClose: () => void;
+  /** 'signup': closed because the person went on to create an account
+   *  (the page is being left; don't redirect away from it). */
+  onClose: (reason?: 'signup') => void;
   onSuccess?: () => void;
+  /** The line under the title. */
+  subtitle?: string;
 };
 
-export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalProps) {
+export default function LoginModal({ isOpen, onClose, onSuccess, subtitle = 'Sign in to save your trip' }: LoginModalProps) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -68,8 +78,12 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
   };
 
   const handleSignupLink = () => {
-    onClose();
-    router.push('/auth/signup');
+    // Read before onClose: closing can navigate away (the results page sends
+    // a signed-out visitor to /main). The new account comes back here — a
+    // shared trip's sign-in prompt used to drop the trip on the way.
+    const next = here();
+    onClose('signup');
+    router.push(next ? `/auth/signup?next=${encodeURIComponent(next)}` : '/auth/signup');
   };
 
   // Google OAuth: Supabase redirects the user to accounts.google.com,
@@ -120,7 +134,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            onClick={() => onClose()}
           />
 
           <motion.div
@@ -138,7 +152,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
               onClick={(e) => e.stopPropagation()}
             >
               <button
-                onClick={onClose}
+                onClick={() => onClose()}
                 className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <X size={18} />
@@ -148,7 +162,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
                 <h2 className="text-xl font-bold" style={{ color: '#2563eb' }}>
                   BlueMurr
                 </h2>
-                <p className="text-gray-500 text-sm mt-1">Sign in to save your trip</p>
+                <p className="text-gray-500 text-sm mt-1">{subtitle}</p>
               </div>
 
               {/* Google sign-in — primary path. Positioned above the
@@ -205,11 +219,13 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
                   </button>
                 </div>
 
-                {error && (
+                {error && isUnconfirmedEmailError(error) ? (
+                  <UnconfirmedEmailNotice email={email.trim()} next={here()} />
+                ) : error ? (
                   <div className="rounded-lg px-3 py-2 text-sm" style={{ background: '#fef2f2', color: '#dc2626' }}>
                     {error}
                   </div>
-                )}
+                ) : null}
 
                 <button
                   type="submit"

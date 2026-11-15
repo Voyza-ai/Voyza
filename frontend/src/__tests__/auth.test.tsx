@@ -33,6 +33,7 @@ jest.mock('framer-motion', () => {
 const mockSignInWithPassword = jest.fn();
 const mockSignUp = jest.fn();
 const mockResetPasswordForEmail = jest.fn();
+const mockResend = jest.fn();
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -40,6 +41,7 @@ jest.mock('@/lib/supabase', () => ({
       signInWithPassword: (...args: any[]) => mockSignInWithPassword(...args),
       signUp: (...args: any[]) => mockSignUp(...args),
       resetPasswordForEmail: (...args: any[]) => mockResetPasswordForEmail(...args),
+      resend: (...args: any[]) => mockResend(...args),
       getUser: jest.fn().mockResolvedValue({ data: { user: null } }),
       getSession: jest.fn().mockResolvedValue({ data: { session: null } }),
     },
@@ -196,9 +198,51 @@ describe('Signup page', () => {
       expect(mockSignUp).toHaveBeenCalledWith({
         email: 'test@test.com',
         password: 'password123!',
-        options: { data: { full_name: 'Test User' } },
+        // The confirmation link comes back to this app, signed in.
+        options: { data: { full_name: 'Test User' }, emailRedirectTo: 'http://localhost/auth/callback' },
       });
     });
+    expect(mockPush).toHaveBeenCalledWith('/history');
+  });
+
+  test('an account that needs confirming gets "Check your email", not a silent jump to My Trips', async () => {
+    // Found live: sign-up went straight on, signed out; the next sign-in said "Email not confirmed".
+    mockPush.mockClear();
+    mockSignUp.mockResolvedValue({ data: { user: { id: 'u1' }, session: null }, error: null });
+    mockResend.mockResolvedValue({ error: null });
+    render(<SignupPage />);
+    fireEvent.change(screen.getByPlaceholderText('Jane Doe'), { target: { value: 'Test User' } });
+    fireEvent.change(screen.getByPlaceholderText('you@example.com'), { target: { value: 'new@test.com' } });
+    fireEvent.change(screen.getByPlaceholderText('At least 8 characters'), { target: { value: 'password123!' } });
+    fireEvent.change(screen.getByPlaceholderText('Re-enter your password'), { target: { value: 'password123!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+    expect(await screen.findByText('Check your email')).toBeInTheDocument();
+    expect(screen.getByText('new@test.com')).toBeInTheDocument();
+    expect(mockPush).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Resend email' }));
+    await waitFor(() =>
+      expect(mockResend).toHaveBeenCalledWith({
+        type: 'signup',
+        email: 'new@test.com',
+        options: { emailRedirectTo: 'http://localhost/auth/callback' },
+      }),
+    );
+    expect(await screen.findByText('Sent again')).toBeInTheDocument();
+  });
+});
+
+describe('Unconfirmed email on sign-in', () => {
+  test('explains it and can resend the confirmation', async () => {
+    mockSignInWithPassword.mockResolvedValue({ data: {}, error: { message: 'Email not confirmed' } });
+    mockResend.mockResolvedValue({ error: null });
+    render(<LoginPage />);
+    fireEvent.change(screen.getByPlaceholderText('you@example.com'), { target: { value: 'new@test.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Enter your password'), { target: { value: 'password123!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByText(/Please confirm your email first/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Resend confirmation email' }));
+    await waitFor(() => expect(mockResend).toHaveBeenCalledWith(expect.objectContaining({ type: 'signup', email: 'new@test.com' })));
+    expect(await screen.findByText(/Sent\. Check your inbox/)).toBeInTheDocument();
   });
 });
 

@@ -255,3 +255,25 @@ describe('runWeeklyDigests', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });
+
+describe('canvasInvite email', () => {
+  it('names the inviter, says what the role can do, and escapes user-typed text', () => {
+    const t = emailTemplates.canvasInvite(
+      'owner@test.dev',
+      'Rome <a href="https://evil.example">win</a>',
+      'suggester',
+      'http://localhost:3000/results?tripId=t1&share=tok',
+      undefined,
+      'Gohil <b>',
+    );
+    expect(t.subject).toBe('Gohil <b> invited you to "Rome <a href="https://evil.example">win</a>" on BlueMurr');
+    expect(t.html).toContain('Gohil &lt;b&gt;');
+    expect(t.html).toContain('(owner@test.dev)');
+    expect(t.html).toContain('&lt;a href=&quot;https://evil.example&quot;&gt;');
+    expect(t.html).not.toContain('<a href="https://evil.example">');
+    expect(t.html).toContain('as a suggester');
+    expect(t.html).toContain('propose changes');
+    expect(t.html).toContain('href="http://localhost:3000/results?tripId=t1&share=tok"');
+    expect(t.html).not.toMatch(/canvas/i);
+  });
+});

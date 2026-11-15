@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Sparkles, Check, X, Clock, Plane, TrainFront, ArrowRight } from 'lucide-react';
+import { Send, Sparkles, Check, X, Clock, Plane, TrainFront, ArrowRight, PanelRightClose } from 'lucide-react';
 import { Trip, Transport } from '@/lib/types';
 import {
   planChat,
@@ -43,14 +43,25 @@ type Message = {
  * baseline is the optimizer's: the cities in the order they were given
  * (optimizer.ts savingsVsNaive), not a "most common routing".
  */
-function messageText(m: Message, priceMode: 'total' | 'perPerson', travelers: number): string {
+function messageText(m: Message, priceMode: 'total' | 'perPerson', trip: Trip): string {
   if (!m.intro) return m.content;
+  const travelers = trip.travelers;
+  // The greeting describes the trip as it is NOW: it used to keep the count
+  // and saving from when the chat opened, so after a city was removed (here
+  // or by a collaborator) it still said "this 4-city trip … save you $X".
+  const intro =
+    m.intro.kind === 'greeting' ? { ...m.intro, cities: trip.cities.length, savings: trip.savings ?? 0 } : m.intro;
   const perPerson = priceMode === 'perPerson' && travelers > 1;
-  const amount = `$${displayAmount(m.intro.savings, priceMode, travelers).toLocaleString()}${perPerson ? ' per person' : ''}`;
-  if (m.intro.kind === 'shiftTip') return `${m.intro.text} would save about ${amount}.`;
-  return m.intro.savings > 0
-    ? `I built this ${m.intro.cities}-city trip to save you ${amount} vs your original city order. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`
-    : `You're working on a ${m.intro.cities}-city trip. Ask me anything — swap transports, shift dates, rework a city, or ask why things are ordered this way.`;
+  const amount = `$${displayAmount(intro.savings, priceMode, travelers).toLocaleString()}${perPerson ? ' per person' : ''}`;
+  if (intro.kind === 'shiftTip') return `${intro.text} would save about ${amount}.`;
+  return intro.savings > 0
+    ? `I built this ${intro.cities}-city trip to save you ${amount} vs your original city order. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`
+    : `You're working on a ${intro.cities}-city trip. Ask me anything — swap transports, shift dates, rework a city, or ask why things are ordered this way.`;
+}
+
+/** The date-shift tip goes once the trip no longer offers it (the stops were rearranged). */
+function isStale(m: Message, trip: Trip): boolean {
+  return m.intro?.kind === 'shiftTip' && !(trip.dateShiftSuggestion && trip.dateShiftSuggestion.savings > 0);
 }
 
 type AIChatPanelProps = {
@@ -68,6 +79,8 @@ type AIChatPanelProps = {
    * passes a reader over its live local state.
    */
   getLatestTrip?: () => Trip | null;
+  /** Shows a hide button in the header (the page then offers a tab to bring it back). */
+  onHide?: () => void;
 };
 
 /**
@@ -254,7 +267,7 @@ function applyLegRefreshToTrip(trip: Trip, refresh: LegRefresh): Trip {
   } as Trip;
 }
 
-export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AIChatPanelProps) {
+export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide }: AIChatPanelProps) {
   const setTrip = useTripStore((s) => s.setTrip);
 
   // Host-provided sinks with trip-store defaults — the results page uses
@@ -354,8 +367,8 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     // did with it: left out, the model saw "swap Venice for Milan" with no
     // answer, then the next request — two user turns in a row — and redid
     // the first one (re-proposed Milan for "replace Venice with X").
-    const history: ChatTurn[] = messages.map((m) => {
-      let content = messageText(m, priceMode, trip.travelers);
+    const history: ChatTurn[] = messages.filter((m) => !isStale(m, trip)).map((m) => {
+      let content = messageText(m, priceMode, trip);
       if (m.proposal) {
         const outcome =
           m.proposalState === 'accepted'
@@ -499,10 +512,21 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
         >
           <Sparkles size={14} className="text-white" />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <div className="text-white text-sm font-medium leading-tight">BlueMurr AI</div>
           <div className="text-white/60 text-[11px]">Tweak your trip in plain English</div>
         </div>
+        {onHide && (
+          <button
+            type="button"
+            onClick={onHide}
+            aria-label="Hide BlueMurr AI"
+            title="Hide"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/15 transition-colors"
+          >
+            <PanelRightClose size={16} />
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -512,7 +536,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
         style={{ scrollbarWidth: 'none' }}
       >
         <AnimatePresence initial={false}>
-          {messages.map((msg) => (
+          {messages.filter((m) => !isStale(m, trip)).map((msg) => (
             <motion.div
               key={msg.id}
               initial={{ opacity: 0, y: 8 }}
@@ -529,7 +553,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
                   border: msg.role === 'user' ? '1px solid rgba(46,107,196,0.2)' : '1px solid rgba(0,0,0,0.06)',
                 }}
               >
-                {messageText(msg, priceMode, trip.travelers)}
+                {messageText(msg, priceMode, trip)}
               </div>
 
               {/* Proposal card — only for date_shift (pin/min-days).

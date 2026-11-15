@@ -156,7 +156,7 @@ describe('NotificationBell', () => {
     fireEvent.click(screen.getByText('You are now the owner of a trip'));
 
     expect(mockedMarkRead).toHaveBeenCalledWith('n-own');
-    expect(mockPush).toHaveBeenCalledWith('/canvas/trip-9');
+    expect(mockPush).toHaveBeenCalledWith('/results?tripId=trip-9');
     expect(screen.queryByTestId('notification-badge')).not.toBeInTheDocument();
   });
 
@@ -189,7 +189,7 @@ describe('NotificationBell', () => {
     fireEvent.click(screen.getByLabelText(/Notifications/));
     fireEvent.click(screen.getByText('You were invited to collaborate on a trip'));
 
-    expect(mockPush).toHaveBeenCalledWith('/canvas/trip-8?share=tok-legacy');
+    expect(mockPush).toHaveBeenCalledWith('/results?tripId=trip-8&share=tok-legacy');
   });
 
   it('the anonymized-owner notification clones the trip and opens the copy', async () => {
@@ -208,7 +208,7 @@ describe('NotificationBell', () => {
     fireEvent.click(screen.getByText('Clone trip'));
 
     await waitFor(() => expect(mockedClone).toHaveBeenCalledWith('trip-1'));
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/canvas/trip-clone-1'));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/results?tripId=trip-clone-1'));
   });
 
   it('deleting a row removes it and calls the API without navigating', async () => {
