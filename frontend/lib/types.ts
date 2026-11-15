@@ -36,6 +36,45 @@ export type Transport = {
    * flight is the only sensible option.
    */
   noTrainData?: boolean;
+  /**
+   * City centre to city centre, with what the time is made of (backend
+   * services/legFacts.ts). Absent on legs priced before it existed, and
+   * when an airport's position is unknown.
+   */
+  doorToDoor?: DoorToDoor | null;
+  /** Party CO₂: Duffel's estimate for a flight, ours for a train. */
+  co2?: Co2Figure | null;
+  /** Trains only: where `price` came from. Absent on older trips. */
+  priceSource?: RailPriceSource;
+};
+
+export type DoorToDoorPart = {
+  kind: 'transfer' | 'airport' | 'flight' | 'train';
+  label: string;
+  minutes: number;
+};
+
+export type DoorToDoor = {
+  totalMinutes: number;
+  basis: string;
+  parts: DoorToDoorPart[];
+};
+
+export type Co2Figure = {
+  /** Kilograms for the whole party, like every price. */
+  kg: number;
+  /** 'duffel' = the airline-itinerary estimate on the Duffel offer; 'estimate' = ours from distance. */
+  source: 'duffel' | 'estimate';
+  distanceKm?: number;
+  gramsPerPassengerKm?: number;
+};
+
+/** Mirrors backend `RailPriceSource` in services/trains.ts. */
+export type RailPriceSource = {
+  kind: 'live' | 'cached' | 'estimated';
+  provider?: string;
+  /** The fare came from the provider's TEST gateway. */
+  testApi?: boolean;
 };
 
 export type Hotel = {

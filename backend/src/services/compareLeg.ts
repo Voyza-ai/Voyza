@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { getStaticIata } from '../data/cityAirports';
 import { resolveDestinationIata } from './location/destinationAirport';
 import { sameAirportArea } from './location/sameAirportArea';
+import { flightDoorToDoor, trainCo2, trainDoorToDoor as trainDoorToDoorFacts } from './legFacts';
 
 /**
  * Both options are priced as PARTY TOTALS for `travelers` — Duffel quotes
@@ -23,6 +24,11 @@ export type LegComparison = {
   timeDifference: number;
 };
 
+/**
+ * Flat allowance for getting to and through airports, used only when a
+ * flight's door-to-door total can't be built from its airports' positions
+ * (legFacts.flightDoorToDoor) — e.g. an airport missing from OurAirports.
+ */
 const AIRPORT_OVERHEAD_MINUTES = 180;
 
 /**
@@ -237,6 +243,8 @@ export async function compareLeg(
       trainType: '',
       bookingUrl: null,
       limitedCoverage: false,
+      // A live fare from an earlier search; the row doesn't say which provider.
+      ...(cachedTrain.price != null ? { priceSource: { kind: 'cached' as const } } : {}),
     };
   } else if (trainsResult && Array.isArray(trainsResult) && trainsResult.length > 0) {
     const withPrice = trainsResult.filter((t) => t.price !== null);
@@ -247,6 +255,29 @@ export async function compareLeg(
     }
   }
 
+  // Door-to-door facts for the card: time city centre to city centre, and
+  // CO₂. A flight's total needs its airports — the offer's own, else the
+  // codes this leg resolved to (a cached row has none of its own).
+  const fromRef = { city: origin, country: originCountry };
+  const toRef = { city: destination, country: destinationCountry };
+  // Only facts we could build are attached — no `null` keys on the wire.
+  if (bestFlight) {
+    const resolved = Array.isArray(airports) ? airports : null;
+    const doorToDoor = flightDoorToDoor({
+      from: fromRef,
+      to: toRef,
+      originAirport: bestFlight.originAirport ?? resolved?.[0],
+      destinationAirport: bestFlight.destinationAirport ?? resolved?.[1],
+      flightMinutes: knownDuration(bestFlight.durationMinutes),
+    });
+    if (doorToDoor) bestFlight = { ...bestFlight, doorToDoor };
+  }
+  if (bestTrain) {
+    const doorToDoor = trainDoorToDoorFacts(knownDuration(bestTrain.durationMinutes));
+    const co2 = trainCo2(fromRef, toRef, travelers);
+    bestTrain = { ...bestTrain, ...(doorToDoor ? { doorToDoor } : {}), ...(co2 ? { co2 } : {}) };
+  }
+
   // Door-to-door times. An unknown duration stays Infinity rather than
   // collapsing to the airport overhead alone — we can't claim a journey is
   // fast when we don't know how long it is, and Infinity keeps it out of
@@ -254,8 +285,12 @@ export async function compareLeg(
   const flightMinutes = bestFlight ? knownDuration(bestFlight.durationMinutes) : null;
   const trainMinutes = bestTrain ? knownDuration(bestTrain.durationMinutes) : null;
 
-  const flightDoorToDoor =
-    flightMinutes != null ? flightMinutes + AIRPORT_OVERHEAD_MINUTES : Infinity;
+  // The same total the card shows when we could build one; the flat
+  // allowance when an airport's position is unknown.
+  const flightDoorToDoorMinutes =
+    flightMinutes == null
+      ? Infinity
+      : bestFlight?.doorToDoor?.totalMinutes ?? flightMinutes + AIRPORT_OVERHEAD_MINUTES;
   const trainDoorToDoor = trainMinutes != null ? trainMinutes : Infinity;
   const durationsComparable = flightMinutes != null && trainMinutes != null;
 
@@ -288,8 +323,8 @@ export async function compareLeg(
     // missing on either side this stays 'unavailable' — the honest answer,
     // and the UI simply renders no "fastest" badge.
     if (!durationsComparable) fastest = 'unavailable';
-    else if (flightDoorToDoor < trainDoorToDoor) fastest = 'flight';
-    else if (trainDoorToDoor < flightDoorToDoor) fastest = 'train';
+    else if (flightDoorToDoorMinutes < trainDoorToDoor) fastest = 'flight';
+    else if (trainDoorToDoor < flightDoorToDoorMinutes) fastest = 'train';
     else fastest = 'same';
   } else if (bestFlight) {
     fastest = 'flight';
@@ -419,7 +454,7 @@ export async function compareLeg(
     // 0 when there's nothing real to subtract. Infinity/NaN here used to
     // serialize to JSON `null` against a `number` field on the client.
     timeDifference: durationsComparable
-      ? Math.abs(flightDoorToDoor - trainDoorToDoor)
+      ? Math.abs(flightDoorToDoorMinutes - trainDoorToDoor)
       : 0,
   };
 }

@@ -157,6 +157,8 @@ describe('searchAllAboard', () => {
     expect(cheapest.limitedCoverage).toBe(false);
     expect(cheapest.operator).toContain('Eurostar');
     expect(cheapest.id).toMatch(/^aa-/);
+    // A real getJourneyOffer fare, from the TEST gateway (the default URL).
+    expect(cheapest.priceSource).toEqual({ kind: 'live', provider: 'All Aboard', testApi: true });
   });
 
   it('computes duration from segment times', async () => {
@@ -215,6 +217,7 @@ describe('searchAllAboard', () => {
     const offers = await searchAllAboard(params);
     expect(offers.length).toBeGreaterThan(0);
     expect(offers.every((o) => o.pricePerPerson === null && o.limitedCoverage)).toBe(true);
+    expect(offers.every((o) => o.priceSource === undefined)).toBe(true);
   });
 
   it('skips journeys with empty itineraries', async () => {
@@ -282,6 +285,8 @@ describe('provider registry integration', () => {
       // per-person fare arriving here unchanged is the headline bug.
       expect(aa[0].price).toBe(79.7);
       expect(aa[0].pricePerPerson).toBeUndefined();
+      // The source survives the party-total scaling.
+      expect(aa[0].priceSource).toMatchObject({ kind: 'live', provider: 'All Aboard' });
     });
   });
 });

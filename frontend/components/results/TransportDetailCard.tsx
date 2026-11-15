@@ -225,6 +225,15 @@ export default function TransportDetailCard({ transport, onClose }: TransportDet
             Book
             <ExternalLink size={11} />
           </a>
+        ) : !isFlight ? (
+          <div
+            role="note"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-dashed cursor-default select-none text-[11px]"
+            style={{ borderColor: `${accentColor}99`, color: '#15805a' }}
+          >
+            <TrainFront size={11} />
+            Rail partner booking · coming soon
+          </div>
         ) : (
           <div className="text-gray-300 text-[11px]">Booking link soon</div>
         )}

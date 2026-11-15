@@ -3,6 +3,7 @@ import { rankHotels } from './hotelScore';
 import { tripStartDate } from './tripSpan';
 import { withLiveTotal } from './tripTotals';
 import type { TravelLegs } from './geoSchedule';
+import type { Co2Figure, DoorToDoor, RailPriceSource } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -70,6 +71,8 @@ export type FlightOffer = {
   carrier: string;
   carrierCode: string;
   bookingUrl: string;
+  doorToDoor?: DoorToDoor | null;
+  co2?: Co2Figure | null;
 };
 
 export async function searchFlights(params: {
@@ -144,6 +147,9 @@ export type TrainOffer = {
   trainType: string;
   bookingUrl: string;
   limitedCoverage: boolean;
+  doorToDoor?: DoorToDoor | null;
+  co2?: Co2Figure | null;
+  priceSource?: RailPriceSource;
 };
 
 export async function searchTrains(params: {
@@ -502,6 +508,9 @@ export type LegOption = {
   stops?: number;
   bookingUrl?: string | null;
   priceDelta: number;
+  doorToDoor?: DoorToDoor | null;
+  co2?: Co2Figure | null;
+  priceSource?: RailPriceSource;
 };
 
 /**
