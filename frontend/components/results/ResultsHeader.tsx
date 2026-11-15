@@ -40,6 +40,8 @@ type ResultsHeaderProps = {
   membersKey?: number;
   /** This person can change the trip: the savings menu's switches apply. */
   canEdit?: boolean;
+  /** Opened from a view-only share link without an account: no Share. */
+  publicView?: boolean;
 };
 
 const formatDate = (iso: string) => {
@@ -48,7 +50,7 @@ const formatDate = (iso: string) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, membersKey = 0, canEdit = true }: ResultsHeaderProps) {
+export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, membersKey = 0, canEdit = true, publicView = false }: ResultsHeaderProps) {
   const shown = pricedTrip ?? trip;
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
@@ -155,7 +157,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
 
   // What this person may do on a shared trip. An unsaved trip, or one whose
   // role is still loading, is the signed-in person's own.
-  const role = collab?.active ? collab.role : 'owner';
+  const role = publicView ? 'viewer' : collab?.active ? collab.role : 'owner';
   const canShare = role === 'owner' || role === 'editor';
   const canRename = !collab?.active || role === 'owner';
   // The TRIP's span — from the day the outbound leaves home — not the first

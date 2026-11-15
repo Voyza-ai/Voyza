@@ -14,6 +14,7 @@ import {
   TripsRotator,
   type HubTrip,
 } from '@/components/main/HubVisuals';
+import RailDemandStat from '@/components/main/RailDemandStat';
 
 type HubCard = {
   key: string;
@@ -222,6 +223,7 @@ export default function MainPage() {
             );
           })}
         </div>
+        <RailDemandStat />
       </div>
     </main>
   );
