@@ -4,7 +4,7 @@ import { useTripStore, restoreTripSession } from '@/store/tripStore';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, UserX, WifiOff } from 'lucide-react';
+import { Eye, Sparkles, UserX, WifiOff } from 'lucide-react';
 import Navbar from '@/components/shared/Navbar';
 import ResultsHeader from '@/components/results/ResultsHeader';
 import OriginClarification, { type OriginChoice } from '@/components/results/OriginClarification';
@@ -23,7 +23,7 @@ import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import NoRailDataNotice from '@/components/results/NoRailDataNotice';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
-import { searchHotels, fetchHomeLegs, updateTrip, compareLeg, type LegComparison } from '@/lib/api';
+import { searchHotels, fetchHomeLegs, updateTrip, compareLeg, fetchSharedTrip, type LegComparison } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 import { originAirportsForCity } from '@/lib/locationResolver';
@@ -131,7 +131,18 @@ function ResultsPageInner() {
    * Their changes reach the database through the owner's page instead.
    */
   const writesTripRef = useRef(true);
-  writesTripRef.current = !collab.active || collab.role === 'owner';
+  // Signed out (a view-only link opened without an account): nothing writes.
+  writesTripRef.current = !!user && (!collab.active || collab.role === 'owner');
+  /**
+   * A "View only" share link opened by someone with no account shows the
+   * trip read-only instead of a sign-in wall (backend routes/shared.ts).
+   * 'failed' (the link is suggest/edit, reset, or the trip is gone) falls
+   * back to the sign-in wall as before.
+   */
+  const [publicState, setPublicState] = useState<'idle' | 'loading' | 'ok' | 'failed'>('idle');
+  const publicStartedRef = useRef(false);
+  const publicView = publicState === 'ok' && !user;
+  const [publicSignIn, setPublicSignIn] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [membersKey, setMembersKey] = useState(0);
   const [addingAfter, setAddingAfter] = useState<number | null>(null);
@@ -148,6 +159,32 @@ function ResultsPageInner() {
 
     // Wait for auth to be ready before fetching protected routes
     if (isAuthLoading) return;
+
+    // Signed out with a share link: try it as a view-only link first.
+    if (tripId && !user && shareInUrl) {
+      if (publicStartedRef.current) return;
+      publicStartedRef.current = true;
+      setPublicState('loading');
+      fetchSharedTrip(tripId, shareInUrl)
+        .then(({ trip }) => {
+          if (!trip || !Array.isArray(trip.cities)) throw new Error('no trip');
+          trip.cities = trip.cities.map((c: any) =>
+            rerankSavedCityHotels({ ...c, country: c.country || countryForCity(c.name) }),
+          );
+          setTrip(trip);
+          setPublicState('ok');
+        })
+        .catch(() => setPublicState('failed'));
+      return;
+    }
+    // Signed in after viewing it read-only: load the full trip (and join).
+    if (tripId && user && publicStartedRef.current && publicState === 'ok') {
+      publicStartedRef.current = false;
+      setPublicState('idle');
+      fetchedRef.current = false;
+      useTripStore.setState({ currentTrip: null });
+      return;
+    }
     // A saved trip needs an account (the sign-in modal shows below), and a
     // share link is claimed before the trip loads so the load sees the new
     // membership.
@@ -305,7 +342,7 @@ function ResultsPageInner() {
 
     // No trip anywhere — redirect to planning
     router.push('/plan');
-  }, [tripId, isAuthLoading, currentTrip?.id, user?.id, collab.joinPending]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tripId, isAuthLoading, currentTrip?.id, user?.id, collab.joinPending, publicState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateCity = useTripStore((s) => s.updateCity);
 
@@ -1002,7 +1039,12 @@ function ResultsPageInner() {
   const signedInRef = useRef(false);
   const signInModal = (
     <LoginModal
-      isOpen={!!tripId && !isAuthLoading && !user}
+      isOpen={
+        !!tripId &&
+        !isAuthLoading &&
+        !user &&
+        (publicSignIn || !shareInUrl || publicState === 'failed')
+      }
       subtitle="Sign in or create an account to open this trip"
       onSuccess={() => {
         signedInRef.current = true;
@@ -1012,6 +1054,12 @@ function ResultsPageInner() {
         // (?next=). Redirecting to /main here overrode it — measured, the
         // popup's "Create account" landed on /main.
         if (reason === 'signup') return;
+        // Closing the sign-in that the read-only view's banner opened just
+        // goes back to viewing.
+        if (publicView) {
+          setPublicSignIn(false);
+          return;
+        }
         collab.dropShareToken();
         setTimeout(() => {
           if (!signedInRef.current) router.push('/main');
@@ -1068,10 +1116,11 @@ function ResultsPageInner() {
     </div>
   );
 
-  if (tripId && !isAuthLoading && !user) {
+  if (tripId && !isAuthLoading && !user && !publicView) {
+    const checkingLink = !!shareInUrl && (publicState === 'idle' || publicState === 'loading');
     return (
       <main className="h-screen flex items-center justify-center" style={{ background: '#f0f4f8' }}>
-        <p className="text-gray-500 text-sm">Sign in to open this trip</p>
+        <p className="text-gray-500 text-sm">{checkingLink ? 'Opening the shared trip…' : 'Sign in to open this trip'}</p>
         {signInModal}
       </main>
     );
@@ -1130,8 +1179,8 @@ function ResultsPageInner() {
 
   // What this person may change. An unsaved trip — or a saved one whose role
   // is still loading for its signed-in owner — is their own to edit.
-  const editable = !collab.active || collab.canManipulate;
-  const chatAllowed = !collab.active || collab.role !== 'viewer';
+  const editable = !publicView && (!collab.active || collab.canManipulate);
+  const chatAllowed = !publicView && (!collab.active || collab.role !== 'viewer');
 
   return (
     <main className="h-screen overflow-hidden dot-grid-bg text-gray-900 flex flex-col">
@@ -1156,7 +1205,28 @@ function ResultsPageInner() {
             onOpenShare={() => setShareOpen(true)}
             membersKey={membersKey}
             canEdit={editable}
+            publicView={publicView}
           />
+          {publicView && (
+            <div
+              data-testid="public-view-banner"
+              className="mx-1 mt-2 flex items-center justify-between gap-3 px-4 py-2 rounded-xl border text-[12px]"
+              style={{ background: '#eef3fb', borderColor: 'rgba(37,99,235,0.25)', color: '#1e3a8a' }}
+            >
+              <span className="flex items-center gap-2">
+                <Eye size={13} />
+                You&apos;re viewing a shared trip. Sign in to save your own copy or plan one like it.
+              </span>
+              <button
+                type="button"
+                onClick={() => setPublicSignIn(true)}
+                className="px-3 py-1 rounded-lg text-[12px] font-medium text-white flex-shrink-0 hover:brightness-110"
+                style={{ background: '#2563eb' }}
+              >
+                Sign in
+              </button>
+            </div>
+          )}
           <AnimatePresence>
             {collab.connectionLost && (
               <motion.div
@@ -1351,6 +1421,7 @@ function ResultsPageInner() {
         }}
         currentCities={currentTrip.cities.map((c) => c.name)}
       />
+      {publicView && signInModal}
       <HomeEditModal
         isOpen={homeEdit !== null}
         direction={homeEdit ?? 'outbound'}

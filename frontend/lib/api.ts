@@ -863,6 +863,35 @@ export async function getTrips(): Promise<{ trips: any[] }> {
   return apiFetch<{ trips: any[] }>('/api/trips');
 }
 
+/**
+ * A trip opened from its "View only" share link by someone with no account.
+ * No auth header: the link's token is the only credential (backend
+ * routes/shared.ts). 404 when the link is not view-only, was reset, or the
+ * trip is gone.
+ */
+export async function fetchSharedTrip(tripId: string, token: string): Promise<{ trip: any }> {
+  const res = await fetch(`${BASE_URL}/api/shared/${encodeURIComponent(tripId)}?token=${encodeURIComponent(token)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.error ?? `API error ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Share of planned multi-city trips with a train leg (public, counts only). */
+export type RailDemand = {
+  tripsWithLegs: number;
+  tripsWithTrain: number;
+  percent: number | null;
+  asOf: string;
+};
+
+export async function fetchRailDemand(): Promise<RailDemand> {
+  const res = await fetch(`${BASE_URL}/api/stats/rail-demand`);
+  if (!res.ok) throw new ApiError(res.status, `API error ${res.status}`);
+  return res.json();
+}
+
 export async function getTrip(tripId: string): Promise<any> {
   return apiFetch<any>(`/api/trips/${tripId}`);
 }

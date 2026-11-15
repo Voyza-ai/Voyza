@@ -6,6 +6,8 @@ import trains from './trains';
 import hotels from './hotels';
 import plan from './plan';
 import canvas from './canvas';
+import shared from './shared';
+import stats from './stats';
 import trips from './trips';
 import users from './users';
 import notifications from './notifications';
@@ -47,6 +49,11 @@ router.use('/locations', locations);
 router.use('/email', email);
 // Public: backs the server-rendered SEO category pages (crawlers are signed out).
 router.use('/presets', presets);
+// No requireAuth: a trip's "View only" share link opens for someone without
+// an account. The route checks the link's token itself (routes/shared.ts).
+router.use('/shared', shared);
+// Public: aggregate counts only (routes/stats.ts).
+router.use('/stats', stats);
 
 // ─── Compare Leg ─────────────────────────────────────────────
 const compareLegSchema = z.object({
