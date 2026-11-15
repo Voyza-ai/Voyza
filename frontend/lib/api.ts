@@ -1,3 +1,4 @@
+import type { OptimizeProgress } from './searchProgress';
 import { getAuthHeader, refreshAuthHeader } from './supabase';
 import { rankHotels } from './hotelScore';
 import { tripStartDate } from './tripSpan';
@@ -242,11 +243,30 @@ export async function optimizeTrip(params: {
    * When omitted the backend uses 2 nights per city as the default.
    */
   totalNights?: number;
+  /** Random id to poll getOptimizeProgress with while this runs. */
+  progressId?: string;
 }): Promise<OptimizeResult> {
   return apiFetch<OptimizeResult>('/api/optimize', {
     method: 'POST',
     body: JSON.stringify(params),
   });
+}
+
+/**
+ * Live counts for an optimize run started with `progressId`. Null when the
+ * backend has none (not started yet, expired, or a backend without the
+ * endpoint) — the search screen then shows its steps without numbers.
+ */
+export async function getOptimizeProgress(progressId: string): Promise<OptimizeProgress | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/optimize/progress/${encodeURIComponent(progressId)}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as OptimizeProgress;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Home Legs ───────────────────────────────────────────────
