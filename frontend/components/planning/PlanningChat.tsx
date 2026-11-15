@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ApiError, interpretPlan, optimizeTrip, reviseDestinations, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
 import { Trip, City, Transport, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
+import { pickLegFacts } from '@/lib/legFacts';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { suggestDestinationsForVibe } from '@/lib/api';
@@ -1088,6 +1089,7 @@ export default function PlanningChat() {
       layovers: opt.mode === 'flight' ? (opt.stops ?? 0) : 0,
       bookingUrl: opt.bookingUrl ?? undefined,
       flightNumber: opt.mode === 'flight' ? (opt.flightNumber ?? undefined) : undefined,
+      ...pickLegFacts(opt, opt.mode),
     });
 
     // Helper: extract a Transport from an optimizer leg.
@@ -1173,6 +1175,7 @@ export default function PlanningChat() {
             ? new Date(otherArriveIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
             : undefined,
           bookingUrl: other.bookingUrl || undefined,
+          ...pickLegFacts(other, otherMode),
         });
       }
 
@@ -1189,6 +1192,7 @@ export default function PlanningChat() {
         layovers: mode === 'flight' ? (picked.stops ?? 0) : 0,
         bookingUrl: picked.bookingUrl || undefined,
         flightNumber: mode === 'flight' ? (picked.carrierCode ?? undefined) : undefined,
+        ...pickLegFacts(picked, mode),
         alternatives,
         // Honest "no train" note when a flight was picked, no train option came
         // back, and the route is short enough (≤6h) that a train would compete.

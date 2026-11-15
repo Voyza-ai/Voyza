@@ -30,6 +30,7 @@ import { originAirportsForCity } from '@/lib/locationResolver';
 import { Hotel, City, Transport, HomeLeg, Trip } from '@/lib/types';
 import { tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
 import { formatMinutes } from '@/lib/dateHelpers';
+import { pickLegFacts } from '@/lib/legFacts';
 import { useAuthStore } from '@/store/authStore';
 import { useSavedTripAutosave } from '@/lib/useSavedTripAutosave';
 import { requestPicksForAddedCity } from '@/store/tripStore';
@@ -1585,6 +1586,7 @@ function comparisonToTransport(
         departDate: date,
         layovers: flight.stops ?? 0,
         bookingUrl: flight.bookingUrl || undefined,
+        ...pickLegFacts(flight, 'flight'),
       };
     }
     if (mode === 'train' && train && train.price != null) {
@@ -1600,6 +1602,7 @@ function comparisonToTransport(
         departDate: date,
         layovers: 0,
         bookingUrl: train.bookingUrl || undefined,
+        ...pickLegFacts(train, 'train'),
       };
     }
     return null;

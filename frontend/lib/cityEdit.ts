@@ -1,5 +1,6 @@
 import type { City, HomeLeg, Transport, Trip } from './types';
 import type { CityEditProposal, LegOption } from './api';
+import { pickLegFacts } from './legFacts';
 import { hotelFromResult } from './hotelShape';
 import { liveTripTotal } from './tripTotals';
 import { buildCityScheduleFromSuggestions } from './dayScheduleDefaults';
@@ -145,6 +146,7 @@ export function legToTransport(options: LegOption[], from: string, to: string, d
     bookingUrl: o.bookingUrl ?? undefined,
     flightNumber: o.mode === 'flight' ? (o.flightNumber ?? undefined) : undefined,
     trainNumber: o.mode === 'train' ? (o.flightNumber ?? undefined) : undefined,
+    ...pickLegFacts(o, o.mode),
   });
   const [main, ...rest] = options;
   if (!main) return { mode: 'flight', operator: '', duration: '', price: 0, from, to, departDate: date, unavailable: true };
