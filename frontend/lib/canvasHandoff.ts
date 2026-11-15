@@ -22,6 +22,9 @@ export type CanvasIntent = {
   // Where to land after the save resolves. 'canvas' (default) opens the
   // canvas editor; 'results' opens the results page — used by Browse presets.
   destination?: 'canvas' | 'results';
+  // Open the share dialog once the saved trip is on screen (the Share button
+  // was what asked for sign-in).
+  openShare?: boolean;
 };
 
 // Per-trip handoff of the latest results-page trip state into the canvas tab.
@@ -205,6 +208,9 @@ export async function persistSavedTrip(trip: Trip): Promise<boolean> {
     cities: trip.cities,
     trip: {
       ...(prev.trip ?? {}),
+      // The save writes the trips row's name from here; the session's copy
+      // goes stale (an auto-titled trip follows its stops when they change).
+      ...(trip.title ? { title: trip.title } : {}),
       travelers: trip.travelers,
       ...(trip.origin ? { origin: trip.origin, returnToHome: trip.returnToHome ?? true } : {}),
     },

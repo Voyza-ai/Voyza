@@ -125,7 +125,7 @@ it('saves the canvas trip with the picks that were loading when the user left fo
     render(<AuthCallbackPage />);
   });
 
-  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/canvas/trip-9'));
+  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/results?tripId=trip-9'));
   expect(mockedSave).toHaveBeenCalledTimes(1);
   const savedCities = mockedSave.mock.calls[0][0].cities;
   expect(savedCities.map((c: any) => c.activities)).toEqual(trip.cities.map((c) => [`${c.name} museum`]));
@@ -150,7 +150,7 @@ it('a pick that fails again after the redirect: the canvas is still saved and op
   });
 
   // The failure is taken in after FAILED_PICKS_GRACE_MS on this page.
-  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/canvas/trip-9'), { timeout: 5000 });
+  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/results?tripId=trip-9'), { timeout: 5000 });
   const savedCities = mockedSave.mock.calls[0][0].cities;
   expect(savedCities[0].activities).toEqual([]);
   expect(savedCities[1].activities).toEqual([`${trip.cities[1].name} museum`]);
@@ -163,7 +163,7 @@ it('an intent with no picks loading (a saved trip, or a Browse preset) is resume
     render(<AuthCallbackPage />);
   });
 
-  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/canvas/trip-1'));
+  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/results?tripId=trip-1'));
   expect(mockedSave).not.toHaveBeenCalled();
   expect(mockedActivities).not.toHaveBeenCalled();
 });

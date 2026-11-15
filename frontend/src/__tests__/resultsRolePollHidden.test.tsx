@@ -1,12 +1,15 @@
 import './mocks';
+import { mockSearchParams } from './mocks';
 import React from 'react';
 import { render, screen, act } from '@testing-library/react';
-import CanvasPage from '@/app/canvas/[tripId]/page';
+import ResultsPage from '@/app/results/page';
+import { useTripStore } from '@/store/tripStore';
 import { getCanvasSession, getCanvasSuggestions, getCanvasRole } from '@/lib/api';
-import { buildCity } from './fixtures';
+import { buildCity, buildTrip } from './fixtures';
 
 /**
- * The canvas's role poll must not run in a tab nobody is looking at.
+ * The shared trip's role poll (the canvas's, now on the results page) must
+ * not run in a tab nobody is looking at.
  *
  * Each canvas tab asked /api/canvas/:id/role every 25 s, hidden or not. That
  * is 36 requests per tab per 15 minutes against the general 100-request
@@ -50,13 +53,28 @@ beforeEach(() => {
   } as any);
 });
 
+const realFetch = global.fetch;
 afterEach(() => {
   jest.useRealTimers();
+  mockSearchParams.delete('tripId');
+  global.fetch = realFetch;
 });
 
 async function openCanvas() {
-  render(<CanvasPage />);
-  expect(await screen.findByText('Rome')).toBeInTheDocument();
+  useTripStore.setState({ currentTrip: null });
+  mockSearchParams.set('tripId', 'trip-italy');
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      trip: buildTrip({ id: 'trip-italy', title: 'Roman Holiday', cities: [buildCity({ name: 'Rome' }), buildCity({ name: 'Florence' })] }),
+    }),
+  }) as any;
+  render(<ResultsPage />);
+  expect(await screen.findByText('Roman Holiday')).toBeInTheDocument();
+  // The session load has settled (it reads the role too).
+  await act(async () => {
+    await Promise.resolve();
+  });
   mockedGetRole.mockClear();
 }
 
@@ -65,7 +83,7 @@ const wait = (ms: number) =>
     jest.advanceTimersByTime(ms);
   });
 
-describe('canvas role poll', () => {
+describe('shared trip role poll', () => {
   it('polls every 25 s while the tab is visible, as before', async () => {
     await openCanvas();
     await wait(25_000);

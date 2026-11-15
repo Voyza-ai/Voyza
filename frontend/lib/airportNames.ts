@@ -26,8 +26,8 @@ import { useEffect, useState } from 'react';
  *
  * The table this replaced carried both a short `name` ("Portland Intl.") and a
  * `full` one ("Portland International Airport"). Checked against what actually
- * renders: all three consumers — `Flowchart`'s `HomeCard`, `CanvasHomeCard`,
- * and a chip tooltip in `HomeEditModal` — read only the short form, and
+ * renders: its consumers — `Flowchart`'s `HomeCard` and a chip tooltip in
+ * `HomeEditModal` — read only the short form, and
  * `getAirportFullName` had no callers at all. Shipping both measures +16.1 KiB
  * gzipped on a payload the budget note below is already the hard part of, for
  * a field nothing reads, so only the short form is generated and the dead

@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Mail } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
+import { confirmRedirectUrl, resendConfirmation, safeReturnPath } from '@/lib/authEmail';
 
 function getPasswordStrength(pw: string): { label: string; color: string; width: string } {
   if (!pw || pw.length < 8) return { label: 'Weak', color: '#dc2626', width: '33%' };
@@ -17,7 +18,21 @@ function getPasswordStrength(pw: string): { label: string; color: string; width:
 }
 
 export default function SignupPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignupInner />
+    </Suspense>
+  );
+}
+
+function SignupInner() {
   const router = useRouter();
+  // Where to go once signed in (e.g. the shared trip that asked for an
+  // account). Carried through the confirmation email.
+  const next = safeReturnPath(useSearchParams().get('next'));
+  /** Set once the account is made but its email still needs confirming. */
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [resend, setResend] = useState<'idle' | 'sending' | 'sent' | string>('idle');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -55,6 +70,7 @@ export default function SignupPage() {
       password,
       options: {
         data: { full_name: fullName },
+        emailRedirectTo: confirmRedirectUrl(next),
       },
     });
 
@@ -65,13 +81,63 @@ export default function SignupPage() {
       return;
     }
 
-    if (data.session) {
-      setSession(data.session);
-      setUser(data.user);
+    // No session = the project requires email confirmation. Before, the page
+    // went on to My Trips signed out, and the next sign-in failed with a bare
+    // "Email not confirmed".
+    if (!data.session) {
+      setSentTo(email.trim());
+      return;
     }
-
-    router.push('/history');
+    setSession(data.session);
+    setUser(data.user);
+    router.push(next ?? '/history');
   };
+
+  if (sentTo) {
+    const doResend = async () => {
+      setResend('sending');
+      const err = await resendConfirmation(sentTo, next);
+      setResend(err ? err : 'sent');
+    };
+    return (
+      <main className="min-h-screen flex items-center justify-center px-4" style={{ background: '#f0f4f8' }}>
+        <div className="w-full max-w-md bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center">
+          <Link href="/" className="text-2xl font-bold" style={{ color: '#2563eb' }}>
+            BlueMurr
+          </Link>
+          <div className="mx-auto mt-5 mb-3 w-12 h-12 rounded-full flex items-center justify-center bg-blue-50">
+            <Mail size={22} className="text-[#2563eb]" />
+          </div>
+          <h1 className="text-gray-900 text-lg font-medium">Check your email</h1>
+          <p className="text-sm text-gray-500 mt-2">
+            We sent a confirmation link to <strong className="text-gray-800">{sentTo}</strong>. Click it to finish
+            creating your account{next ? ' and go straight back to the trip' : ''}.
+          </p>
+          <p className="text-xs text-gray-400 mt-3">Not there after a minute? Check your spam folder.</p>
+          <div className="mt-5 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={doResend}
+              disabled={resend === 'sending' || resend === 'sent'}
+              className="w-full py-2.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              {resend === 'sending' ? 'Sending…' : resend === 'sent' ? 'Sent again' : 'Resend email'}
+            </button>
+            <Link
+              href={next ? `/auth/login?redirect=${encodeURIComponent(next)}` : '/auth/login'}
+              className="block w-full py-2.5 rounded-lg text-sm font-medium text-white"
+              style={{ background: '#2563eb' }}
+            >
+              I've confirmed, sign in
+            </Link>
+          </div>
+          {resend !== 'idle' && resend !== 'sending' && resend !== 'sent' && (
+            <p className="text-sm mt-3" style={{ color: '#dc2626' }}>{resend}</p>
+          )}
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen flex items-center justify-center px-4" style={{ background: '#f0f4f8' }}>
@@ -185,7 +251,7 @@ export default function SignupPage() {
 
         <p className="text-center text-sm text-gray-500 mt-5">
           Already have an account?{' '}
-          <Link href="/auth/login" className="font-medium hover:underline" style={{ color: '#2563eb' }}>
+          <Link href={next ? `/auth/login?redirect=${encodeURIComponent(next)}` : '/auth/login'} className="font-medium hover:underline" style={{ color: '#2563eb' }}>
             Sign in
           </Link>
         </p>

@@ -6,14 +6,11 @@ import { buildCity, buildTrip } from './fixtures';
 import {
   compareLeg,
   fetchHomeLegs,
-  getCanvasSession,
-  getCanvasSuggestions,
   planChat,
   searchHotels,
 } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
 import ResultsPage from '@/app/results/page';
-import CanvasPage from '@/app/canvas/[tripId]/page';
 import type { HomeLeg, Transport, Trip } from '@/lib/types';
 
 /**
@@ -36,8 +33,6 @@ const mockedPlanChat = planChat as jest.MockedFunction<typeof planChat>;
 const mockedCompareLeg = compareLeg as jest.MockedFunction<typeof compareLeg>;
 const mockedFetchHomeLegs = fetchHomeLegs as jest.MockedFunction<typeof fetchHomeLegs>;
 const mockedSearchHotels = searchHotels as jest.MockedFunction<typeof searchHotels>;
-const mockedGetSession = getCanvasSession as jest.MockedFunction<typeof getCanvasSession>;
-const mockedGetSuggestions = getCanvasSuggestions as jest.MockedFunction<typeof getCanvasSuggestions>;
 
 const leg = (over: Partial<HomeLeg>): HomeLeg => ({
   originAirport: 'JFK',
@@ -315,53 +310,5 @@ describe('results page: an accepted AI date change re-prices legs and hotels', (
     expect(mockedCompareLeg).not.toHaveBeenCalled();
     expect(mockedSearchHotels).not.toHaveBeenCalled();
     expect(mockedFetchHomeLegs).not.toHaveBeenCalled();
-  });
-});
-
-describe('canvas: an accepted AI date change re-prices legs and hotels', () => {
-  it('re-prices the moved legs and home flights and re-searches the moved stays', async () => {
-    const trip = ownerTrip();
-    mockedGetSession.mockResolvedValue({
-      session: {
-        state: {
-          trip: { title: 'Owner trip', travelers: 6, origin: trip.origin, returnToHome: true },
-          cities: trip.cities,
-        },
-      },
-      role: 'owner',
-    } as any);
-    mockedGetSuggestions.mockResolvedValue({ suggestions: [] } as any);
-    mockSearches();
-    render(<CanvasPage />);
-    await screen.findByText(/Jan 11 → Jan 13/);
-
-    mockedPlanChat.mockResolvedValueOnce(pinProposal(trip));
-    await sendChat('pin Zurich to 2027-01-14 to 2027-01-16');
-    await act(async () => {
-      fireEvent.click(await screen.findByText('Accept'));
-    });
-
-    await waitFor(() =>
-      expect(mockedCompareLeg.mock.calls.map((c) => c[0])).toEqual(
-        expect.arrayContaining([
-          { origin: 'Paris', destination: 'Zurich', date: '2027-01-14', travelers: 6 },
-          { origin: 'Zurich', destination: 'London', date: '2027-01-16', travelers: 6 },
-        ]),
-      ),
-    );
-    await waitFor(() => {
-      const calls = mockedFetchHomeLegs.mock.calls.map((c) => c[0] as any);
-      expect(calls.find((p) => p.outbound)?.startDate).toBe('2027-01-11');
-      expect(calls.find((p) => p.returnToHome)?.endDate).toBe('2027-01-18');
-    });
-    await waitFor(() =>
-      expect(mockedSearchHotels.mock.calls.map((c) => c[0])).toEqual(
-        expect.arrayContaining([
-          { city: 'Paris', checkin: '2027-01-12', checkout: '2027-01-14', adults: 6 },
-          { city: 'Zurich', checkin: '2027-01-14', checkout: '2027-01-16', adults: 6 },
-          { city: 'London', checkin: '2027-01-16', checkout: '2027-01-18', adults: 6 },
-        ]),
-      ),
-    );
   });
 });

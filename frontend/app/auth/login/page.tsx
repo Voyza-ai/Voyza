@@ -7,6 +7,8 @@ import { Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 import { useTripStore } from '@/store/tripStore';
+import { isUnconfirmedEmailError, safeReturnPath } from '@/lib/authEmail';
+import UnconfirmedEmailNotice from '@/components/shared/UnconfirmedEmailNotice';
 import { Suspense } from 'react';
 
 export default function LoginPage() {
@@ -147,11 +149,13 @@ function LoginPageInner() {
             </div>
           </div>
 
-          {error && (
+          {error && isUnconfirmedEmailError(error) ? (
+            <UnconfirmedEmailNotice email={email.trim()} next={redirectTo} />
+          ) : error ? (
             <div className="rounded-lg px-3 py-2.5 text-sm" style={{ background: '#fef2f2', color: '#dc2626' }}>
               {error}
             </div>
-          )}
+          ) : null}
 
           <button
             type="submit"
@@ -193,7 +197,9 @@ function LoginPageInner() {
 
         <p className="text-center text-sm text-gray-500 mt-5">
           Don&apos;t have an account?{' '}
-          <Link href="/auth/signup" className="font-medium hover:underline" style={{ color: '#2563eb' }}>
+          <Link
+            href={safeReturnPath(redirectTo) ? `/auth/signup?next=${encodeURIComponent(safeReturnPath(redirectTo)!)}` : '/auth/signup'}
+            className="font-medium hover:underline" style={{ color: '#2563eb' }}>
             Sign up
           </Link>
         </p>

@@ -813,7 +813,9 @@ export async function inviteToCanvas(
   email: string,
   role: 'editor' | 'suggester' | 'viewer',
 ) {
-  return apiFetch<{ member: any; inviteLink: string }>(
+  // emailed: the invite email was accepted for delivery. notified: the email
+  // has an account, so the invite is also in their notification bell.
+  return apiFetch<{ member: any; inviteLink: string; emailed?: boolean; notified?: boolean }>(
     `/api/canvas/${tripId}/invite`,
     {
       method: 'POST',

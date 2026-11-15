@@ -17,7 +17,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import CanvasHomeCard from '@/components/canvas/CanvasHomeCard';
+import { HomeCard } from '@/components/results/Flowchart';
 import {
   getAirportName,
   preloadAirportNames,
@@ -78,10 +78,7 @@ describe('a missing name degrades to the bare code', () => {
 
   it('renders the code and no name text while the chunk is still loading', async () => {
     render(
-      <CanvasHomeCard
-        origin={{ city: 'Portland', airports: ['PWM'] }}
-        direction="outbound"
-      />,
+      <HomeCard city="Portland" airports={['PWM']} label="Home" direction="outbound" leg={null} />,
     );
     // The card's name slot falls back to the code, so the code is on screen
     // and the string "undefined" is not.
@@ -96,10 +93,7 @@ describe('a missing name degrades to the bare code', () => {
 
   it('shows the code and no name text for a code the table does not know', async () => {
     render(
-      <CanvasHomeCard
-        origin={{ city: 'Nowhere', airports: ['ZZZ'] }}
-        direction="outbound"
-      />,
+      <HomeCard city="Nowhere" airports={['ZZZ']} label="Home" direction="outbound" leg={null} />,
     );
     await act(async () => {
       await preloadAirportNames();
@@ -117,10 +111,7 @@ describe('the card shows the name once the chunk lands', () => {
     // pulls the chunk, and the card re-renders with the name. The card does
     // not know the table is lazy.
     render(
-      <CanvasHomeCard
-        origin={{ city: 'Portland', airports: ['PWM'] }}
-        direction="outbound"
-      />,
+      <HomeCard city="Portland" airports={['PWM']} label="Home" direction="outbound" leg={null} />,
     );
     expect(screen.queryByText('Portland Intl. Jetport')).toBeNull();
     await waitFor(() => {

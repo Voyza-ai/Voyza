@@ -8,7 +8,7 @@ import React from 'react';
 import { act, render } from '@testing-library/react';
 import { useTripStore } from '@/store/tripStore';
 import { getCanvasSession, saveCanvas } from '@/lib/api';
-import { useSavedTripAutosave, AUTOSAVE_DEBOUNCE_MS, savedTripSignature } from '@/lib/useSavedTripAutosave';
+import { useSavedTripAutosave, AUTOSAVE_DEBOUNCE_MS, AUTOSAVE_MAX_WAIT_MS, savedTripSignature } from '@/lib/useSavedTripAutosave';
 import { buildTrip } from './fixtures';
 import type { Trip } from '@/lib/types';
 
@@ -37,7 +37,7 @@ const editLeg = (t: Trip): Trip => {
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
-  (getCanvasSession as jest.Mock).mockResolvedValue({ session: { state: { trip: { title: 'My Italy' } } }, role: 'owner' });
+  (getCanvasSession as jest.Mock).mockResolvedValue({ session: { state: { trip: { title: 'My Italy', constraints: { pins: ['x'] } } } }, role: 'owner' });
   Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
 });
 afterEach(() => {
@@ -62,7 +62,10 @@ it('a leg picked on a saved trip is written once the trip stops changing', async
   const [id, state] = (saveCanvas as jest.Mock).mock.calls[0];
   expect(id).toBe('trip-saved-1');
   expect(state.cities[0].transportOut.departTime).toBe('13:14');
-  expect(state.trip.title).toBe('My Italy'); // the saved session is built on, not replaced
+  // The saved session is built on, not replaced…
+  expect(state.trip.constraints).toEqual({ pins: ['x'] });
+  // …but the name is the trip's own (the session's copy goes stale).
+  expect(state.trip.title).toBe(useTripStore.getState().currentTrip!.title);
 });
 
 it('several quick changes are one write', async () => {
@@ -77,6 +80,30 @@ it('several quick changes are one write', async () => {
   await flush();
   expect(saveCanvas).toHaveBeenCalledTimes(1);
   expect((saveCanvas as jest.Mock).mock.calls[0][1].trip.travelers).toBe(3);
+});
+
+it('a trip that keeps changing is still written within the max wait', async () => {
+  // Found live: a collaborator's new city filled in (hotels, picks, legs) for
+  // ~25s, each change restarting the debounce, and the owner's reload lost it.
+  useTripStore.setState({ currentTrip: saved() });
+  render(<Host />);
+  let n = 0;
+  for (let elapsed = 0; elapsed < AUTOSAVE_MAX_WAIT_MS + 800; elapsed += 400) {
+    act(() => {
+      const t = useTripStore.getState().currentTrip!;
+      useTripStore.setState({ currentTrip: { ...t, travelers: 3 + (n++ % 5) } });
+      jest.advanceTimersByTime(400);
+    });
+  }
+  // Still changing — no quiet 700ms ever came — yet the write is due.
+  await act(async () => {
+    jest.advanceTimersByTime(1);
+  });
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(saveCanvas).toHaveBeenCalled();
 });
 
 it('an unsaved trip, a non-owner and a hidden tab write nothing', async () => {
@@ -114,4 +141,51 @@ it('the signature ignores hotel lists and totals but sees legs, schedules and ci
   expect(savedTripSignature({ ...t, cities: [t.cities[1], t.cities[0]] })).not.toBe(sig);
   const withEvent = { ...t, cities: t.cities.map((c, i) => (i ? c : { ...c, schedule: { '2026-06-15': [{ id: 'x', title: 'Mine', startTime: '07:00', endTime: '08:00' }] } })) };
   expect(savedTripSignature(withEvent)).not.toBe(sig);
+});
+
+it('never runs two saves at once: a change made mid-save is written after it, once', async () => {
+  // Measured live: three saves landing together failed on the trip rows' foreign keys.
+  let release!: () => void;
+  (saveCanvas as jest.Mock).mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+  useTripStore.setState({ currentTrip: saved() });
+  render(<Host />);
+  act(() => useTripStore.setState({ currentTrip: editLeg(useTripStore.getState().currentTrip!) }));
+  await flush();
+  expect(saveCanvas).toHaveBeenCalledTimes(1); // first save, still running
+  for (const n of [3, 4]) {
+    act(() => {
+      const t = useTripStore.getState().currentTrip!;
+      useTripStore.setState({ currentTrip: { ...t, travelers: n } });
+    });
+    await flush();
+  }
+  expect(saveCanvas).toHaveBeenCalledTimes(1); // nothing overlapped it
+  await act(async () => {
+    release();
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+  });
+  expect(saveCanvas).toHaveBeenCalledTimes(2); // one follow-up, from the latest trip
+  expect((saveCanvas as jest.Mock).mock.calls[1][1].trip.travelers).toBe(4);
+});
+
+it("saves the name with the trip, and the saving and date tip by PATCH (the canvas save writes neither)", async () => {
+  const { updateTrip } = jest.requireMock('@/lib/api');
+  useTripStore.setState({
+    currentTrip: { ...saved(), title: 'Rome → Florence', savings: 225, dateShiftSuggestion: { dayOffset: 1, newStartDate: '2026-06-16', newTotalCost: 1, savings: 50 } },
+  });
+  render(<Host />);
+  act(() => {
+    const t = useTripStore.getState().currentTrip!;
+    useTripStore.setState({ currentTrip: { ...editLeg(t), title: 'Rome → Venice', savings: 0, dateShiftSuggestion: undefined } });
+  });
+  await flush();
+  await act(async () => {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+  });
+  expect(saveCanvas).toHaveBeenCalledTimes(1);
+  expect((saveCanvas as jest.Mock).mock.calls[0][1].trip.title).toBe('Rome → Venice');
+  expect(updateTrip).toHaveBeenCalledWith('trip-saved-1', {
+    savingsVsAlternative: 0,
+    dateShiftSuggestion: null,
+  });
 });
