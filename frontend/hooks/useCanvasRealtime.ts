@@ -54,6 +54,8 @@ export type CursorEvent = {
   ts: number;
 };
 
+export type SuggestionDecision = { id: string; status: 'approved' | 'rejected' };
+
 type UseCanvasRealtimeReturn = {
   canvasState: CanvasState | null;
   suggestions: Suggestion[];
@@ -73,6 +75,21 @@ type UseCanvasRealtimeReturn = {
   cursorEvent: CursorEvent | null;
   /** Share my cursor position (content coordinates). */
   broadcastCursor: (x: number, y: number) => void;
+  /**
+   * Bumped when someone says the trip's suggestions changed (a proposal was
+   * sent, approved or rejected) — re-read them. The table's own change feed
+   * (postgres_changes below) was measured not to arrive: a suggester's
+   * proposal sat in the database while the owner's panel stayed empty.
+   */
+  suggestionsTick: number;
+  /**
+   * The owner's decision that came with the latest tick, if any. The list
+   * endpoint returns pending suggestions only, so a decided one just leaves
+   * the list — this says which way it went.
+   */
+  suggestionDecision: SuggestionDecision | null;
+  /** Tell everyone on the trip its suggestions changed (and, owner, how). */
+  broadcastSuggestionsChanged: (decision?: SuggestionDecision) => void;
 };
 
 export function useCanvasRealtime(
@@ -86,6 +103,8 @@ export function useCanvasRealtime(
   const [remoteOp, setRemoteOp] = useState<RemoteOp | null>(null);
   const [roleEvent, setRoleEvent] = useState<RoleEvent | null>(null);
   const [cursorEvent, setCursorEvent] = useState<CursorEvent | null>(null);
+  const [suggestionsTick, setSuggestionsTick] = useState(0);
+  const [suggestionDecision, setSuggestionDecision] = useState<SuggestionDecision | null>(null);
   // Bumped to force a fresh channel after a fatal status (timeout/closed).
   const [rejoinNonce, setRejoinNonce] = useState(0);
   const rejoinAttemptRef = useRef(0);
@@ -165,6 +184,11 @@ export function useCanvasRealtime(
       })
       .on('broadcast', { event: 'role_change' }, ({ payload }) => {
         if (payload?.targetUserId && payload?.role) setRoleEvent(payload as RoleEvent);
+      })
+      .on('broadcast', { event: 'suggestions_changed' }, ({ payload }) => {
+        const d = payload?.decision;
+        setSuggestionDecision(d && typeof d.id === 'string' ? (d as SuggestionDecision) : null);
+        setSuggestionsTick((n) => n + 1);
       })
       .on('broadcast', { event: 'cursor' }, ({ payload }) => {
         if (payload && typeof payload.x === 'number') setCursorEvent(payload as CursorEvent);
@@ -249,6 +273,14 @@ export function useCanvasRealtime(
     });
   }, []);
 
+  const broadcastSuggestionsChanged = useCallback((decision?: SuggestionDecision) => {
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'suggestions_changed',
+      payload: { actor: userRef.current?.id ?? 'unknown', ts: Date.now(), ...(decision ? { decision } : {}) },
+    });
+  }, []);
+
   return {
     canvasState,
     suggestions,
@@ -261,5 +293,8 @@ export function useCanvasRealtime(
     broadcastRoleChange,
     cursorEvent,
     broadcastCursor,
+    suggestionsTick,
+    suggestionDecision,
+    broadcastSuggestionsChanged,
   };
 }

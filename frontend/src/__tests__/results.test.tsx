@@ -4,6 +4,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { useTripStore } from '@/store/tripStore';
 import { buildTrip } from './fixtures';
+import { getCanvasSession } from '@/lib/api';
 
 // Must import after mocks
 import ResultsPage from '@/app/results/page';
@@ -105,6 +106,8 @@ describe('ResultsPage', () => {
 
     beforeEach(() => {
       mockSearchParams.set('tripId', 'trip-jp');
+      // The signed-in user owns this saved trip (the shared default is a viewer).
+      (getCanvasSession as jest.Mock).mockResolvedValue({ session: { state: null }, role: 'owner' });
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
         json: async () => ({ trip: savedAiTrip }),
@@ -112,6 +115,7 @@ describe('ResultsPage', () => {
     });
 
     afterEach(() => {
+      (getCanvasSession as jest.Mock).mockResolvedValue({ session: { state: null }, role: 'viewer' });
       mockSearchParams.delete('tripId');
       global.fetch = realFetch;
     });

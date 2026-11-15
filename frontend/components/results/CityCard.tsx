@@ -8,6 +8,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
+  Minus,
+  Plus,
 } from 'lucide-react';
 import { City } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
@@ -25,13 +27,15 @@ type CityCardProps = {
   onHover: () => void;
   onLeave: () => void;
   onClick: () => void;
+  /** Present when this person can change the trip: shows − / + around the nights. */
+  onNightsChange?: (nights: number) => void;
 };
 
 /**
  * Whether the city has a stay to show. A city whose hotel search came back
  * empty carries a placeholder — name '' (planner, saved trip) or
- * "Select hotel" (canvas) at $0 — which is not a stay. Same rule as the
- * canvas card (CanvasCityCard).
+ * "Select hotel" (trips last saved by the old canvas) at $0 — which is not a
+ * stay.
  */
 export function hasStay(city: City): boolean {
   if (city.customHotel) return true;
@@ -58,6 +62,7 @@ export default function CityCard({
   onHover,
   onLeave,
   onClick,
+  onNightsChange,
 }: CityCardProps) {
   const color = getCityColor(city.colorIndex ?? index);
   // Date guards (from backend_gohiltalla) prevent crashes when a city in
@@ -144,9 +149,18 @@ export default function CityCard({
           <span>{arrival}</span>
           <span style={{ color: `${color.text}88` }}>→</span>
           <span>{departure}</span>
-          <span className="ml-1" style={{ color: `${color.text}aa` }}>
-            · {nights} {nights === 1 ? 'night' : 'nights'}
-          </span>
+          {onNightsChange && nights > 0 ? (
+            <NightsStepper
+              city={city.name}
+              nights={nights}
+              color={color.text}
+              onChange={onNightsChange}
+            />
+          ) : (
+            <span className="ml-1" style={{ color: `${color.text}aa` }}>
+              · {nights} {nights === 1 ? 'night' : 'nights'}
+            </span>
+          )}
         </div>
 
         {/* Vibe chips */}
@@ -314,5 +328,61 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * − n nights + on a city card. Its own clicks never reach the card (which
+ * opens the city guide) or start a drag.
+ */
+function NightsStepper({
+  city,
+  nights,
+  color,
+  onChange,
+}: {
+  city: string;
+  nights: number;
+  color: string;
+  onChange: (nights: number) => void;
+}) {
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const btn =
+    'w-5 h-5 rounded-full flex items-center justify-center border transition-colors disabled:opacity-30 disabled:cursor-default enabled:hover:bg-white/70';
+  return (
+    <span
+      className="ml-1 inline-flex items-center gap-1.5"
+      style={{ color: `${color}aa` }}
+      onClick={stop}
+      onPointerDown={stop}
+      onKeyDown={stop}
+    >
+      <span>·</span>
+      <button
+        type="button"
+        aria-label={`Fewer nights in ${city}`}
+        title="One night less"
+        disabled={nights <= 1}
+        onClick={() => onChange(nights - 1)}
+        className={btn}
+        style={{ borderColor: `${color}55`, color }}
+      >
+        <Minus size={10} strokeWidth={2.5} />
+      </button>
+      <span className="tabular-nums" data-testid="city-nights">
+        {nights} {nights === 1 ? 'night' : 'nights'}
+      </span>
+      <button
+        type="button"
+        aria-label={`More nights in ${city}`}
+        title="One night more"
+        disabled={nights >= 60}
+        onClick={() => onChange(nights + 1)}
+        className={btn}
+        style={{ borderColor: `${color}55`, color }}
+      >
+        <Plus size={10} strokeWidth={2.5} />
+      </button>
+    </span>
   );
 }

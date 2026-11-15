@@ -79,7 +79,7 @@ export default function ShareModal({ tripId, role: myRole = 'owner', isOpen, onC
   // prod, which would hand dev/localhost users a wrong-environment link.
   const composeUrl = (token?: string, fallback?: string) =>
     token && typeof window !== 'undefined'
-      ? `${window.location.origin}/canvas/${tripId}?share=${token}`
+      ? `${window.location.origin}/results?tripId=${tripId}&share=${token}`
       : fallback ?? '';
 
   const [mode, setMode] = useState<ShareMode>('view');
@@ -176,11 +176,19 @@ export default function ShareModal({ tripId, role: myRole = 'owner', isOpen, onC
     setInviteError(null);
     setSending(true);
     try {
-      await inviteToCanvas(tripId, email.trim(), inviteRole);
+      const sentTo = email.trim();
+      const res = await inviteToCanvas(tripId, sentTo, inviteRole);
       setEmail('');
       const r = await listTripMembers(tripId);
       setMembers(r.members);
-      toast(`Invite created — use its Copy link button to send it`);
+      toast(
+        res?.emailed
+          ? `Invite emailed to ${sentTo}`
+          : res?.notified
+            ? `Invite sent to ${sentTo}'s notifications (the email couldn't be sent)`
+            : `Invite created, but the email couldn't be sent. Use its Copy link button to share it`,
+        res?.emailed || res?.notified ? 'success' : 'error',
+      );
     } catch (err: any) {
       if (err?.status === 400 && /yourself/i.test(err?.message ?? '')) {
         setInviteError("You can't invite yourself");

@@ -95,7 +95,7 @@ describe('ShareModal', () => {
     await waitFor(() => expect(screen.getByText('Copy link')).toBeEnabled());
     fireEvent.click(screen.getByText('Copy link'));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      'http://localhost/canvas/trip-1?share=tok-1',
+      'http://localhost/results?tripId=trip-1&share=tok-1',
     );
     expect(await screen.findByText('Copied')).toBeInTheDocument();
   });

@@ -149,3 +149,18 @@ describe('SuggestionsPanel', () => {
     expect(screen.getByText('Pending Suggestions (2)')).toBeInTheDocument();
   });
 });
+
+it('says who each proposal is from (two suggesters were indistinguishable)', () => {
+  render(
+    <SuggestionsPanel
+      suggestions={[
+        { id: 'a', type: 'edit', status: 'pending', suggested_by: 'u3', created_at: '2026-06-15T10:00:00Z', payload: { author: 'Test Three', summary: ['Remove Milan'] } },
+        { id: 'b', type: 'edit', status: 'pending', suggested_by: 'u4', created_at: '2026-06-15T10:00:01Z', payload: { author: 'Test Four', summary: ['Remove Rome'] } },
+      ] as any}
+      role="owner"
+      onApprove={jest.fn()}
+      onReject={jest.fn()}
+    />,
+  );
+  expect(screen.getAllByTestId('suggestion-author').map((e) => e.textContent)).toEqual([' by Test Three', ' by Test Four']);
+});
