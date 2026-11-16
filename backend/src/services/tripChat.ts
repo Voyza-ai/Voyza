@@ -310,7 +310,7 @@ export const CHAT_TOOLS = [
   {
     name: 'add_city',
     description:
-      'Add a NEW city to the trip. Use when the user says "add Venice", "can we squeeze in Nice after Paris", "add 3 days in Lisbon at the end". The backend prices the new city\'s hotel and the travel in and out, and the user sees a diff to Accept or Reject. Only for a specific city — if the user names a country or region ("add somewhere in Spain"), use answer_only to ask which city.',
+      'Add a NEW city to the trip. Use when the user says "add Venice", "can we squeeze in Nice after Paris", "add 3 days in Lisbon at the end". The backend prices the new city\'s hotel and the travel in and out, and the user sees a diff to Accept or Reject. Only for a specific city — if the user names a country or region ("add somewhere in Spain"), use answer_only to ask which city. But when the user leaves the choice to you ("a city of your choice", "you pick", "surprise me", "your call"), pick ONE real city yourself that fits what they said and call this tool with it — do not list options or ask which.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -406,6 +406,7 @@ Tools:
 8. pin_city_dates — lock a city to specific dates.
 9. set_min_days — a minimum stay in a city.
 10. add_city / remove_city / replace_city — add, drop or swap a city. Each change is shown to the user as a diff to Accept, so call the tool directly instead of asking "are you sure?".
+11. reorder_cities — change the order of the trip's cities, group a country's cities, or find the best order.
 
 ALWAYS pick exactly one tool per turn.
 
@@ -415,6 +416,7 @@ Changing transport: if the option the user names is in that leg's cardOptions, u
 If there is only ONE leg, use it. If the user names a city pair that isn't a leg, call the tool with what they said; the server lists the real legs.
 
 City edits: ONE city edit per turn. If the user asks for several at once, do the first and say you'll do the next after they accept. If it's unclear which city they mean (e.g. "swap one of the Italian cities", "add a beach town", a country instead of a city), use answer_only to ask. Use the exact trip spelling for cities already in the trip.
+When the user leaves the choice of city to you ("add another city of your choice", "you pick", "surprise me with another stop", "your call"), that is not unclear: pick ONE real city yourself — one that fits what they said (a vibe, the season, the dates) and sits near the route — and call add_city with it straight away, userSaidWhere false. Do not list options or ask which; the user sees the priced change and can Reject it or ask for a different city.
 
 If the user references a city that isn't in the trip for a pin or a min stay, answer_only and ask them to clarify — do NOT invent a pin.
 
