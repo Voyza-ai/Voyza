@@ -250,11 +250,13 @@ export const useTripStore = create<TripStore>((set) => ({
       if (!chosen) return state;
       // Move the currently picked option into alternatives (without its own
       // nested alternatives) and pull the chosen one out.
-      const { alternatives: _chosenAlts, ...chosenFlat } = chosen;
-      const { alternatives: _curAlts, ...currentFlat } = currentOut;
+      const { alternatives: _chosenAlts, userChoice: _chosenPref, ...chosenFlat } = chosen;
+      const { alternatives: _curAlts, userChoice: _curPref, ...currentFlat } = currentOut;
       const newAlts: Transport[] = alts.filter((_, i) => i !== alternativeIndex);
       newAlts.unshift(currentFlat);
-      const newOut: Transport = { ...chosenFlat, alternatives: newAlts };
+      // A hand pick is the user's choice: a later date edit keeps its time.
+      const userChoice = { source: 'card' as const, departTime: chosenFlat.departTime ?? null, operator: chosenFlat.operator || null };
+      const newOut: Transport = { ...chosenFlat, alternatives: newAlts, userChoice };
       cities[cityIndex] = { ...c, transportOut: newOut };
       // Keep the next city's transportIn in sync (strip alternatives).
       if (cityIndex + 1 < cities.length) {
@@ -278,10 +280,12 @@ export const useTripStore = create<TripStore>((set) => ({
       if (!chosen) return state;
       // Move current pick into alternatives, pull the chosen one to main.
       // alternatives entries are Omit<HomeLeg, 'alternatives'> by design.
-      const { alternatives: _curAlts, ...currentFlat } = current;
+      const { alternatives: _curAlts, userChoice: _curPref, ...currentFlat } = current;
       const newAlts = alts.filter((_, i) => i !== alternativeIndex);
       newAlts.unshift(currentFlat);
-      const newLeg = { ...chosen, alternatives: newAlts };
+      // A hand pick is the user's choice: a later date edit keeps its time.
+      const userChoice = { source: 'card' as const, departTime: chosen.departTime ?? null, operator: chosen.operator || null };
+      const newLeg = { ...chosen, alternatives: newAlts, userChoice };
       // The first stay starts the day the outbound LANDS. Swapping an
       // overnight flight for a same-day one (or back) moves that day, and the
       // stay with it — a night gained or lost in the first city. The search

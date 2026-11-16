@@ -355,6 +355,62 @@ describe('long journeys (production: a 30h 30m "later evening flight home" for +
   });
 });
 
+describe("a date edit keeps the user's choice for a leg it re-searches (production: the evening flight home became 13:09)", () => {
+  /** The trip after the user accepted "a later flight home in the evening": TAP 21:25 (frontend preferenceFromProposal). */
+  const eveningChosen = () => {
+    const t = trip();
+    t.origin.returnLeg = {
+      ...t.origin.returnLeg,
+      operator: 'TAP Air Portugal', carrierCode: 'TP', departTime: '21:25', arriveTime: '22:55', arriveDate: '2027-01-18', price: 866.58, durationMinutes: 1830, stops: 1,
+      userChoice: { source: 'chat', departTime: '21:25', operator: 'TAP Air Portugal', timeOfDay: 'evening', earliestDepart: '12:23', latestDepart: null, earliestArrive: null, latestArrive: null },
+    };
+    t.totalCost = headerTotal(t);
+    return t;
+  };
+  const jan18 = (list: any[]) =>
+    searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>
+      origin === 'LON' && destination === 'JFK' && date === '2027-01-18' ? list : []);
+
+  it('"Give Paris one more night" → the flight home moves to Jan 18 and is still an evening one', async () => {
+    jan18([
+      offer('Iberia', 'IB', 435, '2027-01-18', '13:09', '16:10'),
+      offer('British Airways', 'BA', 520, '2027-01-18', '19:30', '22:35', 485),
+      { ...offer('TAP Air Portugal', 'TP', 866.58, '2027-01-18', '21:25', '22:55+1', 1830), stops: 1 },
+    ]);
+    const res = await chat(app, 'set_min_days', { city: 'Paris', minNights: 4, explanation: 'One more night in Paris.' }, eveningChosen());
+    expect(res.body.type).toBe('proposal');
+    const p = res.body.proposal;
+    expect(p.after.map((s: any) => [s.name, s.arrival, s.departure])).toEqual([
+      ['Paris', '2027-01-12', '2027-01-16'],
+      ['London', '2027-01-16', '2027-01-18'],
+    ]);
+    // Not the cheapest (Iberia 13:09), not the 30h TAP: the sensible evening one.
+    expect(p.returnLeg).toMatchObject({ operator: 'British Airways', departTime: '19:30', departDate: '2027-01-18', price: 520 });
+    expect(p.returnLeg.userChoice).toMatchObject({ timeOfDay: 'evening' });
+    expect(res.body.reply).toContain('Kept your choice for your flight home: an evening flight (British Airways 19:30).');
+  });
+
+  it('says so when the new date has no sensible evening flight, and names what it picked instead', async () => {
+    jan18([
+      offer('Iberia', 'IB', 435, '2027-01-18', '13:09', '16:10'),
+      { ...offer('TAP Air Portugal', 'TP', 866.58, '2027-01-18', '21:25', '22:55+1', 1830), stops: 1 },
+    ]);
+    const res = await chat(app, 'set_min_days', { city: 'Paris', minNights: 4, explanation: 'One more night in Paris.' }, eveningChosen());
+    expect(res.body.proposal.returnLeg).toMatchObject({ operator: 'Iberia', departTime: '13:09' });
+    expect(res.body.reply).toContain("There's no evening flight for your flight home on Jan 18 (only ones taking 30h 30m+), so I picked Iberia 13:09 instead.");
+  });
+
+  it('a leg the user never touched still gets the cheapest sensible flight', async () => {
+    jan18([
+      { ...offer('TAP Air Portugal', 'TP', 400, '2027-01-18', '21:25', '22:55+1', 1830), stops: 1 },
+      offer('Iberia', 'IB', 435, '2027-01-18', '13:09', '16:10'),
+    ]);
+    const res = await chat(app, 'set_min_days', { city: 'Paris', minNights: 4, explanation: 'x' });
+    expect(res.body.proposal.returnLeg).toMatchObject({ operator: 'Iberia', departTime: '13:09' });
+    expect(res.body.proposal.returnLeg.userChoice).toBeUndefined();
+  });
+});
+
 describe('date edits are priced before they are proposed', () => {
   it('"at least 3 nights in London" → London Jan 15–18 and the flight home searched on Jan 18, with the constraint', async () => {
     searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>

@@ -626,7 +626,8 @@ export type CityEditProposal = {
   after: CityEditStop[];
   removed: string[];
   /** `index` i is the leg after[i] → after[i + 1]. Empty options = nothing found. */
-  legs: Array<{ index: number; from: string; to: string; date: string; options: LegOption[] }>;
+  /** options[0] is the pick (by the user's choice for the leg, when it had one). */
+  legs: Array<{ index: number; from: string; to: string; date: string; options: LegOption[]; userChoice?: Trip['cities'][number]['transportOut']['userChoice'] }>;
   /** Present only when re-searched; null = searched, nothing found. */
   outboundLeg?: any;
   returnLeg?: any;

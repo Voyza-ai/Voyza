@@ -476,7 +476,7 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
     // before anything was searched (see compare_modes, D-07).
     return {
       type: 'proposal',
-      reply: `${describeCityEdit(built.proposal)} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)} Accept to apply it.`,
+      reply: `${describeCityEdit(built.proposal)} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)}${choiceWords(built.proposal)} Accept to apply it.`,
       proposal: built.proposal,
     };
   }
@@ -971,7 +971,7 @@ async function dateTool(currentTrip: any, toolName: string, toolInput: any): Pro
     priced.proposal.constraints = proposedConstraints;
     return {
       type: 'proposal',
-      reply: `${replyText} ${plan.note}${homeFlightChanges(currentTrip, priced.proposal)} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
+      reply: `${replyText} ${plan.note}${homeFlightChanges(currentTrip, priced.proposal)}${choiceWords(priced.proposal)} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
       proposal: priced.proposal,
     };
   }
@@ -1043,6 +1043,9 @@ function homeFlightChanges(currentTrip: any, p: CityEditProposal): string {
   }
   return out.length ? ` ${out.join(' ')}` : '';
 }
+
+/** What a re-search did with the legs the user had chosen, as sentences. */
+const choiceWords = (p: CityEditProposal) => (p.choiceNotes?.length ? ` ${p.choiceNotes.join(' ')}` : '');
 
 function describeCityEdit(p: CityEditProposal): string {
   const op = p.op;

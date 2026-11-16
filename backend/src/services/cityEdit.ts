@@ -3,7 +3,8 @@ import { logger } from '../utils/logger';
 import { MAX_STAY_NIGHTS } from './constraints';
 import { searchHotels, roomsFor, type HotelResult } from './hotels';
 import { searchLegOptions, type LegOption } from './legOptions';
-import { buildHomeLeg, firstStayArrival, type HomeLeg } from './optimizer';
+import { firstStayArrival, searchHomeLegOptions, type HomeLeg } from './optimizer';
+import { pickByPreference, readPreference, type LegPreference } from './legPreference';
 import { getCityCountry } from '../data/cityCountries';
 import { resolve } from './location/resolve';
 import { originIndex } from './location/originAirports';
@@ -275,8 +276,10 @@ export type CityEditLeg = {
   from: string;
   to: string;
   date: string;
-  /** Cheapest first, flights and trains mixed (searchLegOptions). Empty = nothing found. */
+  /** options[0] is the pick: the user's choice kept, else the cheapest sensible one. Empty = nothing found. */
   options: LegOption[];
+  /** The user's choice for this pair, carried to the new leg. */
+  userChoice?: LegPreference;
 };
 
 export type CityEditProposal = {
@@ -293,6 +296,8 @@ export type CityEditProposal = {
   outboundLeg?: HomeLeg | null;
   returnLeg?: HomeLeg | null;
   note: string;
+  /** What a re-search did with a leg the user had chosen (kept, or not possible). */
+  choiceNotes?: string[];
 };
 
 function stopsOf(trip: any): Stop[] {
@@ -412,10 +417,24 @@ export async function priceCityEditPlan(
     }
   });
 
+  const choiceNotes: string[] = [];
+  const fmtDate = (iso: string) => {
+    const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(iso);
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return m ? `${MONTHS[Number(m[1]) - 1]} ${Number(m[2])}` : iso;
+  };
+  // The trip's own leg for this pair, if it had one (a city edit can make new pairs).
+  const oldLegFor = (fromName: string, toName: string) => {
+    const cities: any[] = currentTrip?.cities ?? [];
+    const k = cities.findIndex((c, j) => sameName(String(c?.name ?? ''), fromName) && cities[j + 1] && sameName(String(cities[j + 1].name ?? ''), toName));
+    return k >= 0 ? cities[k].transportOut : null;
+  };
+
   const legJobs = plan.legs.map(async (i): Promise<CityEditLeg> => {
     const from = plan.after[i];
     const to = plan.after[i + 1];
     const date = from.departure;
+    const pref = readPreference(oldLegFor(from.name, to.name));
     try {
       const r = await searchLegOptions({
         from: from.name,
@@ -424,10 +443,13 @@ export async function priceCityEditPlan(
         travelers,
         fromCountry: countryOf(from.name),
         toCountry: countryOf(to.name),
-        limit: 4,
+        // Enough to keep a time preference and skip long journeys; the card keeps 4.
+        limit: 20,
         tripCityNames,
       });
-      return { index: i, from: from.name, to: to.name, date, options: r.options };
+      const picked = pickByPreference(r.options, pref, `${from.name} → ${to.name}`, fmtDate(date));
+      if (picked.note) choiceNotes.push(picked.note);
+      return { index: i, from: from.name, to: to.name, date, options: picked.ordered.slice(0, 4), ...(pref ? { userChoice: pref } : {}) };
     } catch (err: any) {
       logger.warn('cityEdit: leg search failed', { from: from.name, to: to.name, message: err?.message });
       return { index: i, from: from.name, to: to.name, date, options: [] };
@@ -445,26 +467,56 @@ export async function priceCityEditPlan(
   const first = plan.after[0];
   const lastStop = plan.after[plan.after.length - 1];
 
+  // A home flight re-searched for a new date or city: the user's choice for it
+  // kept (an evening flight home stays evening), else the cheapest sensible
+  // journey. Every option is read, not the cheapest few: a preference or the
+  // long-journey rule can rule out all of the cheapest.
+  const homeLegFor = async (
+    params: Parameters<typeof searchHomeLegOptions>[0],
+    old: any,
+    label: string,
+  ): Promise<HomeLeg | null> => {
+    const pref = readPreference(old);
+    const rows = await searchHomeLegOptions(params, Infinity);
+    if (rows.length === 0) return null;
+    const picked = pickByPreference(rows, pref, label, fmtDate(params.date));
+    if (picked.note) choiceNotes.push(picked.note);
+    const [main, ...rest] = picked.ordered;
+    return {
+      ...main,
+      ...(rest.length > 0 ? { alternatives: rest.slice(0, 3) } : {}),
+      ...(pref ? { userChoice: pref } : {}),
+    } as HomeLeg;
+  };
   const outboundJob = wantOutbound
-    ? buildHomeLeg({
-        originAirports: airports,
-        destinationCity: first.name,
-        date: clampToFuture(start),
-        travelers,
-        originCity: origin.city,
-        tripCityNames,
-      }).catch(() => null)
+    ? homeLegFor(
+        {
+          originAirports: airports,
+          destinationCity: first.name,
+          date: clampToFuture(start),
+          travelers,
+          originCity: origin.city,
+          tripCityNames,
+        },
+        // The same flight out only if it still goes to the same first city.
+        before[0] && sameName(before[0].name, first.name) ? origin?.outboundLeg : null,
+        'your flight out',
+      ).catch(() => null)
     : Promise.resolve(undefined);
   const returnJob = wantReturn
-    ? buildHomeLeg({
-        originAirports: returnAirports,
-        destinationCity: lastStop.name,
-        date: clampToFuture(lastStop.departure),
-        travelers,
-        reverse: true,
-        originCity: origin.returnCity ?? origin.city,
-        tripCityNames,
-      }).catch(() => null)
+    ? homeLegFor(
+        {
+          originAirports: returnAirports,
+          destinationCity: lastStop.name,
+          date: clampToFuture(lastStop.departure),
+          travelers,
+          reverse: true,
+          originCity: origin.returnCity ?? origin.city,
+          tripCityNames,
+        },
+        before[before.length - 1] && sameName(before[before.length - 1].name, lastStop.name) ? origin?.returnLeg : null,
+        'your flight home',
+      ).catch(() => null)
     : Promise.resolve(undefined);
 
   const [hotelResults, legs, outboundLeg, returnLeg] = await Promise.all([
@@ -525,6 +577,7 @@ export async function priceCityEditPlan(
   };
   if (outboundLeg !== undefined) proposal.outboundLeg = outboundLeg;
   if (returnLeg !== undefined) proposal.returnLeg = returnLeg;
+  if (choiceNotes.length > 0) proposal.choiceNotes = choiceNotes;
   return { type: 'proposal', proposal };
 }
 

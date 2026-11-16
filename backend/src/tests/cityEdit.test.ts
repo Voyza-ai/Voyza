@@ -51,6 +51,14 @@ const mockBuildHomeLeg = jest.fn();
 jest.mock('../services/optimizer', () => ({
   ...jest.requireActual('../services/optimizer'),
   buildHomeLeg: (p: any) => mockBuildHomeLeg(p),
+  // City edits pick from every home-flight option (services/legPreference.ts):
+  // the same flights, main first.
+  searchHomeLegOptions: async (p: any) => {
+    const l = await mockBuildHomeLeg(p);
+    if (!l) return [];
+    const { alternatives, ...main } = l;
+    return [main, ...(alternatives ?? [])];
+  },
 }));
 
 import planRouter from '../routes/plan';
