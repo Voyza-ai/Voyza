@@ -1,11 +1,23 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { create } from 'zustand';
 import { useTripStore } from '@/store/tripStore';
 import { useAuthStore } from '@/store/authStore';
 import { persistSavedTrip } from './canvasHandoff';
 import { updateTrip } from './api';
 import type { Trip } from './types';
+
+/**
+ * Whether the saved trip on screen has a change the database doesn't have
+ * yet: waiting for its write, being written, or a write that failed or was
+ * skipped (hidden tab). The results page asks before the tab is closed or
+ * reloaded while it does (lib/leaveGuard) — that can cut the write off.
+ */
+export const useSavedTripUnsaved = create<{ unsaved: boolean }>(() => ({ unsaved: false }));
+function setUnsaved(unsaved: boolean) {
+  if (useSavedTripUnsaved.getState().unsaved !== unsaved) useSavedTripUnsaved.setState({ unsaved });
+}
 
 /** How long the trip has to stay still before a change is written. */
 export const AUTOSAVE_DEBOUNCE_MS = 700;
@@ -93,16 +105,19 @@ export function useSavedTripAutosave(): void {
     const id = trip?.id;
     if (!trip || !id || id.startsWith('mock') || !signedIn) {
       baseline.current = null;
+      setUnsaved(false);
       return;
     }
     const sig = savedTripSignature(trip);
     if (!baseline.current || baseline.current.id !== id) {
       baseline.current = { id, sig };
       savedMeta.current = { id, meta: tripMeta(trip) };
+      setUnsaved(false);
       return;
     }
     if (sig === baseline.current.sig) return;
     baseline.current = { id, sig };
+    setUnsaved(true);
     if (timer.current) clearTimeout(timer.current);
     const save = () => {
       if (timer.current) clearTimeout(timer.current);
@@ -120,11 +135,16 @@ export function useSavedTripAutosave(): void {
         again.current = true;
         return;
       }
+      // Whether the last write went through (or there was nothing this
+      // person may write: persistSavedTrip is the owner's alone).
+      let ok = true;
       const run = (): Promise<void> => {
         const latest = useTripStore.getState().currentTrip;
         if (latest?.id !== id) return Promise.resolve();
+        ok = false;
         return persistSavedTrip(latest)
           .then((saved) => {
+            ok = true;
             if (!saved) return;
             const now = tripMeta(latest);
             const was = savedMeta.current?.id === id ? savedMeta.current.meta : null;
@@ -145,6 +165,8 @@ export function useSavedTripAutosave(): void {
       };
       inFlight.current = run().finally(() => {
         inFlight.current = null;
+        // Nothing newer waiting: the trip is as saved as it gets.
+        if (!pending.current && baseline.current?.id === id) setUnsaved(!ok);
       });
     };
     pending.current = save;
@@ -157,8 +179,11 @@ export function useSavedTripAutosave(): void {
     }
   }, [trip, signedIn]);
 
-  // Leaving the page (reload, closing the tab) with a write still waiting:
-  // start it now rather than drop it.
+  // Leaving the page with a write still waiting: start it now rather than
+  // drop it. A reload or a closed tab can still cut it off (the page asks
+  // first, see useSavedTripUnsaved); leaving within the app can't — the
+  // write outlives the page, so going Back from a saved trip a moment after
+  // changing it no longer loses the change.
   useEffect(() => {
     const flush = () => {
       if (!pending.current) return;
@@ -170,8 +195,10 @@ export function useSavedTripAutosave(): void {
     return () => {
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('beforeunload', flush);
+      flush();
       if (timer.current) clearTimeout(timer.current);
       if (maxTimer.current) clearTimeout(maxTimer.current);
+      setUnsaved(false);
     };
   }, []);
 }
