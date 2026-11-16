@@ -1,8 +1,9 @@
 import type { PlanningAnswers } from './types';
+import { vibeList, vibePhrase } from './vibes';
 
 /**
  * The running trip summary on /plan: what the traveller has told us so far,
- * written as one readable line ("Culture trip to Venice & Rome from New York
+ * written as one readable line ("Culture & food trip to Venice & Rome from New York
  * · Round-trip · 2 people · $3k total · Dec 10 – 16 · 6 nights") rather than
  * a list of fields.
  *
@@ -68,12 +69,6 @@ export function shortDateRange(start: string, end: string | undefined, now = new
 
 const capitalise = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-/** "culture and food vibes" → "Culture and food"; long free text is cut. */
-function vibeWord(v: string): string {
-  const t = v.trim().replace(/\s+vibes?$/i, '').replace(/\s+/g, ' ');
-  return capitalise(t.length > 28 ? `${t.slice(0, 27).trimEnd()}…` : t);
-}
-
 function noteText(n: string): string {
   const t = n.trim().replace(/\s+/g, ' ');
   return `“${t.length > 40 ? `${t.slice(0, 39).trimEnd()}…` : t}”`;
@@ -90,7 +85,10 @@ export function summarizeAnswers(a: PlanningAnswers, now = new Date()): SummaryG
   // ── Lead phrase: "<Vibe> trip to <cities> from <origin>" ──
   const lead: Array<string | SummaryPart> = [];
   const cities = (a.destinations ?? []).filter(isSet);
-  const vibe = isSet(a.vibe) ? vibeWord(a.vibe) : null;
+  // "Culture & food", "Culture, food & architecture"; an older single-vibe
+  // answer ("culture and food vibes") reads as before, "Culture and food".
+  const vibes = vibeList(a);
+  const vibe = vibes.length > 0 ? vibePhrase(vibes) : null;
   if (vibe) lead.push({ field: 'vibe', text: vibe }, ' trip');
   if (cities.length) {
     lead.push(vibe ? ' to ' : 'Trip to ', { field: 'destinations', text: joinCities(cities) });

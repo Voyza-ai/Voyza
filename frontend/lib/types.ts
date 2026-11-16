@@ -257,6 +257,10 @@ export type Trip = {
   /** The user's stated total-trip budget in USD, if they gave one. Lets the
    *  results page show a "you're over budget" warning when totalCost > budget. */
   budget?: number;
+  /** The planner's vibe answer, as saved in `trips.vibe`: one string, the
+   *  picked vibes joined with ", " ("Culture, Food"). Older trips carry a
+   *  single vibe ("Culture") or nothing. Read it as a list with `vibeList`. */
+  vibe?: string;
   /** Optional suggestion from the optimizer when shifting dates saves money. */
   dateShiftSuggestion?: {
     dayOffset: number;
@@ -394,7 +398,21 @@ export type HomeLeg = {
 
 export type PlanningAnswers = {
   destinations?: string[];
+  /**
+   * The vibes as ONE string — the picked vibes joined with ", " ("Culture,
+   * Food"), or free text. This is what every backend call takes (vibe
+   * suggestions, activity and restaurant picks, the AI chat) and what a
+   * saved trip stores in `trips.vibe`.
+   */
   vibe?: string;
+  /**
+   * The same vibes as a list (["Culture", "Food"]), up to three picked pills
+   * plus any typed text. Kept beside `vibe` for the planner's own UI: the
+   * "Trip so far" line and re-opening the vibe pills to edit. Absent on
+   * older answers — read them through `vibeList` (lib/vibes), which falls
+   * back to `vibe`.
+   */
+  vibes?: string[];
   dateRange?: { start: string; end: string };
   flexible?: boolean;
   travelers?: number;

@@ -391,8 +391,13 @@ const FALLBACK_BY_VIBE: Record<string, DestinationSuggestion[]> = {
 };
 
 function resolveFallback(vibe: string): DestinationSuggestion[] {
-  const key = vibe.trim().toLowerCase();
-  return FALLBACK_BY_VIBE[key] ?? [];
+  // Several picked vibes arrive joined ("Culture, Adventure"): the first one
+  // with a curated list answers for the trip.
+  for (const part of vibe.split(',')) {
+    const hit = FALLBACK_BY_VIBE[part.trim().toLowerCase()];
+    if (hit) return hit;
+  }
+  return [];
 }
 
 // ─── Main entry point ────────────────────────────────────────

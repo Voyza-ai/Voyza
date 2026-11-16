@@ -16,6 +16,7 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { useNotificationsStore } from '@/store/notificationsStore';
 import { useNotifications } from '@/hooks/useNotifications';
+import { confirmLeave } from '@/lib/leaveGuard';
 import {
   markNotificationRead,
   markAllNotificationsRead,
@@ -106,7 +107,7 @@ export default function NotificationBell() {
       case 'suggestion_decided':
         if (tripId) {
           setOpen(false);
-          router.push(`/results?tripId=${tripId}`);
+          confirmLeave(() => router.push(`/results?tripId=${tripId}`));
         }
         break;
       case 'canvas_invite': {
@@ -120,7 +121,7 @@ export default function NotificationBell() {
         }
         if (link) {
           setOpen(false);
-          router.push(link);
+          confirmLeave(() => router.push(link!));
         }
         break;
       }
@@ -136,7 +137,7 @@ export default function NotificationBell() {
       const res = await cloneTrip(n.data.tripId);
       markRead(n);
       setOpen(false);
-      router.push(`/results?tripId=${res.tripId}`);
+      confirmLeave(() => router.push(`/results?tripId=${res.tripId}`));
     } catch {
       // Clone failed (trip gone?) — leave the notification for a retry.
     } finally {

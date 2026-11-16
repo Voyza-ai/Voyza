@@ -193,7 +193,7 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
           the viewport. scroll-snap so cards snap into view rather than
           stranding the user mid-card on a flick scroll. */}
       <div
-        className="flex-1 min-h-0 flex gap-4 overflow-x-auto no-scrollbar px-8 py-4"
+        className="flex-1 min-h-0 flex gap-4 overflow-x-auto overscroll-x-contain no-scrollbar px-8 py-4"
         style={{ scrollSnapType: 'x mandatory' }}
       >
         {isoDates.map((iso) => {

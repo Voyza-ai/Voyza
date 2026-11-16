@@ -31,7 +31,8 @@ import { Hotel, City, Transport, HomeLeg, Trip } from '@/lib/types';
 import { tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
 import { formatMinutes } from '@/lib/dateHelpers';
 import { useAuthStore } from '@/store/authStore';
-import { useSavedTripAutosave } from '@/lib/useSavedTripAutosave';
+import { useSavedTripAutosave, useSavedTripUnsaved } from '@/lib/useSavedTripAutosave';
+import { useLeaveGuard, type LeaveGuardCopy } from '@/lib/leaveGuard';
 import { requestPicksForAddedCity } from '@/store/tripStore';
 import { useTripCollaboration } from '@/hooks/useTripCollaboration';
 import { isApplyingRemote, remoteAppliedWithin, rechainDates, staleLegIndices } from '@/lib/tripCollab';
@@ -58,6 +59,16 @@ export default function ResultsPage() {
 /** Longest stay the nights stepper allows (the backend's MAX_STAY_NIGHTS). */
 const MAX_CITY_NIGHTS = 60;
 
+/** The leave dialog's words (lib/leaveGuard). */
+const UNSAVED_TRIP: LeaveGuardCopy = {
+  title: 'Leave this trip?',
+  body: "You haven't saved it yet, so it will be lost.",
+};
+const UNSENT_SUGGESTIONS: LeaveGuardCopy = {
+  title: 'Leave this trip?',
+  body: "You haven't sent your changes to the owner yet, so they will be lost.",
+};
+
 function ResultsPageInner() {
   const { currentTrip, setTrip } = useTripStore();
   // A saved trip's changes made here (legs, schedule, AI city edits) are
@@ -79,6 +90,28 @@ function ResultsPageInner() {
   // The trip as a shared, live document (what the canvas page used to be):
   // roles, share-link joins, presence, live edits, suggestions.
   const collab = useTripCollaboration(tripId, searchParams.get('share'));
+
+  // ── Ask before the trip is left with work that would be lost ──
+  // A trip never saved lives only in this tab: Back (a trackpad swipe) went to
+  // /plan, which wipes it. A saved trip is asked about only for a close or
+  // reload while a change is still being written — leaving inside the app
+  // writes it on the way out (useSavedTripAutosave) — and never when it is
+  // opened read-only. A suggester's changes live here until proposed.
+  const savedTripUnsaved = useSavedTripUnsaved((s) => s.unsaved);
+  const tripOnScreen =
+    !!currentTrip && (!tripId || currentTrip.id === tripId) && !loading && !error && !collab.accessGate;
+  const neverSaved = tripOnScreen && (!currentTrip!.id || currentTrip!.id.startsWith('mock'));
+  const unsentSuggestions = tripOnScreen && collab.hasLocalChanges;
+  const changeBeingWritten =
+    tripOnScreen && !neverSaved && savedTripUnsaved && (!collab.active || collab.role === 'owner');
+  useLeaveGuard({
+    inApp: neverSaved || unsentSuggestions,
+    unload: neverSaved || unsentSuggestions || changeBeingWritten,
+    // A reload of a bare /results puts an unsaved trip back from the tab's
+    // session snapshot (restoreTripSession); a close doesn't.
+    reloadRestores: neverSaved && !tripId,
+    copy: unsentSuggestions ? UNSENT_SUGGESTIONS : UNSAVED_TRIP,
+  });
 
   // BlueMurr AI shown or hidden by the person; remembered on this browser
   // (read after mount, so the server's first render matches).
