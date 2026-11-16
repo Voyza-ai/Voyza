@@ -1,6 +1,7 @@
 import { City, Trip, ScheduledEvent, Transport, HomeLeg, UnscheduledItem } from './types';
 import { parseLocal, toIso } from './dateHelpers';
 import { homeDepartureDay } from './tripSpan';
+import { cityFlightCodeLocally } from './locationResolver';
 // `import type` only — keeps the fetch layer in lib/api out of this
 // module's runtime graph while still typing the AI's suggestion shapes.
 import type { ActivitySuggestion, RestaurantSuggestion } from './api';
@@ -40,7 +41,53 @@ const POST_ARRIVAL_CUSHION = 60;
 
 /** Strip station/platform suffixes for cleaner one-line titles. */
 const shortStation = (s?: string) =>
-  s ? s.split(',')[0].split('—')[0].split('–')[0].trim() : '';
+  s ? s.split(',')[0].split('—')[0].split('–')[0].split('·')[0].trim() : '';
+
+/**
+ * The code a city's flights are listed under, for travel-block titles
+ * ("Flight PAR → LON"). The trip's own home flights carry it for the first
+ * and last cities — the code the backend searched every leg there with — and
+ * the location hot set has it for the rest it knows. Null otherwise; the
+ * caller names the city instead.
+ */
+export function cityFlightCode(trip: Pick<Trip, 'cities' | 'origin'>, cityIndex: number): string | null {
+  const city = trip.cities[cityIndex];
+  if (!city) return null;
+  const last = trip.cities.length - 1;
+  if (cityIndex === 0 && trip.origin?.outboundLeg?.destAirport) return trip.origin.outboundLeg.destAirport;
+  if (cityIndex === last && trip.origin?.returnLeg?.originAirport) return trip.origin.returnLeg.originAirport;
+  return cityFlightCodeLocally(city.name, city.country);
+}
+
+/**
+ * One end of a leg as a travel block names it: the station or airport the leg
+ * itself carries, else (a flight) the city's flight code, else the city's
+ * name. Never "the airport" — that placeholder is what an inter-city flight
+ * read as, because those legs carry no airport of their own.
+ */
+const legEnd = (
+  station: string | undefined,
+  mode: Transport['mode'],
+  trip: Pick<Trip, 'cities' | 'origin'>,
+  cityIndex: number,
+  fallbackName: string | undefined,
+): string =>
+  shortStation(station) ||
+  (mode === 'flight' ? cityFlightCode(trip, cityIndex) : null) ||
+  trip.cities[cityIndex]?.name ||
+  fallbackName ||
+  (mode === 'flight' ? 'the airport' : 'the station');
+
+const travelWord = (mode: Transport['mode']) => (mode === 'flight' ? 'Flight' : mode === 'train' ? 'Train' : 'Bus');
+
+/** "58m", "1h 5m", "9h30m" → minutes; null when it says neither. */
+const durationMinutes = (d: string | undefined): number | null => {
+  if (!d) return null;
+  const h = /(\d+)\s*h/i.exec(d);
+  const m = /(\d+)\s*m(?!o)/i.exec(d);
+  if (!h && !m) return null;
+  return (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0);
+};
 
 const timeToMinutes = (t: string): number => {
   const [h, m] = t.split(':').map(Number);
@@ -99,6 +146,15 @@ export type DayTransportContext = {
   windowStart: number;
   windowEnd: number;
   /**
+   * What `events` occupy, in minutes, for planning around them. Usually each
+   * block's start–end; a leg that lands at an earlier clock time than it left
+   * on the SAME day (Paris 10:50 → London 10:48: a short flight into an
+   * earlier time zone) occupies its flight time after departure. Read as
+   * start–end, that block wrapped to midnight like an overnight flight and the
+   * day after a morning arrival was left with nothing on it.
+   */
+  busy: Array<[number, number]>;
+  /**
    * True on the HOME departure day of an overnight outbound — the day the
    * traveller leaves home, before the first stay begins. `events` is the
    * home side of the trip (head to the airport, the flight) and nothing may
@@ -125,11 +181,19 @@ export function buildDayTransportContext(
   cityIndex: number,
 ): DayTransportContext {
   const events: ScheduledEvent[] = [];
+  const busy: Array<[number, number]> = [];
   let windowStart = 0;
   let windowEnd = 24 * 60;
   const isArrival = city.dates.arrival === date;
   const isDeparture = city.dates.departure === date;
   const lastIndex = trip.cities.length - 1;
+  const homeName = trip.origin?.city || undefined;
+  const push = (e: ScheduledEvent, range?: [number, number]) => {
+    events.push(e);
+    const s = timeToMinutes(e.startTime);
+    const end = timeToMinutes(e.endTime);
+    busy.push(range ?? [s, end < s ? 24 * 60 : end]);
+  };
 
   // The home departure day of an overnight outbound (JFK 19:25 Jan 10 →
   // Paris 12:10 Jan 11). The first stay starts the day the flight LANDS, so
@@ -141,9 +205,9 @@ export function buildDayTransportContext(
     const t = homeLegToTransport(trip.origin?.outboundLeg);
     if (t?.departTime) {
       const departMins = timeToMinutes(t.departTime);
-      const fromShort = shortStation(t.fromStation) || 'the airport';
-      const toShort = shortStation(t.toStation) || city.name;
-      events.push({
+      const fromShort = shortStation(t.fromStation) || homeName || 'home';
+      const toShort = legEnd(t.toStation, 'flight', trip, 0, city.name);
+      push({
         id: newId(),
         title: `Head to ${fromShort}`,
         startTime: minutesToTime(Math.max(0, departMins - (BUFFER_MIN[t.mode] ?? 60))),
@@ -153,7 +217,7 @@ export function buildDayTransportContext(
         autoRole: 'in-head',
         notes: 'Allow 2h for check-in & security',
       });
-      events.push({
+      push({
         id: newId(),
         title: `Flight ${fromShort} → ${toShort}`,
         startTime: t.departTime,
@@ -164,7 +228,7 @@ export function buildDayTransportContext(
         notes: t.duration || undefined,
       });
     }
-    return { events, windowStart: 24 * 60, windowEnd: 0, homeSideOnly: true };
+    return { events, busy, windowStart: 24 * 60, windowEnd: 0, homeSideOnly: true };
   }
 
   // Resolve the effective inbound transport. For cities[0] (the first
@@ -172,21 +236,23 @@ export function buildDayTransportContext(
   // here — try that first, fall back to city.transportIn for legacy trips
   // that pre-date the home anchor work.
   let effectiveIn: Transport | null = null;
+  let inFromHome = false;
   if (cityIndex === 0) {
-    effectiveIn =
-      homeLegToTransport(trip.origin?.outboundLeg) ??
-      (city.transportIn?.arriveTime ? city.transportIn : null);
-  } else if (city.transportIn?.arriveTime) {
+    const home = homeLegToTransport(trip.origin?.outboundLeg);
+    inFromHome = !!home;
+    effectiveIn = home ?? (city.transportIn?.arriveTime ? city.transportIn : null);
+  } else if (city.transportIn?.arriveTime && !city.transportIn.unavailable) {
     effectiveIn = city.transportIn;
   }
 
   // Same for outbound: cities[last] uses the home return leg.
   let effectiveOut: Transport | null = null;
+  let outToHome = false;
   if (cityIndex === lastIndex) {
-    effectiveOut =
-      homeLegToTransport(trip.origin?.returnLeg) ??
-      (city.transportOut?.departTime ? city.transportOut : null);
-  } else if (city.transportOut?.departTime) {
+    const home = homeLegToTransport(trip.origin?.returnLeg);
+    outToHome = !!home;
+    effectiveOut = home ?? (city.transportOut?.departTime ? city.transportOut : null);
+  } else if (city.transportOut?.departTime && !city.transportOut.unavailable) {
     effectiveOut = city.transportOut;
   }
 
@@ -200,9 +266,10 @@ export function buildDayTransportContext(
     const arrMins = timeToMinutes(t.arriveTime!);
     const departMins = t.departTime ? timeToMinutes(t.departTime) : null;
     const buffer = BUFFER_MIN[t.mode] ?? 60;
-    const fromShort =
-      shortStation(t.fromStation) || (t.mode === 'flight' ? 'the airport' : 'the station');
-    const toShort = shortStation(t.toStation) || city.name;
+    const fromShort = inFromHome
+      ? shortStation(t.fromStation) || homeName || 'home'
+      : legEnd(t.fromStation, t.mode, trip, cityIndex - 1, t.from);
+    const toShort = legEnd(t.toStation, t.mode, trip, cityIndex, city.name);
 
     // For the home outbound, only render head-to + flight when the
     // departDate is the same day as the arrival. Inter-city legs are
@@ -212,9 +279,13 @@ export function buildDayTransportContext(
         ? trip.origin?.outboundLeg?.departDate === date
         : true;
 
+    // Where the traveller is free again. Normally the landing time; for a leg
+    // that lands at an earlier clock time than it left (a short hop into an
+    // earlier time zone) the flight itself runs on past the landing time.
+    let travelEnd = arrMins;
     if (sameDayDeparture && departMins !== null) {
       const headStart = Math.max(0, departMins - buffer);
-      events.push({
+      push({
         id: newId(),
         title: `Head to ${fromShort}`,
         startTime: minutesToTime(headStart),
@@ -224,19 +295,27 @@ export function buildDayTransportContext(
         autoRole: 'in-head',
         notes: t.mode === 'flight' ? 'Allow 2h for check-in & security' : undefined,
       });
-      events.push({
-        id: newId(),
-        title: `${t.mode === 'flight' ? 'Flight' : t.mode === 'train' ? 'Train' : 'Bus'} ${fromShort} → ${toShort}`,
-        startTime: t.departTime!,
-        endTime: t.arriveTime!,
-        category: 'transport',
-        auto: true,
-        autoRole: 'in-travel',
-        notes: t.duration || undefined,
-      });
+      const dur = durationMinutes(t.duration);
+      // Lands "before" it left, the same day: a time-zone change, not an
+      // overnight. Occupies its flight time, not the rest of the day.
+      const sameDayEarlier = arrMins < departMins && dur !== null && departMins + dur < 24 * 60;
+      if (sameDayEarlier) travelEnd = departMins + dur;
+      push(
+        {
+          id: newId(),
+          title: `${travelWord(t.mode)} ${fromShort} → ${toShort}`,
+          startTime: t.departTime!,
+          endTime: t.arriveTime!,
+          category: 'transport',
+          auto: true,
+          autoRole: 'in-travel',
+          notes: t.duration || undefined,
+        },
+        sameDayEarlier ? [departMins, departMins + dur!] : undefined,
+      );
     }
 
-    events.push({
+    push({
       id: newId(),
       title: `Arrive at ${toShort}`,
       startTime: t.arriveTime!,
@@ -248,7 +327,7 @@ export function buildDayTransportContext(
 
     // No activities/restaurants until the user has actually landed and
     // cleared the airport.
-    windowStart = Math.min(arrMins + POST_ARRIVAL_CUSHION, 24 * 60);
+    windowStart = Math.min(Math.max(arrMins + POST_ARRIVAL_CUSHION, travelEnd + SLOT_BUFFER_MIN), 24 * 60);
   }
 
   // Outbound — two blocks ("Head to" + actual travel). Symmetric to the
@@ -259,12 +338,13 @@ export function buildDayTransportContext(
     const t = effectiveOut;
     const depMins = timeToMinutes(t.departTime!);
     const buffer = BUFFER_MIN[t.mode] ?? 60;
-    const fromShort =
-      shortStation(t.fromStation) || (t.mode === 'flight' ? 'the airport' : 'the station');
-    const toShort = shortStation(t.toStation) || (t.to ?? 'destination');
+    const fromShort = legEnd(t.fromStation, t.mode, trip, cityIndex, city.name);
+    const toShort = outToHome
+      ? shortStation(t.toStation) || trip.origin?.returnCity || homeName || 'home'
+      : legEnd(t.toStation, t.mode, trip, cityIndex + 1, t.to ?? 'destination');
     const headStart = Math.max(0, depMins - buffer);
 
-    events.push({
+    push({
       id: newId(),
       title: `Head to ${fromShort}`,
       startTime: minutesToTime(headStart),
@@ -276,9 +356,9 @@ export function buildDayTransportContext(
     });
 
     const endTime = t.arriveTime ?? minutesToTime(Math.min(depMins + 60, 24 * 60));
-    events.push({
+    push({
       id: newId(),
-      title: `${t.mode === 'flight' ? 'Flight' : t.mode === 'train' ? 'Train' : 'Bus'} ${fromShort} → ${toShort}`,
+      title: `${travelWord(t.mode)} ${fromShort} → ${toShort}`,
       startTime: t.departTime!,
       endTime,
       category: 'transport',
@@ -291,8 +371,13 @@ export function buildDayTransportContext(
     windowEnd = Math.max(0, headStart);
   }
 
-  events.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-  return { events, windowStart, windowEnd };
+  const order = events.map((e, i) => i).sort((a, b) => timeToMinutes(events[a].startTime) - timeToMinutes(events[b].startTime));
+  return {
+    events: order.map((i) => events[i]),
+    busy: order.map((i) => busy[i]),
+    windowStart,
+    windowEnd,
+  };
 }
 
 /* ──────────────────────────── Day planning ──────────────────────────── */
@@ -698,9 +783,7 @@ export function buildDefaultSchedule(
 
   const dayStart = Math.max(DAY_OPEN_MIN, ctx.windowStart);
   const dayEnd = Math.min(DAY_CLOSE_MIN, ctx.windowEnd);
-  const busyRanges = ctx.events.map(
-    (e): [number, number] => [timeToMinutes(e.startTime), timeToMinutes(e.endTime)],
-  );
+  const busyRanges = ctx.busy;
 
   const makers = new Map<string, (startMin: number, endMin: number) => ScheduledEvent>();
 
@@ -937,9 +1020,7 @@ export function buildCityScheduleFromSuggestions(
 
     const dayStart = Math.max(DAY_OPEN_MIN, transportCtx.windowStart);
     const dayEnd = Math.min(DAY_CLOSE_MIN, transportCtx.windowEnd);
-    const busyRanges = transportCtx.events.map(
-      (e): [number, number] => [timeToMinutes(e.startTime), timeToMinutes(e.endTime)],
-    );
+    const busyRanges = transportCtx.busy;
 
     const makers = new Map<string, (startMin: number, endMin: number) => ScheduledEvent>();
     /** Everything handed to the planner this day, so drops can be put back. */
