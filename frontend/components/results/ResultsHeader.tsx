@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Calendar, Users, TrendingDown, Sparkles, Share2, ChevronDown, CheckCircle2, Send, Copy, Eye } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
+import { vibeList } from '@/lib/vibes';
 import { waysToSave, type SaveOption } from '@/lib/waysToSave';
 import { tripSpan } from '@/lib/tripSpan';
 import { useCountUp } from '@/lib/useCountUp';
@@ -277,6 +278,11 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
       }
     })();
 
+    // The vibes, from the answers when this session planned the trip, else
+    // from the saved trip ("Culture, Food" — or an older trip's single
+    // "Culture"), read back as the list the planner shows.
+    const vibes = vibeList(a.vibe ? a : { vibe: trip.vibe });
+
     const staged = {
       destinations: a.destinations?.length
         ? a.destinations
@@ -293,7 +299,8 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
       planningMode: 'destination' as const,
       budget: a.budget,
       budgetPerPerson: a.budgetPerPerson,
-      vibe: a.vibe,
+      vibe: a.vibe ?? (trip.vibe || undefined),
+      vibes: vibes.length > 0 ? vibes : undefined,
     };
 
     // Stage in the store AND snapshot to sessionStorage: the /plan page

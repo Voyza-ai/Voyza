@@ -145,7 +145,11 @@ export async function fetchPopularTrips(
   const enriched: PopularTrip[] = trips.map((t: any) => {
     const cs = citiesByTrip.get(t.id) ?? [];
     const tags = new Set<string>();
-    if (t.vibe) tags.add(String(t.vibe).toLowerCase());
+    // A planner trip saves its picked vibes joined: "Culture, Food".
+    for (const v of String(t.vibe ?? '').split(',')) {
+      const tag = v.trim().toLowerCase();
+      if (tag) tags.add(tag);
+    }
     for (const c of cs) {
       for (const v of Array.isArray(c.vibes) ? c.vibes : []) tags.add(String(v).toLowerCase());
     }

@@ -123,6 +123,20 @@ describe('fetchPopularTrips', () => {
     expect(t.isMine).toBe(true);
     expect(t.cities).toEqual([{ name: 'Rome', country: 'Italy' }]);
   });
+
+  it('a trip saved with several vibes ("Culture, Food") is tagged with each one', async () => {
+    tables.trips = [
+      { id: 't2', title: 'Paris', travelers: 2, total_cost: 2000, vibe: 'Culture, Food',
+        start_date: null, clone_count: 0, created_at: '2026-09-01T00:00:00Z', user_id: 'u9' },
+    ];
+    tables.cities = [];
+    tables.recentClones = [];
+    tables.user_profiles = [];
+
+    const [t] = await fetchPopularTrips({}, 'me');
+    expect(t.tags.sort()).toEqual(['culture', 'food']);
+    expect(filterAndRank([t], { vibe: 'food' }).map((x) => x.id)).toEqual(['t2']);
+  });
 });
 
 describe('GET /api/trips/popular', () => {
