@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Umbrella, Mountain, Compass, Landmark, Drama, Check, ArrowRight } from 'lucide-react';
+import { Umbrella, Mountain, Compass, Landmark, Drama, ArrowRight } from 'lucide-react';
 import { MAX_VIBES } from '@/lib/vibes';
 
 const vibes = [
@@ -35,6 +35,8 @@ type VibePillsProps = {
  * The vibe step: pick one to three vibes, then Continue.
  *
  * A click toggles a pill (brand blue when on, as the city picker's pills).
+ * A picked pill keeps its width — no check mark — so picking never re-wraps
+ * the row and pushes Continue out of view.
  * At three, the other pills dim and stop responding, and the hint says why —
  * a fourth click does nothing rather than silently swapping one out.
  * Enter confirms whenever focus is on a pill or nowhere in particular.
@@ -50,6 +52,19 @@ export default function VibePills({
   const ready = canContinue ?? selected.length > 0;
   const atMax = selected.length >= MAX_VIBES;
   const rootRef = useRef<HTMLDivElement>(null);
+  const continueRowRef = useRef<HTMLDivElement>(null);
+
+  // Keep Continue on screen as picks change: the chat scrolls to the newest
+  // message, not to a widget that grew under it (a narrower window wraps
+  // the pills).
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    continueRowRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [selected.length]);
 
   const toggle = (label: string) => {
     if (selected.includes(label)) {
@@ -110,14 +125,13 @@ export default function VibePills({
             >
               <Icon size={20} style={{ color: on ? '#ffffff' : vibe.color }} />
               {vibe.label}
-              {on && <Check size={16} className="-mr-1" aria-hidden />}
             </motion.button>
           );
         })}
       </div>
 
       {!hideContinue && (
-        <div className="flex items-center gap-4">
+        <div ref={continueRowRef} className="flex items-center gap-4">
           <button
             type="button"
             onClick={() => ready && onContinue()}
