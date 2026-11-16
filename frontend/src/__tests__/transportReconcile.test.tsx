@@ -122,6 +122,27 @@ const day = (date: string): ScheduledEvent[] =>
   useTripStore.getState().currentTrip!.cities[1].schedule![date];
 const byRole = (events: ScheduledEvent[], role: string) => events.filter((e) => e.autoRole === role);
 const nonTransport = (events: ScheduledEvent[]) => events.filter((e) => e.category !== 'transport');
+const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+
+/**
+ * After the inbound moved to the 14:00 train (lands 15:35): no planned stop
+ * on the arrival day before the traveller has landed and cleared the station,
+ * each at its planned length, and every stop that was on the day still on the
+ * stay or listed as not fitting — none silently lost.
+ */
+function expectRefitAfterLateTrain(before: ScheduledEvent[]) {
+  const after = nonTransport(day(ARRIVAL));
+  for (const e of after) {
+    expect(toMin(e.startTime)).toBeGreaterThanOrEqual(toMin('16:35'));
+    expect(toMin(e.endTime) - toMin(e.startTime)).toBe(e.plannedDurationMin);
+  }
+  const florence = useTripStore.getState().currentTrip!.cities[1];
+  const kept = [
+    ...Object.values(florence.schedule!).flat().map((e) => e.title),
+    ...(florence.unscheduled ?? []).map((u) => u.title),
+  ];
+  for (const e of before) expect(kept).toContain(e.title);
+}
 
 describe('generated travel blocks are tagged', () => {
   it('every block buildDayTransportContext makes carries auto + its role', () => {
@@ -190,12 +211,22 @@ describe('swap updates — arrival day (transportIn)', () => {
     expect(after.filter((e) => e.category === 'transport')).toHaveLength(3);
   });
 
-  it('activities and restaurants stay exactly as they were', () => {
+  it('planned stops the later train makes impossible move after arrival, at their own length', () => {
     const t = loadBuilt();
     const before = nonTransport(t.cities[1].schedule![ARRIVAL]);
     expect(before.length).toBeGreaterThan(0);
+    // The 08:00 plan had stops in the morning, before the 14:00 train now lands.
+    expect(before.some((e) => toMin(e.startTime) < toMin('16:35'))).toBe(true);
     useTripStore.getState().setTransportOut(0, 0);
-    expect(nonTransport(day(ARRIVAL))).toEqual(before);
+    expectRefitAfterLateTrain(before);
+  });
+
+  it('stops the traveller can still make stay exactly as they were', () => {
+    const t = loadBuilt();
+    const reachable = nonTransport(t.cities[1].schedule![ARRIVAL]).filter((e) => toMin(e.startTime) >= toMin('16:35'));
+    expect(reachable.length).toBeGreaterThan(0); // dinner
+    useTripStore.getState().setTransportOut(0, 0);
+    for (const e of reachable) expect(day(ARRIVAL)).toContainEqual(e);
   });
 
   it('user-added events stay, even one titled like a travel block', () => {
@@ -230,13 +261,15 @@ describe('swap updates — departure day (transportOut / return leg)', () => {
   });
 
   it('an inter-city transportOut on a non-last city follows its swap too', () => {
+    // A non-last city's departure day is the next city's arrival day on every
+    // view, so the store drops it from the city's own schedule; the reconcile
+    // itself still follows the swap on a schedule that has one.
     const t = makeTrip();
     const rome = t.cities[0];
     const dep = rome.dates.departure;
     const schedule = { [dep]: buildDefaultSchedule(rome, dep, t, 0) };
-    useTripStore.setState({ currentTrip: { ...t, cities: [{ ...rome, schedule }, t.cities[1]] } });
-    useTripStore.getState().setTransportOut(0, 0);
-    const after = useTripStore.getState().currentTrip!.cities[0].schedule![dep];
+    const swapped: Trip = { ...t, cities: [{ ...rome, schedule, transportOut: train1400 }, { ...t.cities[1], transportIn: train1400 }] };
+    const after = reconcileTripTransport(swapped).cities[0].schedule![dep];
     expect(byRole(after, 'out-travel')[0]).toMatchObject({ startTime: '14:00', endTime: '15:35' });
   });
 });
@@ -376,6 +409,6 @@ describe('DayPlanner', () => {
       }),
     );
     expect(byRole(day(ARRIVAL), 'in-travel')[0]).toMatchObject({ startTime: '14:00', endTime: '15:35' });
-    expect(nonTransport(day(ARRIVAL))).toEqual(nonTransport(t.cities[1].schedule![ARRIVAL]));
+    expectRefitAfterLateTrain(nonTransport(t.cities[1].schedule![ARRIVAL]));
   });
 });

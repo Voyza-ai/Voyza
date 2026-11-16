@@ -12,6 +12,8 @@ import {
 } from '@/lib/api';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { applyUserEdit, reconcileTripTransport } from '@/lib/transportReconcile';
+import { syncTripSchedules } from '@/lib/scheduleSync';
+import { isApplyingRemote } from '@/lib/tripCollab';
 import { liveTripTotal } from '@/lib/tripTotals';
 import type { CanvasIntent } from '@/lib/canvasHandoff';
 import { coordsOf, hasCoords, type TravelLegs } from '@/lib/geoSchedule';
@@ -976,8 +978,32 @@ export function restoreTripSession(): boolean {
   return true;
 }
 
+/**
+ * The same trip before and after an update — as against another trip put in
+ * its place (a new planner search, another saved trip opened).
+ */
+function sameTrip(a: Trip, b: Trip): boolean {
+  if (a.id || b.id) return a.id === b.id;
+  return (a.picksRun ?? null) === (b.picksRun ?? null);
+}
+
 // Browser only: on the server this module is shared by every request.
 if (typeof window !== 'undefined') {
+  // Date and transport edits reach the day plans as they happen, whichever
+  // view is open: an AI chat edit accepted, the − / + nights on a city card,
+  // a flight swapped, a flight home searched again for a new last day. With
+  // the trip as it was, the sync knows which days a stay gained (they take
+  // its unused picks, then its defaults) and which it lost (lib/scheduleSync).
+  // A collaborator's change arrives already synced on their screen.
+  useTripStore.subscribe((state, prev) => {
+    const next = state.currentTrip;
+    const before = prev.currentTrip;
+    if (!next || !before || next === before || !sameTrip(before, next)) return;
+    if (isApplyingRemote()) return;
+    const synced = syncTripSchedules(before, next);
+    if (synced !== next) useTripStore.setState({ currentTrip: synced });
+  });
+
   useTripStore.subscribe((state, prev) => {
     if (
       state.currentTrip === prev.currentTrip &&

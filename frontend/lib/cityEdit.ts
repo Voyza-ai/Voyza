@@ -1,9 +1,9 @@
-import type { City, HomeLeg, ScheduledEvent, Transport, Trip, UnscheduledItem } from './types';
-import { reconcileTripTransport } from './transportReconcile';
+import type { City, HomeLeg, Transport, Trip } from './types';
 import type { CityEditProposal, LegOption } from './api';
 import { hotelFromResult } from './hotelShape';
 import { liveTripTotal } from './tripTotals';
 import { buildCityScheduleFromSuggestions } from './dayScheduleDefaults';
+import { isTravellersOwn } from './scheduleSync';
 import { countryForCity } from '@/data/worldCities';
 import { nextColorIndex, withColorIndices } from './cityColors';
 
@@ -44,7 +44,7 @@ export function applyCityEdit(input: Trip, proposal: CityEditProposal): Trip {
       if (stop.status === 'kept' && own.dates.arrival === stop.arrival && own.dates.departure === stop.departure && !hotels) {
         return own;
       }
-      let next: City = { ...moveSchedule(own, dates), dates };
+      let next: City = { ...own, dates };
       if (hotels && hotels.length > 0) {
         const picked = own.hotels[own.selectedHotelIndex]?.name;
         const keep = picked ? hotels.findIndex((h) => h.name === picked) : -1;
@@ -130,63 +130,34 @@ export function applyCityEdit(input: Trip, proposal: CityEditProposal): Trip {
     const built = buildCityScheduleFromSuggestions([], [], c, idx, next);
     return { ...c, schedule: built.schedule, unscheduled: built.unscheduled };
   });
-  // Travel blocks on every day follow the new flights and days.
-  const reconciled = reconcileTripTransport(next);
-  reconciled.totalCost = liveTripTotal(reconciled);
-  return reconciled;
-}
-
-const DAY_MS = 86_400_000;
-function daysOf(arrival: string, departure: string): string[] {
-  const a = Date.parse(`${arrival}T00:00:00Z`);
-  const d = Date.parse(`${departure}T00:00:00Z`);
-  if (!Number.isFinite(a) || !Number.isFinite(d) || d < a) return [];
-  const out: string[] = [];
-  for (let t = a; t <= d; t += DAY_MS) out.push(new Date(t).toISOString().slice(0, 10));
-  return out;
+  next.cities = withOwnEventsOf(trip.cities, next.cities);
+  next.totalCost = liveTripTotal(next);
+  return next;
 }
 
 /**
- * A stay that moved keeps its days with it: the arrival day's plan goes to
- * the new arrival day, the departure day's to the new departure day, and the
- * full days in order between them. Before, a moved stay kept its schedule on
- * the OLD calendar dates — live, "Give Paris one more night" left London's
- * Jan 18 sightseeing on what had become the Paris → London travel day (over
- * the airport and flight blocks) and the new full Jan 19 empty. A full day
- * added is empty; a full day dropped hands its activities and meals to
- * `unscheduled` instead of losing them.
+ * The traveller's own events (added by hand, or stops they reshaped) on a city
+ * the edit removed or replaced are not dropped with it: each goes to the city
+ * that now holds its day — a replacement takes the replaced city's days —
+ * or, for a day the trip no longer has, the nearest city. The schedule sync
+ * (lib/scheduleSync) then moves any that sit on a travel block, or outside the
+ * stay, onto a free time of its days.
  */
-function moveSchedule(city: City, dates: { arrival: string; departure: string }): City {
-  if (!city.schedule || !city.dates) return city;
-  const oldDays = daysOf(city.dates.arrival, city.dates.departure);
-  const newDays = daysOf(dates.arrival, dates.departure);
-  if (oldDays.length === 0 || newDays.length === 0) return city;
-  if (oldDays.join() === newDays.join()) return city;
-  const from = new Map<string, string>(); // new day → old day
-  from.set(newDays[0], oldDays[0]);
-  if (newDays.length > 1 && oldDays.length > 1) from.set(newDays[newDays.length - 1], oldDays[oldDays.length - 1]);
-  for (let k = 1; k < newDays.length - 1; k++) if (k < oldDays.length - 1) from.set(newDays[k], oldDays[k]);
-  const used = new Set(Array.from(from.values()));
-  const schedule: Record<string, ScheduledEvent[]> = {};
-  from.forEach((old, day) => {
-    if (city.schedule![old]) schedule[day] = city.schedule![old];
-  });
-  const dropped: UnscheduledItem[] = [];
-  for (const old of oldDays) {
-    if (used.has(old)) continue;
-    for (const e of city.schedule[old] ?? []) {
-      if (e.auto || e.category === 'transport') continue;
-      const [sh, sm] = (e.startTime ?? '').split(':').map(Number);
-      const [eh, em] = (e.endTime ?? '').split(':').map(Number);
-      const mins = Number.isFinite(sh) && Number.isFinite(eh) ? (eh * 60 + (em || 0)) - (sh * 60 + (sm || 0)) : 60;
-      dropped.push({ title: e.title, kind: e.category === 'restaurant' ? 'restaurant' : 'activity', durationMin: mins > 0 ? mins : 60, date: null });
+function withOwnEventsOf(before: City[], after: City[]): City[] {
+  const names = new Set(after.map((c) => c.name.toLowerCase()));
+  const out = [...after];
+  for (const gone of before) {
+    if (names.has(gone.name.toLowerCase())) continue;
+    for (const [date, events] of Object.entries(gone.schedule ?? {})) {
+      const own = events.filter(isTravellersOwn);
+      if (own.length === 0 || out.length === 0) continue;
+      let i = out.findIndex((c) => c.dates.arrival <= date && date < c.dates.departure);
+      if (i < 0) i = date < out[0].dates.arrival ? 0 : out.length - 1;
+      const c = out[i];
+      out[i] = { ...c, schedule: { ...(c.schedule ?? {}), [date]: [...(c.schedule?.[date] ?? []), ...own] } };
     }
   }
-  return {
-    ...city,
-    schedule,
-    ...(dropped.length > 0 ? { unscheduled: [...(city.unscheduled ?? []), ...dropped] } : {}),
-  };
+  return out;
 }
 
 /** A leg's searched options as the flowchart's Transport: cheapest first, the rest as alternatives. */

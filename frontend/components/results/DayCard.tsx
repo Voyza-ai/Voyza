@@ -8,6 +8,7 @@ import { getCityColor } from '@/lib/cityColors';
 import { parseLocal } from '@/lib/dateHelpers';
 import TravelConnectors from './TravelConnectors';
 import { useDayHubs } from '@/lib/tripHubs';
+import { blockLayout } from '@/lib/blockLayout';
 
 /**
  * Read-only single-day column rendered side-by-side with peers in
@@ -85,6 +86,7 @@ export default function DayCard({
   onOpenEditor,
 }: DayCardProps) {
   const hubs = useDayHubs(trip, cityIndex, date);
+  const layout = blockLayout(events, (m) => (m / 60) * HOUR_HEIGHT, 18);
   const theme =
     city && cityIndex != null ? getCityColor(city.colorIndex ?? cityIndex) : null;
   const accent = theme?.text ?? '#9ca3af';
@@ -192,10 +194,7 @@ export default function DayCard({
               click bubbles up to the card-level onClick so we don't
               need a separate handler here. */}
           {events.map((evt) => {
-            const startMins = timeToMinutes(evt.startTime);
-            const endMins = timeToMinutes(evt.endTime);
-            const top = (startMins / 60) * HOUR_HEIGHT;
-            const height = Math.max(((endMins - startMins) / 60) * HOUR_HEIGHT, 18);
+            const { top, height } = layout.get(evt.id) ?? { top: 0, height: 18 };
             const CatIcon = CATEGORY_ICONS[evt.category ?? 'custom'] ?? Clock;
             return (
               <div

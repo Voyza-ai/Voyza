@@ -284,34 +284,6 @@ describe("the user's choice for a leg is kept on it (so a later date edit keeps 
   });
 });
 
-describe('an accepted date edit moves each stay\'s days with it (Schedule tab)', () => {
-  it('+1 night in Paris: London\'s days move a day later, Paris\'s departure day too, the new full day is empty', () => {
-    const t = trip();
-    const titles = (c: any, d: string) => (c.schedule?.[d] ?? []).filter((e: any) => !e.auto).map((e: any) => e.title);
-    const old = { p13: titles(t.cities[0], '2027-01-13'), p15: titles(t.cities[0], '2027-01-15'), l15: titles(t.cities[1], '2027-01-15'), l16: titles(t.cities[1], '2027-01-16'), l17: titles(t.cities[1], '2027-01-17') };
-    expect(old.l16.length).toBeGreaterThan(0);
-    const later = { ...t.origin!.returnLeg!, departDate: '2027-01-18', arriveDate: '2027-01-18', departTime: '19:30', arriveTime: '22:35' };
-    const next = applyCityEdit(t, {
-      kind: 'city_edit', toolName: 'set_min_days', op: { kind: 'dates', city: 'Paris' },
-      before: t.cities.map((c) => ({ name: c.name, arrival: c.dates.arrival, departure: c.dates.departure })),
-      after: [
-        { name: 'Paris', arrival: '2027-01-12', departure: '2027-01-16', status: 'moved' },
-        { name: 'London', arrival: '2027-01-16', departure: '2027-01-18', status: 'moved' },
-      ],
-      removed: [], legs: [], returnLeg: later, note: '',
-    } as any);
-    const [paris, london] = next.cities;
-    expect(titles(paris, '2027-01-13')).toEqual(old.p13);
-    expect(titles(paris, '2027-01-15')).toEqual([]); // the night added: a free day
-    expect(titles(paris, '2027-01-16')).toEqual(old.p15); // departure day → new departure day
-    expect(titles(london, '2027-01-16')).toEqual(old.l15); // arrival day
-    expect(titles(london, '2027-01-17')).toEqual(old.l16); // full day
-    expect(titles(london, '2027-01-18')).toEqual(old.l17); // departure day
-    // The last day's flight block is the new flight home.
-    expect(london.schedule!['2027-01-18'].find((e) => e.auto && /^Flight/.test(e.title))).toMatchObject({ startTime: '19:30', endTime: '22:35' });
-  });
-});
-
 describe('applyLegOptions', () => {
   it('puts listed evening flights home on the card first and changes neither the selection nor the total', () => {
     const t = trip();
