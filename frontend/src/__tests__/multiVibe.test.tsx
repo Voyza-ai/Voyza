@@ -157,6 +157,45 @@ describe('vibe step — multi-select', () => {
   });
 });
 
+describe('"I know my budget"', () => {
+  async function toBudgetVibeStep() {
+    render(<PlanningChat />);
+    useTripStore.setState({
+      answers: {
+        origin: 'New York',
+        originAirports: ['JFK'],
+        returnToHome: true,
+        dateRange: { start: '2027-01-12', end: '2027-01-17' },
+        nights: 5,
+        travelers: 2,
+      },
+    });
+    fireEvent.click(await screen.findByText('I know my budget'));
+    const bar = await screen.findByPlaceholderText('Or type your budget, e.g. "$1500"', undefined, { timeout: 3000 });
+    fireEvent.change(bar, { target: { value: '$4000 total' } });
+    fireEvent.keyDown(bar, { key: 'Enter' });
+    await screen.findByText('Any vibe in mind, or totally open?', undefined, { timeout: 3000 });
+    await screen.findByRole('button', { name: /^Culture/ });
+  }
+
+  it('its (skippable) vibe step takes several vibes too', async () => {
+    await toBudgetVibeStep();
+    fireEvent.click(pill('Beachy'));
+    fireEvent.click(pill('Adventure'));
+    fireEvent.click(screen.getByRole('button', { name: /^Continue/ }));
+    expect(useTripStore.getState().answers.vibe).toBe('Beachy, Adventure');
+    await screen.findByText('Anything else I should know?', undefined, { timeout: 3000 });
+    expect(summary()).toMatch(/^Trip so far: Beachy & adventure trip from New York/);
+  });
+
+  it('and can still be skipped', async () => {
+    await toBudgetVibeStep();
+    fireEvent.click(screen.getByText(/Skip this/));
+    await screen.findByText('Anything else I should know?', undefined, { timeout: 3000 });
+    expect(useTripStore.getState().answers.vibe).toBeUndefined();
+  });
+});
+
 describe('"Trip so far" with several vibes', () => {
   it('reads naturally', () => {
     expect(line({ vibes: ['Culture', 'Food'], destinations: ['Paris', 'London'] })).toBe(
