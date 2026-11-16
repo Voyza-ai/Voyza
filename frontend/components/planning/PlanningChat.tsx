@@ -2044,12 +2044,6 @@ export default function PlanningChat() {
   const canReviseDestinations =
     !!intent && intent !== 'chat' && (answers.destinations?.length ?? 0) > 0 && !citySelectionData;
 
-  // ── Running trip summary: clicking a fact revises that answer ─────────
-  //
-  // Guided mode opens the answer's own bubble in its inline editor (the
-  // pencil), so the edit goes through the same parser as the first answer.
-  // Cities go through the bar instead: a city change is an AI revision
-  // (/api/plan/revise-destinations), not a re-parse.
   // Editing the vibe answer re-opens the pills with the current picks; any
   // vibe that isn't a pill comes back as text beside them.
   const openVibeEditor = () => {
@@ -2070,6 +2064,12 @@ export default function PlanningChat() {
     setEditingMsgId(null);
   };
 
+  // ── Running trip summary: clicking a fact revises that answer ─────────
+  //
+  // Guided mode opens the answer's own bubble in its inline editor (the
+  // pencil), so the edit goes through the same parser as the first answer.
+  // Cities go through the bar instead: a city change is an AI revision
+  // (/api/plan/revise-destinations), not a re-parse.
   const answerBubbleFor = (field: SummaryField): Message | undefined => {
     for (const id of SUMMARY_FIELD_STEPS[field]) {
       const found = [...messages].reverse().find((m) => m.role === 'user' && m.stepId === id);
