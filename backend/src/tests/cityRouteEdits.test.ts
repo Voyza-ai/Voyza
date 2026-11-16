@@ -68,6 +68,7 @@ jest.mock('../services/optimizer', () => ({
 
 import planRouter from '../routes/plan';
 import { errorHandler } from '../middleware/error';
+import { chatSystemPrompt, CHAT_TOOLS } from '../services/tripChat';
 
 function createApp() {
   const app = express();
@@ -242,5 +243,28 @@ describe('a leg with no sensible flight is flagged, not silently priced', () => 
     );
     // An ordinary hop is not flagged.
     expect(res.body.proposal.legs.find((l: any) => l.from === 'Salzburg').flag).toBeUndefined();
+  });
+});
+
+describe('"a city of your choice" is a pick, not a question', () => {
+  // Production (after the fix above shipped): "add another city of your choice.
+  // Im feeling christmas vibes" got a list of four cities and "Which city would
+  // you like me to add?". Live, the old prompt added a city 7 times in 24 across
+  // four phrasings; with these instructions, 24 in 24 (Salzburg, placed by the server).
+  it('the prompt tells the model to choose one city itself and call add_city', () => {
+    const prompt = chatSystemPrompt(ownerTrip());
+    expect(prompt).toMatch(/leaves the choice of city to you/);
+    expect(prompt).toMatch(/pick ONE real city yourself[^]*call add_city with it straight away, userSaidWhere false/);
+    expect(prompt).toMatch(/Do not list options or ask which/);
+    const addCity = CHAT_TOOLS.find((t: any) => t.name === 'add_city') as any;
+    expect(addCity.description).toMatch(/leaves the choice to you[^]*pick ONE real city yourself[^]*call this tool with it/);
+  });
+
+  it('a country or region with no choice handed over still asks which city', () => {
+    expect(chatSystemPrompt(ownerTrip())).toMatch(/a country instead of a city\), use answer_only to ask/);
+  });
+
+  it('reorder_cities is in the tool list the model reads', () => {
+    expect(chatSystemPrompt(ownerTrip())).toMatch(/11\. reorder_cities/);
   });
 });
