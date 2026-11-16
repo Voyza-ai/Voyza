@@ -268,8 +268,8 @@ describe('checkCityName', () => {
 
 describe('cityEditOpFromTool', () => {
   it('maps each tool and rejects a missing city', () => {
-    expect(cityEditOpFromTool('add_city', { city: 'Nice', afterCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: 'Rome', beforeCity: null, nights: null });
-    expect(cityEditOpFromTool('add_city', { city: 'Nice', beforeCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: null, beforeCity: 'Rome', nights: null });
+    expect(cityEditOpFromTool('add_city', { city: 'Nice', afterCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: 'Rome', beforeCity: null, nights: null, userSaidWhere: false });
+    expect(cityEditOpFromTool('add_city', { city: 'Nice', beforeCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: null, beforeCity: 'Rome', nights: null, userSaidWhere: false });
     expect(cityEditOpFromTool('remove_city', { city: 'Nice' })).toEqual({ kind: 'remove', city: 'Nice' });
     expect(cityEditOpFromTool('replace_city', { old: 'Rome', new: 'Naples' })).toEqual({ kind: 'replace', oldCity: 'Rome', newCity: 'Naples' });
     expect(cityEditOpFromTool('replace_city', { old: 'Rome' })).toBeNull();

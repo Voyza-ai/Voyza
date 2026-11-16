@@ -53,6 +53,7 @@ import {
 } from './constraints';
 import { searchLegOptions, LegOption, normalizeTimeWindow, NormalizedTimeWindow } from './legOptions';
 import { compareLeg } from './compareLeg';
+import { bestOrder, cityGeo, countrySplits, routeKm, type CityGeo } from './routeGeo';
 import {
   buildCityEditProposal,
   cityEditOpFromTool,
@@ -316,7 +317,11 @@ export const CHAT_TOOLS = [
         city: { type: 'string', description: 'The city to add, plain English name ("Venice").' },
         afterCity: {
           type: ['string', 'null'],
-          description: 'Existing trip city the new one goes right after. Null/omitted = add it at the end.',
+          description: 'Existing trip city the new one goes right after — ONLY when the user said where. Otherwise null: the server places it where it adds the least detour.',
+        },
+        userSaidWhere: {
+          type: 'boolean',
+          description: 'True only if the user named the position ("after Prague", "at the end", "start with Rome"). False when they did not say where (including "a city of your choice") — then leave afterCity/beforeCity null.',
         },
         beforeCity: {
           type: ['string', 'null'],
@@ -330,6 +335,20 @@ export const CHAT_TOOLS = [
         explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
       },
       required: ['city', 'explanation'],
+    },
+  },
+  {
+    name: 'reorder_cities',
+    description:
+      'Change the ORDER of the cities already in the trip (nights per city kept). Use for "move Salzburg after Vienna", "swap Munich and Vienna", "put the Austrian cities together", "start with Vienna". Pass the full new order. For "what\'s the best order?" / "optimize the order" set optimize=true and leave order empty: the server picks the order with the least backtracking and distance. The user sees the re-priced trip with its exact total and must Accept.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        order: { type: 'array', items: { type: 'string' }, description: 'Every trip city exactly once, in the new order.' },
+        optimize: { type: 'boolean', description: 'True for "best order" / "optimize": the server decides the order.' },
+        explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
+      },
+      required: ['explanation'],
     },
   },
   {
@@ -467,6 +486,7 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
   // --- City edits: add_city / remove_city / replace_city. Priced (new
   //     city's hotels, the legs that changed, home flights when the trip's
   //     ends changed) and returned as a proposal. Nothing is applied until Accept.
+  if (toolName === 'reorder_cities') return reorderCities(currentTrip, toolInput);
   if (toolName === 'add_city' || toolName === 'remove_city' || toolName === 'replace_city') {
     const op = cityEditOpFromTool(toolName, toolInput);
     if (!op) return { type: 'answer', reply: "Which city did you mean? Tell me the name and I'll work it out." };
@@ -476,7 +496,7 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
     // before anything was searched (see compare_modes, D-07).
     return {
       type: 'proposal',
-      reply: `${describeCityEdit(built.proposal)} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)}${choiceWords(built.proposal)} Accept to apply it.`,
+      reply: `${describeCityEdit(built.proposal)}${built.proposal.placementNote ? ` ${built.proposal.placementNote}` : ''} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)}${choiceWords(built.proposal)} Accept to apply it.`,
       proposal: built.proposal,
     };
   }
@@ -1044,6 +1064,46 @@ function homeFlightChanges(currentTrip: any, p: CityEditProposal): string {
   return out.length ? ` ${out.join(' ')}` : '';
 }
 
+/**
+ * reorder_cities: the order the user gave, or (optimize) the one with the
+ * least backtracking and distance — priced like any city edit.
+ */
+async function reorderCities(currentTrip: any, input: any): Promise<TripChatResult> {
+  const names: string[] = (currentTrip?.cities ?? []).map((c: any) => String(c.name ?? ''));
+  if (names.length < 2) return { type: 'answer', reply: 'There is only one city in this trip, so there is no order to change.' };
+  let order: string[];
+  let why = '';
+  if (input?.optimize === true || !Array.isArray(input?.order) || input.order.length === 0) {
+    const geos = names.map((n) => cityGeo(n, names));
+    if (geos.some((g) => !g)) return { type: 'answer', reply: "I couldn't place every city on the map, so I can't work out the best order." };
+    const home = currentTrip?.origin?.city ? cityGeo(String(currentTrip.origin.city)) : null;
+    const returnsHome = (currentTrip?.returnToHome ?? true) !== false;
+    const best = bestOrder(geos as CityGeo[], home, returnsHome);
+    order = best.map((g) => g.name);
+    const before = routeKm(geos as CityGeo[], home, returnsHome);
+    const after = routeKm(best, home, returnsHome);
+    if (order.every((n, i) => n === names[i])) {
+      return { type: 'answer', reply: `${names.join(' → ')} is already the order with the least backtracking and travel, so I'd keep it.` };
+    }
+    const splitsBefore = countrySplits((geos as CityGeo[]).map((g) => g.country));
+    why =
+      ` It ${splitsBefore > 0 ? 'stops leaving a country and coming back, and ' : ''}cuts about ${Math.max(0, Math.round(before - after)).toLocaleString('en-US')} km of travel` +
+      ' — the card shows the exact change in price.';
+  } else {
+    order = input.order.map((x: any) => String(x));
+  }
+  const op = cityEditOpFromTool('reorder_cities', { order });
+  if (!op) return { type: 'answer', reply: `Which order? The cities are ${names.join(', ')}.` };
+  const built = await buildCityEditProposal(currentTrip, 'reorder_cities', op);
+  if (built.type === 'answer') return built;
+  const p = built.proposal;
+  return {
+    type: 'proposal',
+    reply: `Here's your trip as ${p.after.map((s) => s.name).join(' → ')}.${why} ${p.note}${homeFlightChanges(currentTrip, p)}${choiceWords(p)} Accept to apply it.`,
+    proposal: p,
+  };
+}
+
 /** What a re-search did with the legs the user had chosen, as sentences. */
 const choiceWords = (p: CityEditProposal) => (p.choiceNotes?.length ? ` ${p.choiceNotes.join(' ')}` : '');
 
@@ -1054,6 +1114,7 @@ function describeCityEdit(p: CityEditProposal): string {
     return `Here's your trip with ${added?.name ?? op.newCity} instead of ${added?.replaces ?? op.oldCity}.`;
   }
   if (op.kind === 'remove') return `Here's your trip without ${p.removed[0] ?? op.city}.`;
+  if (op.kind !== 'add') return `Here's your trip as ${p.after.map((s) => s.name).join(' → ')}.`;
   const idx = p.after.findIndex((s) => s.status === 'added');
   const prev = idx > 0 ? p.after[idx - 1].name : null;
   return `Here's your trip with ${op.city} added${idx === p.after.length - 1 ? ' at the end' : prev ? ` after ${prev}` : ''}.`;
