@@ -614,19 +614,32 @@ export type CityEditStop = {
 export type CityEditProposal = {
   kind: 'city_edit';
   /** pin_city_dates / set_min_days: the same cities on new dates, priced the same way. */
-  toolName: 'add_city' | 'remove_city' | 'replace_city' | 'pin_city_dates' | 'set_min_days';
+  toolName: 'add_city' | 'remove_city' | 'replace_city' | 'pin_city_dates' | 'set_min_days' | 'reorder_cities';
   op:
     | { kind: 'add'; city: string; afterCity?: string | null; beforeCity?: string | null; nights?: number | null }
     | { kind: 'remove'; city: string }
     | { kind: 'replace'; oldCity: string; newCity: string }
-    | { kind: 'dates'; city: string };
+    | { kind: 'dates'; city: string }
+    | { kind: 'reorder'; order: string[] };
   /** A date edit's constraints (pins, minimum stays), kept on the trip once accepted. */
   constraints?: Trip['constraints'];
   before: Array<{ name: string; arrival: string; departure: string }>;
   after: CityEditStop[];
   removed: string[];
   /** `index` i is the leg after[i] → after[i + 1]. Empty options = nothing found. */
-  legs: Array<{ index: number; from: string; to: string; date: string; options: LegOption[] }>;
+  /** options[0] is the pick (by the user's choice for the leg, when it had one). */
+  legs: Array<{
+    index: number;
+    from: string;
+    to: string;
+    date: string;
+    options: LegOption[];
+    userChoice?: Trip['cities'][number]['transportOut']['userChoice'];
+    /** No sensible flight exists on this pair: priced, but flagged on the card. */
+    flag?: { fastestMinutes: number; stops: number; groundHours: [number, number] | null };
+  }>;
+  /** Where an added city went and why (said in the reply). */
+  placementNote?: string;
   /** Present only when re-searched; null = searched, nothing found. */
   outboundLeg?: any;
   returnLeg?: any;

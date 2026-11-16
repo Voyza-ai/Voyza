@@ -1,6 +1,23 @@
 import type { TravelInfo } from './geoSchedule';
 export type TransportMode = 'flight' | 'train';
 
+/**
+ * What the user chose for a leg — a flight they accepted from the chat or
+ * picked on the card — so a later date or city edit that re-searches the leg
+ * keeps it: an evening departure stays evening, "after 15:00" stays after
+ * 15:00, a hand-picked time stays close (backend services/legPreference.ts).
+ */
+export type LegPreference = {
+  source: 'chat' | 'card';
+  departTime: string | null;
+  operator: string | null;
+  timeOfDay?: 'morning' | 'afternoon' | 'evening' | null;
+  earliestDepart?: string | null;
+  latestDepart?: string | null;
+  earliestArrive?: string | null;
+  latestArrive?: string | null;
+};
+
 export type Transport = {
   mode: TransportMode;
   operator: string;
@@ -36,6 +53,8 @@ export type Transport = {
    * flight is the only sensible option.
    */
   noTrainData?: boolean;
+  /** The user's choice for this leg, kept through date / city edits. */
+  userChoice?: LegPreference;
 };
 
 export type Hotel = {
@@ -373,6 +392,8 @@ export type HomeLeg = {
   stops: number;
   bookingUrl: string | null;
   alternatives?: Omit<HomeLeg, 'alternatives'>[];
+  /** The user's choice for this leg, kept through date / city edits. */
+  userChoice?: LegPreference;
 };
 
 export type PlanningAnswers = {
