@@ -114,6 +114,8 @@ export function applyCityEdit(input: Trip, proposal: CityEditProposal): Trip {
     // The date-shift check priced the old trip; its suggestion no longer applies.
     dateShiftSuggestion: undefined,
     dateShiftChecked: false,
+    // A date edit (pin / minimum stay) keeps its constraint for the next turns.
+    ...(proposal.constraints ? { constraints: proposal.constraints } : {}),
   };
 
   // New cities: a transport-only schedule, as the planner gives a city

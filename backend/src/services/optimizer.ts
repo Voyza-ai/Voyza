@@ -1870,12 +1870,8 @@ async function estimateHomeLegCost(
   return (await estimateHomeLeg(ctx, params)).cost;
 }
 
-/**
- * Rebuild the full HomeLeg for the winning route's outbound/return.
- * Returns null on any failure so the trip still builds — the UI just
- * renders the home card without the detail line.
- */
-export async function buildHomeLeg(params: {
+/** What a home-flight search for one leg needs (buildHomeLeg, searchHomeLegOptions). */
+export type HomeLegSearchParams = {
   originAirports: string[];
   destinationCity: string;
   date: string;
@@ -1893,23 +1889,29 @@ export async function buildHomeLeg(params: {
    * already carries the trip.
    */
   tripCityNames?: string[];
-}, ctx: RunContext = createRunContext(params.tripCityNames ?? []),
+};
+
 /**
- * The offers ranking already found for this leg (optimize() on 4+ cities —
- * see HomeFares), used instead of searching the airports again.
+ * One home leg's offers as HomeLeg rows (no alternatives), cheapest first:
+ * the traveller's home airports (homeAirportsFor), one search each, then the
+ * home city's metro code when none of them had anything. The one search
+ * behind both buildHomeLeg (its top four) and searchHomeLegOptions.
  */
-known?: Promise<HomeFlightOffer[]>): Promise<HomeLeg | null> {
-  // Pull top 4 — first becomes the main leg, rest go into alternatives
-  // so the user can swap to another carrier/time without a new search.
+async function homeLegRows(
+  params: HomeLegSearchParams,
+  ctx: RunContext,
+  limit: number,
+  known?: Promise<HomeFlightOffer[]>,
+): Promise<Array<Omit<HomeLeg, 'alternatives'>>> {
   let offers = known
-    ? (await known).slice(0, 4)
+    ? (await known).slice(0, limit)
     : await searchHomeFlights(ctx, {
         originAirports: params.originAirports,
         tripCity: params.destinationCity,
         date: params.date,
         travelers: params.travelers,
         reverse: params.reverse ?? false,
-        limit: 4,
+        limit,
       });
 
   // Fallback: none of the specific airports had offers — retry with the
@@ -1927,17 +1929,15 @@ known?: Promise<HomeFlightOffer[]>): Promise<HomeLeg | null> {
           date: params.date,
           travelers: params.travelers,
           reverse: params.reverse ?? false,
-          limit: 4,
+          limit,
         });
       }
     } catch {
-      // metro lookup failed — fall through to null below.
+      // metro lookup failed — fall through to none below.
     }
   }
 
-  if (offers.length === 0) return null;
-
-  const toLeg = (o: HomeFlightOffer): Omit<HomeLeg, 'alternatives'> => ({
+  return offers.map((o) => ({
     originAirport: o.originAirport,
     destAirport: o.destAirport,
     price: o.price,
@@ -1953,13 +1953,43 @@ known?: Promise<HomeFlightOffer[]>): Promise<HomeLeg | null> {
     ...(o.arriveDate ? { arriveDate: o.arriveDate } : {}),
     stops: o.stops,
     bookingUrl: o.bookingUrl,
-  });
+  }));
+}
 
-  const [main, ...rest] = offers;
+/**
+ * Rebuild the full HomeLeg for the winning route's outbound/return.
+ * Returns null on any failure so the trip still builds — the UI just
+ * renders the home card without the detail line.
+ */
+export async function buildHomeLeg(params: HomeLegSearchParams, ctx: RunContext = createRunContext(params.tripCityNames ?? []),
+/**
+ * The offers ranking already found for this leg (optimize() on 4+ cities —
+ * see HomeFares), used instead of searching the airports again.
+ */
+known?: Promise<HomeFlightOffer[]>): Promise<HomeLeg | null> {
+  // Pull top 4 — first becomes the main leg, rest go into alternatives
+  // so the user can swap to another carrier/time without a new search.
+  const rows = await homeLegRows(params, ctx, 4, known);
+  if (rows.length === 0) return null;
+  const [main, ...rest] = rows;
   return {
-    ...toLeg(main),
-    alternatives: rest.length > 0 ? rest.map(toLeg) : undefined,
+    ...main,
+    alternatives: rest.length > 0 ? rest : undefined,
   };
+}
+
+/**
+ * Every home-flight option for one leg, cheapest first (up to `limit`), from
+ * the same home airports, per-airport fan-out and metro fallback that price
+ * the trip's home flights (buildHomeLeg is the top four of this). The AI
+ * chat filters these for "a later flight home", "evening flights out", "a
+ * cheaper one" (services/tripLegs.ts).
+ */
+export async function searchHomeLegOptions(
+  params: HomeLegSearchParams,
+  limit = 40,
+): Promise<Array<Omit<HomeLeg, 'alternatives'>>> {
+  return homeLegRows(params, createRunContext(params.tripCityNames ?? []), limit);
 }
 
 /**
