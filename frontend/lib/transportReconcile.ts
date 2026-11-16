@@ -194,12 +194,18 @@ export function reconcileTripTransport(trip: Trip): Trip {
  */
 const EDIT_FIELDS: Array<keyof ScheduledEvent> = ['startTime', 'endTime', 'title'];
 
-/** Apply a user edit to an event, dropping `auto` when it reshapes a generated block. */
+/**
+ * Apply a user edit to an event, dropping `auto` when it reshapes a generated
+ * block, and `plannedDurationMin` when it moves or resizes a planned stop:
+ * the block is the traveller's from then on (lib/scheduleSync leaves it
+ * where they put it), as the field's own contract says — it is absent on
+ * anything dragged by hand.
+ */
 export function applyUserEdit(e: ScheduledEvent, updates: Partial<ScheduledEvent>): ScheduledEvent {
   const next = { ...e, ...updates };
-  if (e.auto === true && !('auto' in updates)) {
-    const changed = EDIT_FIELDS.some((k) => k in updates && updates[k] !== e[k]);
-    if (changed) next.auto = false;
-  }
+  const changed = EDIT_FIELDS.some((k) => k in updates && updates[k] !== e[k]);
+  if (e.auto === true && !('auto' in updates) && changed) next.auto = false;
+  const retimed = (['startTime', 'endTime'] as const).some((k) => k in updates && updates[k] !== e[k]);
+  if (retimed && e.category !== 'transport' && !('plannedDurationMin' in updates)) delete next.plannedDurationMin;
   return next;
 }

@@ -187,7 +187,7 @@ type Price = RestaurantSuggestion['priceRange'];
  * with notes "Cuisine · $$". A restaurant-coloured block in neither shape is
  * a food or nightlife ACTIVITY (a food tour), not a meal.
  */
-function parseStop(e: ScheduledEvent): { name: string; meal?: { cuisine: string; priceRange: Price; reason: string } } {
+export function parseStop(e: ScheduledEvent): { name: string; meal?: { cuisine: string; priceRange: Price; reason: string } } {
   if (e.category !== 'restaurant') return { name: e.title };
   const [a = '', ...rest] = (e.notes ?? '').split(' · ');
   const b = rest.join(' · ');
