@@ -109,7 +109,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
    * without them, the save would fill each city with generic placeholders
    * ("Explore Paris old town").
    */
-  const saveTrip = async (thenShare: boolean) => {
+  const saveThisTrip = async (thenShare: boolean) => {
     if (alreadySaved) {
       if (thenShare) onOpenShare?.();
       return;
@@ -150,13 +150,13 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
       });
       return;
     }
-    saveTrip(thenShare);
+    saveThisTrip(thenShare);
   };
   const handleShare = () => requestSave(true);
 
   // Email/password sign-in completes in-place (no redirect): carry on.
   const handleLoginSuccess = () => {
-    saveTrip(afterSignIn.current === 'share');
+    saveThisTrip(afterSignIn.current === 'share');
   };
 
   // What this person may do on a shared trip. An unsaved trip, or one whose

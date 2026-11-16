@@ -67,7 +67,19 @@ let passPop = false;
 let unloadAllowedUntil = 0;
 const UNLOAD_ALLOWED_MS = 30_000;
 const unloadAllowed = () => Date.now() < unloadAllowedUntil;
+/**
+ * The page guard's Back/Forward handler, while a page asks before an in-app
+ * leave. Reached through ONE listener added when this module loads (the root
+ * layout imports it), which is before the app router hydrates and adds its
+ * own: Chrome calls a window's popstate listeners in the order they were
+ * added, capture or not, and the router's handler renders a cached page
+ * synchronously — measured, it unmounted the planner, and the listener the
+ * planner had added later was removed before it ever ran. `capture` puts it
+ * first in browsers that run capture listeners first at the target.
+ */
+let popHandler: ((e: PopStateEvent) => void) | null = null;
 if (typeof window !== 'undefined') {
+  window.addEventListener('popstate', (e) => popHandler?.(e), true);
   window.addEventListener('pageshow', () => {
     unloadAllowedUntil = 0;
   });
@@ -321,12 +333,12 @@ export function useLeaveGuard({ inApp, unload, reloadRestores = false, copy }: L
     root.style.overscrollBehaviorX = 'none';
     body.style.overscrollBehaviorX = 'none';
 
-    // Capture: ahead of the app router's popstate listener and of every
-    // click handler on the page.
-    window.addEventListener('popstate', onPopState, true);
+    // Back/Forward: ahead of the app router (see popHandler). Links: window
+    // capture, ahead of every click handler on the page.
+    popHandler = onPopState;
     window.addEventListener('click', onClick, true);
     return () => {
-      window.removeEventListener('popstate', onPopState, true);
+      if (popHandler === onPopState) popHandler = null;
       window.removeEventListener('click', onClick, true);
       root.style.overscrollBehaviorX = before[0];
       body.style.overscrollBehaviorX = before[1];

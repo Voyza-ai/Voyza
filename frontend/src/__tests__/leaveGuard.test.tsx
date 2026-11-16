@@ -13,9 +13,13 @@ import type { Trip } from '@/lib/types';
  * on was gone, with no warning (the app router moves pages without unloading,
  * so `beforeunload` never fired).
  *
- * `routerPop` below stands in for the app router's own popstate listener
- * (registered the same way, on window, without capture): if it hears a Back,
- * the router renders the other page.
+ * `routerPop` below stands in for the app router's own popstate listener:
+ * if it hears a Back, the router renders the other page (synchronously, for
+ * a page it has cached). It is added before any page mounts, as the router's
+ * is (at hydration), and as a capture listener, so that jsdom calls it in the
+ * order Chrome does — Chrome runs a window's popstate listeners in the order
+ * they were added, capture or not. A guard that only added its listener when
+ * the page mounted ran after the router: measured live, the planner was gone.
  */
 
 // Signed in by default; the Google test signs out. (The shared mock's auth
@@ -103,10 +107,10 @@ function openResults(trip: Trip, from = '/plan', at = '/results') {
 }
 
 beforeAll(() => {
-  window.addEventListener('popstate', routerPop);
+  window.addEventListener('popstate', routerPop, true);
   Element.prototype.scrollTo = jest.fn();
 });
-afterAll(() => window.removeEventListener('popstate', routerPop));
+afterAll(() => window.removeEventListener('popstate', routerPop, true));
 
 beforeEach(() => {
   jest.clearAllMocks();
