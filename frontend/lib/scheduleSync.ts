@@ -38,12 +38,18 @@ import { coordsOf, travelBetween } from './geoSchedule';
  *    the same stay; one no day can hold is listed as unscheduled. Never
  *    shortened, never silently lost.
  *  - A day the stay no longer has drops its stops; they become free for the
- *    days it gained. The traveller's own blocks there are moved onto the stay.
- *  - A day with nothing planned on it is filled from the city's picks that no
- *    day uses — the stops that just moved first, then the unused picks. After
- *    a date or transport change (`prev` given), a day the stay GAINED (or
- *    whose free hours grew) that still has nothing gets the city's default
- *    plan, its picks again, rather than staying empty.
+ *    days it gained (and are listed as unscheduled when none takes them). The
+ *    traveller's own blocks there are moved onto the stay.
+ *  - A day never laid out, or one whose stops just had to move, is filled
+ *    from what no day uses — the stops that just moved first, then the stops
+ *    of the lost days, then the city's unused picks. After a date or
+ *    transport change (`prev` given) so is a day the stay GAINED or whose
+ *    free hours grew; if it still has nothing planned, it gets the city's
+ *    default plan — its picks again, furthest-placed first — rather than
+ *    staying empty. A planned day left empty is not refilled: the stay ran
+ *    out of stops, or the traveller cleared it.
+ *  - A day whose flight home is still being searched (the stay just moved) is
+ *    left as it is until the flight lands.
  *
  * "Planned stop" is read from the data, as the planner wrote it: an activity
  * or meal whose block still spans its `plannedDurationMin`. Anything else —
@@ -101,7 +107,8 @@ export const isPlannedStop = (e: ScheduledEvent): boolean =>
   spanOf(e)[1] - spanOf(e)[0] === e.plannedDurationMin;
 
 /** The traveller's own block: anything that is neither travel nor a planned stop. */
-const isOwn = (e: ScheduledEvent) => e.category !== 'transport' && !isPlannedStop(e);
+export const isTravellersOwn = (e: ScheduledEvent) => e.category !== 'transport' && !isPlannedStop(e);
+const isOwn = isTravellersOwn;
 
 const mealAt = (start: number): Meal => (start < 11 * 60 ? 'breakfast' : start < 16 * 60 ? 'lunch' : 'dinner');
 const slotAt = (start: number): Slot => (start < 12 * 60 ? 'morning' : start < 17 * 60 ? 'afternoon' : 'evening');
@@ -344,6 +351,14 @@ export function syncCitySchedule(
         { title: parseStop(s.event).name, kind: s.meal ? 'restaurant' : 'activity', durationMin: s.durationMin, date: null },
       ];
     }
+  }
+
+  // Stops of the days the stay lost that no day took: listed, not lost.
+  for (const s of pool.filter((p) => p.rank === 1)) {
+    unscheduled = [
+      ...unscheduled.filter((u) => itemKey(u.title) !== s.key),
+      { title: parseStop(s.event).name, kind: s.meal ? 'restaurant' : 'activity', durationMin: s.durationMin, date: s.day ?? null },
+    ];
   }
 
   // A day the stay just gained (or whose free hours grew) with still nothing
