@@ -340,12 +340,16 @@ export const CHAT_TOOLS = [
   {
     name: 'reorder_cities',
     description:
-      'Change the ORDER of the cities already in the trip (nights per city kept). Use for "move Salzburg after Vienna", "swap Munich and Vienna", "put the Austrian cities together", "start with Vienna". Pass the full new order. For "what\'s the best order?" / "optimize the order" set optimize=true and leave order empty: the server picks the order with the least backtracking and distance. The user sees the re-priced trip with its exact total and must Accept.',
+      'Change the ORDER of the cities already in the trip (nights per city kept). Use for "move Salzburg after Vienna", "swap Munich and Vienna", "start with Vienna" — pass the full new order. For "put the Austrian cities together" pass groupCountry instead (the server checks whether they already are). For "what\'s the best order?" / "optimize the order" set optimize=true and leave order empty: the server picks the order with the least backtracking and distance. The user sees the re-priced trip with its exact total and must Accept.',
     input_schema: {
       type: 'object' as const,
       properties: {
         order: { type: 'array', items: { type: 'string' }, description: 'Every trip city exactly once, in the new order.' },
         optimize: { type: 'boolean', description: 'True for "best order" / "optimize": the server decides the order.' },
+        groupCountry: {
+          type: 'string',
+          description: 'For "put the Austrian cities together" / "keep the Italian ones next to each other": the country (e.g. "Austria"). Leave order empty: the server checks whether they already are, and groups them with the least travel if not.',
+        },
         explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
       },
       required: ['explanation'],
@@ -1068,11 +1072,26 @@ function homeFlightChanges(currentTrip: any, p: CityEditProposal): string {
  * reorder_cities: the order the user gave, or (optimize) the one with the
  * least backtracking and distance — priced like any city edit.
  */
-async function reorderCities(currentTrip: any, input: any): Promise<TripChatResult> {
+async function reorderCities(currentTrip: any, rawInput: any): Promise<TripChatResult> {
+  let input = rawInput;
   const names: string[] = (currentTrip?.cities ?? []).map((c: any) => String(c.name ?? ''));
   if (names.length < 2) return { type: 'answer', reply: 'There is only one city in this trip, so there is no order to change.' };
   let order: string[];
   let why = '';
+  const group = typeof input?.groupCountry === 'string' ? input.groupCountry.trim() : '';
+  if (group) {
+    // "Put the Austrian cities together": already together → say so, propose nothing.
+    const geos = names.map((n) => cityGeo(n, names));
+    const want = countryCode(group);
+    const inIt = geos.map((g, i) => (g && (g.country === want || (currentTrip.cities[i]?.country ?? '').toLowerCase() === group.toLowerCase()) ? i : -1)).filter((i) => i >= 0);
+    if (inIt.length < 2) {
+      return { type: 'answer', reply: inIt.length === 1 ? `Only ${names[inIt[0]]} is in ${group}, so there's nothing to group.` : `None of ${names.join(', ')} is in ${group}.` };
+    }
+    if (inIt[inIt.length - 1] - inIt[0] === inIt.length - 1) {
+      return { type: 'answer', reply: `${inIt.map((i) => names[i]).join(' and ')} are already next to each other (${names.join(' → ')}), so nothing needs to move.` };
+    }
+    input = { ...input, optimize: true };
+  }
   if (input?.optimize === true || !Array.isArray(input?.order) || input.order.length === 0) {
     const geos = names.map((n) => cityGeo(n, names));
     if (geos.some((g) => !g)) return { type: 'answer', reply: "I couldn't place every city on the map, so I can't work out the best order." };
@@ -1102,6 +1121,25 @@ async function reorderCities(currentTrip: any, input: any): Promise<TripChatResu
     reply: `Here's your trip as ${p.after.map((s) => s.name).join(' → ')}.${why} ${p.note}${homeFlightChanges(currentTrip, p)}${choiceWords(p)} Accept to apply it.`,
     proposal: p,
   };
+}
+
+/** "Austria" / "Austrian" / "AT" → "AT" (null-safe; unknown → the input upper-cased). */
+function countryCode(name: string): string {
+  const n = name.trim().toLowerCase().replace(/(n|ian|ish|ese)$/, '');
+  if (/^[a-z]{2}$/i.test(name.trim())) return name.trim().toUpperCase();
+  try {
+    const dn = new Intl.DisplayNames(['en'], { type: 'region' });
+    for (let a = 65; a <= 90; a++) {
+      for (let b = 65; b <= 90; b++) {
+        const code = String.fromCharCode(a, b);
+        const label = (dn.of(code) ?? '').toLowerCase();
+        if (label && label !== code.toLowerCase() && (label === name.trim().toLowerCase() || label.startsWith(n))) return code;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return name.trim().toUpperCase();
 }
 
 /** What a re-search did with the legs the user had chosen, as sentences. */

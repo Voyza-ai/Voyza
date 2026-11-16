@@ -184,6 +184,22 @@ describe('reorder_cities', () => {
     expect(res.body.proposal.after.map((s: any) => s.status)).toEqual(['kept', 'moved', 'moved', 'kept']);
   });
 
+  it('"put the Austrian cities together" when they already are: says so, proposes nothing (live: it reordered anyway, +$247)', async () => {
+    const t = backtrackTrip();
+    t.cities = [t.cities[0], t.cities[2], t.cities[1], t.cities[3]]; // Prague → Munich → Salzburg → Vienna
+    const res = await chat('reorder_cities', { groupCountry: 'Austrian', explanation: 'x' }, t);
+    expect(res.body.type).toBe('answer');
+    expect(res.body.proposal).toBeUndefined();
+    expect(res.body.reply).toBe('Salzburg and Vienna are already next to each other (Prague → Munich → Salzburg → Vienna), so nothing needs to move.');
+  });
+
+  it('"put the Austrian cities together" when they are split: groups them with the least travel', async () => {
+    const res = await chat('reorder_cities', { groupCountry: 'Austria', explanation: 'x' }, backtrackTrip());
+    expect(res.body.type).toBe('proposal');
+    const names: string[] = order(res.body.proposal);
+    expect(Math.abs(names.indexOf('Salzburg') - names.indexOf('Vienna'))).toBe(1);
+  });
+
   it('"what\'s the best order?": no leaving a country and coming back, the least travel, and says so', async () => {
     const res = await chat('reorder_cities', { optimize: true, explanation: 'x' }, backtrackTrip());
     expect(res.body.type).toBe('proposal');
