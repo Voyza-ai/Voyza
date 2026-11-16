@@ -326,7 +326,7 @@ export async function suggestDestinations(params: {
 // schema (why it fits, cost range, best months, caveats) so the UI
 // can render a pickable card list later. Cached 7 days server-side.
 
-import type { VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
+import type { Trip, VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
 
 export type SuggestDestinationsForVibeResult = {
   suggestions: VibeDestinationSuggestion[];
@@ -505,13 +505,13 @@ export type LegOption = {
 };
 
 /**
- * Proposal card = user needs to Accept/Reject a set of trip-wide changes.
- * Currently used only for date-bearing tools (pin_city_dates, set_min_days)
- * because those move several cities at once and we don't want to apply
- * without confirmation.
+ * Proposal card = user needs to Accept/Reject a change: date shifts
+ * (pin_city_dates, set_min_days), city edits, and switching one leg to a
+ * specific option (transport_change — select_transport_option /
+ * find_transport_option, any leg including the flights to and from home).
  *
- * Transport changes (show_transport_options, set_transport_window) use a
- * different pattern: type='leg_refresh'. See ChatResponse below.
+ * Inter-city card refreshes (show_transport_options, set_transport_window)
+ * still use type='leg_refresh'. See ChatResponse below.
  */
 export type ChatProposal =
   | {
@@ -522,7 +522,79 @@ export type ChatProposal =
       proposedConstraints: any;
       proposedTrip: any;
     }
-  | CityEditProposal;
+  | CityEditProposal
+  | TransportChangeProposal;
+
+/**
+ * One way to travel a leg, as the chat proposes or lists it (backend
+ * services/tripLegs.ts `LegChoice`). Prices are party totals in USD.
+ */
+export type LegChoice = {
+  optionId: string;
+  mode: 'flight' | 'train';
+  operator: string;
+  flightNumber: string | null;
+  departTime: string | null;
+  arriveTime: string | null;
+  departDate: string | null;
+  /** Landing day when known (home legs); null = same day / unknown. */
+  arriveDate: string | null;
+  fromAirport: string | null;
+  toAirport: string | null;
+  durationMinutes: number;
+  duration: string;
+  stops: number;
+  price: number;
+  currency: string;
+  bookingUrl: string | null;
+};
+
+/** A leg of the trip as the chat names it: home → first city, city → city, last city → home. */
+export type ChatLegRef = {
+  /** "home→Paris", "Paris→London", "London→home". */
+  id: string;
+  kind: 'outbound' | 'intercity' | 'return';
+  /** intercity: i for cities[i] → cities[i + 1]; outbound -1; return: the last city's index. */
+  index: number;
+  from: string;
+  to: string;
+  date: string | null;
+};
+
+/**
+ * Switch ONE leg — a home flight included — to exactly `after`. Built and
+ * checked on the backend (services/tripLegs.ts): `after` satisfies what was
+ * asked, and `totals` is the header total before → after. Applied on Accept
+ * by lib/transportChange.ts `applyTransportChange`.
+ */
+export type TransportChangeProposal = {
+  kind: 'transport_change';
+  toolName: string;
+  leg: ChatLegRef;
+  before: LegChoice | null;
+  after: LegChoice;
+  request: Record<string, unknown>;
+  /** after.price − before.price. */
+  priceDelta: number;
+  /** Outbound landing on another day: the first stay starts that day. */
+  firstStay: {
+    city: string;
+    arrivalBefore: string;
+    arrivalAfter: string;
+    nightsBefore: number;
+    nightsAfter: number;
+    hotelDelta: number;
+  } | null;
+  /** Header total (group, whole USD) before → after; null when the backend couldn't check it. */
+  totals: { before: number; after: number; delta: number } | null;
+};
+
+/** Options the chat found for a leg, added to that leg's card; nothing else changes. */
+export type LegOptionsPayload = {
+  leg: ChatLegRef;
+  options: LegChoice[];
+  totalFound: number;
+};
 
 /**
  * add_city / remove_city / replace_city — the backend's planned and priced
@@ -541,11 +613,15 @@ export type CityEditStop = {
 
 export type CityEditProposal = {
   kind: 'city_edit';
-  toolName: 'add_city' | 'remove_city' | 'replace_city';
+  /** pin_city_dates / set_min_days: the same cities on new dates, priced the same way. */
+  toolName: 'add_city' | 'remove_city' | 'replace_city' | 'pin_city_dates' | 'set_min_days';
   op:
     | { kind: 'add'; city: string; afterCity?: string | null; beforeCity?: string | null; nights?: number | null }
     | { kind: 'remove'; city: string }
-    | { kind: 'replace'; oldCity: string; newCity: string };
+    | { kind: 'replace'; oldCity: string; newCity: string }
+    | { kind: 'dates'; city: string };
+  /** A date edit's constraints (pins, minimum stays), kept on the trip once accepted. */
+  constraints?: Trip['constraints'];
   before: Array<{ name: string; arrival: string; departure: string }>;
   after: CityEditStop[];
   removed: string[];
@@ -610,12 +686,15 @@ export type ChatResponse =
   | { type: 'answer'; reply: string }
   | { type: 'proposal'; reply: string; proposal: ChatProposal }
   | { type: 'leg_refresh'; reply: string; refresh: LegRefresh }
+  | { type: 'leg_options'; reply: string; legOptions: LegOptionsPayload }
   | { type: 'mode_comparison'; reply: string; comparison: ModeComparison };
 
 export async function planChat(params: {
   message: string;
   currentTrip: any;
   history?: ChatTurn[];
+  /** The header's price mode, so the reply quotes amounts as the card does. */
+  priceMode?: 'total' | 'perPerson';
 }): Promise<ChatResponse> {
   return apiFetch<ChatResponse>('/api/plan/chat', {
     method: 'POST',
