@@ -21,6 +21,7 @@ import { useTripStore } from '@/store/tripStore';
 import { homeDepartureDay } from '@/lib/tripSpan';
 import TravelConnectors from './TravelConnectors';
 import { useDayHubs } from '@/lib/tripHubs';
+import { blockLayout } from '@/lib/blockLayout';
 
 type DayPlannerProps = {
   trip: Trip;
@@ -114,6 +115,7 @@ export default function DayPlanner({
   // events (e.g. a 4 AM "head to airport") are never clipped.
   const startHour = 0;
   const totalHours = END_HOUR - startHour;
+  const layout = blockLayout(events, (m) => ((m - startHour * 60) / 60) * HOUR_HEIGHT, 24);
 
   // Add new event state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -315,10 +317,7 @@ export default function DayPlanner({
 
             {/* Event blocks */}
             {events.map((evt) => {
-              const startMins = timeToMinutes(evt.startTime) - startHour * 60;
-              const endMins = timeToMinutes(evt.endTime) - startHour * 60;
-              const top = (startMins / 60) * HOUR_HEIGHT;
-              const height = Math.max(((endMins - startMins) / 60) * HOUR_HEIGHT, 24);
+              const { top, height } = layout.get(evt.id) ?? { top: 0, height: 24 };
 
               const catColors: Record<string, { bg: string; border: string }> = {
                 activity: { bg: `${accent}20`, border: accent },

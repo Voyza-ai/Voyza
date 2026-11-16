@@ -81,7 +81,7 @@ const legEnd = (
 const travelWord = (mode: Transport['mode']) => (mode === 'flight' ? 'Flight' : mode === 'train' ? 'Train' : 'Bus');
 
 /** "58m", "1h 5m", "9h30m" → minutes; null when it says neither. */
-const durationMinutes = (d: string | undefined): number | null => {
+export const durationMinutes = (d: string | undefined): number | null => {
   if (!d) return null;
   const h = /(\d+)\s*h/i.exec(d);
   const m = /(\d+)\s*m(?!o)/i.exec(d);
