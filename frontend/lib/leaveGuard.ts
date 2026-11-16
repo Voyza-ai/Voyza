@@ -59,8 +59,19 @@ let leavingFrom: string | null = null;
 const leaving = () => leavingFrom !== null && leavingFrom === window.location.href;
 /** Leave was chosen for a Back/Forward: the popstate that redoes it goes through. */
 let passPop = false;
-/** A full-page navigation the app makes on purpose (Google sign-in). */
-let unloadAllowed = false;
+/**
+ * Until when a full-page navigation the app started on purpose (Google
+ * sign-in) may unload the page unasked. Back on the page (Back from Google,
+ * restored from the back/forward cache) it asks again.
+ */
+let unloadAllowedUntil = 0;
+const UNLOAD_ALLOWED_MS = 30_000;
+const unloadAllowed = () => Date.now() < unloadAllowedUntil;
+if (typeof window !== 'undefined') {
+  window.addEventListener('pageshow', () => {
+    unloadAllowedUntil = 0;
+  });
+}
 /** When a reload key was last pressed (see `reloadRestores`). */
 let reloadKeyAt = Number.NEGATIVE_INFINITY;
 const RELOAD_KEY_WINDOW_MS = 1500;
@@ -109,9 +120,9 @@ export function confirmLeave(go: () => void): void {
  * undo, for when the navigation doesn't happen after all.
  */
 export function allowUnload(): () => void {
-  unloadAllowed = true;
+  unloadAllowedUntil = Date.now() + UNLOAD_ALLOWED_MS;
   return () => {
-    unloadAllowed = false;
+    unloadAllowedUntil = 0;
   };
 }
 
@@ -177,12 +188,15 @@ export function useLeaveGuard({ inApp, unload, reloadRestores = false, copy }: L
       if (k === 'f5' || ((e.metaKey || e.ctrlKey) && k === 'r')) reloadKeyAt = Date.now();
     };
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (leaving() || unloadAllowed) return;
-      if (reloadRestores && Date.now() - reloadKeyAt < RELOAD_KEY_WINDOW_MS) return;
+      if (leaving() || unloadAllowed()) return;
+      const reloadKey = Date.now() - reloadKeyAt < RELOAD_KEY_WINDOW_MS;
+      reloadKeyAt = Number.NEGATIVE_INFINITY;
+      if (reloadRestores && reloadKey) return;
       e.preventDefault();
       // Chrome before 119 and older Safari show the dialog only for this.
       e.returnValue = true;
     };
+    reloadKeyAt = Number.NEGATIVE_INFINITY;
     if (reloadRestores) window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
