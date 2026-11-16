@@ -4,9 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Trip, City, TransportMode } from '@/lib/types';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
-import { buildDefaultSchedule } from '@/lib/dayScheduleDefaults';
-import { reconcileDayTransport } from '@/lib/transportReconcile';
-import { relayMovedStay } from '@/lib/stayRelay';
+import { syncCitySchedule } from '@/lib/scheduleSync';
 import { homeDepartureDay } from '@/lib/tripSpan';
 import { useTripStore } from '@/store/tripStore';
 import DayCard from './DayCard';
@@ -147,16 +145,6 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trip]);
 
-  // Eager-build the default schedule for every trip day on mount. Without
-  // this, cards for days the user has never opened in the modal render
-  // empty — the existing DayPlanner-only build runs lazily per-day on
-  // modal open. Pure compute (no API), so populating the whole trip up
-  // front costs ~ms and leaves all cards immediately useful.
-  //
-  // The dependency on `trip` (rather than just `isoDates`) means swapping
-  // to a different trip object will re-trigger the build for the new
-  // trip's days. The skip-if-already-populated check inside the loop
-  // makes re-runs idempotent.
   // Whose schedule holds a day. The home departure day is not part of any
   // stay, but its blocks (head to the airport, the flight) are kept on the
   // FIRST city — the way the fly-home day's are kept on the last — so the
@@ -166,39 +154,20 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
       ? { city: trip.cities[0], index: 0 }
       : dateToCity.get(iso);
 
-  const setDaySchedule = useTripStore((s) => s.setDaySchedule);
+  // Every day of every stay is built on mount and kept in step with the
+  // trip's dates and transport (lib/scheduleSync): a day nobody has opened is
+  // laid out, a moved stay is laid out again, travel blocks follow the legs,
+  // and a planned stop the traveller can no longer make moves. Pure compute
+  // (no API). `null` means a city is already in step, so a re-run after the
+  // store write settles at once. Date and transport edits are also synced in
+  // the store as they happen (store/tripStore), which is what lets a day the
+  // stay gained take the city's defaults; this pass covers whatever reaches
+  // the view without that — a saved trip, an older session.
   const updateCity = useTripStore((s) => s.updateCity);
   useEffect(() => {
-    // A city whose dates moved (swapped or re-dated in Canvas) has days its
-    // schedule doesn't cover: re-plan that whole stay with the located,
-    // stay-wide planner rather than filling each day from bare names. Those
-    // cities are skipped below this run; the store write re-runs the effect.
-    const relaid = new Set<number>();
     trip.cities.forEach((_, index) => {
-      const next = relayMovedStay(trip, index);
-      if (!next) return;
-      relaid.add(index);
-      updateCity(index, next);
-    });
-    isoDates.forEach((iso) => {
-      const match = scheduleOwner(iso);
-      if (!match) return; // travel-only day with no city mapping
-      if (relaid.has(match.index)) return;
-      const existing = match.city.schedule?.[iso];
-      // A day with a key is planned — an empty one too (the stay ran out of
-      // stops before it ran out of days): filling it from the city's whole
-      // list is what repeated the same stops day after day.
-      if (existing !== undefined) {
-        // Built already: bring its generated travel blocks onto the
-        // current transport (legacy days included), nothing else.
-        const next = reconcileDayTransport(trip, match.index, iso);
-        if (next) setDaySchedule(match.index, iso, next);
-        return;
-      }
-      const events = buildDefaultSchedule(match.city, iso, trip, match.index);
-      if (events.length > 0) {
-        setDaySchedule(match.index, iso, events);
-      }
+      const next = syncCitySchedule(trip, index);
+      if (next) updateCity(index, next);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trip, isoDates]);
