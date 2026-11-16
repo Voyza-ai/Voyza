@@ -147,6 +147,15 @@ describe('suggestDestinationsForVibe retry policy', () => {
     expect(result.meta.fallbackUsed).toBe(true);
   });
 
+  it('several picked vibes ("Culture, Adventure") still get a curated fallback when one of them has it', async () => {
+    mockCreate.mockRejectedValue(new APIError(401, undefined, 'invalid x-api-key', undefined));
+
+    const result = await suggestDestinationsForVibe({ ...baseInput, vibe: 'Culture, Adventure' });
+
+    expect(result.meta.fallbackUsed).toBe(true);
+    expect(result.suggestions.length).toBeGreaterThan(0);
+  });
+
   it('caches the outage fallback so the next request does not re-call Claude', async () => {
     mockCreate.mockRejectedValue(new APIError(529, undefined, 'overloaded', undefined));
 

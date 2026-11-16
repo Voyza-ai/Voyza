@@ -7,6 +7,7 @@ import LoginModal from '@/components/shared/LoginModal';
 import NotificationBell from '@/components/shared/NotificationBell';
 import DeleteAccountModal from '@/components/shared/DeleteAccountModal';
 import { getCurrentUser } from '@/lib/api';
+import { confirmLeave } from '@/lib/leaveGuard';
 
 type NavbarProps = {
   minimal?: boolean;
@@ -141,7 +142,8 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
               <button
                 onClick={() => {
                   setDropdownOpen(false);
-                  signOut();
+                  // Signing out reloads the site: a trip not saved yet is asked about.
+                  confirmLeave(() => signOut());
                 }}
                 className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
               >

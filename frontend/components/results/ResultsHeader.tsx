@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Calendar, Users, TrendingDown, Sparkles, Share2, ChevronDown, CheckCircle2, Send, Copy, Eye } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
+import { vibeList } from '@/lib/vibes';
 import { waysToSave, type SaveOption } from '@/lib/waysToSave';
 import { tripSpan } from '@/lib/tripSpan';
 import { useCountUp } from '@/lib/useCountUp';
@@ -20,6 +21,7 @@ import { useTripStore, tripPicksSettled } from '@/store/tripStore';
 import LoginModal from '@/components/shared/LoginModal';
 import TripNameEditor from '@/components/shared/TripNameEditor';
 import { updateTrip } from '@/lib/api';
+import { useLeaveGuardSave } from '@/lib/leaveGuard';
 import CollaboratorAvatars from './CollaboratorAvatars';
 import type { TripCollaboration } from '@/hooks/useTripCollaboration';
 
@@ -82,10 +84,10 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
     }
   };
 
-  // Captures the current Share request so it can be resumed after sign-in —
-  // including across the Google OAuth full-page redirect, which wipes
-  // in-memory trip state. A trip has to be saved before it can be shared.
-  const buildShareIntent = (t: Trip = trip): CanvasIntent => ({
+  // Captures the current Share (or Save) request so it can be resumed after
+  // sign-in — including across the Google OAuth full-page redirect, which
+  // wipes in-memory trip state. A trip has to be saved before it can be shared.
+  const buildShareIntent = (t: Trip = trip, openShare = true): CanvasIntent => ({
     savedId: alreadySaved ? t.id ?? null : null,
     // Pass the whole trip through so new fields (budget, vibe,
     // dateShiftSuggestion, etc.) flow to the backend.
@@ -94,7 +96,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
       ? { origin: t.origin, returnToHome: t.returnToHome ?? true }
       : null,
     destination: 'results',
-    openShare: true,
+    openShare,
   });
 
   // The trip to save: the store's, which is this one plus anything that
@@ -103,26 +105,27 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
 
   /**
    * Save the trip if it isn't yet (it gets an id and a shareable address),
-   * then open the share dialog. The save waits for the trip's AI picks
-   * (activities, restaurants) — saved without them, the save would fill each
-   * city with generic placeholders ("Explore Paris old town").
+   * then open the share dialog (Share) or not (the leave dialog's Save trip).
+   * The save waits for the trip's AI picks (activities, restaurants) — saved
+   * without them, the save would fill each city with generic placeholders
+   * ("Explore Paris old town").
    */
-  const saveThenShare = async () => {
+  const saveThisTrip = async (thenShare: boolean) => {
     if (alreadySaved) {
-      onOpenShare?.();
+      if (thenShare) onOpenShare?.();
       return;
     }
     setSaving(true);
     try {
       await tripPicksSettled();
-      const tripId = await resolveCanvasTripId(buildShareIntent(latestTrip()));
+      const tripId = await resolveCanvasTripId(buildShareIntent(latestTrip(), thenShare));
       clearCanvasIntent();
       if (!tripId) return;
       setTrip({ ...latestTrip(), id: tripId });
       // The trip now has an address: put it in the URL (bookmarkable, and
       // the page's shared-trip layer switches on for it).
       router.replace(`/results?tripId=${tripId}`);
-      onOpenShare?.();
+      if (thenShare) onOpenShare?.();
     } catch {
       collab?.showToast('Could not save this trip — try again', 'error');
     } finally {
@@ -130,33 +133,41 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
     }
   };
 
-  const handleShare = () => {
+  /** What the sign-in below was asked for: Share, or the leave dialog's Save trip. */
+  const afterSignIn = useRef<'share' | 'save'>('share');
+  const requestSave = (thenShare: boolean) => {
     if (!user) {
       // Persist the intent so it survives the OAuth redirect, then prompt
       // sign-in. The callback page (Google) or onSuccess below (password)
       // resumes it.
-      stashCanvasIntent(buildShareIntent());
+      afterSignIn.current = thenShare ? 'share' : 'save';
+      stashCanvasIntent(buildShareIntent(trip, thenShare));
       setShowLoginModal(true);
       // The trip's AI picks may still be on their way. Signing in takes
       // longer than they do, so once they land the stashed trip is brought
       // up to date — unless the sign-in already used it.
       tripPicksSettled().then((waited) => {
-        if (waited && readCanvasIntent()) stashCanvasIntent(buildShareIntent(latestTrip()));
+        if (waited && readCanvasIntent()) stashCanvasIntent(buildShareIntent(latestTrip(), thenShare));
       });
       return;
     }
-    saveThenShare();
+    saveThisTrip(thenShare);
   };
+  const handleShare = () => requestSave(true);
 
   // Email/password sign-in completes in-place (no redirect): carry on.
   const handleLoginSuccess = () => {
-    saveThenShare();
+    saveThisTrip(afterSignIn.current === 'share');
   };
 
   // What this person may do on a shared trip. An unsaved trip, or one whose
   // role is still loading, is the signed-in person's own.
   const role = collab?.active ? collab.role : 'owner';
   const canShare = role === 'owner' || role === 'editor';
+
+  // "Save trip" in the leave dialog, for a trip never saved: the Share
+  // button's save (sign-in first when signed out), without the share dialog.
+  useLeaveGuardSave(!alreadySaved && canShare && !saving ? () => requestSave(false) : null);
   const canRename = !collab?.active || role === 'owner';
   // The TRIP's span — from the day the outbound leaves home — not the first
   // city's stay, which starts the day an overnight outbound lands.
@@ -277,6 +288,11 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
       }
     })();
 
+    // The vibes, from the answers when this session planned the trip, else
+    // from the saved trip ("Culture, Food" — or an older trip's single
+    // "Culture"), read back as the list the planner shows.
+    const vibes = vibeList(a.vibe ? a : { vibe: trip.vibe });
+
     const staged = {
       destinations: a.destinations?.length
         ? a.destinations
@@ -293,7 +309,8 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
       planningMode: 'destination' as const,
       budget: a.budget,
       budgetPerPerson: a.budgetPerPerson,
-      vibe: a.vibe,
+      vibe: a.vibe ?? (trip.vibe || undefined),
+      vibes: vibes.length > 0 ? vibes : undefined,
     };
 
     // Stage in the store AND snapshot to sessionStorage: the /plan page

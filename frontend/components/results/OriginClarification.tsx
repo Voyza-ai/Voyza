@@ -118,7 +118,7 @@ export default function OriginClarification({
                a button, so tabbing through them scrolls the focused one into
                view on its own. `pb-1` leaves room for the 6px scrollbar in
                globals.css so it does not sit over the card borders. */
-            <ul className="mt-2.5 flex gap-2 overflow-x-auto pb-1">
+            <ul className="mt-2.5 flex gap-2 overflow-x-auto overscroll-x-contain pb-1">
               {alternatives.map((candidate) => (
                 /* Fixed-ish rather than `flex-1`: in a scroller a card that
                    stretches to fill makes the row look complete when it is
