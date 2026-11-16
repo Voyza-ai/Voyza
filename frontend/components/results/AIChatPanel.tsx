@@ -847,6 +847,7 @@ const EDIT_TITLE: Record<CityEditProposal['toolName'], string> = {
   replace_city: 'Swap a city',
   pin_city_dates: 'Change dates',
   set_min_days: 'Change dates',
+  reorder_cities: 'Reorder cities',
 };
 
 function CityEditProposalCard({ proposal, trip, state, priceMode, onAccept, onReject }: CityEditProposalCardProps) {
@@ -862,7 +863,13 @@ function CityEditProposalCard({ proposal, trip, state, priceMode, onAccept, onRe
   };
   const newLegs = proposal.legs.map((l) => {
     const best = l.options[0];
-    return { key: `${l.from}-${l.to}`, label: `${l.from} → ${l.to}`, best };
+    const f = l.flag;
+    const hm = (m: number) => `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`;
+    // No sensible flight on this pair: say so on the row (the total includes it).
+    const warning = f
+      ? `${hm(f.fastestMinutes)}${f.stops > 0 ? `, ${f.stops} stop${f.stops === 1 ? '' : 's'}` : ''} — no sensible flight${f.groundHours ? ` · ground ≈ ${f.groundHours[0]}–${f.groundHours[1]}h (estimate)` : ''}`
+      : null;
+    return { key: `${l.from}-${l.to}`, label: `${l.from} → ${l.to}`, best, warning };
   });
 
   return (
@@ -940,12 +947,17 @@ function CityEditProposalCard({ proposal, trip, state, priceMode, onAccept, onRe
       {newLegs.length > 0 && (
         <div className="px-4 py-2 flex flex-col gap-1" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
           {newLegs.map((l) => (
-            <div key={l.key} className="flex items-center gap-1.5 text-[11px] text-white/60">
+            <div key={l.key} className="flex flex-wrap items-center gap-1.5 text-[11px] text-white/60">
               {l.best?.mode === 'train' ? <TrainFront size={11} /> : <Plane size={11} />}
               <span className="flex-1 truncate">{l.label}</span>
               <span className="text-white/80">
                 {l.best ? `${l.best.operator ? `${l.best.operator} · ` : ''}${l.best.price > 0 ? money(l.best.price) : '—'}` : 'No option found'}
               </span>
+              {l.warning && (
+                <span className="basis-full pl-[17px] text-[10px]" style={{ color: '#f5b098' }} data-testid="leg-flag">
+                  {l.warning}
+                </span>
+              )}
             </div>
           ))}
         </div>

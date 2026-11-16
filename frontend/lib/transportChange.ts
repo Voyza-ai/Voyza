@@ -1,4 +1,4 @@
-import type { HomeLeg, Transport, Trip } from './types';
+import type { HomeLeg, LegPreference, Transport, Trip } from './types';
 import type { ChatLegRef, LegChoice, LegOptionsPayload, TransportChangeProposal } from './api';
 import { liveTripTotal } from './tripTotals';
 import { reconcileTripTransport } from './transportReconcile';
@@ -98,11 +98,11 @@ function choiceToTransport(c: LegChoice, from: string, to: string, fallbackDate:
 }
 
 const flatHome = (h: HomeLeg): Omit<HomeLeg, 'alternatives'> => {
-  const { alternatives: _a, ...rest } = h;
+  const { alternatives: _a, userChoice: _u, ...rest } = h;
   return rest;
 };
 const flatTransport = (t: Transport): Transport => {
-  const { alternatives: _a, ...rest } = t;
+  const { alternatives: _a, userChoice: _u, ...rest } = t;
   return rest;
 };
 
@@ -149,9 +149,31 @@ export function transportChangeApplies(trip: Trip, p: TransportChangeProposal): 
 }
 
 /** The trip with the proposal's leg switched to `p.after`. Unchanged when it no longer applies. */
+/**
+ * The accepted change as the user's choice for the leg: what they asked for
+ * ("evening", "after 15:00", "later" = after the flight they had) and what
+ * they took, so a later date or city edit keeps it.
+ */
+export function preferenceFromProposal(p: TransportChangeProposal): LegPreference {
+  const req = (p.request ?? {}) as any;
+  const w = req.window ?? {};
+  const before = p.before?.departTime ?? null;
+  return {
+    source: 'chat',
+    departTime: p.after.departTime ?? null,
+    operator: p.after.operator || null,
+    timeOfDay: req.timeOfDay ?? null,
+    earliestDepart: w.earliestDepart ?? (req.relative === 'later' ? before : null),
+    latestDepart: w.latestDepart ?? (req.relative === 'earlier' ? before : null),
+    earliestArrive: w.earliestArrive ?? null,
+    latestArrive: w.latestArrive ?? null,
+  };
+}
+
 export function applyTransportChange(trip: Trip, p: TransportChangeProposal): Trip {
   if (!transportChangeApplies(trip, p)) return trip;
   const leg = findLeg(trip, p.leg)!;
+  const userChoice = preferenceFromProposal(p);
 
   if (leg.kind === 'intercity') {
     const i = leg.index;
@@ -162,7 +184,7 @@ export function applyTransportChange(trip: Trip, p: TransportChangeProposal): Tr
     const chosen = at >= 0 ? flatTransport(alts[at]) : choiceToTransport(p.after, cities[i].name, cities[i + 1].name, p.leg.date);
     const rest = alts.filter((_, k) => k !== at).map(flatTransport);
     const nextAlts = (cur ? [flatTransport(cur), ...rest] : rest).slice(0, MAX_ALTERNATIVES);
-    cities[i] = { ...cities[i], transportOut: { ...chosen, alternatives: nextAlts } };
+    cities[i] = { ...cities[i], transportOut: { ...chosen, alternatives: nextAlts, userChoice } };
     cities[i + 1] = { ...cities[i + 1], transportIn: chosen };
     return reconcileTripTransport({ ...trip, cities });
   }
@@ -174,7 +196,7 @@ export function applyTransportChange(trip: Trip, p: TransportChangeProposal): Tr
   const chosen = at >= 0 ? alts[at] : choiceToHomeLeg(p.after, p.leg.date);
   const rest = alts.filter((_, k) => k !== at);
   const nextAlts = (cur ? [flatHome(cur), ...rest] : rest).slice(0, MAX_ALTERNATIVES);
-  const nextLeg: HomeLeg = { ...chosen, ...(nextAlts.length > 0 ? { alternatives: nextAlts } : {}) };
+  const nextLeg: HomeLeg = { ...chosen, ...(nextAlts.length > 0 ? { alternatives: nextAlts } : {}), userChoice };
 
   let cities = trip.cities;
   // The first stay starts the day the new outbound lands — the date the

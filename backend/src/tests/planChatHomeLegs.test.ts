@@ -305,6 +305,112 @@ describe('switching to a named option', () => {
   });
 });
 
+describe('long journeys (production: a 30h 30m "later evening flight home" for +$431)', () => {
+  /** TAP via Lisbon, as Duffel offered it on production: 21:25 → EWR 22:55 next day, 30h 30m, 1 stop. */
+  const tap = () => ({ ...offer('TAP Air Portugal', 'TP', 866.58, '2027-01-17', '21:25', '22:55+1', 1830), stops: 1 });
+  const homeOffers = (list: any[]) =>
+    searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>
+      origin === 'LON' && destination === 'JFK' && date === '2027-01-17' ? list : []);
+
+  it('"later, in the evening" picks the sensible 19:00 over the cheaper 30h one, and says why', async () => {
+    homeOffers([offer('American Airlines', 'AA', 432.18, '2027-01-17', '12:23', '15:24'), tap(), offer('British Airways', 'BA', 900, '2027-01-17', '19:00', '22:10', 490)]);
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', relative: 'later', timeOfDay: 'evening' });
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after).toMatchObject({ operator: 'British Airways', departTime: '19:00', price: 900 });
+    // Fastest 8h → anything over 16h is long.
+    expect(res.body.reply).toMatch(/^The cheapest later evening flight home \(London → New York\) I found that doesn't take more than about 16h:/);
+    expect(res.body.reply).not.toContain('Journey time');
+  });
+
+  it('when every evening option is 25h+, proposes nothing: names them, their times, and the latest sensible flight', async () => {
+    homeOffers([
+      offer('American Airlines', 'AA', 432.18, '2027-01-17', '12:23', '15:24'),
+      offer('Iberia', 'IB', 440, '2027-01-17', '15:00', '18:05', 485),
+      tap(),
+      { ...offer('Icelandair', 'FI', 932.58, '2027-01-17', '20:35', '18:25+1', 1610), stops: 1 },
+    ]);
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', relative: 'later', timeOfDay: 'evening' });
+    expect(res.body.type).toBe('answer');
+    expect(res.body.proposal).toBeUndefined();
+    expect(res.body.reply).toContain('Every later evening flight home on Jan 17 is a very long journey — the quickest takes 26h 50m, against 8h for the fastest flight that day');
+    expect(res.body.reply).toContain('1. TAP Air Portugal LON 21:25 → JFK 22:55 (lands Jan 18) — 30h 30m, 1 stop, $867 (+$434)');
+    expect(res.body.reply).toContain('The latest sensible flight that day: Iberia LON 15:00 → JFK 18:05 — 8h 5m, nonstop, $440 (+$8).');
+    expect(res.body.reply).toContain('Nothing changed');
+  });
+
+  it('a long option the user names is still theirs to take, with its journey time stated', async () => {
+    homeOffers([offer('American Airlines', 'AA', 432.18, '2027-01-17', '12:23', '15:24'), tap()]);
+    const res = await chat(app, 'select_transport_option', { leg: 'London→home', operator: 'TAP Air Portugal' });
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after).toMatchObject({ operator: 'TAP Air Portugal', departTime: '21:25', price: 866.58 });
+    expect(res.body.reply).toContain('Journey time 8h 1m → 30h 30m, 1 stop.');
+  });
+
+  it('a listing shows the sensible ones and says how many long ones it left out', async () => {
+    homeOffers([offer('American Airlines', 'AA', 432.18, '2027-01-17', '12:23', '15:24'), tap(), offer('British Airways', 'BA', 900, '2027-01-17', '19:00', '22:10', 490)]);
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', timeOfDay: 'evening', list: true });
+    expect(res.body.type).toBe('leg_options');
+    expect(res.body.legOptions.options.map((o: any) => o.operator)).toEqual(['British Airways']);
+    expect(res.body.reply).toContain('I left out 1 that take more than about 16h (the quickest of those: 30h 30m).');
+  });
+});
+
+describe("a date edit keeps the user's choice for a leg it re-searches (production: the evening flight home became 13:09)", () => {
+  /** The trip after the user accepted "a later flight home in the evening": TAP 21:25 (frontend preferenceFromProposal). */
+  const eveningChosen = () => {
+    const t = trip();
+    t.origin.returnLeg = {
+      ...t.origin.returnLeg,
+      operator: 'TAP Air Portugal', carrierCode: 'TP', departTime: '21:25', arriveTime: '22:55', arriveDate: '2027-01-18', price: 866.58, durationMinutes: 1830, stops: 1,
+      userChoice: { source: 'chat', departTime: '21:25', operator: 'TAP Air Portugal', timeOfDay: 'evening', earliestDepart: '12:23', latestDepart: null, earliestArrive: null, latestArrive: null },
+    };
+    t.totalCost = headerTotal(t);
+    return t;
+  };
+  const jan18 = (list: any[]) =>
+    searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>
+      origin === 'LON' && destination === 'JFK' && date === '2027-01-18' ? list : []);
+
+  it('"Give Paris one more night" → the flight home moves to Jan 18 and is still an evening one', async () => {
+    jan18([
+      offer('Iberia', 'IB', 435, '2027-01-18', '13:09', '16:10'),
+      offer('British Airways', 'BA', 520, '2027-01-18', '19:30', '22:35', 485),
+      { ...offer('TAP Air Portugal', 'TP', 866.58, '2027-01-18', '21:25', '22:55+1', 1830), stops: 1 },
+    ]);
+    const res = await chat(app, 'set_min_days', { city: 'Paris', minNights: 4, explanation: 'One more night in Paris.' }, eveningChosen());
+    expect(res.body.type).toBe('proposal');
+    const p = res.body.proposal;
+    expect(p.after.map((s: any) => [s.name, s.arrival, s.departure])).toEqual([
+      ['Paris', '2027-01-12', '2027-01-16'],
+      ['London', '2027-01-16', '2027-01-18'],
+    ]);
+    // Not the cheapest (Iberia 13:09), not the 30h TAP: the sensible evening one.
+    expect(p.returnLeg).toMatchObject({ operator: 'British Airways', departTime: '19:30', departDate: '2027-01-18', price: 520 });
+    expect(p.returnLeg.userChoice).toMatchObject({ timeOfDay: 'evening' });
+    expect(res.body.reply).toContain('Kept your choice for your flight home: an evening flight (British Airways 19:30).');
+  });
+
+  it('says so when the new date has no sensible evening flight, and names what it picked instead', async () => {
+    jan18([
+      offer('Iberia', 'IB', 435, '2027-01-18', '13:09', '16:10'),
+      { ...offer('TAP Air Portugal', 'TP', 866.58, '2027-01-18', '21:25', '22:55+1', 1830), stops: 1 },
+    ]);
+    const res = await chat(app, 'set_min_days', { city: 'Paris', minNights: 4, explanation: 'One more night in Paris.' }, eveningChosen());
+    expect(res.body.proposal.returnLeg).toMatchObject({ operator: 'Iberia', departTime: '13:09' });
+    expect(res.body.reply).toContain("There's no evening flight for your flight home on Jan 18 (only ones taking 30h 30m+), so I picked Iberia 13:09 instead.");
+  });
+
+  it('a leg the user never touched still gets the cheapest sensible flight', async () => {
+    jan18([
+      { ...offer('TAP Air Portugal', 'TP', 400, '2027-01-18', '21:25', '22:55+1', 1830), stops: 1 },
+      offer('Iberia', 'IB', 435, '2027-01-18', '13:09', '16:10'),
+    ]);
+    const res = await chat(app, 'set_min_days', { city: 'Paris', minNights: 4, explanation: 'x' });
+    expect(res.body.proposal.returnLeg).toMatchObject({ operator: 'Iberia', departTime: '13:09' });
+    expect(res.body.proposal.returnLeg.userChoice).toBeUndefined();
+  });
+});
+
 describe('date edits are priced before they are proposed', () => {
   it('"at least 3 nights in London" → London Jan 15–18 and the flight home searched on Jan 18, with the constraint', async () => {
     searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>

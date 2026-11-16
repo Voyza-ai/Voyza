@@ -53,6 +53,7 @@ import {
 } from './constraints';
 import { searchLegOptions, LegOption, normalizeTimeWindow, NormalizedTimeWindow } from './legOptions';
 import { compareLeg } from './compareLeg';
+import { bestOrder, cityGeo, countrySplits, routeKm, type CityGeo } from './routeGeo';
 import {
   buildCityEditProposal,
   cityEditOpFromTool,
@@ -78,6 +79,10 @@ import {
   matchingChoices,
   money,
   moneyDiff,
+  formatMinutes,
+  isLongJourney,
+  journeyLimit,
+  journeyWords,
   notALegReply,
   perPersonWord,
   withPriceUnits,
@@ -312,7 +317,11 @@ export const CHAT_TOOLS = [
         city: { type: 'string', description: 'The city to add, plain English name ("Venice").' },
         afterCity: {
           type: ['string', 'null'],
-          description: 'Existing trip city the new one goes right after. Null/omitted = add it at the end.',
+          description: 'Existing trip city the new one goes right after — ONLY when the user said where. Otherwise null: the server places it where it adds the least detour.',
+        },
+        userSaidWhere: {
+          type: 'boolean',
+          description: 'True only if the user named the position ("after Prague", "at the end", "start with Rome"). False when they did not say where (including "a city of your choice") — then leave afterCity/beforeCity null.',
         },
         beforeCity: {
           type: ['string', 'null'],
@@ -326,6 +335,24 @@ export const CHAT_TOOLS = [
         explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
       },
       required: ['city', 'explanation'],
+    },
+  },
+  {
+    name: 'reorder_cities',
+    description:
+      'Change the ORDER of the cities already in the trip (nights per city kept). Use for "move Salzburg after Vienna", "swap Munich and Vienna", "start with Vienna" — pass the full new order. For "put the Austrian cities together" pass groupCountry instead (the server checks whether they already are). For "what\'s the best order?" / "optimize the order" set optimize=true and leave order empty: the server picks the order with the least backtracking and distance. The user sees the re-priced trip with its exact total and must Accept.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        order: { type: 'array', items: { type: 'string' }, description: 'Every trip city exactly once, in the new order.' },
+        optimize: { type: 'boolean', description: 'True for "best order" / "optimize": the server decides the order.' },
+        groupCountry: {
+          type: 'string',
+          description: 'For "put the Austrian cities together" / "keep the Italian ones next to each other": the country (e.g. "Austria"). Leave order empty: the server checks whether they already are, and groups them with the least travel if not.',
+        },
+        explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
+      },
+      required: ['explanation'],
     },
   },
   {
@@ -463,6 +490,7 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
   // --- City edits: add_city / remove_city / replace_city. Priced (new
   //     city's hotels, the legs that changed, home flights when the trip's
   //     ends changed) and returned as a proposal. Nothing is applied until Accept.
+  if (toolName === 'reorder_cities') return reorderCities(currentTrip, toolInput);
   if (toolName === 'add_city' || toolName === 'remove_city' || toolName === 'replace_city') {
     const op = cityEditOpFromTool(toolName, toolInput);
     if (!op) return { type: 'answer', reply: "Which city did you mean? Tell me the name and I'll work it out." };
@@ -472,7 +500,7 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
     // before anything was searched (see compare_modes, D-07).
     return {
       type: 'proposal',
-      reply: `${describeCityEdit(built.proposal)} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)} Accept to apply it.`,
+      reply: `${describeCityEdit(built.proposal)}${built.proposal.placementNote ? ` ${built.proposal.placementNote}` : ''} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)}${choiceWords(built.proposal)} Accept to apply it.`,
       proposal: built.proposal,
     };
   }
@@ -617,23 +645,41 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
     };
   }
 
+  // Long journeys (tripLegs.ts LONG_RATIO): never picked or listed first for
+  // "later", "evening", "cheaper"…; an airline the user named is theirs to
+  // choose, however long ("the TAP one").
+  const limit = request.operator ? null : journeyLimit(searched.choices, leg.current);
+  const sensible = matches.filter((c) => !isLongJourney(c, limit));
+  const long = matches.filter((c) => isLongJourney(c, limit));
+
   if (input?.list === true || forceList) {
-    const shown = matches.slice(0, LIST_LIMIT);
+    const pool = sensible.length > 0 ? sensible : long;
+    const shown = pool.slice(0, LIST_LIMIT);
     const lines = shown.map((c, i) => {
       const delta = leg.current ? ` (${moneyDiff(leg.current.price, c.price)})` : '';
-      return `${i + 1}. ${describeChoice(c)} — ${money(c.price)}${delta}`;
+      const takes = isLongJourney(c, limit) ? ` — ${journeyWords(c)}` : '';
+      return `${i + 1}. ${describeChoice(c)} — ${money(c.price)}${delta}${takes}`;
     });
-    const more = matches.length > shown.length ? ` (${matches.length} found, cheapest ${shown.length} shown)` : '';
+    const more =
+      sensible.length === 0
+        ? ` — every one is a long journey (more than ${aboutHours(limit!)})`
+        : pool.length > shown.length
+          ? ` (${pool.length} found, cheapest ${shown.length} shown)`
+          : '';
+    const skipped =
+      sensible.length > 0 && long.length > 0
+        ? `\nI left out ${long.length} that take more than ${aboutHours(limit!)} (the quickest of those: ${formatMinutes(Math.min(...long.map((c) => c.durationMinutes)))}).`
+        : '';
     const onCard = leg.current
       ? `They're on the ${legLabel(leg)} card now — pick one there, or tell me which and I'll set it up for you to accept. Nothing has changed yet.`
       : 'Tell me which one you want and I\'ll set it up for you to accept.';
     return {
       type: 'leg_options',
-      reply: `${capitalize(what)} options for ${legLabel(leg)} on ${when}${more}:\n${lines.join('\n')}\n${onCard}`,
+      reply: `${capitalize(what)} options for ${legLabel(leg)} on ${when}${more}:\n${lines.join('\n')}${skipped}\n${onCard}`,
       legOptions: {
         leg: { id: leg.id, kind: leg.kind, index: leg.index, from: leg.from, to: leg.to, date: leg.date },
         options: shown,
-        totalFound: matches.length,
+        totalFound: pool.length,
       },
     };
   }
@@ -643,8 +689,60 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
   const label = legLabel(leg);
   const subject =
     leg.kind === 'return' ? `${what} home (${label})` : leg.kind === 'outbound' ? `${what} out (${label})` : `${what} for ${label}`;
-  const lead = request.cheaper ? `A ${subject}:` : `The cheapest ${subject} I found:`;
-  return propose(currentTrip, leg, matches[0], request, toolName, lead);
+  if (sensible.length === 0) return allLongReply(searched.choices, long, request, leg, limit!, `${what} ${leg.kind === 'return' ? 'home' : leg.kind === 'outbound' ? 'out' : `for ${label}`}`);
+  // Cheaper matches skipped for being long: the lead says what was picked.
+  const skippedCheaper = long.some((c) => c.price > 0 && c.price < sensible[0].price);
+  const lead = skippedCheaper
+    ? `The cheapest ${subject} I found that doesn't take more than ${aboutHours(limit!)}:`
+    : request.cheaper
+      ? `A ${subject}:`
+      : `The cheapest ${subject} I found:`;
+  return propose(currentTrip, leg, sensible[0], request, toolName, lead);
+}
+
+/** A long-journey limit as words: "about 16h" (15h 54m reads oddly; the rule itself is exact). */
+const aboutHours = (limit: number) => `about ${formatMinutes(Math.round(limit / 60) * 60)}`;
+
+/**
+ * Every match is a long journey: propose none of them. Say so with their
+ * journey times, and name the sensible flight closest to what was asked
+ * (the latest one that day for "later" / "evening", the earliest for
+ * "earlier" / "morning") so the user can choose.
+ */
+function allLongReply(all: LegChoice[], long: LegChoice[], request: ChoiceRequest, leg: TripLeg, limit: number, what: string): TripChatResult {
+  const when = shortDate(leg.date);
+  const quickest = Math.min(...long.map((c) => c.durationMinutes));
+  const fastest = Math.min(...all.map((c) => c.durationMinutes).filter((m) => m > 0));
+  const top = long.slice(0, 3).map((c, i) => {
+    const delta = leg.current ? ` (${moneyDiff(leg.current.price, c.price)})` : '';
+    return `${i + 1}. ${describeChoice(c)} — ${journeyWords(c)}, ${money(c.price)}${delta}`;
+  });
+  const cur = leg.current;
+  const sensibleOthers = all.filter((c) => !isLongJourney(c, limit) && !(cur && sameService(c, cur)) && !!c.departTime);
+  const wantsLater = request.relative === 'later' || request.timeOfDay === 'evening' || request.timeOfDay === 'afternoon' || !!request.window?.earliestDepart;
+  const wantsEarlier = request.relative === 'earlier' || request.timeOfDay === 'morning' || !!request.window?.latestDepart;
+  let alt: LegChoice | undefined;
+  const byPrice = (a: LegChoice, b: LegChoice) => (a.price || Infinity) - (b.price || Infinity);
+  if (wantsLater) {
+    const later = sensibleOthers.filter((c) => !cur?.departTime || c.departTime! > cur.departTime);
+    const latest = later.map((c) => c.departTime!).sort().pop();
+    alt = later.filter((c) => c.departTime === latest).sort(byPrice)[0];
+  } else if (wantsEarlier) {
+    const earlier = sensibleOthers.filter((c) => !cur?.departTime || c.departTime! < cur.departTime);
+    const earliest = earlier.map((c) => c.departTime!).sort()[0];
+    alt = earlier.filter((c) => c.departTime === earliest).sort(byPrice)[0];
+  }
+  const altLine = alt
+    ? ` The ${wantsLater ? 'latest' : 'earliest'} sensible flight that day: ${describeChoice(alt)} — ${journeyWords(alt)}, ${money(alt.price)}${cur ? ` (${moneyDiff(cur.price, alt.price)})` : ''}.`
+    : cur?.departTime && (wantsLater || wantsEarlier)
+      ? ` Yours (${cur.departTime}) is already the ${wantsLater ? 'latest' : 'earliest'} sensible flight that day.`
+      : '';
+  return {
+    type: 'answer',
+    reply:
+      `Every ${what} on ${when} is a very long journey — the quickest takes ${formatMinutes(quickest)}, against ${formatMinutes(fastest)} for the fastest flight that day:\n${top.join('\n')}\n` +
+      `${altLine.trim()} Nothing changed — tell me if you want one of these anyway, or another day.`.trim(),
+  };
 }
 
 /** " — the latest leaves at 12:23" style hint for a no-match reply. */
@@ -897,7 +995,7 @@ async function dateTool(currentTrip: any, toolName: string, toolInput: any): Pro
     priced.proposal.constraints = proposedConstraints;
     return {
       type: 'proposal',
-      reply: `${replyText} ${plan.note}${homeFlightChanges(currentTrip, priced.proposal)} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
+      reply: `${replyText} ${plan.note}${homeFlightChanges(currentTrip, priced.proposal)}${choiceWords(priced.proposal)} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
       proposal: priced.proposal,
     };
   }
@@ -970,6 +1068,83 @@ function homeFlightChanges(currentTrip: any, p: CityEditProposal): string {
   return out.length ? ` ${out.join(' ')}` : '';
 }
 
+/**
+ * reorder_cities: the order the user gave, or (optimize) the one with the
+ * least backtracking and distance — priced like any city edit.
+ */
+async function reorderCities(currentTrip: any, rawInput: any): Promise<TripChatResult> {
+  let input = rawInput;
+  const names: string[] = (currentTrip?.cities ?? []).map((c: any) => String(c.name ?? ''));
+  if (names.length < 2) return { type: 'answer', reply: 'There is only one city in this trip, so there is no order to change.' };
+  let order: string[];
+  let why = '';
+  const group = typeof input?.groupCountry === 'string' ? input.groupCountry.trim() : '';
+  if (group) {
+    // "Put the Austrian cities together": already together → say so, propose nothing.
+    const geos = names.map((n) => cityGeo(n, names));
+    const want = countryCode(group);
+    const inIt = geos.map((g, i) => (g && (g.country === want || (currentTrip.cities[i]?.country ?? '').toLowerCase() === group.toLowerCase()) ? i : -1)).filter((i) => i >= 0);
+    if (inIt.length < 2) {
+      return { type: 'answer', reply: inIt.length === 1 ? `Only ${names[inIt[0]]} is in ${group}, so there's nothing to group.` : `None of ${names.join(', ')} is in ${group}.` };
+    }
+    if (inIt[inIt.length - 1] - inIt[0] === inIt.length - 1) {
+      return { type: 'answer', reply: `${inIt.map((i) => names[i]).join(' and ')} are already next to each other (${names.join(' → ')}), so nothing needs to move.` };
+    }
+    input = { ...input, optimize: true };
+  }
+  if (input?.optimize === true || !Array.isArray(input?.order) || input.order.length === 0) {
+    const geos = names.map((n) => cityGeo(n, names));
+    if (geos.some((g) => !g)) return { type: 'answer', reply: "I couldn't place every city on the map, so I can't work out the best order." };
+    const home = currentTrip?.origin?.city ? cityGeo(String(currentTrip.origin.city)) : null;
+    const returnsHome = (currentTrip?.returnToHome ?? true) !== false;
+    const best = bestOrder(geos as CityGeo[], home, returnsHome);
+    order = best.map((g) => g.name);
+    const before = routeKm(geos as CityGeo[], home, returnsHome);
+    const after = routeKm(best, home, returnsHome);
+    if (order.every((n, i) => n === names[i])) {
+      return { type: 'answer', reply: `${names.join(' → ')} is already the order with the least backtracking and travel, so I'd keep it.` };
+    }
+    const splitsBefore = countrySplits((geos as CityGeo[]).map((g) => g.country));
+    why =
+      ` It ${splitsBefore > 0 ? 'stops leaving a country and coming back, and ' : ''}cuts about ${Math.max(0, Math.round(before - after)).toLocaleString('en-US')} km of travel` +
+      ' — the card shows the exact change in price.';
+  } else {
+    order = input.order.map((x: any) => String(x));
+  }
+  const op = cityEditOpFromTool('reorder_cities', { order });
+  if (!op) return { type: 'answer', reply: `Which order? The cities are ${names.join(', ')}.` };
+  const built = await buildCityEditProposal(currentTrip, 'reorder_cities', op);
+  if (built.type === 'answer') return built;
+  const p = built.proposal;
+  return {
+    type: 'proposal',
+    reply: `Here's your trip as ${p.after.map((s) => s.name).join(' → ')}.${why} ${p.note}${homeFlightChanges(currentTrip, p)}${choiceWords(p)} Accept to apply it.`,
+    proposal: p,
+  };
+}
+
+/** "Austria" / "Austrian" / "AT" → "AT" (null-safe; unknown → the input upper-cased). */
+function countryCode(name: string): string {
+  const n = name.trim().toLowerCase().replace(/(n|ian|ish|ese)$/, '');
+  if (/^[a-z]{2}$/i.test(name.trim())) return name.trim().toUpperCase();
+  try {
+    const dn = new Intl.DisplayNames(['en'], { type: 'region' });
+    for (let a = 65; a <= 90; a++) {
+      for (let b = 65; b <= 90; b++) {
+        const code = String.fromCharCode(a, b);
+        const label = (dn.of(code) ?? '').toLowerCase();
+        if (label && label !== code.toLowerCase() && (label === name.trim().toLowerCase() || label.startsWith(n))) return code;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return name.trim().toUpperCase();
+}
+
+/** What a re-search did with the legs the user had chosen, as sentences. */
+const choiceWords = (p: CityEditProposal) => (p.choiceNotes?.length ? ` ${p.choiceNotes.join(' ')}` : '');
+
 function describeCityEdit(p: CityEditProposal): string {
   const op = p.op;
   if (op.kind === 'replace') {
@@ -977,6 +1152,7 @@ function describeCityEdit(p: CityEditProposal): string {
     return `Here's your trip with ${added?.name ?? op.newCity} instead of ${added?.replaces ?? op.oldCity}.`;
   }
   if (op.kind === 'remove') return `Here's your trip without ${p.removed[0] ?? op.city}.`;
+  if (op.kind !== 'add') return `Here's your trip as ${p.after.map((s) => s.name).join(' → ')}.`;
   const idx = p.after.findIndex((s) => s.status === 'added');
   const prev = idx > 0 ? p.after[idx - 1].name : null;
   return `Here's your trip with ${op.city} added${idx === p.after.length - 1 ? ' at the end' : prev ? ` after ${prev}` : ''}.`;

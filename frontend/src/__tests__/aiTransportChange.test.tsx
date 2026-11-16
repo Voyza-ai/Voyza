@@ -6,6 +6,7 @@ import { useTripStore } from '@/store/tripStore';
 import { planChat } from '@/lib/api';
 import type { LegChoice, LegOptionsPayload, TransportChangeProposal } from '@/lib/api';
 import { applyLegOptions, applyTransportChange, transportChangeApplies } from '@/lib/transportChange';
+import { applyCityEdit } from '@/lib/cityEdit';
 import { liveTripTotal } from '@/lib/tripTotals';
 import type { Trip } from '@/lib/types';
 import tripJson from './chatTripNycParisLondon.json';
@@ -232,6 +233,54 @@ describe('applyTransportChange', () => {
     expect(transportChangeApplies(changed, laterEveningHome())).toBe(false);
     expect(applyTransportChange(changed, laterEveningHome())).toBe(changed);
     expect(transportChangeApplies(t, laterEveningHome())).toBe(true);
+  });
+});
+
+describe("the user's choice for a leg is kept on it (so a later date edit keeps it)", () => {
+  it('Accept records what was asked and what was taken: "later, in the evening" → evening, after the 12:23 they had', () => {
+    const next = applyTransportChange(trip(), laterEveningHome());
+    expect(next.origin!.returnLeg!.userChoice).toEqual({
+      source: 'chat', departTime: '18:05', operator: 'Virgin Atlantic', timeOfDay: 'evening',
+      earliestDepart: '12:23', latestDepart: null, earliestArrive: null, latestArrive: null,
+    });
+    // The flight it replaced, now an option, carries no choice.
+    expect(next.origin!.returnLeg!.alternatives!.some((a) => 'userChoice' in a)).toBe(false);
+  });
+
+  it('a hand pick on the card records it too', () => {
+    const t = trip();
+    const alt = t.origin!.returnLeg!.alternatives![1];
+    useTripStore.setState({ currentTrip: t });
+    useTripStore.getState().setHomeLegAlternative('return', 1);
+    expect(useTripStore.getState().currentTrip!.origin!.returnLeg!.userChoice).toEqual({
+      source: 'card', departTime: alt.departTime, operator: alt.operator,
+    });
+  });
+
+  it('a city / date edit carries it onto the flight the backend re-searched by it', () => {
+    const t = applyTransportChange(trip(), laterEveningHome());
+    const pref = t.origin!.returnLeg!.userChoice!;
+    const evening = { ...t.origin!.returnLeg!, departDate: '2027-01-18', arriveDate: '2027-01-18', departTime: '19:30', operator: 'British Airways', price: 520 };
+    const legPref = { source: 'card' as const, departTime: '17:10', operator: 'easyJet' };
+    const next = applyCityEdit(t, {
+      kind: 'city_edit',
+      toolName: 'set_min_days',
+      op: { kind: 'dates', city: 'Paris' },
+      before: t.cities.map((c) => ({ name: c.name, arrival: c.dates.arrival, departure: c.dates.departure })),
+      after: [
+        { name: 'Paris', arrival: '2027-01-12', departure: '2027-01-16', status: 'moved' },
+        { name: 'London', arrival: '2027-01-16', departure: '2027-01-18', status: 'moved' },
+      ],
+      removed: [],
+      legs: [{
+        index: 0, from: 'Paris', to: 'London', date: '2027-01-16', userChoice: legPref,
+        options: [{ mode: 'flight', operator: 'easyJet', price: 133, currency: 'USD', departTime: '17:10', arriveTime: '17:15', duration: '1h 5m', durationMinutes: 65, priceDelta: 0 }],
+      }],
+      returnLeg: { ...evening, userChoice: pref },
+      note: '',
+    } as any);
+    expect(next.origin!.returnLeg).toMatchObject({ departTime: '19:30', userChoice: pref });
+    expect(next.cities[0].transportOut).toMatchObject({ departTime: '17:10', userChoice: legPref });
   });
 });
 
