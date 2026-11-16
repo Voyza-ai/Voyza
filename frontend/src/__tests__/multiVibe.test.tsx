@@ -81,9 +81,18 @@ describe('vibe step — multi-select', () => {
     expect(useTripStore.getState().answers.vibe).toBeUndefined();
   });
 
-  it('caps at three: a fourth pill does nothing and the hint says why', async () => {
+  it('pills and Continue sit on one row, with no hint text', async () => {
     await toVibeStep();
-    expect(screen.getByTestId('vibe-hint')).toHaveTextContent('Pick up to 3');
+    const row = screen.getByRole('group', { name: 'Pick up to 3 vibes' });
+    // Continue is the last item of the pill row itself, not a second row.
+    const items = Array.from(row.children);
+    expect(items).toHaveLength(6);
+    expect(items[items.length - 1]).toBe(within(row).getByRole('button', { name: 'Continue' }));
+    expect(screen.queryByText(/Pick up to 3/)).toBeNull();
+  });
+
+  it('caps at three: a fourth pill does nothing', async () => {
+    await toVibeStep();
     fireEvent.click(pill('Beachy'));
     fireEvent.click(pill('Skiing'));
     fireEvent.click(pill('Adventure'));
@@ -92,7 +101,8 @@ describe('vibe step — multi-select', () => {
     expect(pressed(pill('Culture'))).toBe(false);
     expect(pill('Culture')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(3);
-    expect(screen.getByTestId('vibe-hint')).toHaveTextContent("That's 3 — unpick one to swap");
+    // The other unpicked pill is dimmed the same way.
+    expect(pill('Architecture')).toHaveAttribute('aria-disabled', 'true');
 
     // Unpicking one frees a slot again.
     fireEvent.click(pill('Skiing'));
@@ -383,6 +393,12 @@ describe('an old saved trip with a single vibe', () => {
     expect(staged.vibe).toBe('Culture');
     expect(staged.vibes).toEqual(['Culture']);
     expect(line(staged)).toMatch(/^Culture trip to Rome & Florence/);
+  });
+
+  it('the saved vibe stays internal: the results header does not show it', () => {
+    const trip = buildTrip({ vibe: 'Culture, Architecture' } as any);
+    const { container } = render(<ResultsHeader trip={trip} />);
+    expect(container.textContent).not.toMatch(/culture|architecture/i);
   });
 
   it('a trip saved with two vibes comes back as two', () => {

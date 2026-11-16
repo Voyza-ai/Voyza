@@ -124,18 +124,22 @@ describe('fetchPopularTrips', () => {
     expect(t.cities).toEqual([{ name: 'Rome', country: 'Italy' }]);
   });
 
-  it('a trip saved with several vibes ("Culture, Food") is tagged with each one', async () => {
+  it("the trip's own saved vibe stays internal: it is never an Explore tag", async () => {
+    // A planner trip now saves its picked vibes in trips.vibe ("Culture, Food").
     tables.trips = [
       { id: 't2', title: 'Paris', travelers: 2, total_cost: 2000, vibe: 'Culture, Food',
         start_date: null, clone_count: 0, created_at: '2026-09-01T00:00:00Z', user_id: 'u9' },
     ];
-    tables.cities = [];
+    tables.cities = [
+      { trip_id: 't2', name: 'Paris', country: 'France', vibes: ['history', 'food'], position: 0 },
+    ];
     tables.recentClones = [];
     tables.user_profiles = [];
 
     const [t] = await fetchPopularTrips({}, 'me');
-    expect(t.tags.sort()).toEqual(['culture', 'food']);
-    expect(filterAndRank([t], { vibe: 'food' }).map((x) => x.id)).toEqual(['t2']);
+    // Only the city tags the card already showed — no "culture" / "culture, food".
+    expect(t.tags.sort()).toEqual(['food', 'history']);
+    expect(JSON.stringify(t)).not.toMatch(/culture/i);
   });
 });
 

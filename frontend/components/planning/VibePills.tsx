@@ -25,20 +25,20 @@ type VibePillsProps = {
    * also allows it when vibe text has been typed alongside.
    */
   canContinue?: boolean;
-  /** Button text — "Save" when editing an earlier answer. */
-  continueLabel?: string;
-  /** Hide the Continue row (the editor brings its own Save/Cancel). */
+  /** Hide the Continue button (the editor brings its own Save/Cancel). */
   hideContinue?: boolean;
 };
 
 /**
- * The vibe step: pick one to three vibes, then Continue.
+ * The vibe step: pick one to three vibes, then Continue — all on ONE row.
  *
  * A click toggles a pill (brand blue when on, as the city picker's pills).
- * A picked pill keeps its width — no check mark — so picking never re-wraps
- * the row and pushes Continue out of view.
- * At three, the other pills dim and stop responding, and the hint says why —
- * a fourth click does nothing rather than silently swapping one out.
+ * Continue is the compact arrow at the end of the row. At three picks the
+ * other pills dim and stop responding, so a fourth click does nothing rather
+ * than silently swapping one out; there is no hint text (owner's call).
+ * A picked pill keeps its width — no check mark — and nothing wraps: the
+ * row is sized to fit the planner's 768px column (measured at 1280 and
+ * 1440 wide).
  * Enter confirms whenever focus is on a pill or nowhere in particular.
  */
 export default function VibePills({
@@ -46,24 +46,21 @@ export default function VibePills({
   onChange,
   onContinue,
   canContinue,
-  continueLabel = 'Continue',
   hideContinue = false,
 }: VibePillsProps) {
   const ready = canContinue ?? selected.length > 0;
   const atMax = selected.length >= MAX_VIBES;
   const rootRef = useRef<HTMLDivElement>(null);
-  const continueRowRef = useRef<HTMLDivElement>(null);
 
-  // Keep Continue on screen as picks change: the chat scrolls to the newest
-  // message, not to a widget that grew under it (a narrower window wraps
-  // the pills).
+  // Keep the row on screen as picks change: the chat scrolls to the newest
+  // message, not to a widget under it.
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
       return;
     }
-    continueRowRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    rootRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
   }, [selected.length]);
 
   const toggle = (label: string) => {
@@ -98,62 +95,54 @@ export default function VibePills({
   }, [hideContinue]);
 
   return (
-    <div ref={rootRef} className="flex flex-col gap-4 w-full" data-testid="vibe-pills">
-      <div className="flex flex-wrap gap-3 w-full" role="group" aria-label={`Pick up to ${MAX_VIBES} vibes`}>
-        {vibes.map((vibe, i) => {
-          const Icon = vibe.icon;
-          const on = selected.includes(vibe.label);
-          const blocked = !on && atMax;
-          return (
-            <motion.button
-              key={vibe.label}
-              type="button"
-              data-vibe-pill={vibe.label}
-              aria-pressed={on}
-              aria-disabled={blocked || undefined}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.25, delay: i * 0.06 }}
-              onClick={() => toggle(vibe.label)}
-              className={`flex items-center gap-2.5 px-5 py-3.5 rounded-full border text-[16px] transition-colors ${
-                on
-                  ? 'bg-[#2563eb] border-[#2563eb] text-white'
-                  : blocked
-                    ? 'bg-white border-gray-200 text-gray-400 opacity-50 cursor-not-allowed'
-                    : 'bg-white border-gray-200 text-gray-700 hover:text-gray-900 hover:border-gray-400'
-              }`}
-            >
-              <Icon size={20} style={{ color: on ? '#ffffff' : vibe.color }} />
-              {vibe.label}
-            </motion.button>
-          );
-        })}
-      </div>
+    <div
+      ref={rootRef}
+      className="flex flex-nowrap items-stretch gap-2 w-full"
+      role="group"
+      aria-label={`Pick up to ${MAX_VIBES} vibes`}
+      data-testid="vibe-pills"
+    >
+      {vibes.map((vibe, i) => {
+        const Icon = vibe.icon;
+        const on = selected.includes(vibe.label);
+        const blocked = !on && atMax;
+        return (
+          <motion.button
+            key={vibe.label}
+            type="button"
+            data-vibe-pill={vibe.label}
+            aria-pressed={on}
+            aria-disabled={blocked || undefined}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.25, delay: i * 0.06 }}
+            onClick={() => toggle(vibe.label)}
+            className={`flex flex-shrink-0 items-center gap-2 px-4 py-3.5 rounded-full border text-[16px] whitespace-nowrap transition-colors ${
+              on
+                ? 'bg-[#2563eb] border-[#2563eb] text-white'
+                : blocked
+                  ? 'bg-white border-gray-200 text-gray-400 opacity-50 cursor-not-allowed'
+                  : 'bg-white border-gray-200 text-gray-700 hover:text-gray-900 hover:border-gray-400'
+            }`}
+          >
+            <Icon size={20} style={{ color: on ? '#ffffff' : vibe.color }} />
+            {vibe.label}
+          </motion.button>
+        );
+      })}
 
       {!hideContinue && (
-        <div ref={continueRowRef} className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => ready && onContinue()}
-            disabled={!ready}
-            className="flex items-center gap-2 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold px-6 py-3 rounded-full text-[15px] transition-colors disabled:opacity-40 disabled:hover:bg-[#2563eb] disabled:cursor-not-allowed"
-          >
-            {continueLabel}
-            <ArrowRight size={18} />
-          </button>
-          <VibeHint count={selected.length} />
-        </div>
+        <button
+          type="button"
+          onClick={() => ready && onContinue()}
+          disabled={!ready}
+          aria-label="Continue"
+          title="Continue"
+          className="flex flex-shrink-0 items-center justify-center w-[52px] rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white transition-colors disabled:opacity-40 disabled:hover:bg-[#2563eb] disabled:cursor-not-allowed"
+        >
+          <ArrowRight size={20} />
+        </button>
       )}
-      {hideContinue && <VibeHint count={selected.length} />}
     </div>
-  );
-}
-
-/** "Pick up to 3", or at the cap why the other pills went quiet. */
-export function VibeHint({ count }: { count: number }) {
-  return (
-    <span className="text-[13px] text-gray-500" aria-live="polite" data-testid="vibe-hint">
-      {count >= MAX_VIBES ? `That's ${MAX_VIBES} — unpick one to swap` : `Pick up to ${MAX_VIBES}`}
-    </span>
   );
 }
