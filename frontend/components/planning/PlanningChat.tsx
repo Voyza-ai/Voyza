@@ -28,6 +28,7 @@ import type { SummaryField } from '@/lib/tripSummary';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
+import { usePlannerLeaveGuard } from '@/hooks/usePlannerLeaveGuard';
 import { formatMinutes, humanDay, humanDayRange } from '@/lib/dateHelpers';
 import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
@@ -1274,6 +1275,8 @@ export default function PlanningChat() {
   const [findTripLoading, setFindTripLoading] = useState(false);
   const [findTripStatus, setFindTripStatus] = useState('');
   const [findTripError, setFindTripError] = useState<string | null>(null);
+  // Ask before leaving once something is answered, until Find my trip runs.
+  usePlannerLeaveGuard(findTripLoading);
 
   // City selection state — shown when user mentions countries
   const [citySelectionData, setCitySelectionData] = useState<{
