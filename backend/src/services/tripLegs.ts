@@ -667,6 +667,57 @@ export function describeRequest(request: ChoiceRequest, leg: TripLeg): string {
   return s;
 }
 
+// ─── Long journeys ────────────────────────────────────────────────
+
+/**
+ * An option is a LONG journey when it takes more than LONG_RATIO × the leg's
+ * fastest option that day AND more than LONG_EXTRA_MIN minutes longer than it.
+ *
+ * Picked from Duffel's own offers for the production trip (test mode,
+ * 2026-11-16): London → New York, Jan 17, 364 offers — nonstops 8h00–8h32,
+ * ordinary one-stops 10h30–16h, then a separate cluster of overnight
+ * connections at 22h–32h (TAP via Lisbon 29h–31h: the "later evening flight
+ * home" production proposed, 30h 30m for +$431). Paris → New York looks the
+ * same (8h17 nonstop, 26h–32h overnight); New York → Paris tops out at 19h.
+ * Paris → London: 58m–1h20 nonstop, one-stops from 3h50.
+ *
+ * 1.5× / +3h would cut transatlantic at 12h, dropping London → New York's
+ * median offer (12h05) and ordinary 12h30 one-stops. 2× / +3h cuts it at 16h:
+ * every normal one-stop stays, every overnight 22h+ connection goes. On a
+ * one-hour hop the +3h side decides (≈ 4h): nonstops stay, 4h+ detours go.
+ */
+export const LONG_RATIO = 2;
+export const LONG_EXTRA_MIN = 180;
+
+/**
+ * The longest a sensible option may take on this leg, from the fastest one
+ * known (searched options and the current one). null = no durations known.
+ */
+export function journeyLimit(choices: LegChoice[], current?: LegChoice | null): number | null {
+  const known = [...choices, ...(current ? [current] : [])].map((c) => c.durationMinutes).filter((m) => m > 0);
+  if (known.length === 0) return null;
+  const fastest = Math.min(...known);
+  return Math.max(fastest * LONG_RATIO, fastest + LONG_EXTRA_MIN);
+}
+
+export function isLongJourney(c: LegChoice, limit: number | null): boolean {
+  return limit != null && c.durationMinutes > 0 && c.durationMinutes > limit;
+}
+
+/** 1830 → "30h 30m", 58 → "58m", 480 → "8h". */
+export function formatMinutes(m: number): string {
+  const h = Math.floor(m / 60);
+  const r = Math.round(m % 60);
+  if (h === 0) return `${r}m`;
+  return r === 0 ? `${h}h` : `${h}h ${r}m`;
+}
+
+/** "30h 30m, 1 stop" — a journey's length as the user needs it. */
+export function journeyWords(c: LegChoice): string {
+  const stops = c.stops > 0 ? `, ${c.stops} stop${c.stops === 1 ? '' : 's'}` : c.mode === 'flight' ? ', nonstop' : '';
+  return `${formatMinutes(c.durationMinutes)}${stops}`;
+}
+
 /** Candidates that satisfy the request, cheapest first; the current option never counts. */
 export function matchingChoices(choices: LegChoice[], request: ChoiceRequest, leg: TripLeg): LegChoice[] {
   return choices
@@ -909,6 +960,13 @@ export function describeTransportProposal(p: TransportChangeProposal, leg: TripL
   const parts: string[] = [];
   const now = p.before ? ` instead of ${describeChoice(p.before)} at ${money(p.before.price)}` : '';
   parts.push(`${lead} ${describeChoice(p.after)} on ${shortDate(p.after.departDate ?? leg.date)}, ${money(p.after.price)}${perPersonWord()}${now}.`);
+  // A journey notably longer than the current one is said, with its stops
+  // (production proposed a 30h 30m "evening flight home" without a word).
+  const b = p.before?.durationMinutes ?? 0;
+  const a = p.after.durationMinutes;
+  if (b > 0 && a > 0 && a - b >= 60 && a >= b * 1.25) {
+    parts.push(`Journey time ${formatMinutes(b)} → ${journeyWords(p.after)}.`);
+  }
   if (p.firstStay) {
     const fs = p.firstStay;
     parts.push(

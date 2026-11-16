@@ -78,6 +78,10 @@ import {
   matchingChoices,
   money,
   moneyDiff,
+  formatMinutes,
+  isLongJourney,
+  journeyLimit,
+  journeyWords,
   notALegReply,
   perPersonWord,
   withPriceUnits,
@@ -617,23 +621,41 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
     };
   }
 
+  // Long journeys (tripLegs.ts LONG_RATIO): never picked or listed first for
+  // "later", "evening", "cheaper"…; an airline the user named is theirs to
+  // choose, however long ("the TAP one").
+  const limit = request.operator ? null : journeyLimit(searched.choices, leg.current);
+  const sensible = matches.filter((c) => !isLongJourney(c, limit));
+  const long = matches.filter((c) => isLongJourney(c, limit));
+
   if (input?.list === true || forceList) {
-    const shown = matches.slice(0, LIST_LIMIT);
+    const pool = sensible.length > 0 ? sensible : long;
+    const shown = pool.slice(0, LIST_LIMIT);
     const lines = shown.map((c, i) => {
       const delta = leg.current ? ` (${moneyDiff(leg.current.price, c.price)})` : '';
-      return `${i + 1}. ${describeChoice(c)} — ${money(c.price)}${delta}`;
+      const takes = isLongJourney(c, limit) ? ` — ${journeyWords(c)}` : '';
+      return `${i + 1}. ${describeChoice(c)} — ${money(c.price)}${delta}${takes}`;
     });
-    const more = matches.length > shown.length ? ` (${matches.length} found, cheapest ${shown.length} shown)` : '';
+    const more =
+      sensible.length === 0
+        ? ` — every one is a long journey (more than ${aboutHours(limit!)})`
+        : pool.length > shown.length
+          ? ` (${pool.length} found, cheapest ${shown.length} shown)`
+          : '';
+    const skipped =
+      sensible.length > 0 && long.length > 0
+        ? `\nI left out ${long.length} that take more than ${aboutHours(limit!)} (the quickest of those: ${formatMinutes(Math.min(...long.map((c) => c.durationMinutes)))}).`
+        : '';
     const onCard = leg.current
       ? `They're on the ${legLabel(leg)} card now — pick one there, or tell me which and I'll set it up for you to accept. Nothing has changed yet.`
       : 'Tell me which one you want and I\'ll set it up for you to accept.';
     return {
       type: 'leg_options',
-      reply: `${capitalize(what)} options for ${legLabel(leg)} on ${when}${more}:\n${lines.join('\n')}\n${onCard}`,
+      reply: `${capitalize(what)} options for ${legLabel(leg)} on ${when}${more}:\n${lines.join('\n')}${skipped}\n${onCard}`,
       legOptions: {
         leg: { id: leg.id, kind: leg.kind, index: leg.index, from: leg.from, to: leg.to, date: leg.date },
         options: shown,
-        totalFound: matches.length,
+        totalFound: pool.length,
       },
     };
   }
@@ -643,8 +665,60 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
   const label = legLabel(leg);
   const subject =
     leg.kind === 'return' ? `${what} home (${label})` : leg.kind === 'outbound' ? `${what} out (${label})` : `${what} for ${label}`;
-  const lead = request.cheaper ? `A ${subject}:` : `The cheapest ${subject} I found:`;
-  return propose(currentTrip, leg, matches[0], request, toolName, lead);
+  if (sensible.length === 0) return allLongReply(searched.choices, long, request, leg, limit!, `${what} ${leg.kind === 'return' ? 'home' : leg.kind === 'outbound' ? 'out' : `for ${label}`}`);
+  // Cheaper matches skipped for being long: the lead says what was picked.
+  const skippedCheaper = long.some((c) => c.price > 0 && c.price < sensible[0].price);
+  const lead = skippedCheaper
+    ? `The cheapest ${subject} I found that doesn't take more than ${aboutHours(limit!)}:`
+    : request.cheaper
+      ? `A ${subject}:`
+      : `The cheapest ${subject} I found:`;
+  return propose(currentTrip, leg, sensible[0], request, toolName, lead);
+}
+
+/** A long-journey limit as words: "about 16h" (15h 54m reads oddly; the rule itself is exact). */
+const aboutHours = (limit: number) => `about ${formatMinutes(Math.round(limit / 60) * 60)}`;
+
+/**
+ * Every match is a long journey: propose none of them. Say so with their
+ * journey times, and name the sensible flight closest to what was asked
+ * (the latest one that day for "later" / "evening", the earliest for
+ * "earlier" / "morning") so the user can choose.
+ */
+function allLongReply(all: LegChoice[], long: LegChoice[], request: ChoiceRequest, leg: TripLeg, limit: number, what: string): TripChatResult {
+  const when = shortDate(leg.date);
+  const quickest = Math.min(...long.map((c) => c.durationMinutes));
+  const fastest = Math.min(...all.map((c) => c.durationMinutes).filter((m) => m > 0));
+  const top = long.slice(0, 3).map((c, i) => {
+    const delta = leg.current ? ` (${moneyDiff(leg.current.price, c.price)})` : '';
+    return `${i + 1}. ${describeChoice(c)} — ${journeyWords(c)}, ${money(c.price)}${delta}`;
+  });
+  const cur = leg.current;
+  const sensibleOthers = all.filter((c) => !isLongJourney(c, limit) && !(cur && sameService(c, cur)) && !!c.departTime);
+  const wantsLater = request.relative === 'later' || request.timeOfDay === 'evening' || request.timeOfDay === 'afternoon' || !!request.window?.earliestDepart;
+  const wantsEarlier = request.relative === 'earlier' || request.timeOfDay === 'morning' || !!request.window?.latestDepart;
+  let alt: LegChoice | undefined;
+  const byPrice = (a: LegChoice, b: LegChoice) => (a.price || Infinity) - (b.price || Infinity);
+  if (wantsLater) {
+    const later = sensibleOthers.filter((c) => !cur?.departTime || c.departTime! > cur.departTime);
+    const latest = later.map((c) => c.departTime!).sort().pop();
+    alt = later.filter((c) => c.departTime === latest).sort(byPrice)[0];
+  } else if (wantsEarlier) {
+    const earlier = sensibleOthers.filter((c) => !cur?.departTime || c.departTime! < cur.departTime);
+    const earliest = earlier.map((c) => c.departTime!).sort()[0];
+    alt = earlier.filter((c) => c.departTime === earliest).sort(byPrice)[0];
+  }
+  const altLine = alt
+    ? ` The ${wantsLater ? 'latest' : 'earliest'} sensible flight that day: ${describeChoice(alt)} — ${journeyWords(alt)}, ${money(alt.price)}${cur ? ` (${moneyDiff(cur.price, alt.price)})` : ''}.`
+    : cur?.departTime && (wantsLater || wantsEarlier)
+      ? ` Yours (${cur.departTime}) is already the ${wantsLater ? 'latest' : 'earliest'} sensible flight that day.`
+      : '';
+  return {
+    type: 'answer',
+    reply:
+      `Every ${what} on ${when} is a very long journey — the quickest takes ${formatMinutes(quickest)}, against ${formatMinutes(fastest)} for the fastest flight that day:\n${top.join('\n')}\n` +
+      `${altLine.trim()} Nothing changed — tell me if you want one of these anyway, or another day.`.trim(),
+  };
 }
 
 /** " — the latest leaves at 12:23" style hint for a no-match reply. */

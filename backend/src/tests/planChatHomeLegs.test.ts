@@ -305,6 +305,56 @@ describe('switching to a named option', () => {
   });
 });
 
+describe('long journeys (production: a 30h 30m "later evening flight home" for +$431)', () => {
+  /** TAP via Lisbon, as Duffel offered it on production: 21:25 → EWR 22:55 next day, 30h 30m, 1 stop. */
+  const tap = () => ({ ...offer('TAP Air Portugal', 'TP', 866.58, '2027-01-17', '21:25', '22:55+1', 1830), stops: 1 });
+  const homeOffers = (list: any[]) =>
+    searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>
+      origin === 'LON' && destination === 'JFK' && date === '2027-01-17' ? list : []);
+
+  it('"later, in the evening" picks the sensible 19:00 over the cheaper 30h one, and says why', async () => {
+    homeOffers([offer('American Airlines', 'AA', 432.18, '2027-01-17', '12:23', '15:24'), tap(), offer('British Airways', 'BA', 900, '2027-01-17', '19:00', '22:10', 490)]);
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', relative: 'later', timeOfDay: 'evening' });
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after).toMatchObject({ operator: 'British Airways', departTime: '19:00', price: 900 });
+    // Fastest 8h → anything over 16h is long.
+    expect(res.body.reply).toMatch(/^The cheapest later evening flight home \(London → New York\) I found that doesn't take more than about 16h:/);
+    expect(res.body.reply).not.toContain('Journey time');
+  });
+
+  it('when every evening option is 25h+, proposes nothing: names them, their times, and the latest sensible flight', async () => {
+    homeOffers([
+      offer('American Airlines', 'AA', 432.18, '2027-01-17', '12:23', '15:24'),
+      offer('Iberia', 'IB', 440, '2027-01-17', '15:00', '18:05', 485),
+      tap(),
+      { ...offer('Icelandair', 'FI', 932.58, '2027-01-17', '20:35', '18:25+1', 1610), stops: 1 },
+    ]);
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', relative: 'later', timeOfDay: 'evening' });
+    expect(res.body.type).toBe('answer');
+    expect(res.body.proposal).toBeUndefined();
+    expect(res.body.reply).toContain('Every later evening flight home on Jan 17 is a very long journey — the quickest takes 26h 50m, against 8h for the fastest flight that day');
+    expect(res.body.reply).toContain('1. TAP Air Portugal LON 21:25 → JFK 22:55 (lands Jan 18) — 30h 30m, 1 stop, $867 (+$434)');
+    expect(res.body.reply).toContain('The latest sensible flight that day: Iberia LON 15:00 → JFK 18:05 — 8h 5m, nonstop, $440 (+$8).');
+    expect(res.body.reply).toContain('Nothing changed');
+  });
+
+  it('a long option the user names is still theirs to take, with its journey time stated', async () => {
+    homeOffers([offer('American Airlines', 'AA', 432.18, '2027-01-17', '12:23', '15:24'), tap()]);
+    const res = await chat(app, 'select_transport_option', { leg: 'London→home', operator: 'TAP Air Portugal' });
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after).toMatchObject({ operator: 'TAP Air Portugal', departTime: '21:25', price: 866.58 });
+    expect(res.body.reply).toContain('Journey time 8h 1m → 30h 30m, 1 stop.');
+  });
+
+  it('a listing shows the sensible ones and says how many long ones it left out', async () => {
+    homeOffers([offer('American Airlines', 'AA', 432.18, '2027-01-17', '12:23', '15:24'), tap(), offer('British Airways', 'BA', 900, '2027-01-17', '19:00', '22:10', 490)]);
+    const res = await chat(app, 'find_transport_option', { leg: 'London→home', timeOfDay: 'evening', list: true });
+    expect(res.body.type).toBe('leg_options');
+    expect(res.body.legOptions.options.map((o: any) => o.operator)).toEqual(['British Airways']);
+    expect(res.body.reply).toContain('I left out 1 that take more than about 16h (the quickest of those: 30h 30m).');
+  });
+});
+
 describe('date edits are priced before they are proposed', () => {
   it('"at least 3 nights in London" → London Jan 15–18 and the flight home searched on Jan 18, with the constraint', async () => {
     searchFlights.mockImplementation(async ({ origin, destination, date }: any) =>
