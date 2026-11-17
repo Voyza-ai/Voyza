@@ -44,6 +44,7 @@ import SuggestedCitiesPanel from '@/components/canvas/SuggestedCitiesPanel';
 import SuggestionsPanel from '@/components/canvas/SuggestionsPanel';
 import LoginModal from '@/components/shared/LoginModal';
 import { useNotificationsStore } from '@/store/notificationsStore';
+import { track as trackEvent } from '@/lib/track';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
 // during the static build pass. We split the page into an outer wrapper that
@@ -1171,7 +1172,17 @@ function ResultsPageInner() {
       {/* View tabs live in the navbar (next to the auth corner) so the cards
           below get the full viewport height. The date-shift savings tip now
           arrives as a BlueMurr AI chat message instead of a page banner. */}
-      <Navbar tabs={<ViewTabs value={view} onChange={setView} />} />
+      <Navbar
+        tabs={
+          <ViewTabs
+            value={view}
+            onChange={(v) => {
+              if (v !== view) trackEvent('results_tab_viewed', { tab: v });
+              setView(v);
+            }}
+          />
+        }
+      />
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
           except the cards area (left↔right) and the AI chat panel. */}
