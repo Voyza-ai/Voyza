@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { getStaticIata } from '../data/cityAirports';
 import { resolveDestinationIata } from './location/destinationAirport';
 import { sameAirportArea } from './location/sameAirportArea';
+import { cheapestSensible } from './longJourney';
 
 /**
  * Both options are priced as PARTY TOTALS for `travelers` — Duffel quotes
@@ -192,7 +193,9 @@ export async function compareLeg(
       : searchTrains({ origin, destination, date, travelers, originCountry, destinationCountry }).catch(() => []),
   ]);
 
-  // Pick cheapest flight
+  // Pick the cheapest flight that isn't a long journey (longJourney.ts).
+  // Plain cheapest priced Prague → Vienna as a 22h 50m itinerary at $301
+  // over the 55m nonstop at $368, and ranked routes on that fare.
   let bestFlight: FlightOffer | null = null;
   if (cachedFlight) {
     // Cache doesn't store bookingUrl, so send to Google Flights pre-filled.
@@ -213,7 +216,7 @@ export async function compareLeg(
       raw: {},
     };
   } else if (flightsResult && flightsResult.length > 0) {
-    bestFlight = flightsResult.reduce((a, b) => (a.price < b.price ? a : b));
+    bestFlight = cheapestSensible(flightsResult) ?? null;
   }
 
   // Pick cheapest train

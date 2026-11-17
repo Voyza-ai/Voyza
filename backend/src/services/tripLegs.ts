@@ -27,6 +27,7 @@ import { getCityCountry } from '../data/cityCountries';
 import { logger } from '../utils/logger';
 import { normalizeTimeOfDay, normalizeTimeWindow, searchLegOptions, type NormalizedTimeWindow } from './legOptions';
 import { firstStayArrival, searchHomeLegOptions } from './optimizer';
+import { LONG_EXTRA_MIN, LONG_RATIO, longJourneyLimit } from './longJourney';
 
 export type LegKind = 'outbound' | 'intercity' | 'return';
 
@@ -669,35 +670,16 @@ export function describeRequest(request: ChoiceRequest, leg: TripLeg): string {
 
 // ─── Long journeys ────────────────────────────────────────────────
 
-/**
- * An option is a LONG journey when it takes more than LONG_RATIO × the leg's
- * fastest option that day AND more than LONG_EXTRA_MIN minutes longer than it.
- *
- * Picked from Duffel's own offers for the production trip (test mode,
- * 2026-11-16): London → New York, Jan 17, 364 offers — nonstops 8h00–8h32,
- * ordinary one-stops 10h30–16h, then a separate cluster of overnight
- * connections at 22h–32h (TAP via Lisbon 29h–31h: the "later evening flight
- * home" production proposed, 30h 30m for +$431). Paris → New York looks the
- * same (8h17 nonstop, 26h–32h overnight); New York → Paris tops out at 19h.
- * Paris → London: 58m–1h20 nonstop, one-stops from 3h50.
- *
- * 1.5× / +3h would cut transatlantic at 12h, dropping London → New York's
- * median offer (12h05) and ordinary 12h30 one-stops. 2× / +3h cuts it at 16h:
- * every normal one-stop stays, every overnight 22h+ connection goes. On a
- * one-hour hop the +3h side decides (≈ 4h): nonstops stay, 4h+ detours go.
- */
-export const LONG_RATIO = 2;
-export const LONG_EXTRA_MIN = 180;
+// The rule (LONG_RATIO × the fastest AND LONG_EXTRA_MIN longer) and why those
+// numbers: longJourney.ts, shared with the planner.
+export { LONG_RATIO, LONG_EXTRA_MIN };
 
 /**
  * The longest a sensible option may take on this leg, from the fastest one
  * known (searched options and the current one). null = no durations known.
  */
 export function journeyLimit(choices: LegChoice[], current?: LegChoice | null): number | null {
-  const known = [...choices, ...(current ? [current] : [])].map((c) => c.durationMinutes).filter((m) => m > 0);
-  if (known.length === 0) return null;
-  const fastest = Math.min(...known);
-  return Math.max(fastest * LONG_RATIO, fastest + LONG_EXTRA_MIN);
+  return longJourneyLimit([...choices, ...(current ? [current] : [])].map((c) => c.durationMinutes));
 }
 
 export function isLongJourney(c: LegChoice, limit: number | null): boolean {
