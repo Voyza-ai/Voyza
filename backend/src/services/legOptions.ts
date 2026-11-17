@@ -7,7 +7,7 @@
  * applied and present real alternatives in the proposal card, instead
  * of just silently storing a constraint to honor "later".
  *
- * Returns sorted-by-price options with priceDelta against the user's
+ * Returns options cheapest first (long journeys last) with priceDelta against the user's
  * current transport so the UI can render the savings at a glance.
  */
 
@@ -17,6 +17,7 @@ import { formatDurationMinutes } from '../utils/duration';
 import { searchTrains, TrainOffer } from './trains';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
+import { sensibleFirst } from './longJourney';
 
 export type TimeWindow = {
   earliestDepart?: string | null; // HH:MM
@@ -369,16 +370,12 @@ export async function searchLegOptions(
     ? allOptions.filter((o) => matchesWindow(o.departTime, o.arriveTime, window))
     : allOptions;
 
-  // Sort cheapest-first so the default-selected option in the UI
-  // maximizes savings. Options with price=0 (data gap) go to the end
-  // rather than misleading the user into thinking the train is free.
-  matched.sort((a, b) => {
-    const pa = a.price || Infinity;
-    const pb = b.price || Infinity;
-    return pa - pb;
-  });
-
-  const options = matched.slice(0, limit);
+  // Cheapest first so the default-selected option in the UI maximizes
+  // savings — but long journeys (longJourney.ts) after every sensible one:
+  // a new plan's leg card shows options[0], and plain cheapest-first put a
+  // 22h 50m Prague → Vienna itinerary there over the 55m nonstop. Options
+  // with price=0 (data gap) go last rather than look free.
+  const options = sensibleFirst(matched).slice(0, limit);
 
   return {
     options,
