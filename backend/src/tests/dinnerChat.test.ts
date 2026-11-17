@@ -166,6 +166,27 @@ describe('"add a dinner reservation for one night in Paris"', () => {
     expect(res.body.reply).not.toMatch(/\b(confirmed|booked for you|reserved for you)\b/i);
   });
 
+  it('never picks a restaurant the schedule already has on another day (live: Clown Bar on Friday and again on Saturday)', async () => {
+    // The 15th's planned dinner is Septime; the dinner goes on the 16th (the 15th is taken by a dinner plan).
+    const trip = parisLondon();
+    trip.cities[0].schedule['2026-12-15'][1] = { id: 'p2', title: 'Le Comptoir du Relais (French bistro)', startTime: '18:00', endTime: '20:00', category: 'restaurant', plannedDurationMin: 120 };
+    const res = await chat('add_dinner', { city: 'Paris', date: '2026-12-16' }, trip);
+    expect(res.body.type).toBe('proposal');
+    // Le Comptoir is first in the picks, but it is already Tuesday's dinner.
+    expect(res.body.proposal.after.event.dinner.restaurant).toBe('Septime');
+  });
+
+  it('when every pick is already on the schedule, it still proposes one rather than refusing', async () => {
+    const trip = parisLondon();
+    trip.cities[0].schedule['2026-12-14'] = [
+      { id: 'a', title: 'Le Comptoir du Relais (French bistro)', startTime: '19:00', endTime: '21:00', category: 'restaurant', plannedDurationMin: 120 },
+      { id: 'b', title: 'Pink Mamma (Italian)', startTime: '12:30', endTime: '13:30', category: 'restaurant', plannedDurationMin: 60 },
+    ];
+    const res = await chat('add_dinner', { city: 'Paris', date: '2026-12-16' }, trip);
+    expect(res.body.type).toBe('proposal');
+    expect(['Le Comptoir du Relais', 'Septime', 'Pink Mamma']).toContain(res.body.proposal.after.event.dinner.restaurant);
+  });
+
   it('a cuisine hint picks the matching restaurant, keeps its coordinates, and says what it replaces that evening', async () => {
     const res = await chat('add_dinner', { city: 'Paris', cuisine: 'bistro' });
     const e = res.body.proposal.after.event;

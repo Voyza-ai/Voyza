@@ -773,7 +773,23 @@ const DINNER_TITLE: Record<DinnerProposal['action'], string> = {
   remove: 'Remove dinner',
 };
 
-function DinnerLine({ side, muted }: { side: NonNullable<DinnerProposal['after']>; muted?: boolean }) {
+type DinnerSide = NonNullable<DinnerProposal['after']>;
+
+/** "Sat, Jan 16 · 7:30 PM → 8:00 PM · 2 people · Paris": what changed, in place. */
+function dinnerWhen(side: DinnerSide, from?: DinnerSide): string {
+  const d = side.event.dinner!;
+  const was = from?.event.dinner;
+  const step = (a: string, b: string | undefined) => (b !== undefined && b !== a ? `${b} → ${a}` : a);
+  const party = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
+  return [
+    step(nightLabel(side.date), from ? nightLabel(from.date) : undefined),
+    step(timeLabel(side.event.startTime), from ? timeLabel(from.event.startTime) : undefined),
+    step(party(d.partySize), was ? party(was.partySize) : undefined),
+    d.city,
+  ].join(' · ');
+}
+
+function DinnerLine({ side, muted, from }: { side: DinnerSide; muted?: boolean; from?: DinnerSide }) {
   const d = side.event.dinner!;
   const meta = [d.cuisine, d.priceRange].filter(Boolean).join(' · ');
   return (
@@ -788,12 +804,15 @@ function DinnerLine({ side, muted }: { side: NonNullable<DinnerProposal['after']
         <div className={`text-[13px] font-medium text-white truncate ${muted ? 'line-through' : ''}`}>{d.restaurant}</div>
         {meta && <div className="text-[11px] text-white/50">{meta}</div>}
         <div className="text-[11px] text-white/70" data-testid="dinner-when">
-          {nightLabel(side.date)} · {timeLabel(side.event.startTime)} · {d.partySize} {d.partySize === 1 ? 'person' : 'people'} · {d.city}
+          {dinnerWhen(side, from)}
         </div>
       </div>
     </div>
   );
 }
+
+const sameRestaurant = (a: DinnerSide, b: DinnerSide) =>
+  a.event.dinner!.restaurant.trim().toLowerCase() === b.event.dinner!.restaurant.trim().toLowerCase();
 
 function DinnerProposalCard({
   proposal,
@@ -823,8 +842,17 @@ function DinnerProposalCard({
         <div className="text-[10px] uppercase tracking-wide text-white/40">Proposed</div>
       </div>
       <div className="px-4 pb-3 flex flex-col gap-2">
-        {proposal.action === 'change' && proposal.before && <DinnerLine side={proposal.before} muted />}
-        {proposal.action === 'remove' ? <DinnerLine side={proposal.before!} muted /> : <DinnerLine side={proposal.after!} />}
+        {proposal.action === 'remove' ? (
+          <DinnerLine side={proposal.before!} muted />
+        ) : proposal.action === 'change' && proposal.before && sameRestaurant(proposal.before, proposal.after!) ? (
+          // Same restaurant, new time / night / party: one line, the change shown in place.
+          <DinnerLine side={proposal.after!} from={proposal.before} />
+        ) : (
+          <>
+            {proposal.action === 'change' && proposal.before && <DinnerLine side={proposal.before} muted />}
+            <DinnerLine side={proposal.after!} />
+          </>
+        )}
         {proposal.action !== 'remove' && (
           <div className="pl-[34px]">
             <span

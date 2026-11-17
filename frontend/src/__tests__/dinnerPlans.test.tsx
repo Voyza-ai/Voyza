@@ -168,6 +168,35 @@ describe('the chat card and the guide', () => {
     expect(within(card).getByTestId('dinner-reserve')).toHaveAttribute('href', 'https://www.google.com/maps/search/?api=1&query=Da%20Enzo%2C%20Rome');
   });
 
+  it('"make it 8pm": the change card shows the restaurant once and the new time in place (live: it struck out the same restaurant and repeated it)', async () => {
+    const before = { date: '2026-06-16', event: dinnerEvent() };
+    const after = { date: '2026-06-16', event: dinnerEvent({ startTime: '20:00', endTime: '22:00' }) };
+    mockedPlanChat.mockResolvedValueOnce({ type: 'proposal', reply: 'Your dinner in Rome: 7:30 PM → 8:00 PM.', proposal: { kind: 'dinner', action: 'change', city: 'Rome', before, after } });
+    const t = applyDinnerProposal(trip(), add())!;
+    render(<AIChatPanel trip={t} onTripUpdate={jest.fn()} getLatestTrip={() => t} />);
+    const input = screen.getByPlaceholderText('Ask about your trip...');
+    fireEvent.change(input, { target: { value: 'make it 8pm' } });
+    fireEvent.submit(input.closest('form')!);
+    const card = await screen.findByTestId('dinner-card');
+    expect(within(card).getByText('Change dinner')).toBeInTheDocument();
+    expect(within(card).getAllByText('Da Enzo')).toHaveLength(1);
+    expect(within(card).getByTestId('dinner-when')).toHaveTextContent('Tue, Jun 16 · 7:30 PM → 8:00 PM · 2 people · Rome');
+  });
+
+  it('a change of restaurant still shows the old one struck out above the new one', async () => {
+    const before = { date: '2026-06-16', event: dinnerEvent() };
+    const after = { date: '2026-06-16', event: dinnerEvent({ title: 'Roscioli', dinner: { ...dinnerEvent().dinner!, restaurant: 'Roscioli', cuisine: 'Roman' } }) };
+    mockedPlanChat.mockResolvedValueOnce({ type: 'proposal', reply: 'Da Enzo → Roscioli.', proposal: { kind: 'dinner', action: 'change', city: 'Rome', before, after } });
+    const t = applyDinnerProposal(trip(), add())!;
+    render(<AIChatPanel trip={t} onTripUpdate={jest.fn()} getLatestTrip={() => t} />);
+    const input = screen.getByPlaceholderText('Ask about your trip...');
+    fireEvent.change(input, { target: { value: 'somewhere Roman instead' } });
+    fireEvent.submit(input.closest('form')!);
+    const card = await screen.findByTestId('dinner-card');
+    expect(within(card).getByText('Da Enzo')).toHaveClass('line-through');
+    expect(within(card).getByText('Roscioli')).not.toHaveClass('line-through');
+  });
+
   it('the city guide lists the dinner with its night, time, party, "Not booked yet" and Reserve', () => {
     const t = applyDinnerProposal(trip(), add())!;
     render(

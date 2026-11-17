@@ -146,6 +146,25 @@ function plannedDinnerOn(city: any, date: string): string | null {
   return e ? stopName(String(e.title)) : null;
 }
 
+/**
+ * Restaurants the city's schedule already has on days other than `night`:
+ * the planner's meals and other dinner plans. A new dinner avoids them —
+ * live, "add a dinner for one night in Paris" picked Clown Bar for Saturday
+ * while the schedule already had Clown Bar for Friday's dinner.
+ */
+function restaurantsOnOtherDays(city: any, night: string): Set<string> {
+  const out = new Set<string>();
+  for (const [date, events] of Object.entries(city?.schedule ?? {})) {
+    if (date === night) continue;
+    for (const e of (events as any[]) ?? []) {
+      if (!e) continue;
+      if (e.dinner && typeof e.dinner.restaurant === 'string') out.add(norm(e.dinner.restaurant));
+      else if (e.category === 'restaurant' && typeof e.title === 'string') out.add(norm(stopName(e.title)));
+    }
+  }
+  return out;
+}
+
 /** When the traveller lands in a city on its arrival day (HH:MM), if known. */
 function landingTime(trip: any, cityIndex: number): string | null {
   const city = trip.cities[cityIndex];
@@ -330,8 +349,10 @@ export function proposeAddDinner(trip: any, input: any): DinnerResult {
       };
     }
     const used = new Set(dinners.map((d) => norm(d.event.dinner.restaurant)));
+    const elsewhere = restaurantsOnOtherDays(city, night);
     pick =
-      fits.find((r) => planned && norm(r.name) === norm(planned) && !used.has(norm(r.name))) ??
+      fits.find((r) => planned && norm(r.name) === norm(planned) && !used.has(norm(r.name)) && !elsewhere.has(norm(r.name))) ??
+      fits.find((r) => !used.has(norm(r.name)) && !elsewhere.has(norm(r.name))) ??
       fits.find((r) => !used.has(norm(r.name))) ??
       fits[0];
     from = ` from your ${city.name} dining picks`;
@@ -429,7 +450,8 @@ export function proposeChangeDinner(trip: any, input: any): DinnerResult {
         reply: `None of your other ${city.name} dining picks is ${want}${others.length ? ` — they are: ${others.map(describePick).join('; ')}` : ''}. Name a restaurant and I'll switch the dinner to it. Nothing changed.`,
       };
     }
-    pick = fits[0];
+    const elsewhere = restaurantsOnOtherDays(city, night);
+    pick = fits.find((r) => !elsewhere.has(norm(r.name))) ?? fits[0];
   }
   const party = input?.partySize != null ? readParty(input.partySize, trip) : d.event.dinner.partySize;
 
