@@ -146,6 +146,30 @@ describe('the owner\'s conversation', () => {
   });
 });
 
+describe('it does not claim round-trip before it is answered', () => {
+  it('production, after "Paris is home": "So you\'ll be flying round-trip from Paris" is removed, the question kept', async () => {
+    model({
+      reply: "Perfect! So you'll be flying round-trip from Paris. How many people are traveling?",
+      updates: { origin: 'Paris', returnToHome: true },
+      action: 'ask',
+      quickReplies: ['Just me', '2 of us'],
+    });
+    const res = await turn('Paris is home', { destinations: ['London', 'Paris', 'Munich'] }, [
+      { role: 'assistant', content: 'Are you flying to Paris from somewhere else to start this trip, or is Paris home?' },
+    ]);
+    expect(res.body.updates.origin).toBe('Paris');
+    expect(res.body.updates.returnToHome).toBeUndefined();
+    expect(res.body.reply).toBe('Perfect! How many people are traveling?');
+    expect(res.body.quickReplies).toEqual(['Just me', '2 of us']);
+  });
+
+  it('once it is answered, the reply is left alone', async () => {
+    model({ reply: 'Round-trip it is! How many people?', updates: { returnToHome: true }, action: 'ask' });
+    const res = await turn('Round-trip', { origin: 'Paris' });
+    expect(res.body.reply).toBe('Round-trip it is! How many people?');
+  });
+});
+
 describe('when the traveller DID say it', () => {
   it('"I live in Paris" is home, no confirmation', async () => {
     model({ reply: 'Lovely. When?', updates: { origin: 'Paris', destinations: ['London', 'Munich'] }, action: 'ask' });

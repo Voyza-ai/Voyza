@@ -166,5 +166,16 @@ export function guardHomeAnswers(params: {
   if (finishing && typeof roundTrip !== 'boolean') {
     return { reply: withAck(reply, roundTripQuestion(origin)), updates, action: 'ask', quickReplies: ['Round-trip', 'One-way'] };
   }
+  // Nor is it stated as if it were known. Production, after "Paris is
+  // home": "Perfect! So you'll be flying round-trip from Paris. How many
+  // people are traveling?" — nobody had said round-trip.
+  if (typeof roundTrip !== 'boolean') reply = withoutRoundTripClaims(reply);
   return { reply, updates, action, quickReplies };
+}
+
+/** The reply without statements (not questions) about round-trip / one-way / flying back. */
+export function withoutRoundTripClaims(reply: string): string {
+  const sentences = reply.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
+  const kept = sentences.filter((x) => x.endsWith('?') || !/round[\s-]?trip|one[\s-]?way|flying back|fly back|return(ing)? home|back home/i.test(x));
+  return kept.length > 0 ? kept.join(' ') : reply;
 }
