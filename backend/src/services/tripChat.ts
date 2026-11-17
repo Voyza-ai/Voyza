@@ -66,6 +66,7 @@ import {
 import { getCityCountry } from '../data/cityCountries';
 import { parseDurationMinutes } from '../utils/duration';
 import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
+import { runPackingTool, runWeatherTool, WEATHER_PROMPT_LINE, WEATHER_TOOLS } from './weatherChat';
 import {
   buildTransportProposal,
   describeChoice,
@@ -148,7 +149,7 @@ export const CHAT_TOOLS = [
   {
     name: 'answer_only',
     description:
-      'Use when the user is asking a question, seeking an explanation, or making small talk — NOT requesting a change to the trip. Examples: "Why is this trip cheaper?", "Why this order of cities?", "What\'s the weather like in Rome in March?".',
+      'Use when the user is asking a question, seeking an explanation, or making small talk — NOT requesting a change to the trip. Examples: "Why is this trip cheaper?", "Why this order of cities?". Never for weather or packing — those have their own tools, and you must never state temperatures or rain yourself.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -382,6 +383,7 @@ export const CHAT_TOOLS = [
       required: ['old', 'new', 'explanation'],
     },
   },
+  ...WEATHER_TOOLS,
 ];
 
 /** The system prompt for one turn. Today's date is computed per call. */
@@ -408,6 +410,7 @@ Tools:
 10. add_city / remove_city / replace_city — add, drop or swap a city. Each change is shown to the user as a diff to Accept, so call the tool directly instead of asking "are you sure?".
 11. reorder_cities — change the order of the trip's cities, group a country's cities, or find the best order.
 
+${WEATHER_PROMPT_LINE}
 ALWAYS pick exactly one tool per turn.
 
 Each request stands on its own: never carry a time bound, airline or other filter over from an earlier message unless the user clearly refers back to it ("the same time", "that one"). "Make it cheaper" with no leg named: ask which leg (ask_which_leg).
@@ -475,11 +478,11 @@ async function runTripChatInUnits(input: TripChatInput): Promise<TripChatResult>
     const textBlock = response.content.find((b: any) => b.type === 'text') as any;
     return { type: 'answer', reply: textBlock?.text ?? "I'm not sure how to help with that — could you rephrase?" };
   }
-  return runTool(currentTrip, toolUse.name as string, (toolUse.input ?? {}) as any);
+  return runTool(currentTrip, toolUse.name as string, (toolUse.input ?? {}) as any, message);
 }
 
 /** Dispatch one tool call. Exported for tests of a tool without a model. */
-export async function runTool(currentTrip: any, toolName: string, toolInput: any): Promise<TripChatResult> {
+export async function runTool(currentTrip: any, toolName: string, toolInput: any, message?: string): Promise<TripChatResult> {
   if (toolName === 'answer_only') return { type: 'answer', reply: toolInput.answer };
 
   const legs = tripLegs(currentTrip);
@@ -506,6 +509,9 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
       proposal: built.proposal,
     };
   }
+
+  if (toolName === 'get_weather') return runWeatherTool(currentTrip, toolInput, message ?? '');
+  if (toolName === 'packing_list') return runPackingTool(currentTrip, toolInput, message ?? '');
 
   if (toolName === 'compare_modes') return compareModes(currentTrip, legs, toolInput);
   if (toolName === 'set_transport_window' || toolName === 'show_transport_options') {
