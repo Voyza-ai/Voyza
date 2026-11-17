@@ -29,6 +29,7 @@ import type { SummaryField } from '@/lib/tripSummary';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
+import MobilePlanner from '@/components/mobile/MobilePlanner';
 import { usePlannerLeaveGuard } from '@/hooks/usePlannerLeaveGuard';
 import { formatMinutes, humanDay, humanDayRange } from '@/lib/dateHelpers';
 import DatePicker from './DatePicker';
@@ -257,8 +258,18 @@ export function looksLikeDestinationEdit(text: string, destinations: string[] | 
   return destinations.some((d) => d && lower.includes(d.toLowerCase()));
 }
 
-export default function PlanningChat() {
+type PlanningChatProps = {
+  /**
+   * 'mobile' (the /m planner) opens straight into the AI conversation, draws
+   * it with the mobile layout, and lands the found trip on the mobile trip
+   * screen. Every search, answer and guard below is the same code either way.
+   */
+  variant?: 'web' | 'mobile';
+};
+
+export default function PlanningChat({ variant = 'web' }: PlanningChatProps = {}) {
   const router = useRouter();
+  const isMobile = variant === 'mobile';
   // Landing-page hero seed — handed to the conversational planner on mount.
   const chatSeedRef = useRef<string | null>(null);
   const { answers, setAnswer } = useTripStore();
@@ -406,6 +417,10 @@ export default function PlanningChat() {
     } else if (useTripStore.getState().chatHistory.length > 0) {
       // Resumed session (back from results to replan) — rejoin the
       // conversation where it left off.
+      setIntent('chat');
+    } else if (isMobile) {
+      // The mobile planner is the conversation itself (no mode picker).
+      setAnswer('planningMode', 'destination');
       setIntent('chat');
     } else {
       setMessages([
@@ -1792,7 +1807,7 @@ export default function PlanningChat() {
       // Step 4 lands on /results: the trip goes on screen now, and each city's
       // AI picks fill in when they answer (startTripPicks).
       startTripPicks(trip, picksRequests, picksInFlight);
-      router.push('/results');
+      router.push(isMobile ? '/m/trip' : '/results');
     } catch (err: unknown) {
       const friendly = plannerErrorMessage(err);
       setFindTripError(friendly);
@@ -2394,6 +2409,31 @@ export default function PlanningChat() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findTripLoading, findTripError, intent]);
+
+  if (isMobile && intent === 'chat') {
+    return (
+      <MobilePlanner
+        seedMessage={chatSeedRef.current ?? undefined}
+        onFindTrip={handleFindTrip}
+        findTripLoading={findTripLoading}
+        findTripStatus={findTripStatus}
+        findTripError={findTripError}
+        onSwitchToGuided={() => {
+          setIntent('place');
+          setSteps(PLACE_STEPS);
+          setCurrentStepIndex(0);
+          setMessages([
+            {
+              id: nextId(),
+              role: 'assistant',
+              content: PLACE_STEPS[0].question,
+              stepId: PLACE_STEPS[0].id,
+            },
+          ]);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="relative flex flex-col h-screen" style={{ background: '#f0f4f8' }}>

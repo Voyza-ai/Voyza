@@ -1,0 +1,16 @@
+{
+  "name": "BlueMurr",
+  "short_name": "BlueMurr",
+  "description": "Plan multi-city trips by flight and train — just say where you want to go.",
+  "start_url": "/m",
+  "scope": "/m",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f0f4f8",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "/m/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/m/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/m/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

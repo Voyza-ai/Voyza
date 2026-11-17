@@ -833,7 +833,7 @@ function formatHomeDate(iso: string): string {
  * train swap list that between-city legs do. Connector gracefully
  * hides the "Other options" section when alternatives is empty.
  */
-function homeLegToTransport(leg: HomeLeg, fromCity: string, toCity: string): Transport {
+export function homeLegToTransport(leg: HomeLeg, fromCity: string, toCity: string): Transport {
   const fmt = (mins: number) => {
     const h = Math.floor(mins / 60);
     const m = mins % 60;

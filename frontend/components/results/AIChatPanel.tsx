@@ -93,6 +93,11 @@ type AIChatPanelProps = {
   getLatestTrip?: () => Trip | null;
   /** Shows a hide button in the header (the page then offers a tab to bring it back). */
   onHide?: () => void;
+  /**
+   * 'sheet' draws the same chat on the dark #0f0f1a AI surface for the mobile
+   * bottom sheet, which brings its own header. Behaviour is identical.
+   */
+  appearance?: 'panel' | 'sheet';
 };
 
 /**
@@ -279,7 +284,8 @@ function applyLegRefreshToTrip(trip: Trip, refresh: LegRefresh): Trip {
   } as Trip;
 }
 
-export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide }: AIChatPanelProps) {
+export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide, appearance = 'panel' }: AIChatPanelProps) {
+  const dark = appearance === 'sheet';
   const setTrip = useTripStore((s) => s.setTrip);
 
   // Host-provided sinks with trip-store defaults — the results page uses
@@ -541,14 +547,20 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
 
   return (
     <div
-      className="flex flex-col h-full rounded-3xl border-2 overflow-hidden"
-      style={{
-        background: '#eef3fb',
-        borderColor: '#2e6bc4',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04)',
-      }}
+      className={dark ? 'flex flex-col h-full overflow-hidden' : 'flex flex-col h-full rounded-3xl border-2 overflow-hidden'}
+      data-appearance={appearance}
+      style={
+        dark
+          ? { background: '#0f0f1a' }
+          : {
+              background: '#eef3fb',
+              borderColor: '#2e6bc4',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04)',
+            }
+      }
     >
       {/* Header */}
+      {!dark && (
       <div className="px-5 py-4 flex items-center gap-2.5" style={{ background: '#2e6bc4' }}>
         <div
           className="w-8 h-8 rounded-full flex items-center justify-center"
@@ -572,6 +584,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
           </button>
         )}
       </div>
+      )}
 
       {/* Messages */}
       <div
@@ -589,13 +602,26 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
               className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
             >
               <div
-                className={`max-w-[88%] px-3.5 py-2.5 rounded-2xl text-[13px] leading-relaxed whitespace-pre-wrap ${
-                  msg.role === 'user' ? 'text-gray-900 rounded-br-md' : 'text-gray-700 rounded-bl-md'
-                }`}
-                style={{
-                  background: msg.role === 'user' ? 'rgba(46,107,196,0.12)' : 'rgba(0,0,0,0.03)',
-                  border: msg.role === 'user' ? '1px solid rgba(46,107,196,0.2)' : '1px solid rgba(0,0,0,0.06)',
-                }}
+                className={
+                  dark
+                    ? `max-w-[88%] px-3.5 py-2.5 rounded-2xl text-[15px] leading-relaxed whitespace-pre-wrap ${
+                        msg.role === 'user' ? 'text-white rounded-br-md' : 'text-white/85 rounded-bl-md'
+                      }`
+                    : `max-w-[88%] px-3.5 py-2.5 rounded-2xl text-[13px] leading-relaxed whitespace-pre-wrap ${
+                        msg.role === 'user' ? 'text-gray-900 rounded-br-md' : 'text-gray-700 rounded-bl-md'
+                      }`
+                }
+                style={
+                  dark
+                    ? {
+                        background: msg.role === 'user' ? '#2563eb' : 'rgba(255,255,255,0.06)',
+                        border: msg.role === 'user' ? '1px solid #2563eb' : '1px solid rgba(255,255,255,0.08)',
+                      }
+                    : {
+                        background: msg.role === 'user' ? 'rgba(46,107,196,0.12)' : 'rgba(0,0,0,0.03)',
+                        border: msg.role === 'user' ? '1px solid rgba(46,107,196,0.2)' : '1px solid rgba(0,0,0,0.06)',
+                      }
+                }
               >
                 {messageText(msg, priceMode, trip)}
               </div>
@@ -666,7 +692,11 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
             >
               <div
                 className="px-3.5 py-3 rounded-2xl rounded-bl-md flex items-center gap-1"
-                style={{ background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.06)' }}
+                style={
+                  dark
+                    ? { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }
+                    : { background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.06)' }
+                }
               >
                 {[0, 1, 2].map((i) => (
                   <motion.div
@@ -686,15 +716,19 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
           message. Counting messages breaks when the date-shift savings tip
           adds a second assistant bubble on load. */}
       {!messages.some((m) => m.role === 'user') && (
-        <div className="px-5 pb-3 flex flex-wrap gap-1.5">
+        <div className={dark ? 'px-4 pb-3 flex gap-2 overflow-x-auto scrollbar-hide' : 'px-5 pb-3 flex flex-wrap gap-1.5'}>
           {suggestions.map((prompt) => (
             <button
               key={prompt}
               onClick={() => handleSend(prompt)}
-              className="text-[11px] text-[#2e6bc4] hover:text-[#1e5ab3] px-2.5 py-1.5 rounded-full border transition-colors"
+              className={
+                dark
+                  ? 'flex-shrink-0 min-h-[40px] text-[13px] text-white/85 px-3.5 py-2 rounded-full border transition-colors whitespace-nowrap'
+                  : 'text-[11px] text-[#2e6bc4] hover:text-[#1e5ab3] px-2.5 py-1.5 rounded-full border transition-colors'
+              }
               style={{
-                background: 'rgba(46,107,196,0.08)',
-                borderColor: 'rgba(46,107,196,0.25)',
+                background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(46,107,196,0.08)',
+                borderColor: dark ? 'rgba(255,255,255,0.14)' : 'rgba(46,107,196,0.25)',
                 opacity: suggestionsLoaded ? 1 : 0.6,
               }}
             >
@@ -707,24 +741,32 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
       {/* Input */}
       <form
         onSubmit={handleSubmit}
-        className="p-3 flex items-center gap-2"
-        style={{ borderTop: '2px solid #2e6bc4' }}
+        className={dark ? 'px-3 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] flex items-center gap-2' : 'p-3 flex items-center gap-2'}
+        style={{ borderTop: dark ? '1px solid rgba(255,255,255,0.08)' : '2px solid #2e6bc4' }}
       >
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask about your trip..."
-          className="flex-1 text-gray-900 text-[13px] placeholder:text-gray-400 outline-none px-3 py-2 rounded-lg"
-          style={{ background: 'rgba(46,107,196,0.06)' }}
+          className={
+            dark
+              ? 'flex-1 min-w-0 text-white text-[16px] placeholder:text-white/40 outline-none px-4 py-3 rounded-full'
+              : 'flex-1 text-gray-900 text-[13px] placeholder:text-gray-400 outline-none px-3 py-2 rounded-lg'
+          }
+          style={{ background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(46,107,196,0.06)' }}
         />
         <button
           type="submit"
           disabled={!input.trim() || isTyping}
-          className="w-9 h-9 rounded-full flex items-center justify-center text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed enabled:hover:scale-105 active:scale-95"
+          className={
+            dark
+              ? 'w-11 h-11 flex-shrink-0 rounded-full flex items-center justify-center text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed active:scale-95'
+              : 'w-9 h-9 rounded-full flex items-center justify-center text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed enabled:hover:scale-105 active:scale-95'
+          }
           style={{
-            background: input.trim() && !isTyping ? '#2e6bc4' : 'rgba(0,0,0,0.05)',
-            color: input.trim() && !isTyping ? '#ffffff' : 'rgba(0,0,0,0.4)',
+            background: input.trim() && !isTyping ? (dark ? '#2563eb' : '#2e6bc4') : dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+            color: input.trim() && !isTyping ? '#ffffff' : dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
           }}
           aria-label="Send"
         >
