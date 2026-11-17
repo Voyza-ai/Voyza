@@ -657,3 +657,75 @@ describe('the Duffel test-mode airline is not shown when a real airline is offer
     expect(offers.map((o) => o.carrierCode)).toEqual(['ZZ', 'ZZ']);
   });
 });
+
+/**
+ * Duffel's test mode also sells placeholder schedules under REAL airline
+ * names: departing at exactly 00:00:00, no aircraft on any segment, and a
+ * computed `distance`. Production, 2026-11-17: Paris → London's cheapest
+ * were "British Airways" / "American Airlines" CDG → BQH (Biggin Hill)
+ * 00:00 → 00:00, and the home-flight card showed 00:00 → 00:00 at $164.
+ * (Real Duffel payload shape, copied from that search.)
+ */
+describe('Duffel test-mode placeholder schedules are not shown when a real flight is offered', () => {
+  const offer = (id: string, amount: string, seg: any) => ({
+    id,
+    total_amount: amount,
+    total_currency: 'USD',
+    slices: [{ duration: seg.duration, segments: [seg] }],
+  });
+  const placeholder = (id: string, carrier: { name: string; iata_code: string }, amount: string) =>
+    offer(id, amount, {
+      ...segment({
+        departingAt: '2027-03-01T00:00:00', arrivingAt: '2027-03-01T00:00:00',
+        originIata: 'CDG', originTimeZone: 'Europe/Paris', destinationIata: 'BQH', destinationTimeZone: 'Europe/London',
+        duration: 'PT1H', carrier,
+      }),
+      aircraft: null,
+      distance: '314.16032681785833',
+    });
+  const easyJet = offer('u2', '132.69', {
+    ...segment({
+      departingAt: '2027-03-01T14:25:00', arrivingAt: '2027-03-01T14:35:00',
+      originIata: 'CDG', originTimeZone: 'Europe/Paris', destinationIata: 'SEN', destinationTimeZone: 'Europe/London',
+      duration: 'PT1H10M', carrier: { name: 'easyJet', iata_code: 'U2' },
+    }),
+    aircraft: null,
+    distance: null,
+  });
+  // A real flight that happens to leave at midnight, with its aircraft named.
+  const realMidnight = offer('af', '150.00', {
+    ...segment({
+      departingAt: '2027-03-01T00:00:00', arrivingAt: '2027-03-01T00:15:00',
+      originIata: 'CDG', originTimeZone: 'Europe/Paris', destinationIata: 'LHR', destinationTimeZone: 'Europe/London',
+      duration: 'PT1H15M', carrier: { name: 'Air France', iata_code: 'AF' },
+    }),
+    aircraft: { name: 'Airbus A320' },
+    distance: '348.1',
+  });
+  const BA = { name: 'British Airways', iata_code: 'BA' };
+  const AA = { name: 'American Airlines', iata_code: 'AA' };
+
+  let n = 0;
+  const search = () =>
+    searchFlights({ origin: 'CDG', destination: 'LON', date: `2027-04-${String(++n).padStart(2, '0')}`, travelers: 2 });
+
+  it('drops them, even cheaper ones, when a real flight is in the results', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValue({
+      data: { offers: [placeholder('ba', BA, '82.02'), placeholder('aa', AA, '82.04'), easyJet] },
+    });
+    const offers = await search();
+    expect(offers.map((o) => `${o.carrier} ${o.departure.slice(11, 16)}`)).toEqual(['easyJet 14:25']);
+  });
+
+  it('keeps a real midnight departure (it names its aircraft)', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValue({ data: { offers: [placeholder('ba', BA, '82.02'), realMidnight] } });
+    const offers = await search();
+    expect(offers.map((o) => o.carrier)).toEqual(['Air France']);
+  });
+
+  it('keeps them when they are all there is, so the leg still has a price', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValue({ data: { offers: [placeholder('ba', BA, '82.02')] } });
+    const offers = await search();
+    expect(offers).toHaveLength(1);
+  });
+});
