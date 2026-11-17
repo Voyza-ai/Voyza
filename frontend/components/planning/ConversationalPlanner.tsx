@@ -197,7 +197,8 @@ export default function ConversationalPlanner({
         a.dateRange?.start &&
         a.dateRange?.end &&
         a.travelers &&
-        a.origin, // where they're flying FROM — required for the flight search
+        a.origin && // where they're flying FROM — required for the flight search
+        typeof a.returnToHome === 'boolean', // round-trip vs one-way — asked, never assumed
     );
   }, []);
 
