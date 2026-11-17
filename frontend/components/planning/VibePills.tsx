@@ -27,6 +27,8 @@ type VibePillsProps = {
   canContinue?: boolean;
   /** Hide the Continue button (the editor brings its own Save/Cancel). */
   hideContinue?: boolean;
+  /** Let the pills wrap onto more rows (the mobile vibe sheet). Default: one row. */
+  wrap?: boolean;
 };
 
 /**
@@ -47,6 +49,7 @@ export default function VibePills({
   onContinue,
   canContinue,
   hideContinue = false,
+  wrap = false,
 }: VibePillsProps) {
   const ready = canContinue ?? selected.length > 0;
   const atMax = selected.length >= MAX_VIBES;
@@ -97,7 +100,7 @@ export default function VibePills({
   return (
     <div
       ref={rootRef}
-      className="flex flex-nowrap items-stretch gap-2 w-full"
+      className={`flex ${wrap ? 'flex-wrap' : 'flex-nowrap'} items-stretch gap-2 w-full`}
       role="group"
       aria-label={`Pick up to ${MAX_VIBES} vibes`}
       data-testid="vibe-pills"

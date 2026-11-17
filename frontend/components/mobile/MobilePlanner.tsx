@@ -89,6 +89,17 @@ export default function MobilePlanner({
     p.send(v);
   };
 
+  const submitVibes = () => {
+    const picked = dedupeVibes(p.vibeDraft);
+    if (picked.length === 0) return;
+    // Stored as picked, whatever the AI makes of the sentence (as on desktop).
+    p.setAnswer('vibes', picked);
+    p.setAnswer('vibe', joinVibes(picked));
+    p.setWidget(null);
+    p.setVibeDraft([]);
+    p.send(`${vibeBubbleText(picked)} vibes`);
+  };
+
   const summary = summarizeAnswers(p.answers);
   const summaryParts = summary.flatMap((g) => g.pieces.filter((x): x is { field: SummaryField; text: string } => typeof x !== 'string'));
   const busy = p.isTyping || findTripLoading;
@@ -391,21 +402,21 @@ export default function MobilePlanner({
         title="What's the vibe?"
         subtitle="Pick one or a few"
         testId="m-vibe-sheet"
+        footer={
+          <div className="px-4 pt-2 pb-[max(14px,env(safe-area-inset-bottom))] border-t" style={{ borderColor: M.line }}>
+            <button
+              onClick={submitVibes}
+              disabled={dedupeVibes(p.vibeDraft).length === 0}
+              className="w-full min-h-[52px] rounded-2xl text-[16px] font-semibold text-white disabled:opacity-40"
+              style={{ background: M.blue }}
+            >
+              Continue
+            </button>
+          </div>
+        }
       >
-        <div className="px-5 pb-[max(16px,env(safe-area-inset-bottom))]">
-          <VibePills
-            selected={p.vibeDraft}
-            onChange={p.setVibeDraft}
-            onContinue={() => {
-              const picked = dedupeVibes(p.vibeDraft);
-              if (picked.length === 0) return;
-              p.setAnswer('vibes', picked);
-              p.setAnswer('vibe', joinVibes(picked));
-              p.setWidget(null);
-              p.setVibeDraft([]);
-              p.send(`${vibeBubbleText(picked)} vibes`);
-            }}
-          />
+        <div className="px-5 pb-4">
+          <VibePills wrap hideContinue selected={p.vibeDraft} onChange={p.setVibeDraft} onContinue={submitVibes} />
         </div>
       </BottomSheet>
 
