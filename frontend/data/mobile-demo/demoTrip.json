@@ -1,1 +1,891 @@
-{"title":"placeholder","status":"planning","totalCost":0,"savings":0,"travelers":2,"cities":[],"savingsTips":[]}
+{
+ "title": "Paris → London",
+ "status": "planning",
+ "totalCost": 968,
+ "savings": 0,
+ "travelers": 2,
+ "cities": [
+  {
+   "name": "Paris",
+   "country": "France",
+   "dates": {
+    "arrival": "2027-01-12",
+    "departure": "2027-01-16"
+   },
+   "transportIn": {
+    "mode": "flight",
+    "operator": "",
+    "duration": "",
+    "price": 0
+   },
+   "transportOut": {
+    "mode": "flight",
+    "operator": "American Airlines",
+    "duration": "1h 5m",
+    "price": 86.3,
+    "from": "Paris",
+    "to": "London",
+    "departTime": "11:36",
+    "arriveTime": "11:41",
+    "layovers": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-16",
+    "flightNumber": "AA",
+    "alternatives": [
+     {
+      "mode": "flight",
+      "operator": "British Airways",
+      "duration": "1h 5m",
+      "price": 86.94,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "11:36",
+      "arriveTime": "11:41",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-16",
+      "flightNumber": "BA"
+     },
+     {
+      "mode": "flight",
+      "operator": "Iberia",
+      "duration": "1h 5m",
+      "price": 87.76,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "11:36",
+      "arriveTime": "11:41",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-16",
+      "flightNumber": "IB"
+     },
+     {
+      "mode": "flight",
+      "operator": "easyJet",
+      "duration": "1h 20m",
+      "price": 132.77,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:30",
+      "arriveTime": "10:50",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-16",
+      "flightNumber": "U2"
+     }
+    ],
+    "noTrainData": true
+   },
+   "hotel": {
+    "name": "Hôtel Malte Opéra",
+    "rating": 8.6,
+    "pricePerNight": 189,
+    "area": "2nd Arrondissement",
+    "locationScore": 0.9,
+    "reviewCount": 1840
+   },
+   "hotels": [
+    {
+     "name": "Hôtel Malte Opéra",
+     "rating": 8.6,
+     "pricePerNight": 189,
+     "area": "2nd Arrondissement",
+     "locationScore": 0.9,
+     "reviewCount": 1840
+    },
+    {
+     "name": "Hôtel des Grands Boulevards",
+     "rating": 8.9,
+     "pricePerNight": 224,
+     "area": "2nd Arrondissement",
+     "locationScore": 0.88,
+     "reviewCount": 1210
+    },
+    {
+     "name": "Hôtel Jeanne d’Arc Le Marais",
+     "rating": 8.4,
+     "pricePerNight": 162,
+     "area": "Le Marais",
+     "locationScore": 0.86,
+     "reviewCount": 2650
+    }
+   ],
+   "selectedHotelIndex": 0,
+   "activities": [
+    "Musée d'Orsay",
+    "Le Marais walking tour",
+    "Sainte-Chapelle",
+    "Dinner at Le Comptoir du Relais",
+    "Musée Rodin sculpture gardens",
+    "Marché des Enfants Rouges",
+    "Atelier des Lumières",
+    "Père Lachaise Cemetery"
+   ],
+   "restaurants": [
+    {
+     "name": "L'Ami Jean",
+     "cuisine": "Basque bistro",
+     "priceRange": "$$",
+     "lat": 48.8603183,
+     "lng": 2.3059915,
+     "placeId": "osm:N254497766"
+    },
+    {
+     "name": "Breizh Café",
+     "cuisine": "Breton crêperie",
+     "priceRange": "$",
+     "lat": 48.8606307,
+     "lng": 2.3618156,
+     "placeId": "osm:N2383363288"
+    },
+    {
+     "name": "Chez L'Ami Jean",
+     "cuisine": "classic French bistro",
+     "priceRange": "$$$"
+    },
+    {
+     "name": "Bouillon Chartier",
+     "cuisine": "traditional French bouillon",
+     "priceRange": "$",
+     "lat": 48.8719356,
+     "lng": 2.3430137,
+     "placeId": "osm:N10804882603"
+    },
+    {
+     "name": "Septime",
+     "cuisine": "modern French",
+     "priceRange": "$$$$",
+     "lat": 48.8536026,
+     "lng": 2.3809558,
+     "placeId": "osm:N3602657896"
+    }
+   ],
+   "vibes": [
+    "history",
+    "art"
+   ],
+   "schedule": {
+    "2027-01-12": [
+     {
+      "id": "evt-1794933590986-20",
+      "title": "Head to LGA",
+      "startTime": "06:30",
+      "endTime": "08:30",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-head",
+      "notes": "Allow 2h for check-in & security"
+     },
+     {
+      "id": "evt-1794933590986-21",
+      "title": "Flight LGA → PAR",
+      "startTime": "08:30",
+      "endTime": "22:48",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-travel"
+     },
+     {
+      "id": "evt-1794933590986-22",
+      "title": "Arrive at PAR",
+      "startTime": "22:48",
+      "endTime": "23:03",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-arrive"
+     }
+    ],
+    "2027-01-13": [
+     {
+      "id": "sched-1",
+      "title": "Bouillon Chartier (traditional French bouillon)",
+      "startTime": "08:00",
+      "endTime": "08:45",
+      "category": "restaurant",
+      "notes": "$ · Historic 1896 workers' canteen with Belle Époque decor serving affordable classic French dishes to packed tables.",
+      "lat": 48.8719356,
+      "lng": 2.3430137,
+      "placeId": "osm:N10804882603",
+      "plannedDurationMin": 45
+     },
+     {
+      "id": "sched-2",
+      "title": "Sainte-Chapelle",
+      "startTime": "09:05",
+      "endTime": "10:05",
+      "category": "activity",
+      "notes": "Gothic masterpiece with breathtaking 13th-century stained glass that transforms with sunlight.",
+      "lat": 48.8553933,
+      "lng": 2.3449941,
+      "placeId": "osm:R3344870",
+      "plannedDurationMin": 60,
+      "travelFromPrev": {
+       "minutes": 20,
+       "distanceKm": 2.5,
+       "mode": "transit",
+       "source": "estimate",
+       "fromPlaceId": "osm:N10804882603"
+      }
+     },
+     {
+      "id": "sched-3",
+      "title": "Breizh Café (Breton crêperie)",
+      "startTime": "11:30",
+      "endTime": "13:00",
+      "category": "restaurant",
+      "notes": "$ · Authentic buckwheat galettes and sweet crêpes from Brittany, showcasing traditional French regional cooking.",
+      "lat": 48.8606307,
+      "lng": 2.3618156,
+      "placeId": "osm:N2383363288",
+      "plannedDurationMin": 90,
+      "travelFromPrev": {
+       "minutes": 20,
+       "distanceKm": 1.8,
+       "mode": "transit",
+       "source": "estimate",
+       "fromPlaceId": "osm:R3344870"
+      }
+     },
+     {
+      "id": "sched-4",
+      "title": "Marché des Enfants Rouges",
+      "startTime": "13:15",
+      "endTime": "15:15",
+      "category": "restaurant",
+      "notes": "Paris's oldest covered market offering diverse international food stalls and local produce.",
+      "lat": 48.8622546,
+      "lng": 2.3666035,
+      "placeId": "osm:N10032478445",
+      "plannedDurationMin": 120,
+      "travelFromPrev": {
+       "minutes": 10,
+       "distanceKm": 0.5,
+       "mode": "walk",
+       "source": "estimate",
+       "fromPlaceId": "osm:N2383363288"
+      }
+     },
+     {
+      "id": "sched-5",
+      "title": "Atelier des Lumières",
+      "startTime": "17:00",
+      "endTime": "18:00",
+      "category": "activity",
+      "notes": "Immersive digital art projections in a former foundry create a mesmerizing audiovisual experience.",
+      "lat": 48.8618887,
+      "lng": 2.3811608,
+      "placeId": "osm:W973123037",
+      "plannedDurationMin": 60,
+      "travelFromPrev": {
+       "minutes": 20,
+       "distanceKm": 1.3,
+       "mode": "walk",
+       "source": "estimate",
+       "fromPlaceId": "osm:N10032478445"
+      }
+     },
+     {
+      "id": "sched-6",
+      "title": "Septime (modern French)",
+      "startTime": "19:00",
+      "endTime": "21:00",
+      "category": "restaurant",
+      "notes": "$$$$ · Critically acclaimed restaurant where inventive seasonal tasting menus reflect contemporary Parisian culinary excellence.",
+      "lat": 48.8536026,
+      "lng": 2.3809558,
+      "placeId": "osm:N3602657896",
+      "plannedDurationMin": 120,
+      "travelFromPrev": {
+       "minutes": 15,
+       "distanceKm": 1.2,
+       "mode": "walk",
+       "source": "estimate",
+       "fromPlaceId": "osm:W973123037"
+      }
+     }
+    ],
+    "2027-01-14": [
+     {
+      "id": "sched-7",
+      "title": "Père Lachaise Cemetery",
+      "startTime": "09:00",
+      "endTime": "11:00",
+      "category": "activity",
+      "notes": "Hauntingly beautiful necropolis where Oscar Wilde, Jim Morrison, and Édith Piaf rest among Gothic tombs.",
+      "lat": 48.8611296,
+      "lng": 2.3940087,
+      "placeId": "osm:W13859706",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-8",
+      "title": "Musée Rodin sculpture gardens",
+      "startTime": "12:00",
+      "endTime": "14:00",
+      "category": "activity",
+      "notes": "Contemplative outdoor museum featuring The Thinker amid rose gardens in an 18th-century mansion.",
+      "lat": 48.8547473,
+      "lng": 2.315867,
+      "placeId": "osm:W472159547",
+      "plannedDurationMin": 120,
+      "travelFromPrev": {
+       "minutes": 40,
+       "distanceKm": 7.8,
+       "mode": "transit",
+       "source": "estimate",
+       "fromPlaceId": "osm:W13859706"
+      }
+     },
+     {
+      "id": "sched-9",
+      "title": "L'Ami Jean (Basque bistro)",
+      "startTime": "18:00",
+      "endTime": "20:00",
+      "category": "restaurant",
+      "notes": "$$ · Boisterous neighborhood favorite serving hearty regional dishes in a convivial atmosphere beloved by locals.",
+      "lat": 48.8603183,
+      "lng": 2.3059915,
+      "placeId": "osm:N254497766",
+      "plannedDurationMin": 120,
+      "travelFromPrev": {
+       "minutes": 15,
+       "distanceKm": 1.2,
+       "mode": "walk",
+       "source": "estimate",
+       "fromPlaceId": "osm:W472159547"
+      }
+     },
+     {
+      "id": "sched-10",
+      "title": "Dinner at Le Comptoir du Relais",
+      "startTime": "20:25",
+      "endTime": "22:25",
+      "category": "restaurant",
+      "notes": "Intimate bistro serving exceptional modern French cuisine by chef Yves Camdeborde.",
+      "lat": 48.8519626,
+      "lng": 2.3388319,
+      "placeId": "osm:N315769031",
+      "plannedDurationMin": 120,
+      "travelFromPrev": {
+       "minutes": 25,
+       "distanceKm": 3.5,
+       "mode": "transit",
+       "source": "estimate",
+       "fromPlaceId": "osm:N254497766"
+      }
+     }
+    ],
+    "2027-01-15": [
+     {
+      "id": "sched-11",
+      "title": "Musée d'Orsay",
+      "startTime": "09:00",
+      "endTime": "12:00",
+      "category": "activity",
+      "notes": "World-class Impressionist collection in a stunning Beaux-Arts railway station.",
+      "lat": 48.8599179,
+      "lng": 2.3265849,
+      "placeId": "osm:W63178753",
+      "plannedDurationMin": 180
+     },
+     {
+      "id": "sched-12",
+      "title": "Le Marais walking tour",
+      "startTime": "12:15",
+      "endTime": "15:15",
+      "category": "activity",
+      "notes": "Historic Jewish quarter with medieval architecture, trendy boutiques, and authentic falafel.",
+      "plannedDurationMin": 180
+     },
+     {
+      "id": "sched-13",
+      "title": "Chez L'Ami Jean (classic French bistro)",
+      "startTime": "19:00",
+      "endTime": "21:00",
+      "category": "restaurant",
+      "notes": "$$$ · Experience the soul of Parisian dining culture with impeccable seasonal cooking and legendary rice pudding.",
+      "plannedDurationMin": 120
+     }
+    ]
+   },
+   "unscheduled": []
+  },
+  {
+   "name": "London",
+   "country": "United Kingdom",
+   "dates": {
+    "arrival": "2027-01-16",
+    "departure": "2027-01-19"
+   },
+   "transportIn": {
+    "mode": "flight",
+    "operator": "American Airlines",
+    "duration": "1h 5m",
+    "price": 86.3,
+    "from": "Paris",
+    "to": "London",
+    "departTime": "11:36",
+    "arriveTime": "11:41",
+    "layovers": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-16",
+    "flightNumber": "AA",
+    "alternatives": [
+     {
+      "mode": "flight",
+      "operator": "British Airways",
+      "duration": "1h 5m",
+      "price": 86.94,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "11:36",
+      "arriveTime": "11:41",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-16",
+      "flightNumber": "BA"
+     },
+     {
+      "mode": "flight",
+      "operator": "Iberia",
+      "duration": "1h 5m",
+      "price": 87.76,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "11:36",
+      "arriveTime": "11:41",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-16",
+      "flightNumber": "IB"
+     },
+     {
+      "mode": "flight",
+      "operator": "easyJet",
+      "duration": "1h 20m",
+      "price": 132.77,
+      "from": "Paris",
+      "to": "London",
+      "departTime": "10:30",
+      "arriveTime": "10:50",
+      "layovers": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-16",
+      "flightNumber": "U2"
+     }
+    ],
+    "noTrainData": true
+   },
+   "transportOut": {
+    "mode": "flight",
+    "operator": "",
+    "duration": "",
+    "price": 0
+   },
+   "hotel": {
+    "name": "The Hoxton, Holborn",
+    "rating": 8.8,
+    "pricePerNight": 239,
+    "area": "Holborn",
+    "locationScore": 0.9,
+    "reviewCount": 3020
+   },
+   "hotels": [
+    {
+     "name": "The Hoxton, Holborn",
+     "rating": 8.8,
+     "pricePerNight": 239,
+     "area": "Holborn",
+     "locationScore": 0.9,
+     "reviewCount": 3020
+    },
+    {
+     "name": "citizenM Tower of London",
+     "rating": 8.7,
+     "pricePerNight": 205,
+     "area": "Tower Hill",
+     "locationScore": 0.82,
+     "reviewCount": 4100
+    },
+    {
+     "name": "Premier Inn London County Hall",
+     "rating": 8.3,
+     "pricePerNight": 168,
+     "area": "South Bank",
+     "locationScore": 0.84,
+     "reviewCount": 5200
+    }
+   ],
+   "selectedHotelIndex": 0,
+   "activities": [
+    "British Museum",
+    "Street art tour in Shoreditch",
+    "Borough Market",
+    "Shakespeare's Globe Theatre",
+    "Sir John Soane's Museum",
+    "Afternoon tea at The Wolseley",
+    "Tate Modern"
+   ],
+   "restaurants": [
+    {
+     "name": "Dishoom Covent Garden",
+     "cuisine": "Bombay café",
+     "priceRange": "$$",
+     "lat": 51.5124271,
+     "lng": -0.126856,
+     "placeId": "osm:W207104925"
+    },
+    {
+     "name": "St. John Bread and Wine",
+     "cuisine": "British nose-to-tail",
+     "priceRange": "$$"
+    },
+    {
+     "name": "Lahore Kebab House",
+     "cuisine": "Pakistani grills",
+     "priceRange": "$"
+    },
+    {
+     "name": "Sketch (The Lecture Room & Library)",
+     "cuisine": "French haute cuisine",
+     "priceRange": "$$$$"
+    },
+    {
+     "name": "Kiln",
+     "cuisine": "Thai regional",
+     "priceRange": "$$"
+    }
+   ],
+   "vibes": [
+    "history",
+    "art"
+   ],
+   "schedule": {
+    "2027-01-16": [
+     {
+      "id": "evt-1794933591878-28",
+      "title": "Head to PAR",
+      "startTime": "09:36",
+      "endTime": "11:36",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-head",
+      "notes": "Allow 2h for check-in & security"
+     },
+     {
+      "id": "evt-1794933591878-29",
+      "title": "Flight PAR → LON",
+      "startTime": "11:36",
+      "endTime": "11:41",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-travel",
+      "notes": "1h 5m"
+     },
+     {
+      "id": "evt-1794933591878-30",
+      "title": "Arrive at LON",
+      "startTime": "11:41",
+      "endTime": "11:56",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "in-arrive"
+     },
+     {
+      "id": "sched-1",
+      "title": "St. John Bread and Wine (British nose-to-tail)",
+      "startTime": "12:41",
+      "endTime": "14:11",
+      "category": "restaurant",
+      "notes": "$$ · Iconic Spitalfields institution championing British ingredients and offal with unfussy seasonal dishes that define modern London dining.",
+      "plannedDurationMin": 90
+     },
+     {
+      "id": "sched-2",
+      "title": "British Museum",
+      "startTime": "14:26",
+      "endTime": "17:26",
+      "category": "activity",
+      "notes": "World-class collection spanning human history from Egyptian mummies to the Rosetta Stone.",
+      "lat": 51.5193118,
+      "lng": -0.1267051,
+      "placeId": "osm:R177044",
+      "plannedDurationMin": 180
+     },
+     {
+      "id": "sched-3",
+      "title": "Lahore Kebab House (Pakistani grills)",
+      "startTime": "18:00",
+      "endTime": "20:00",
+      "category": "restaurant",
+      "notes": "$ · No-frills East London legend serving sizzling lamb chops and seekh kebabs that locals have queued for since 1983.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-4",
+      "title": "Tate Modern",
+      "startTime": "20:15",
+      "endTime": "23:15",
+      "category": "activity",
+      "notes": "Contemporary art powerhouse in a converted power station with stunning Thames views.",
+      "lat": 51.5074293,
+      "lng": -0.0993416,
+      "placeId": "osm:W24642569",
+      "plannedDurationMin": 180
+     }
+    ],
+    "2027-01-19": [
+     {
+      "id": "evt-1794933591886-31",
+      "title": "Head to LON",
+      "startTime": "11:56",
+      "endTime": "13:56",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "out-head",
+      "notes": "Allow 2h for check-in & security"
+     },
+     {
+      "id": "evt-1794933591886-32",
+      "title": "Flight LON → LGA",
+      "startTime": "13:56",
+      "endTime": "16:53",
+      "category": "transport",
+      "auto": true,
+      "autoRole": "out-travel"
+     }
+    ],
+    "2027-01-17": [
+     {
+      "id": "sched-5",
+      "title": "Dishoom Covent Garden (Bombay café)",
+      "startTime": "08:00",
+      "endTime": "08:45",
+      "category": "restaurant",
+      "notes": "$$ · Vibrant Indian café serving exceptional bacon naan rolls for breakfast and rich curries in a nostalgic 1960s Bombay setting.",
+      "lat": 51.5124271,
+      "lng": -0.126856,
+      "placeId": "osm:W207104925",
+      "plannedDurationMin": 45
+     },
+     {
+      "id": "sched-6",
+      "title": "Sir John Soane's Museum",
+      "startTime": "09:00",
+      "endTime": "11:00",
+      "category": "activity",
+      "notes": "Eccentric architect's former home packed with antiquities and art in atmospheric candlelit rooms.",
+      "lat": 51.5170754,
+      "lng": -0.1174953,
+      "placeId": "osm:W61453261",
+      "plannedDurationMin": 120,
+      "travelFromPrev": {
+       "minutes": 15,
+       "distanceKm": 1,
+       "mode": "walk",
+       "source": "estimate",
+       "fromPlaceId": "osm:W207104925"
+      }
+     },
+     {
+      "id": "sched-7",
+      "title": "Borough Market",
+      "startTime": "12:00",
+      "endTime": "14:00",
+      "category": "restaurant",
+      "notes": "Historic food market offering artisan cheeses, fresh oysters, and global street food.",
+      "lat": 51.5055264,
+      "lng": -0.090438,
+      "placeId": "osm:W24282400",
+      "plannedDurationMin": 120,
+      "travelFromPrev": {
+       "minutes": 25,
+       "distanceKm": 3.1,
+       "mode": "transit",
+       "source": "estimate",
+       "fromPlaceId": "osm:W61453261"
+      }
+     },
+     {
+      "id": "sched-8",
+      "title": "Sketch (The Lecture Room & Library) (French haute cuisine)",
+      "startTime": "18:00",
+      "endTime": "20:00",
+      "category": "restaurant",
+      "notes": "$$$$ · Three-Michelin-starred temple of gastronomy set in a whimsical 18th-century townhouse where art, design, and culinary brilliance collide.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-9",
+      "title": "Shakespeare's Globe Theatre",
+      "startTime": "20:15",
+      "endTime": "23:15",
+      "category": "activity",
+      "notes": "Experience a play in this faithful reconstruction of the original Elizabethan playhouse.",
+      "lat": 51.5081214,
+      "lng": -0.0971864,
+      "placeId": "osm:R1239793",
+      "plannedDurationMin": 180
+     }
+    ],
+    "2027-01-18": [
+     {
+      "id": "sched-10",
+      "title": "Street art tour in Shoreditch",
+      "startTime": "12:00",
+      "endTime": "14:00",
+      "category": "activity",
+      "notes": "Explore vibrant murals and graffiti by Banksy and local artists in East London's creative heart.",
+      "plannedDurationMin": 120
+     },
+     {
+      "id": "sched-11",
+      "title": "Kiln (Thai regional)",
+      "startTime": "19:00",
+      "endTime": "21:00",
+      "category": "restaurant",
+      "notes": "$$ · Counter-seating gem in Soho showcasing smoky, intense northern Thai flavours cooked over open flames with seasonal British ingredients.",
+      "plannedDurationMin": 120
+     }
+    ]
+   },
+   "unscheduled": [
+    {
+     "title": "Afternoon tea at The Wolseley",
+     "kind": "activity",
+     "durationMin": 120,
+     "date": "2027-01-19"
+    }
+   ]
+  }
+ ],
+ "savingsTips": [],
+ "dateShiftChecked": true,
+ "origin": {
+  "city": "New York",
+  "airports": [
+   "JFK",
+   "LGA",
+   "EWR"
+  ],
+  "outboundLeg": {
+   "originAirport": "LGA",
+   "destAirport": "PAR",
+   "price": 448.04,
+   "currency": "USD",
+   "durationMinutes": 498,
+   "operator": "British Airways",
+   "carrierCode": "BA",
+   "departTime": "08:30",
+   "arriveTime": "22:48",
+   "departDate": "2027-01-12",
+   "arriveDate": "2027-01-12",
+   "stops": 0,
+   "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20LGA%20on%202027-01-12",
+   "alternatives": [
+    {
+     "originAirport": "LGA",
+     "destAirport": "PAR",
+     "price": 449.36,
+     "currency": "USD",
+     "durationMinutes": 498,
+     "operator": "American Airlines",
+     "carrierCode": "AA",
+     "departTime": "08:30",
+     "arriveTime": "22:48",
+     "departDate": "2027-01-12",
+     "arriveDate": "2027-01-12",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20LGA%20on%202027-01-12"
+    },
+    {
+     "originAirport": "JFK",
+     "destAirport": "PAR",
+     "price": 451.28,
+     "currency": "USD",
+     "durationMinutes": 498,
+     "operator": "British Airways",
+     "carrierCode": "BA",
+     "departTime": "08:30",
+     "arriveTime": "22:48",
+     "departDate": "2027-01-12",
+     "arriveDate": "2027-01-12",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20JFK%20on%202027-01-12"
+    },
+    {
+     "originAirport": "EWR",
+     "destAirport": "PAR",
+     "price": 454.86,
+     "currency": "USD",
+     "durationMinutes": 500,
+     "operator": "British Airways",
+     "carrierCode": "BA",
+     "departTime": "08:30",
+     "arriveTime": "22:50",
+     "departDate": "2027-01-12",
+     "arriveDate": "2027-01-12",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20EWR%20on%202027-01-12"
+    }
+   ]
+  },
+  "returnLeg": {
+   "originAirport": "LON",
+   "destAirport": "LGA",
+   "price": 433.54,
+   "currency": "USD",
+   "durationMinutes": 477,
+   "operator": "American Airlines",
+   "carrierCode": "AA",
+   "departTime": "13:56",
+   "arriveTime": "16:53",
+   "departDate": "2027-01-19",
+   "arriveDate": "2027-01-19",
+   "stops": 0,
+   "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LGA%20from%20LON%20on%202027-01-19",
+   "alternatives": [
+    {
+     "originAirport": "LON",
+     "destAirport": "JFK",
+     "price": 437.08,
+     "currency": "USD",
+     "durationMinutes": 477,
+     "operator": "British Airways",
+     "carrierCode": "BA",
+     "departTime": "13:56",
+     "arriveTime": "16:53",
+     "departDate": "2027-01-19",
+     "arriveDate": "2027-01-19",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20JFK%20from%20LON%20on%202027-01-19"
+    },
+    {
+     "originAirport": "LON",
+     "destAirport": "EWR",
+     "price": 444.98,
+     "currency": "USD",
+     "durationMinutes": 479,
+     "operator": "British Airways",
+     "carrierCode": "BA",
+     "departTime": "13:56",
+     "arriveTime": "16:55",
+     "departDate": "2027-01-19",
+     "arriveDate": "2027-01-19",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20EWR%20from%20LON%20on%202027-01-19"
+    },
+    {
+     "originAirport": "LON",
+     "destAirport": "EWR",
+     "price": 447.96,
+     "currency": "USD",
+     "durationMinutes": 479,
+     "operator": "Iberia",
+     "carrierCode": "IB",
+     "departTime": "13:56",
+     "arriveTime": "16:55",
+     "departDate": "2027-01-19",
+     "arriveDate": "2027-01-19",
+     "stops": 0,
+     "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20EWR%20from%20LON%20on%202027-01-19"
+    }
+   ]
+  }
+ },
+ "returnToHome": true,
+ "vibe": "Culture"
+}

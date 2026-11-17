@@ -1,1 +1,200 @@
-{"suggestions":[],"replies":[{"type":"answer","reply":"placeholder"}]}
+{
+ "suggestions": [
+  "Add a night in Paris",
+  "Why did you pick this order?",
+  "Can we take the train to London?"
+ ],
+ "replies": [
+  {
+   "match": "night",
+   "response": {
+    "type": "proposal",
+    "reply": "Adding one more night in Paris (from 4 to 5 nights). New dates: Paris Jan 12–Jan 17 (5 nights), London Jan 17–Jan 20 (3 nights). Your flight home moves to Jan 20. Flight home: American Airlines LON 14:42 → LGA 17:42 on Jan 20, $433 (was American Airlines at $434). Accept to apply it.",
+    "proposal": {
+     "kind": "city_edit",
+     "toolName": "set_min_days",
+     "op": {
+      "kind": "dates",
+      "city": "Paris"
+     },
+     "before": [
+      {
+       "name": "Paris",
+       "arrival": "2027-01-12",
+       "departure": "2027-01-16"
+      },
+      {
+       "name": "London",
+       "arrival": "2027-01-16",
+       "departure": "2027-01-19"
+      }
+     ],
+     "after": [
+      {
+       "name": "Paris",
+       "arrival": "2027-01-12",
+       "departure": "2027-01-17",
+       "status": "moved",
+       "fromIndex": 0,
+       "hotels": []
+      },
+      {
+       "name": "London",
+       "arrival": "2027-01-17",
+       "departure": "2027-01-20",
+       "status": "moved",
+       "fromIndex": 1,
+       "hotels": []
+      }
+     ],
+     "removed": [],
+     "legs": [
+      {
+       "index": 0,
+       "from": "Paris",
+       "to": "London",
+       "date": "2027-01-17",
+       "options": [
+        {
+         "mode": "flight",
+         "operator": "British Airways",
+         "flightNumber": "BA",
+         "price": 77.18,
+         "currency": "USD",
+         "departTime": "12:23",
+         "arriveTime": "12:18",
+         "duration": "55m",
+         "durationMinutes": 55,
+         "stops": 0,
+         "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-17",
+         "priceDelta": 77.18
+        },
+        {
+         "mode": "flight",
+         "operator": "Iberia",
+         "flightNumber": "IB",
+         "price": 78.2,
+         "currency": "USD",
+         "departTime": "12:23",
+         "arriveTime": "12:18",
+         "duration": "55m",
+         "durationMinutes": 55,
+         "stops": 0,
+         "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-17",
+         "priceDelta": 78.2
+        },
+        {
+         "mode": "flight",
+         "operator": "American Airlines",
+         "flightNumber": "AA",
+         "price": 78.74,
+         "currency": "USD",
+         "departTime": "12:23",
+         "arriveTime": "12:18",
+         "duration": "55m",
+         "durationMinutes": 55,
+         "stops": 0,
+         "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-17",
+         "priceDelta": 78.74
+        },
+        {
+         "mode": "flight",
+         "operator": "easyJet",
+         "flightNumber": "U2",
+         "price": 132.77,
+         "currency": "USD",
+         "departTime": "10:05",
+         "arriveTime": "10:25",
+         "duration": "1h 20m",
+         "durationMinutes": 80,
+         "stops": 0,
+         "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LON%20from%20PAR%20on%202027-01-17",
+         "priceDelta": 132.77
+        }
+       ]
+      }
+     ],
+     "note": "New dates: Paris Jan 12–Jan 17 (5 nights), London Jan 17–Jan 20 (3 nights). Your flight home moves to Jan 20.",
+     "returnLeg": {
+      "originAirport": "LON",
+      "destAirport": "LGA",
+      "price": 432.72,
+      "currency": "USD",
+      "durationMinutes": 480,
+      "operator": "American Airlines",
+      "carrierCode": "AA",
+      "departTime": "14:42",
+      "arriveTime": "17:42",
+      "departDate": "2027-01-20",
+      "arriveDate": "2027-01-20",
+      "stops": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LGA%20from%20LON%20on%202027-01-20",
+      "alternatives": [
+       {
+        "originAirport": "LON",
+        "destAirport": "JFK",
+        "price": 434,
+        "currency": "USD",
+        "durationMinutes": 481,
+        "operator": "Iberia",
+        "carrierCode": "IB",
+        "departTime": "14:42",
+        "arriveTime": "17:43",
+        "departDate": "2027-01-20",
+        "arriveDate": "2027-01-20",
+        "stops": 0,
+        "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20JFK%20from%20LON%20on%202027-01-20"
+       },
+       {
+        "originAirport": "LON",
+        "destAirport": "LGA",
+        "price": 439.26,
+        "currency": "USD",
+        "durationMinutes": 480,
+        "operator": "British Airways",
+        "carrierCode": "BA",
+        "departTime": "14:42",
+        "arriveTime": "17:42",
+        "departDate": "2027-01-20",
+        "arriveDate": "2027-01-20",
+        "stops": 0,
+        "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LGA%20from%20LON%20on%202027-01-20"
+       },
+       {
+        "originAirport": "LON",
+        "destAirport": "JFK",
+        "price": 451.36,
+        "currency": "USD",
+        "durationMinutes": 481,
+        "operator": "American Airlines",
+        "carrierCode": "AA",
+        "departTime": "14:42",
+        "arriveTime": "17:43",
+        "departDate": "2027-01-20",
+        "arriveDate": "2027-01-20",
+        "stops": 0,
+        "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20JFK%20from%20LON%20on%202027-01-20"
+       }
+      ]
+     },
+     "constraints": {
+      "pinned_cities": [],
+      "min_days": [
+       {
+        "city": "Paris",
+        "minNights": 5
+       }
+      ],
+      "transport_windows": []
+     }
+    }
+   }
+  },
+  {
+   "response": {
+    "type": "answer",
+    "reply": "This is the demo, so I can only make one scripted change here — try “Add a night in Paris”. In the real app, ask me anything: swap a flight for a train, move dates, add or drop a city."
+   }
+  }
+ ]
+}

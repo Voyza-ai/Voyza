@@ -22,6 +22,8 @@ type ActivitiesDetailPanelProps = {
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
+  /** Narrow layout for the mobile city sheet (see CityDetailPanel). */
+  compact?: boolean;
 };
 
 export default function ActivitiesDetailPanel({
@@ -30,6 +32,7 @@ export default function ActivitiesDetailPanel({
   onClose,
   onPrev,
   onNext,
+  compact = false,
 }: ActivitiesDetailPanelProps) {
   const city = trip.cities[cityIndex];
   const color = getCityColor(city.colorIndex ?? cityIndex);
@@ -53,7 +56,7 @@ export default function ActivitiesDetailPanel({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.97 }}
       transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }}
-      className="h-full flex flex-col rounded-3xl border-2 overflow-hidden relative"
+      className={`${compact ? '' : 'h-full '}flex flex-col rounded-3xl border-2 overflow-hidden relative`}
       style={{ background: color.bg, borderColor: color.border }}
     >
       <style>{`
@@ -68,7 +71,7 @@ export default function ActivitiesDetailPanel({
 
       {/* Header */}
       <div
-        className="px-7 pt-6 pb-5 flex items-start justify-between gap-4 flex-shrink-0"
+        className={compact ? 'px-4 pt-4 pb-4 flex items-start justify-between gap-3 flex-shrink-0' : 'px-7 pt-6 pb-5 flex items-start justify-between gap-4 flex-shrink-0'}
         style={{ borderBottom: `4px solid ${color.border}` }}
       >
         <div className="min-w-0">
@@ -152,10 +155,10 @@ export default function ActivitiesDetailPanel({
       </div>
 
       {/* Body — two-column: activities LEFT, restaurants RIGHT */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-0">
+      <div className={compact ? 'flex flex-col' : 'flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-0'}>
         {/* LEFT: Activities */}
         <div
-          className={`px-7 py-6 overflow-y-auto min-h-0 ${scrollCls}`}
+          className={compact ? 'px-4 py-5' : `px-7 py-6 overflow-y-auto min-h-0 ${scrollCls}`}
           style={{ borderRight: `4px solid ${color.border}` }}
         >
           {/* `key` is load-bearing. The list holds `editingIdx` and the
@@ -175,7 +178,7 @@ export default function ActivitiesDetailPanel({
 
         {/* RIGHT: Restaurants */}
         <div
-          className={`px-7 py-6 overflow-y-auto min-h-0 ${scrollCls}`}
+          className={compact ? 'px-4 py-5' : `px-7 py-6 overflow-y-auto min-h-0 ${scrollCls}`}
           style={{ background: `${color.text}06` }}
         >
           {/* Same reason as ActivityList above — and more urgent here: the

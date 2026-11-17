@@ -37,6 +37,11 @@ type CityDetailPanelProps = {
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
+  /**
+   * Narrow layout for the mobile city sheet: header stacked, one column,
+   * natural height (the sheet scrolls). Default false — the desktop layout.
+   */
+  compact?: boolean;
 };
 
 /**
@@ -72,6 +77,7 @@ export default function CityDetailPanel({
   onClose,
   onPrev,
   onNext,
+  compact = false,
 }: CityDetailPanelProps) {
   const setSelectedHotel = useTripStore((s) => s.setSelectedHotel);
   const setCustomHotel = useTripStore((s) => s.setCustomHotel);
@@ -112,7 +118,7 @@ export default function CityDetailPanel({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.97 }}
       transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }}
-      className="h-full flex flex-col rounded-3xl border-2 overflow-hidden relative"
+      className={`${compact ? '' : 'h-full '}flex flex-col rounded-3xl border-2 overflow-hidden relative`}
       style={{
         background: color.bg,
         borderColor: color.border,
@@ -134,7 +140,7 @@ export default function CityDetailPanel({
 
       {/* Header — pinned */}
       <div
-        className="px-7 pt-6 pb-5 flex items-start justify-between gap-4 flex-shrink-0"
+        className={compact ? 'px-4 pt-12 pb-4 flex flex-col gap-3 flex-shrink-0' : 'px-7 pt-6 pb-5 flex items-start justify-between gap-4 flex-shrink-0'}
         style={{ borderBottom: `4px solid ${color.border}` }}
       >
         <div className="min-w-0">
@@ -176,7 +182,7 @@ export default function CityDetailPanel({
         </div>
 
         {/* Right column: nav controls + travel in/out summary */}
-        <div className="flex flex-col items-end gap-3 flex-shrink-0">
+        <div className={compact ? 'flex flex-col items-stretch gap-3' : 'flex flex-col items-end gap-3 flex-shrink-0'}>
           <div className="flex items-center gap-1.5">
             <button
               type="button"
@@ -233,11 +239,11 @@ export default function CityDetailPanel({
       </div>
 
       {/* Body grid — fills remaining height; each column scrolls internally */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-0">
+      <div className={compact ? 'flex flex-col' : 'flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-0'}>
 
         {/* LEFT: Hotel picker */}
         <div
-          className={`px-7 py-6 overflow-y-auto min-h-0 ${scrollCls}`}
+          className={compact ? 'px-4 py-5' : `px-7 py-6 overflow-y-auto min-h-0 ${scrollCls}`}
           style={{ borderRight: `4px solid ${color.border}` }}
         >
           <div className="flex items-start justify-between mb-4 gap-4">
@@ -363,7 +369,7 @@ export default function CityDetailPanel({
 
         {/* RIGHT: Selected hotel details — slightly different tinted bg */}
         <div
-          className={`px-6 py-5 flex flex-col gap-3 overflow-y-auto min-h-0 ${scrollCls}`}
+          className={compact ? 'px-4 py-5 flex flex-col gap-3' : `px-6 py-5 flex flex-col gap-3 overflow-y-auto min-h-0 ${scrollCls}`}
           style={{ background: `${color.text}06` }}
         >
           <HotelDetail

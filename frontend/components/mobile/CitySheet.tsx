@@ -89,9 +89,10 @@ export default function CitySheet({ trip, index, onClose, onIndexChange, editabl
       }
     >
       {index !== null && city && (
-        <div className="m-panel h-full px-3 pb-3">
+        <div className="m-panel px-3 pb-6">
           {tab === 'stay' ? (
             <CityDetailPanel
+              compact
               trip={trip}
               cityIndex={index}
               onClose={onClose}
@@ -100,6 +101,7 @@ export default function CitySheet({ trip, index, onClose, onIndexChange, editabl
             />
           ) : (
             <ActivitiesDetailPanel
+              compact
               trip={trip}
               cityIndex={index}
               onClose={onClose}

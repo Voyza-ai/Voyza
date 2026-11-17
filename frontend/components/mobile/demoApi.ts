@@ -11,9 +11,9 @@ import type { Trip } from '@/lib/types';
 export type DemoChatScript = {
   /** Shown as the chat's suggestion chips. */
   suggestions: string[];
-  /** Replies in order, one per message sent; the last one repeats. Each is a
-   *  real /api/plan/chat response recorded from the backend. */
-  replies: unknown[];
+  /** The first reply whose `match` is in the message (case-insensitive),
+   *  else the first without one. Responses are /api/plan/chat bodies. */
+  replies: Array<{ match?: string; response: unknown }>;
 };
 
 const ISO_DAY = /^(\d{4}-\d{2}-\d{2})/;
@@ -30,7 +30,8 @@ export function shiftDates<T>(value: T, days: number): T {
       return dt.toISOString().slice(0, 10) + v.slice(10);
     }
     if (Array.isArray(v)) return v.map(walk);
-    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    // Keys too: a city's schedule is keyed by day.
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [walk(k), walk(x)]));
     return v;
   };
   return walk(value);
@@ -53,7 +54,6 @@ const json = (body: unknown, status = 200) =>
  */
 export function installDemoApi(apiBase: string, script: DemoChatScript, dayShift: number): () => void {
   const realFetch = window.fetch.bind(window);
-  let replyIndex = 0;
   const apiOrigin = new URL(apiBase, window.location.href).origin;
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -64,9 +64,14 @@ export function installDemoApi(apiBase: string, script: DemoChatScript, dayShift
     await new Promise((r) => setTimeout(r, path === '/api/plan/chat' ? 1100 : 150));
     if (path === '/api/plan/chat-suggestions') return json({ suggestions: script.suggestions });
     if (path === '/api/plan/chat') {
-      const reply = script.replies[Math.min(replyIndex, script.replies.length - 1)];
-      replyIndex++;
-      return json(shiftDates(reply, dayShift));
+      let message = '';
+      try {
+        message = String(JSON.parse(String(init?.body ?? '{}')).message ?? '').toLowerCase();
+      } catch {}
+      const hit =
+        script.replies.find((r) => r.match && message.includes(r.match.toLowerCase())) ??
+        script.replies.find((r) => !r.match);
+      return json(shiftDates(hit?.response ?? { type: 'answer', reply: '' }, dayShift));
     }
     if (path.startsWith('/api/trips/popular')) return json({ trips: [] });
     return json({ error: 'This is the demo — the BlueMurr service is not connected here.' }, 503);
