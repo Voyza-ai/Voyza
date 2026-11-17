@@ -1,6 +1,6 @@
 import { compareLeg, LegComparison, type CompareLegParams } from './compareLeg';
 import { getIataCode, searchFlights, type IataLookupContext } from './flights';
-import { isDuffelTestAirline, withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
+import { isDuffelTestOffer, withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
 import { duffelLiveMode } from '../utils/duffelMode';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
@@ -1721,7 +1721,7 @@ async function searchHomeOffers(ctx: RunContext, params: {
       searched = [usable[0]];
     }
   }
-  if (!found.some(({ offer }) => !isDuffelTestAirline(offer))) {
+  if (!found.some(({ offer }) => !isDuffelTestOffer(offer))) {
     const rest = usable.filter((a) => !searched.includes(a));
     found = [...found, ...(await Promise.all(rest.map(alone))).flat()];
     searched = [...searched, ...rest];
@@ -1790,7 +1790,10 @@ function createHomeFares(
               date,
               travelers,
             });
-            return found.map((o: any) => toHomeFlightOffer(o, airport, r.cityIata, reverse));
+            // A placeholder schedule (testAirline.ts) loses to any offer
+            // already found; the merge below can't tell, having no `raw`.
+            const real = r.offers.length > 0 ? found.filter((o: any) => !isDuffelTestOffer(o)) : found;
+            return real.map((o: any) => toHomeFlightOffer(o, airport, r.cityIata, reverse));
           } catch {
             return [];
           }

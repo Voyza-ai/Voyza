@@ -128,13 +128,25 @@ describe('ConversationalPlanner', () => {
     await screen.findByText('Where are you flying from?');
     expect(screen.queryByText('Your trip so far')).not.toBeInTheDocument();
 
-    // Now origin arrives → recap + Find my trip
+    // Origin arrives, but round-trip vs one-way is still unanswered → not
+    // ready yet (it is asked, never assumed — production planned "flying out
+    // of Paris … back to Paris" as one-way without asking).
     mockedConverse.mockResolvedValue({
-      reply: "That's everything!",
+      reply: 'Round-trip, or one-way?',
       updates: { origin: 'New York' },
       action: 'ready',
     });
     await sendText('from New York');
+    await screen.findByText('Round-trip, or one-way?');
+    expect(screen.queryByText('Your trip so far')).not.toBeInTheDocument();
+
+    // Now round-trip is answered → recap + Find my trip
+    mockedConverse.mockResolvedValue({
+      reply: "That's everything!",
+      updates: { returnToHome: true },
+      action: 'ready',
+    });
+    await sendText('Round-trip');
     expect(await screen.findByText('Your trip so far')).toBeInTheDocument();
     // Dates in words, like the rest of the planner — not "2026-10-01 → 2026-10-05".
     expect(screen.getByText('Oct 1 – Oct 5, 2026')).toBeInTheDocument();

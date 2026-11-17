@@ -1364,10 +1364,13 @@ export default function PlanningChat() {
     const hasDates = answers.dateRange?.start || parsed?.dates?.start;
     const hasTravelers = typeof answers.travelers === 'number' || typeof parsed?.travelers === 'number';
     const hasBudget = typeof answers.budget === 'number' || typeof parsed?.budget === 'number';
-    const hasOrigin = !!(answers.origin || parsed?.origin);
-    const hasRoundTrip =
-      typeof answers.returnToHome === 'boolean' ||
-      typeof parsed?.returnToHome === 'boolean';
+    // Where they fly from and round-trip vs one-way are ASKED unless the
+    // traveller already answered them here. The interpret guess was used to
+    // skip both questions but never stored, so "flying out of Paris to
+    // London…" lost its home city, and a mid-route "back to Paris" read as
+    // round-trip.
+    const hasOrigin = !!answers.origin;
+    const hasRoundTrip = typeof answers.returnToHome === 'boolean';
     const travelersAmbiguous = parsed?.travelersAmbiguous === true && hasTravelers;
     const budgetPerPersonKnown =
       typeof answers.budgetPerPerson === 'boolean' ||
