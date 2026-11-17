@@ -46,7 +46,9 @@ export function relayMovedStay(
   const cover = isLast && !stay.includes(city.dates.departure) ? [...stay, city.dates.departure] : stay;
   if (cover.every((d) => old[d] !== undefined)) return null;
 
-  const hasOwn = (d: string) => (old[d] ?? []).some((e) => e.category !== 'transport');
+  // A dinner plan is not a planned stop and is not re-planned here: the
+  // schedule sync keeps it on a night of the stay (lib/scheduleSync).
+  const hasOwn = (d: string) => (old[d] ?? []).some((e) => e.category !== 'transport' && !e.dinner);
   // Days that legitimately sit outside the nights of the stay: the fly-home
   // morning of the last city and the home-departure day of the first.
   const ownDays = new Set(stay);
@@ -71,6 +73,10 @@ export function relayMovedStay(
   for (const d of days) {
     for (const e of [...old[d]].sort((a, b) => a.startTime.localeCompare(b.startTime))) {
       if (e.category !== 'activity' && e.category !== 'restaurant') continue;
+      if (e.dinner) {
+        seen.add(itemKey(e.dinner.restaurant));
+        continue;
+      }
       const stop = parseStop(e);
       const key = itemKey(stop.name);
       if (seen.has(key)) continue;

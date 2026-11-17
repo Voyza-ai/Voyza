@@ -16,6 +16,7 @@ import { parseStop, relayMovedStay } from './stayRelay';
 import { homeDepartureDay } from './tripSpan';
 import { parseLocal, toIso } from './dateHelpers';
 import { coordsOf, travelBetween } from './geoSchedule';
+import { insertDinner, isDinner, nearestNight, stayNights } from './dinnerPlace';
 
 /**
  * Keep a city's day plans in step with its dates and transport.
@@ -106,8 +107,12 @@ export const isPlannedStop = (e: ScheduledEvent): boolean =>
   typeof e.plannedDurationMin === 'number' &&
   spanOf(e)[1] - spanOf(e)[0] === e.plannedDurationMin;
 
-/** The traveller's own block: anything that is neither travel nor a planned stop. */
-export const isTravellersOwn = (e: ScheduledEvent) => e.category !== 'transport' && !isPlannedStop(e);
+/**
+ * The traveller's own block: anything that is neither travel nor a planned
+ * stop — nor a dinner plan, which has its own rule (below): it stays in its
+ * city, on a night of the stay, at its time.
+ */
+export const isTravellersOwn = (e: ScheduledEvent) => e.category !== 'transport' && !isPlannedStop(e) && !isDinner(e);
 const isOwn = isTravellersOwn;
 
 const mealAt = (start: number): Meal => (start < 11 * 60 ? 'breakfast' : start < 16 * 60 ? 'lunch' : 'dinner');
@@ -234,7 +239,7 @@ export function syncCitySchedule(
     // their own blocks that now sit on a travel block.
     const travel = travelRanges(events, ctx);
     const misplaced = events.filter((e) => {
-      if (e.category === 'transport') return false;
+      if (e.category === 'transport' || isDinner(e)) return false;
       const r = spanOf(e);
       const onTravel = travel.some((t) => overlaps(r, t));
       if (isPlannedStop(e)) return onTravel || r[0] < win[0] || r[1] > win[1];
@@ -369,6 +374,30 @@ export function syncCitySchedule(
     const win = fillable(d);
     if (!win || !eligible.has(d) || next[d].some((e) => e.category !== 'transport')) continue;
     write(d, fillDay(next[d], travelRanges(next[d], ctxs.get(d)!), win, defaultsFor(city, d, cover, next)));
+  }
+
+  // Dinner plans (ScheduledEvent.dinner): each stays on its night at its
+  // time. One whose night the stay no longer has moves to the nearest night
+  // it still has (a later one on a tie — the backend's chat reply says the
+  // same), keeps its time and records where it came from, so the views can
+  // say it moved. It never moves to another city, and never lands on the
+  // fly-home morning, which is not a night. It takes the place of a dinner
+  // the planner put on that evening.
+  const dinners: Array<{ e: ScheduledEvent; day: string }> = [];
+  for (const [d, events] of Object.entries(original)) for (const e of events) if (isDinner(e)) dinners.push({ e, day: d });
+  if (dinners.length > 0) {
+    const nights = stayNights(city);
+    for (const d of Object.keys(next)) if (next[d].some(isDinner)) next[d] = next[d].filter((e) => !isDinner(e));
+    for (const { e, day } of dinners) {
+      const target = nights.includes(day) ? day : nearestNight(nights, day);
+      if (!target || !next[target]) continue;
+      const ev = target === day ? e : { ...e, dinner: { ...e.dinner!, movedFrom: e.dinner!.movedFrom ?? day } };
+      const placed = insertDinner(next[target], ev, target);
+      next[target] = placed.events;
+      changed.add(target);
+      for (const u of placed.dropped) unscheduled = [...unscheduled.filter((x) => itemKey(x.title) !== itemKey(u.title)), u];
+    }
+    for (const d of cover) if (!sameDay(next[d], original[d])) changed.add(d);
   }
 
   // What is on the stay now is no longer "unscheduled".
@@ -516,7 +545,8 @@ function travelRanges(events: ScheduledEvent[], ctx: DayTransportContext): Range
 }
 
 const isMealOf = (e: ScheduledEvent, meal: Meal) =>
-  e.category === 'restaurant' && !!parseStop(e).meal && mealAt(toMin(e.startTime)) === meal;
+  (isDinner(e) && meal === 'dinner') ||
+  (e.category === 'restaurant' && !!parseStop(e).meal && mealAt(toMin(e.startTime)) === meal);
 
 /** Cover days, nearest to `day` first (later before earlier on a tie); in order without one. */
 function nearestFirst(cover: string[], day: string | undefined): string[] {

@@ -22,6 +22,7 @@ import { homeDepartureDay } from '@/lib/tripSpan';
 import TravelConnectors from './TravelConnectors';
 import { useDayHubs } from '@/lib/tripHubs';
 import { blockLayout } from '@/lib/blockLayout';
+import DinnerBadge from './DinnerBadge';
 
 type DayPlannerProps = {
   trip: Trip;
@@ -367,7 +368,12 @@ export default function DayPlanner({
                           {minutesToLabel(timeToMinutes(evt.startTime))} – {minutesToLabel(timeToMinutes(evt.endTime))}
                         </div>
                       )}
-                      {height > 56 && evt.notes && (
+                      {evt.dinner && height > 50 && (
+                        <div className="mt-1" data-testid="planner-dinner">
+                          <DinnerBadge dinner={evt.dinner} accent={accent} />
+                        </div>
+                      )}
+                      {height > 56 && evt.notes && !evt.dinner && (
                         <div className="text-[10px] mt-0.5 truncate" style={{ color: `${accent}60` }}>
                           {evt.notes}
                         </div>

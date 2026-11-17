@@ -13,6 +13,7 @@ import {
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { applyUserEdit, reconcileTripTransport } from '@/lib/transportReconcile';
 import { syncTripSchedules } from '@/lib/scheduleSync';
+import { insertDinner, isDinner } from '@/lib/dinnerPlace';
 import { isApplyingRemote } from '@/lib/tripCollab';
 import { liveTripTotal } from '@/lib/tripTotals';
 import type { CanvasIntent } from '@/lib/canvasHandoff';
@@ -633,7 +634,8 @@ function withCityPicks(trip: Trip, cityName: string, picks: CityPicks, legs?: Tr
   const schedule = { ...(old.schedule ?? {}) };
   for (const [day, events] of Object.entries(built.schedule)) {
     const mine = schedule[day];
-    if (!mine || mine.every((e) => e.category === 'transport')) schedule[day] = events;
+    // A dinner plan made before the picks landed keeps its evening.
+    if (!mine || mine.every((e) => e.category === 'transport' || isDinner(e))) schedule[day] = withDinnersOf(mine, events);
   }
   cities[idx] = { ...city, schedule, unscheduled: built.unscheduled };
   return next;
@@ -711,18 +713,27 @@ export function withCityGeo(
   let changed = false;
   for (const [day, events] of Object.entries(built.schedule)) {
     const mine = schedule[day];
+    // A day with a dinner plan on it counts as untouched when the rest of it
+    // is the planner's: the dinner is put back on the re-planned day.
     const untouched =
       !mine ||
-      mine.every((e) => e.category === 'transport') ||
-      sameDayAsBuilt(mine, prior.schedule[day]);
+      mine.every((e) => e.category === 'transport' || isDinner(e)) ||
+      sameDayAsBuilt(mine, withDinnersOf(mine, prior.schedule[day] ?? []));
     if (untouched) {
-      schedule[day] = events;
+      schedule[day] = withDinnersOf(mine, events);
       changed = true;
     }
   }
   if (!changed && restaurants === old.restaurants) return trip;
   cities[idx] = { ...city, schedule, unscheduled: changed ? built.unscheduled : old.unscheduled };
   return next;
+}
+
+/** `events` with the dinner plans of `mine` put back on (lib/dinnerPlace). */
+function withDinnersOf(mine: ScheduledEvent[] | undefined, events: ScheduledEvent[]): ScheduledEvent[] {
+  let out = events;
+  for (const d of (mine ?? []).filter(isDinner)) out = insertDinner(out, d).events;
+  return out;
 }
 
 /**
