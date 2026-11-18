@@ -716,6 +716,42 @@ export async function planChat(params: {
   });
 }
 
+// ─── Weather on the trip's days (Calendar / Schedule) ─────────
+/** One day's weather in one trip city (backend services/weather.ts). */
+export type DayWeather = {
+  date: string;
+  /** forecast: MET Norway. typical: past years' average for the date — not a forecast. */
+  kind: 'forecast' | 'typical';
+  highC: number;
+  lowC: number;
+  /** forecast: rain/snow expected, mm. */
+  precipMm?: number;
+  /** forecast: "rain", "partly cloudy", … */
+  summary?: string;
+  /** typical: share of past years with ≥ 1 mm on the date's window, 0..1. */
+  wetDayShare?: number;
+  source?: string;
+};
+export type TripWeather = {
+  /** A US home reads °F, as the chat answers do. */
+  fahrenheit: boolean;
+  cities: Array<{ city: string; days: DayWeather[]; missing: string[]; typicalYears: string | null }>;
+};
+
+/** Each trip city's weather on its own days. Read-only. */
+export async function fetchTripWeather(trip: {
+  origin?: { city?: string | null } | null;
+  cities: Array<{ name: string; country?: string | null; dates: { arrival: string; departure: string } }>;
+}): Promise<TripWeather> {
+  return apiFetch<TripWeather>('/api/plan/weather', {
+    method: 'POST',
+    body: JSON.stringify({
+      origin: trip.origin?.city ? { city: trip.origin.city } : null,
+      cities: trip.cities.map((c) => ({ name: c.name, country: c.country ?? null, dates: { arrival: c.dates.arrival, departure: c.dates.departure } })),
+    }),
+  });
+}
+
 export async function planChatSuggestions(params: {
   currentTrip: any;
 }): Promise<{ suggestions: string[] }> {
