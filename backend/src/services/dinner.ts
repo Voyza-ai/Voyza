@@ -343,6 +343,7 @@ export function proposeAddDinner(trip: any, input: any): DinnerResult {
   const planned = plannedDinnerOn(city, night);
   let pick: any;
   let from = '';
+  let priceNote = '';
   if (named) {
     pick = picks.find((r) => norm(r.name) === norm(named)) ??
       picks.find((r) => norm(r.name).includes(norm(named)) || norm(named).includes(norm(r.name))) ?? {
@@ -354,13 +355,36 @@ export function proposeAddDinner(trip: any, input: any): DinnerResult {
     if (picks.length === 0) {
       return { type: 'answer', reply: `I don't have dining suggestions for ${city.name} yet. Tell me a restaurant there and I'll add the dinner.` };
     }
-    const fits = picks.filter((r) => matchesHint(r, cuisine, price));
+    // A cuisine is a requirement; a price is a preference ("somewhere fancy"
+    // arrives as $$$$ even when the fanciest pick is $$$ — live, that was
+    // refused). Exact price first, else the nearest level, said so.
+    let fits = picks.filter((r) => matchesHint(r, cuisine, ''));
     if (fits.length === 0) {
-      const want = [cuisine, PRICE.test(price) ? price : ''].filter(Boolean).join(', ');
       return {
         type: 'answer',
-        reply: `None of your ${city.name} dining picks is ${want}. They are: ${picks.map(describePick).join('; ')}. Name one of these, or any restaurant you like, and I'll add it.`,
+        reply: `None of your ${city.name} dining picks is ${cuisine}. They are: ${picks.map(describePick).join('; ')}. Name one of these, or any restaurant you like, and I'll add it.`,
       };
+    }
+    if (PRICE.test(price)) {
+      const level = (r: any) => (PRICE.test(String(r.priceRange ?? '').trim()) ? String(r.priceRange).trim().length : 0);
+      const want = price.length;
+      const exact = fits.filter((r) => level(r) === want);
+      const priced = fits.filter((r) => level(r) > 0);
+      if (exact.length > 0) fits = exact;
+      else if (priced.length > 0) {
+        const levels = priced.map(level);
+        const nearest = Math.min(...levels.map((l) => Math.abs(l - want)));
+        // On a tie, lean the way the traveller asked: up for fancy, down for cheap.
+        const target = levels.filter((l) => Math.abs(l - want) === nearest).sort((x, y) => (want >= 3 ? y - x : x - y))[0];
+        fits = priced.filter((r) => level(r) === target);
+        const scope = `your ${city.name} dining picks${cuisine ? ` for ${cuisine}` : ''}`;
+        priceNote =
+          target === Math.max(...levels) && want > target
+            ? ` — the fanciest of ${scope} (${'$'.repeat(target)}; none is ${price})`
+            : target === Math.min(...levels) && want < target
+              ? ` — the cheapest of ${scope} (${'$'.repeat(target)}; none is ${price})`
+              : ` — the closest to ${price} among ${scope}`;
+      }
     }
     const used = new Set(dinners.map((d) => norm(d.event.dinner.restaurant)));
     const elsewhere = restaurantsOnOtherDays(city, night);
@@ -369,7 +393,7 @@ export function proposeAddDinner(trip: any, input: any): DinnerResult {
       fits.find((r) => !used.has(norm(r.name)) && !elsewhere.has(norm(r.name))) ??
       fits.find((r) => !used.has(norm(r.name))) ??
       fits[0];
-    from = ` from your ${city.name} dining picks`;
+    from = priceNote || ` from your ${city.name} dining picks`;
   }
 
   const event = buildEvent(newId(), trip, city.name, time, party, pick);

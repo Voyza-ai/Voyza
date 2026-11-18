@@ -427,3 +427,34 @@ describe('the address the trip already has is reused', () => {
     expect(mockResolvePlaces).not.toHaveBeenCalled();
   });
 });
+
+describe('"somewhere fancy": a price hint is a preference, not a filter', () => {
+  // Live (weather session, merged chat): "book us somewhere fancy in Paris"
+  // got "None of your Paris dining picks is $$$$" — the model passed $$$$
+  // and the fanciest Paris pick was $$$.
+  it('$$$$ with no $$$$ pick: the fanciest pick, and the reply says it is the fanciest', async () => {
+    const res = await chat('add_dinner', { city: 'Paris', priceRange: '$$$$' });
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after.event.dinner.restaurant).toBe('Septime');
+    expect(res.body.reply).toContain('the fanciest of your Paris dining picks');
+  });
+
+  it('$ with no $ pick: the cheapest, said so', async () => {
+    const res = await chat('add_dinner', { city: 'Paris', priceRange: '$' });
+    expect(res.body.type).toBe('proposal');
+    expect(['$$']).toContain(res.body.proposal.after.event.dinner.priceRange);
+    expect(res.body.reply).toContain('the cheapest of your Paris dining picks');
+  });
+
+  it('an exact price match is still preferred, with no note', async () => {
+    const res = await chat('add_dinner', { city: 'Paris', priceRange: '$$$' });
+    expect(res.body.proposal.after.event.dinner.restaurant).toBe('Septime');
+    expect(res.body.reply).not.toMatch(/fanciest|cheapest/);
+  });
+
+  it('a cuisine with no match still lists the picks instead of guessing', async () => {
+    const res = await chat('add_dinner', { city: 'Paris', cuisine: 'Japanese', priceRange: '$$$$' });
+    expect(res.body.type).toBe('answer');
+    expect(res.body.reply).toContain('None of your Paris dining picks is Japanese');
+  });
+});
