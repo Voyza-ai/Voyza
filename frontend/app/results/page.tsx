@@ -863,10 +863,16 @@ function ResultsPageInner() {
         (next.returnToHome ?? true) &&
         (last?.name !== nLast.name || last?.dates.departure !== nLast.dates.departure);
       if (outbound || ret) {
+        // On the trip as the store holds it NOW: setTrip(next) above has
+        // already synced its day plans (lib/scheduleSync via the store), and
+        // `next` predates that. Built from `next`, this put the old schedule
+        // back, and the re-sync — no longer knowing the stay had moved — sent a
+        // dinner on Paris's 2nd night to the nearest date (its 3rd night).
+        const synced = useTripStore.getState().currentTrip ?? next;
         const cleared: Trip = {
-          ...next,
+          ...synced,
           origin: {
-            ...next.origin,
+            ...synced.origin!,
             ...(outbound ? { outboundLeg: null } : {}),
             ...(ret ? { returnLeg: null } : {}),
           },

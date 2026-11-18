@@ -173,6 +173,30 @@ export type ScheduledEvent = {
   auto?: boolean;
   /** Which generated slot this block fills. Set alongside `auto`. */
   autoRole?: AutoTransportRole;
+  /**
+   * Set on a dinner the traveller planned through BlueMurr AI (lib/dinners).
+   * The night is the schedule day the event sits on and the time is its
+   * startTime. A plan, never a booking.
+   */
+  dinner?: DinnerPlan;
+};
+
+/**
+ * A dinner plan — backend services/dinner.ts DinnerPlan. Nothing books it:
+ * `status` is always 'not_booked' and `reserveUrl` is where the traveller
+ * books the table themselves.
+ */
+export type DinnerPlan = {
+  restaurant: string;
+  city: string;
+  partySize: number;
+  cuisine?: string;
+  priceRange?: string;
+  status: 'not_booked';
+  reserveUrl: string;
+  reserveVia: string;
+  /** The night it was on before the stay's dates moved it (lib/scheduleSync). */
+  movedFrom?: string;
 };
 
 /** The slots `buildDayTransportContext` fills on a travel day. */

@@ -16,6 +16,7 @@ import { parseStop, relayMovedStay } from './stayRelay';
 import { homeDepartureDay } from './tripSpan';
 import { parseLocal, toIso } from './dateHelpers';
 import { coordsOf, travelBetween } from './geoSchedule';
+import { dinnerNightAfter, insertDinner, isDinner, stayNights } from './dinnerPlace';
 
 /**
  * Keep a city's day plans in step with its dates and transport.
@@ -106,8 +107,12 @@ export const isPlannedStop = (e: ScheduledEvent): boolean =>
   typeof e.plannedDurationMin === 'number' &&
   spanOf(e)[1] - spanOf(e)[0] === e.plannedDurationMin;
 
-/** The traveller's own block: anything that is neither travel nor a planned stop. */
-export const isTravellersOwn = (e: ScheduledEvent) => e.category !== 'transport' && !isPlannedStop(e);
+/**
+ * The traveller's own block: anything that is neither travel nor a planned
+ * stop — nor a dinner plan, which has its own rule (below): it stays in its
+ * city, on a night of the stay, at its time.
+ */
+export const isTravellersOwn = (e: ScheduledEvent) => e.category !== 'transport' && !isPlannedStop(e) && !isDinner(e);
 const isOwn = isTravellersOwn;
 
 const mealAt = (start: number): Meal => (start < 11 * 60 ? 'breakfast' : start < 16 * 60 ? 'lunch' : 'dinner');
@@ -234,7 +239,7 @@ export function syncCitySchedule(
     // their own blocks that now sit on a travel block.
     const travel = travelRanges(events, ctx);
     const misplaced = events.filter((e) => {
-      if (e.category === 'transport') return false;
+      if (e.category === 'transport' || isDinner(e)) return false;
       const r = spanOf(e);
       const onTravel = travel.some((t) => overlaps(r, t));
       if (isPlannedStop(e)) return onTravel || r[0] < win[0] || r[1] > win[1];
@@ -276,8 +281,13 @@ export function syncCitySchedule(
   const removedKeys = Object.keys(original).some((d) => !coverSet.has(d));
 
   // The pool, best first: what just moved, then the lost days' stops, then
-  // picks no day uses.
+  // picks no day uses. A dinner plan's restaurant counts as used wherever the
+  // dinner sits now — it is put back on its night only at the end, and a
+  // moved stay's dinner is still on an old date here (live, after a drag:
+  // Septime filled Jan 14's evening while it was Jan 13's dinner).
+  const dinnerSpots = new Set(Object.values(original).flat().filter(isDinner).map((e) => itemKey(e.dinner!.restaurant)));
   const onStay = placedKeys();
+  dinnerSpots.forEach((k) => onStay.add(k));
   const pool: Stop[] = [];
   const inPool = new Set<string>();
   const add = (s: Stop) => {
@@ -368,7 +378,35 @@ export function syncCitySchedule(
   for (const d of cover) {
     const win = fillable(d);
     if (!win || !eligible.has(d) || next[d].some((e) => e.category !== 'transport')) continue;
-    write(d, fillDay(next[d], travelRanges(next[d], ctxs.get(d)!), win, defaultsFor(city, d, cover, next)));
+    write(d, fillDay(next[d], travelRanges(next[d], ctxs.get(d)!), win, defaultsFor(city, d, cover, next, dinnerSpots)));
+  }
+
+  // Dinner plans (ScheduledEvent.dinner): each stays on its night at its
+  // time. A stay that moved wholesale (a reorder) takes its dinner to the
+  // same night of the stay; otherwise one whose night the stay no longer has
+  // moves to the nearest night it still has (a later one on a tie) — see
+  // dinnerNightAfter; the backend's chat reply says the same. It keeps its
+  // time and records where it came from, so the views can say it moved. It
+  // never moves to another city, and never lands on the fly-home morning,
+  // which is not a night. It takes the place of a dinner the planner put on
+  // that evening.
+  const dinners: Array<{ e: ScheduledEvent; day: string }> = [];
+  for (const [d, events] of Object.entries(original)) for (const e of events) if (isDinner(e)) dinners.push({ e, day: d });
+  if (dinners.length > 0) {
+    const nights = stayNights(city);
+    const prevCity = prev ? prev.trip.cities[prev.cityIndex] : null;
+    const oldNights = prevCity ? stayNights(prevCity) : null;
+    for (const d of Object.keys(next)) if (next[d].some(isDinner)) next[d] = next[d].filter((e) => !isDinner(e));
+    for (const { e, day } of dinners) {
+      const target = dinnerNightAfter(oldNights, nights, day);
+      if (!target || !next[target]) continue;
+      const ev = target === day ? e : { ...e, dinner: { ...e.dinner!, movedFrom: e.dinner!.movedFrom ?? day } };
+      const placed = insertDinner(next[target], ev, target);
+      next[target] = placed.events;
+      changed.add(target);
+      for (const u of placed.dropped) unscheduled = [...unscheduled.filter((x) => itemKey(x.title) !== itemKey(u.title)), u];
+    }
+    for (const d of cover) if (!sameDay(next[d], original[d])) changed.add(d);
   }
 
   // What is on the stay now is no longer "unscheduled".
@@ -486,7 +524,7 @@ function picksOf(city: City, rank: number): Stop[] {
  * planned there — its time of day, length and place — so an evening food
  * tour is not put in a morning slot as a bare name.
  */
-function defaultsFor(city: City, day: string, cover: string[], schedule: Record<string, ScheduledEvent[]>): Stop[] {
+function defaultsFor(city: City, day: string, cover: string[], schedule: Record<string, ScheduledEvent[]>, dinnerSpots: Set<string>): Stop[] {
   const at = new Map<string, { gap: number; event: ScheduledEvent }>();
   const t = parseLocal(day).getTime();
   for (const d of cover) {
@@ -498,7 +536,9 @@ function defaultsFor(city: City, day: string, cover: string[], schedule: Record<
       if (!held || gap < held.gap) at.set(k, { gap, event: e });
     }
   }
+  // A restaurant a dinner plan uses is not placed again on an empty day.
   return picksOf(city, 3)
+    .filter((s) => !dinnerSpots.has(s.key))
     .map((s, i) => {
       const held = at.get(s.key);
       return { s: held ? { ...stopOf(held.event, 3), event: { ...stopOf(held.event, 3).event, id: '' } } : s, i, gap: held?.gap ?? Infinity };
@@ -516,7 +556,8 @@ function travelRanges(events: ScheduledEvent[], ctx: DayTransportContext): Range
 }
 
 const isMealOf = (e: ScheduledEvent, meal: Meal) =>
-  e.category === 'restaurant' && !!parseStop(e).meal && mealAt(toMin(e.startTime)) === meal;
+  (isDinner(e) && meal === 'dinner') ||
+  (e.category === 'restaurant' && !!parseStop(e).meal && mealAt(toMin(e.startTime)) === meal);
 
 /** Cover days, nearest to `day` first (later before earlier on a tie); in order without one. */
 function nearestFirst(cover: string[], day: string | undefined): string[] {
