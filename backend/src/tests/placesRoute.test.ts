@@ -81,6 +81,21 @@ describe('POST /api/plan/places', () => {
   });
 });
 
+describe('/restaurants: how many places', () => {
+  const asked = () => String(mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0].system);
+  it('a short or unknown stay asks for 5 with one breakfast place; a longer one for more (live: 4 nights in London ran out and repeated)', async () => {
+    __setProviderForTests(provider({}));
+    mockCreate.mockResolvedValue(aiText([{ name: 'Roscioli', cuisine: 'Roman', priceRange: '$$$', mealType: 'lunch', reason: 'r' }]));
+    await request(app).post('/api/plan/restaurants').send({ city: 'Rome', country: 'Italy' });
+    expect(asked()).toMatch(/Pick 5 diverse spots[^.]*one of them a breakfast place/);
+    await request(app).post('/api/plan/restaurants').send({ city: 'London', country: 'United Kingdom', nights: 4 });
+    expect(asked()).toMatch(/Pick 9 diverse spots[^.]*2 of them breakfast places/);
+    await request(app).post('/api/plan/restaurants').send({ city: 'Paris', country: 'France', nights: 12 });
+    expect(asked()).toMatch(/Pick 10 diverse spots[^.]*3 of them breakfast places/);
+    expect(mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0].max_tokens).toBe(2048);
+  });
+});
+
 describe('/activities and /restaurants', () => {
   it('strips coordinates the model invented and passes placeQuery through', async () => {
     __setProviderForTests(provider({}));
