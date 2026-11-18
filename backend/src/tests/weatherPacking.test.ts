@@ -420,3 +420,51 @@ describe('POST /api/plan/weather (calendar and schedule)', () => {
     expect(res.status).toBe(400);
   });
 });
+
+/**
+ * NOAA timed out on one request and not the next (2026-11-18), so the
+ * calendar showed the station's Paris (≈10/5°C) and the chat NASA's grid
+ * (≈9/3°C) for the same day. A city's typical figures for a date stay put once
+ * worked out, so every view agrees.
+ */
+describe('typical figures are the same in every view', () => {
+  /** A NOAA station near Paris that answers: highs 12, lows 6, wet every 4th day. MET Norway down. */
+  function withStation() {
+    calls.length = 0;
+    const json = (body: any) => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => body }) as any;
+    const rows: any[] = [];
+    let n = 0;
+    for (let d = `${YEAR - 10}-01-01`; d <= `${YEAR - 1}-12-31`; d = addDays(d, 1)) rows.push({ STATION: 'FR000007150', DATE: d, TMAX: '12', TMIN: '6', PRCP: n++ % 4 === 0 ? '3' : '0' });
+    const station = {
+      stations: [{ id: 'FR000007150', name: 'PARIS-MONTSOURIS, FR', dataTypes: [{ id: 'TMAX', coverage: 99, endDate: `${YEAR - 1}-12-31` }, { id: 'TMIN', coverage: 99, endDate: `${YEAR - 1}-12-31` }] }],
+      boundingPoints: [{ coordinates: [2.3378, 48.8222] }],
+    };
+    setWeatherFetch((async (url: any) => {
+      const u = String(url);
+      calls.push(u);
+      if (u.includes('ncei.noaa.gov')) return json(u.includes('/search/') ? { results: [station] } : rows);
+      if (u.includes('api.met.no')) throw new Error('MET down');
+      if (u.includes('power.larc.nasa.gov')) return json(nasaJson(PARIS_CLIMATE));
+      throw new Error(`unexpected fetch ${u}`);
+    }) as any);
+  }
+  const body = (t: any) => ({ origin: { city: t.origin.city }, cities: t.cities.map((c: any) => ({ name: c.name, country: c.country, dates: c.dates })) });
+  const paris = (res: any) => res.body.cities.find((c: any) => c.city === 'Paris').days;
+
+  it('control: with the station answering, Paris uses the station', async () => {
+    withStation();
+    const res = await request(app).post('/api/plan/weather').send(body(trip(60)));
+    expect(paris(res).every((d: any) => d.kind === 'typical' && d.highC === 12 && d.lowC === 6 && /Montsouris/.test(d.source))).toBe(true);
+  });
+
+  it('a later request keeps the first figures even when the station answers this time', async () => {
+    // First: the station times out → NASA's grid.
+    fakeWeather({ met: 'fail', nasa: nasaJson(PARIS_CLIMATE), noaa: 'fail' });
+    const first = paris(await request(app).post('/api/plan/weather').send(body(trip(60))));
+    expect(first.every((d: any) => d.source === 'NASA POWER')).toBe(true);
+    // Then the station answers — the same days still read the same.
+    withStation();
+    const second = paris(await request(app).post('/api/plan/weather').send(body(trip(60))));
+    expect(second).toEqual(first);
+  });
+});

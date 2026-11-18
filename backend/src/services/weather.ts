@@ -207,6 +207,18 @@ type History = {
   pr: Record<string, number>;
 };
 const historyCache = new Map<string, { expires: number; value: Promise<unknown> }>();
+/**
+ * NOAA usually answers in ~1 s but took over 10 s twice on 2026-11-18, which
+ * sent Paris to NASA's grid (about 2°C colder) for one request and not the next.
+ */
+const NOAA_TIMEOUT_MS = 20000;
+/**
+ * A city's typical figures for a date, once worked out, for 6 hours: the
+ * Calendar, the Schedule and the chat show the same numbers for the same day
+ * even when a slow station sent one request to the grid and not another.
+ */
+const typicalCache = new Map<string, { expires: number; value: Omit<DayWeather, 'date' | 'kind'> & { years: [number, number] } }>();
+const TYPICAL_TTL_MS = 6 * 3_600_000;
 const TYPICAL_YEARS = 10;
 const WINDOW_DAYS = 3;
 const WET_MM = 1;
@@ -232,7 +244,7 @@ async function noaaHistory(lat: number, lon: number): Promise<History[]> {
       `https://www.ncei.noaa.gov/access/services/search/v1/data?dataset=daily-summaries&dataTypes=TMAX,TMIN&limit=40` +
       `&bbox=${(lat + d).toFixed(3)},${(lon - d).toFixed(3)},${(lat - d).toFixed(3)},${(lon + d).toFixed(3)}` +
       `&startDate=${firstYear}-01-01T00:00:00&endDate=${lastYear}-12-31T23:59:59`;
-    const res = await fetcher(search, { headers: { 'User-Agent': WEATHER_USER_AGENT }, signal: AbortSignal.timeout(10000) });
+    const res = await fetcher(search, { headers: { 'User-Agent': WEATHER_USER_AGENT }, signal: AbortSignal.timeout(NOAA_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`NOAA search ${res.status}`);
     const json: any = await res.json();
     const stations = pickStations(json?.results ?? [], lat, lon, lastYear).slice(0, 1);
@@ -240,7 +252,7 @@ async function noaaHistory(lat: number, lon: number): Promise<History[]> {
     const dataUrl =
       `https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=${stations.map((x) => encodeURIComponent(x.id)).join(',')}` +
       `&startDate=${firstYear}-01-01&endDate=${lastYear}-12-31&dataTypes=TMAX,TMIN,PRCP&format=json&units=metric`;
-    const dres = await fetcher(dataUrl, { headers: { 'User-Agent': WEATHER_USER_AGENT }, signal: AbortSignal.timeout(10000) });
+    const dres = await fetcher(dataUrl, { headers: { 'User-Agent': WEATHER_USER_AGENT }, signal: AbortSignal.timeout(NOAA_TIMEOUT_MS) });
     if (!dres.ok) throw new Error(`NOAA data ${dres.status}`);
     const rows = (await dres.json()) as any[];
     const byId = new Map<string, History>(
@@ -387,6 +399,15 @@ export async function weatherForCity(
       out.days.push({ date, kind: 'forecast', highC: f.highC, lowC: f.lowC, precipMm: f.precipMm, summary: f.summary });
       continue;
     }
+    const stickyKey = `${geo.lat.toFixed(2)},${geo.lon.toFixed(2)}|${date}`;
+    const sticky = typicalCache.get(stickyKey);
+    if (sticky && sticky.expires > Date.now()) {
+      const { years, ...t } = sticky.value;
+      out.days.push({ date, kind: 'typical', ...t });
+      out.typicalYears = `${years[0]}–${years[1]}`;
+      if (t.source) sources.add(t.source);
+      continue;
+    }
     let h: History | null = null;
     let t: ReturnType<typeof typicalFor> = null;
     for (const st of (await station()) ?? []) {
@@ -401,6 +422,7 @@ export async function weatherForCity(
       t = h ? typicalFor(h, date) : null;
     }
     if (t && h) {
+      typicalCache.set(stickyKey, { expires: Date.now() + TYPICAL_TTL_MS, value: { ...t, source: h.source, years: h.years } });
       out.days.push({ date, kind: 'typical', ...t, source: h.source });
       out.typicalYears = `${h.years[0]}–${h.years[1]}`;
       sources.add(h.source);
@@ -451,4 +473,5 @@ export async function tripWeather(
 export function __resetWeatherCache(): void {
   forecastCache.clear();
   historyCache.clear();
+  typicalCache.clear();
 }
