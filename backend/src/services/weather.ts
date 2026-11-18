@@ -209,9 +209,18 @@ type History = {
 const historyCache = new Map<string, { expires: number; value: Promise<unknown> }>();
 /**
  * NOAA usually answers in ~1 s but took over 10 s twice on 2026-11-18, which
- * sent Paris to NASA's grid (about 2°C colder) for one request and not the next.
+ * sent Paris to NASA's grid (about 2°C colder) for one request and not the
+ * next; Heathrow's ten years took 28 s. A request waits for the station at
+ * most NOAA_WAIT_MS and then uses the grid, while the download carries on (up
+ * to NOAA_TIMEOUT_MS) and is kept for the requests after it.
  */
-const NOAA_TIMEOUT_MS = 20000;
+const NOAA_TIMEOUT_MS = 60000;
+const NOAA_WAIT_MS = 20000;
+/** For tests: how long a request waits for the station. */
+let stationWaitMs = NOAA_WAIT_MS;
+export function __setStationWaitMs(ms: number | null): void {
+  stationWaitMs = ms ?? NOAA_WAIT_MS;
+}
 /**
  * A city's typical figures for a date, once worked out, for 6 hours: the
  * Calendar, the Schedule and the chat show the same numbers for the same day
@@ -334,17 +343,18 @@ export function typicalFor(h: History, date: string): Omit<DayWeather, 'date' | 
     const center = mmdd === '02-29' && !(y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)) ? `${y}-03-01` : `${y}-${mmdd}`;
     for (let k = -WINDOW_DAYS; k <= WINDOW_DAYS; k++) {
       const d = addDays(center, k).replace(/-/g, '');
-      if (valid(h.hi[d]) && valid(h.lo[d])) {
-        his.push(h.hi[d]);
-        los.push(h.lo[d]);
-      }
+      // Each from the days that have it: Heathrow's record has a high and a
+      // low on the same day in only ~10% of 2016–2021, so requiring both sent
+      // London to NASA's grid, whose lows read ~2°C cold.
+      if (valid(h.hi[d])) his.push(h.hi[d]);
+      if (valid(h.lo[d])) los.push(h.lo[d]);
       if (valid(h.pr[d])) {
         rainN++;
         if (h.pr[d] >= WET_MM) wet++;
       }
     }
   }
-  if (his.length < 20) return null;
+  if (his.length < 20 || los.length < 20) return null;
   const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
   return { highC: round1(mean(his)), lowC: round1(mean(los)), wetDayShare: rainN ? Math.round((wet / rainN) * 100) / 100 : undefined };
 }
@@ -382,7 +392,17 @@ export async function weatherForCity(
     let p: Promise<T> | null = null;
     return () => (p ??= f());
   };
-  const station = lazy(() => noaaHistory(geo.lat, geo.lon).catch((e) => fail('typical (station)', city, e)));
+  const station = lazy(() => {
+    const history = noaaHistory(geo.lat, geo.lon).catch((e) => fail('typical (station)', city, e));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        logger.warn('weather station slow: using the grid for this request', { city, waitedMs: stationWaitMs });
+        resolve(null);
+      }, stationWaitMs);
+    });
+    return Promise.race([history, late]).finally(() => clearTimeout(timer));
+  });
   const grid = lazy(() => nasaHistory(geo.lat, geo.lon).catch((e) => fail('typical (grid)', city, e)));
   if (dates.some((d) => d > addDays(today, 8) || d < today) || !wantsForecast) {
     // Both at once: the grid is the fallback for a station's gaps, and
