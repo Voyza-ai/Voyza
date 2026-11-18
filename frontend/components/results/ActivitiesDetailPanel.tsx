@@ -12,7 +12,9 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
-import { Trip, Restaurant } from '@/lib/types';
+import { City, Trip, Restaurant } from '@/lib/types';
+import { cityDinners, nightLabel, timeLabel } from '@/lib/dinnerPlace';
+import DinnerBadge from './DinnerBadge';
 import { useTripStore } from '@/store/tripStore';
 import { getCityColor } from '@/lib/cityColors';
 
@@ -181,6 +183,7 @@ export default function ActivitiesDetailPanel({
           {/* Same reason as ActivityList above — and more urgent here: the
               edit's name input has no onBlur, so a city switch leaves the
               edit open on the new city's row. */}
+          <DinnerPlans city={city} color={color} />
           <RestaurantList
             key={cityIndex}
             restaurants={city.restaurants}
@@ -377,6 +380,47 @@ function ActivityList({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ----------------------------- Dinner plans ----------------------------- */
+
+/** Dinners planned with BlueMurr AI for this city — not booked; Reserve opens the restaurant. */
+function DinnerPlans({ city, color }: { city: City; color: { text: string; border: string } }) {
+  const dinners = cityDinners(city);
+  if (dinners.length === 0) return null;
+  return (
+    <div className="mb-6" data-testid="panel-dinners">
+      <div className="text-[11px] uppercase tracking-[0.18em] font-semibold mb-3" style={{ color: `${color.text}aa` }}>
+        Dinner plans
+      </div>
+      <ul className="flex flex-col gap-2.5">
+        {dinners.map(({ date, event }) => (
+          <li
+            key={event.id}
+            className="rounded-2xl px-4 py-3"
+            style={{ border: `1.5px dashed ${color.text}66`, background: '#ffffff80' }}
+          >
+            <div className="flex items-center gap-2 text-[15px] font-medium" style={{ color: color.text }}>
+              <Utensils size={14} />
+              <span className="truncate">{event.dinner!.restaurant}</span>
+              {(event.dinner!.cuisine || event.dinner!.priceRange) && (
+                <span className="text-[12px] font-normal" style={{ color: `${color.text}88` }}>
+                  {[event.dinner!.cuisine, event.dinner!.priceRange].filter(Boolean).join(' · ')}
+                </span>
+              )}
+            </div>
+            <div className="text-[13px] mt-0.5" style={{ color: `${color.text}aa` }}>
+              {nightLabel(date)} · {timeLabel(event.startTime)} · {event.dinner!.partySize}{' '}
+              {event.dinner!.partySize === 1 ? 'person' : 'people'}
+            </div>
+            <div className="mt-1.5">
+              <DinnerBadge dinner={event.dinner!} accent={color.text} />
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

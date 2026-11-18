@@ -73,6 +73,24 @@ function swapped(t: Trip): Trip {
 const located = (e: { lat?: number; lng?: number }) => typeof e.lat === 'number' && typeof e.lng === 'number';
 
 describe('relayMovedStay', () => {
+  it('a dinner plan\'s restaurant is not re-planned as a meal on another day, even when it was planned on an earlier one (live: L\'Ami Jean twice after a drag)', () => {
+    const before = plannedTrip();
+    const rome = before.cities[1];
+    const days = Object.keys(rome.schedule!).sort();
+    // Armando: planned on the first day (as the planner left it) AND the dinner plan on the last night.
+    const dinnerDay = days[days.length - 1];
+    const sched = { ...rome.schedule! };
+    sched[days[0]] = [...sched[days[0]], { id: 'p-arm', title: 'Armando (Roman)', startTime: '19:00', endTime: '20:30', category: 'restaurant', notes: '$$ · x', plannedDurationMin: 90, lat: 41.8986, lng: 12.4768 } as any];
+    sched[dinnerDay] = [
+      ...sched[dinnerDay].filter((e) => !(e.category === 'restaurant' && e.startTime >= '17:00')),
+      { id: 'dinner-1', title: 'Armando', startTime: '19:30', endTime: '21:30', category: 'restaurant', dinner: { restaurant: 'Armando', city: 'Rome', partySize: 2, status: 'not_booked', reserveUrl: 'x', reserveVia: 'Google Maps' } } as any,
+    ];
+    const withDinner: Trip = { ...before, cities: [before.cities[0], { ...rome, schedule: sched }] };
+    const out = relayMovedStay(swapped(withDinner), 0)!;
+    const armando = Object.values(out.schedule).flat().filter((e) => !e.dinner && /Armando/.test(e.title));
+    expect(armando).toEqual([]);
+  });
+
   it('re-plans a swapped city on its new days with coordinates, no repeats, old dates dropped', () => {
     const before = plannedTrip();
     const oldRome = before.cities[1].schedule!;

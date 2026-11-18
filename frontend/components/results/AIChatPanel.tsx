@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Sparkles, Check, X, Clock, Plane, TrainFront, ArrowRight, PanelRightClose } from 'lucide-react';
+import { Send, Sparkles, Check, X, Clock, Plane, TrainFront, ArrowRight, PanelRightClose, Utensils, ExternalLink } from 'lucide-react';
 import { Trip, Transport } from '@/lib/types';
 import {
   planChat,
@@ -10,6 +10,7 @@ import {
   ChatProposal,
   ChatTurn,
   CityEditProposal,
+  DinnerProposal,
   LegChoice,
   LegOption,
   LegRefresh,
@@ -27,6 +28,7 @@ import {
 } from '@/lib/transportChange';
 import { getCityColor } from '@/lib/cityColors';
 import { nightsBetween } from '@/lib/hotelScore';
+import { applyDinnerProposal, nightLabel, timeLabel } from '@/lib/dinners';
 
 type Message = {
   id: number;
@@ -523,6 +525,22 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
         return;
       }
       applyTrip(applyTransportChange(current, msg.proposal));
+    } else if (msg.proposal.kind === 'dinner') {
+      // On the trip as it is NOW; null when the dinner's night or the dinner
+      // itself is gone since the card appeared (a date edit, a removal).
+      const next = applyDinnerProposal(latestTrip() ?? trip, msg.proposal);
+      if (!next) {
+        setMessages((prev) => [
+          ...prev.map((m) => (m.id === messageId ? { ...m, proposalState: 'outdated' as const } : m)),
+          {
+            id: idRef.current++,
+            role: 'ai' as const,
+            content: "Your trip changed since I proposed this (that night or that dinner isn't there any more), so I didn't apply it — nothing changed. Ask me again.",
+          },
+        ]);
+        return;
+      }
+      applyTrip(next);
     } else {
       applyTrip(msg.proposal.proposedTrip as Trip);
     }
@@ -638,6 +656,16 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
                 />
               )}
 
+              {/* A dinner plan added / changed / removed — never a booking. */}
+              {msg.proposal && msg.proposal.kind === 'dinner' && (
+                <DinnerProposalCard
+                  proposal={msg.proposal}
+                  state={msg.proposalState ?? 'pending'}
+                  onAccept={() => acceptProposal(msg.id)}
+                  onReject={() => rejectProposal(msg.id)}
+                />
+              )}
+
               {/* Inline flight-vs-train comparison card. Informational —
                   the "Show on card" button asks chat to switch which fires
                   show_transport_options under the hood. */}
@@ -732,6 +760,162 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
         </button>
       </form>
     </div>
+  );
+}
+
+// ─── Dinner proposal card ───────────────────────────────────
+// A dinner plan on a night of a stay. Says plainly it is not booked, and
+// once accepted offers the Reserve link the traveller books it with.
+
+const DINNER_TITLE: Record<DinnerProposal['action'], string> = {
+  add: 'Add dinner',
+  change: 'Change dinner',
+  remove: 'Remove dinner',
+};
+
+type DinnerSide = NonNullable<DinnerProposal['after']>;
+
+/** "Sat, Jan 16 · 7:30 PM → 8:00 PM · 2 people · Paris": what changed, in place. */
+function dinnerWhen(side: DinnerSide, from?: DinnerSide): string {
+  const d = side.event.dinner!;
+  const was = from?.event.dinner;
+  const step = (a: string, b: string | undefined) => (b !== undefined && b !== a ? `${b} → ${a}` : a);
+  const party = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
+  return [
+    step(nightLabel(side.date), from ? nightLabel(from.date) : undefined),
+    step(timeLabel(side.event.startTime), from ? timeLabel(from.event.startTime) : undefined),
+    step(party(d.partySize), was ? party(was.partySize) : undefined),
+    d.city,
+  ].join(' · ');
+}
+
+function DinnerLine({ side, muted, from }: { side: DinnerSide; muted?: boolean; from?: DinnerSide }) {
+  const d = side.event.dinner!;
+  const meta = [d.cuisine, d.priceRange].filter(Boolean).join(' · ');
+  return (
+    <div className={`flex items-start gap-2.5 ${muted ? 'opacity-50' : ''}`}>
+      <div
+        className="mt-0.5 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+        style={{ background: 'rgba(79,142,247,0.15)', border: '1px solid rgba(79,142,247,0.35)' }}
+      >
+        <Utensils size={11} style={{ color: '#9cc0fa' }} />
+      </div>
+      <div className="min-w-0">
+        <div className={`text-[13px] font-medium text-white truncate ${muted ? 'line-through' : ''}`}>{d.restaurant}</div>
+        {meta && <div className="text-[11px] text-white/50">{meta}</div>}
+        <div className="text-[11px] text-white/70" data-testid="dinner-when">
+          {dinnerWhen(side, from)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const sameRestaurant = (a: DinnerSide, b: DinnerSide) =>
+  a.event.dinner!.restaurant.trim().toLowerCase() === b.event.dinner!.restaurant.trim().toLowerCase();
+
+function DinnerProposalCard({
+  proposal,
+  state,
+  onAccept,
+  onReject,
+}: {
+  proposal: DinnerProposal;
+  state: 'pending' | 'accepted' | 'rejected' | 'outdated';
+  onAccept: () => void;
+  onReject: () => void;
+}) {
+  const isPending = state === 'pending';
+  const shown = proposal.after ?? proposal.before!;
+  const d = shown.event.dinner!;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.1, duration: 0.25 }}
+      className="mt-2 max-w-[92%] w-full overflow-hidden"
+      style={{ background: '#0f0f1a', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)' }}
+      data-testid="dinner-card"
+    >
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+        <div className="text-[12px] font-medium text-white">{DINNER_TITLE[proposal.action]}</div>
+        <div className="text-[10px] uppercase tracking-wide text-white/40">Proposed</div>
+      </div>
+      <div className="px-4 pb-3 flex flex-col gap-2">
+        {proposal.action === 'remove' ? (
+          <DinnerLine side={proposal.before!} muted />
+        ) : proposal.action === 'change' && proposal.before && sameRestaurant(proposal.before, proposal.after!) ? (
+          // Same restaurant, new time / night / party: one line, the change shown in place.
+          <DinnerLine side={proposal.after!} from={proposal.before} />
+        ) : (
+          <>
+            {proposal.action === 'change' && proposal.before && <DinnerLine side={proposal.before} muted />}
+            <DinnerLine side={proposal.after!} />
+          </>
+        )}
+        {proposal.action !== 'remove' && (
+          <div className="pl-[34px]">
+            <span
+              className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded"
+              style={{ color: '#f5c98a', border: '1px dashed rgba(245,201,138,0.5)' }}
+              data-testid="dinner-not-booked"
+            >
+              Not booked yet
+            </span>
+          </div>
+        )}
+        {proposal.replacesPlanned && (
+          <div className="pl-[34px] text-[11px] text-white/50">Replaces {proposal.replacesPlanned}, planned for that evening</div>
+        )}
+      </div>
+      {isPending ? (
+        <div className="px-4 py-2.5 flex justify-end gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <button
+            onClick={onReject}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-white/60 hover:text-white hover:bg-white/5 transition"
+          >
+            <X size={13} className="inline mr-1 -mt-0.5" />
+            Reject
+          </button>
+          <button
+            onClick={onAccept}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-white transition hover:opacity-90"
+            style={{ background: '#2e6bc4' }}
+          >
+            <Check size={13} className="inline mr-1 -mt-0.5" />
+            Accept
+          </button>
+        </div>
+      ) : (
+        <div
+          className="px-4 py-2 flex items-center justify-between gap-2 text-[11px]"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.06)', color: state === 'accepted' ? '#a0dfc0' : 'rgba(255,255,255,0.4)' }}
+        >
+          <span>
+            {state === 'accepted'
+              ? proposal.action === 'remove'
+                ? '✓ Removed from your schedule'
+                : '✓ On your schedule — not booked yet'
+              : state === 'outdated'
+                ? '× Not applied — your trip changed'
+                : '× Dismissed — your trip is unchanged'}
+          </span>
+          {state === 'accepted' && proposal.action !== 'remove' && (
+            <a
+              href={d.reserveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-white hover:opacity-90"
+              style={{ background: '#2e6bc4' }}
+              data-testid="dinner-reserve"
+              title={`Opens ${d.restaurant} on ${d.reserveVia} — book the table there`}
+            >
+              Reserve <ExternalLink size={10} />
+            </a>
+          )}
+        </div>
+      )}
+    </motion.div>
   );
 }
 

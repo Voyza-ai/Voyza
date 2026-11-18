@@ -326,7 +326,7 @@ export async function suggestDestinations(params: {
 // schema (why it fits, cost range, best months, caveats) so the UI
 // can render a pickable card list later. Cached 7 days server-side.
 
-import type { Trip, VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
+import type { ScheduledEvent, Trip, VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
 
 export type SuggestDestinationsForVibeResult = {
   suggestions: VibeDestinationSuggestion[];
@@ -523,7 +523,22 @@ export type ChatProposal =
       proposedTrip: any;
     }
   | CityEditProposal
-  | TransportChangeProposal;
+  | TransportChangeProposal
+  | DinnerProposal;
+
+/**
+ * A dinner plan added, changed or removed (backend services/dinner.ts).
+ * `before` / `after` carry the whole schedule event and the night it sits on.
+ * Applied by lib/dinners.ts applyDinnerProposal; nothing is booked.
+ */
+export type DinnerProposal = {
+  kind: 'dinner';
+  action: 'add' | 'change' | 'remove';
+  city: string;
+  before: { date: string; event: ScheduledEvent } | null;
+  after: { date: string; event: ScheduledEvent } | null;
+  replacesPlanned?: string | null;
+};
 
 /**
  * One way to travel a leg, as the chat proposes or lists it (backend
