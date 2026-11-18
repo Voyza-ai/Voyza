@@ -148,12 +148,217 @@ describe('searchTrains fan-out', () => {
   });
 
   it('does not cache a failed search, so the next caller retries', async () => {
-    // Every request fails → both providers return [] non-fatally, and the
-    // (resolved, empty) result IS cached: same as flights.ts, an honest
-    // empty answer is still an answer.
+    // Every request fails → both providers return [] non-fatally. That is
+    // not "no trains on this route": All Aboard timing out on a cold search
+    // used to be cached for 10 minutes, so every trip search in that window
+    // priced the route on flights only. The next caller must search again.
     mockFetch.mockRejectedValue(new Error('everything down'));
     const params = { origin: 'Oslo', destination: 'Bergen', date: '2026-10-01', travelers: 1 };
     await expect(searchTrains(params)).resolves.toEqual([]);
+    await settle();
+    const callsAfterFirst = mockFetch.mock.calls.length;
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    expect(mockFetch.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+  });
+
+  it('retries a route whose first search timed out, and finds the train once All Aboard answers', async () => {
+    // The production failure, 2026-11-17: Vienna → Munich's first getJourneys
+    // ran past the 10s timeout (cold gateway), later ones answered in ~4s.
+    let journeysFail = true;
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.reject(new Error('DB REST down'));
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        if (journeysFail) return Promise.reject(new Error('The operation was aborted'));
+        return Promise.resolve(
+          gqlOk({
+            getJourneys: [
+              {
+                id: 'j1',
+                itinerary: [
+                  {
+                    segments: [
+                      {
+                        origin: { name: 'Wien Hbf' },
+                        destination: { name: 'München Hbf' },
+                        departureAt: '2026-12-23T14:28:00+01:00',
+                        arrivalAt: '2026-12-23T18:31:00+01:00',
+                        operator: { name: 'ÖBB' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          }),
+        );
+      }
+      if (query.includes('getJourneyOffer')) {
+        return Promise.resolve(
+          gqlOk({ getJourneyOffer: { itinerary: [{ offers: [{ id: 'o1', price: { amount: 5605, currency: 'USD' } }] }] } }),
+        );
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Vienna', destination: 'Munich', date: '2026-12-23', travelers: 2, originCountry: 'AT', destinationCountry: 'DE' };
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    await settle();
+    journeysFail = false;
+    const second = await searchTrains(params);
+    expect(second).toHaveLength(1);
+    expect(second[0].operator).toBe('ÖBB');
+    expect(second[0].price).toBeCloseTo(56.05, 2);
+  });
+
+  it('does not cache a search whose fares did not come back, so the price is fetched again', async () => {
+    let pricingFails = true;
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.reject(new Error('DB REST down'));
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        return Promise.resolve(
+          gqlOk({
+            getJourneys: [
+              {
+                id: 'j1',
+                itinerary: [{ segments: [{ origin: { name: 'A' }, destination: { name: 'B' }, departureAt: '2026-12-23T08:00:00+01:00', arrivalAt: '2026-12-23T12:00:00+01:00', operator: { name: 'DB' } }] }],
+              },
+            ],
+          }),
+        );
+      }
+      if (query.includes('getJourneyOffer')) {
+        if (pricingFails) return Promise.reject(new Error('The operation was aborted'));
+        return Promise.resolve(gqlOk({ getJourneyOffer: { itinerary: [{ offers: [{ id: 'o1', price: { amount: 3000, currency: 'USD' } }] }] } }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Munich', destination: 'Vienna', date: '2026-12-23', travelers: 1 };
+    const first = await searchTrains(params);
+    expect(first[0].price).toBeNull(); // timetable row, unpriced
+    await settle();
+    pricingFails = false;
+    const second = await searchTrains(params);
+    expect(second[0].price).toBe(30);
+  });
+
+  it('a RATE_LIMITED answer is not "no trains": it is not cached, and the next search finds the train', async () => {
+    // The gateway's real reply once the key's 500/hour timetable quota ran
+    // out (2026-11-18): a journey with status ERROR whose SegmentCollection is
+    // RATE_LIMITED and has segments: null.
+    let limited = true;
+    let journeyCalls = 0;
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.reject(new Error('DB REST down'));
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        journeyCalls++;
+        if (limited) {
+          return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j0', status: 'ERROR', itinerary: [{ status: 'RATE_LIMITED', segments: null }] }] }));
+        }
+        return Promise.resolve(
+          gqlOk({
+            getJourneys: [
+              {
+                id: 'j1',
+                status: 'SUCCESS',
+                itinerary: [{ status: 'SUCCESS', segments: [{ origin: { name: 'Zürich HB' }, destination: { name: 'Milano Centrale' }, departureAt: '2026-12-28T07:33', arrivalAt: '2026-12-28T10:50', operator: { name: 'SBB' } }] }],
+              },
+            ],
+          }),
+        );
+      }
+      if (query.includes('getJourneyOffer')) {
+        return Promise.resolve(gqlOk({ getJourneyOffer: { itinerary: [{ status: 'SUCCESS', offers: [{ id: 'o1', price: { amount: 7351, currency: 'USD' } }] }] } }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Zurich', destination: 'Milan', date: '2026-12-28', travelers: 1 };
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    await settle();
+    limited = false;
+    const second = await searchTrains(params);
+    expect(journeyCalls).toBe(2);
+    expect(second).toHaveLength(1);
+    expect(second[0].operator).toBe('SBB');
+    expect(second[0].price).toBeCloseTo(73.51, 2);
+  });
+
+  it('a RATE_LIMITED fare is not cached either, so the price is fetched again', async () => {
+    let limited = true;
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.reject(new Error('DB REST down'));
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j1', status: 'SUCCESS', itinerary: [{ status: 'SUCCESS', segments: [{ origin: { name: 'A' }, destination: { name: 'B' }, departureAt: '2026-12-28T07:00', arrivalAt: '2026-12-28T09:00', operator: { name: 'SBB' } }] }] }] }));
+      }
+      if (query.includes('getJourneyOffer')) {
+        if (limited) return Promise.resolve(gqlOk({ getJourneyOffer: { itinerary: [{ status: 'RATE_LIMITED', offers: null }] } }));
+        return Promise.resolve(gqlOk({ getJourneyOffer: { itinerary: [{ status: 'SUCCESS', offers: [{ id: 'o1', price: { amount: 4000, currency: 'USD' } }] }] } }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Basel', destination: 'Bern', date: '2026-12-28', travelers: 1 };
+    expect((await searchTrains(params))[0].price).toBeNull();
+    await settle();
+    limited = false;
+    expect((await searchTrains(params))[0].price).toBe(40);
+  });
+
+  it('NO_TIMETABLE is a real answer and is cached', async () => {
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ journeys: [] }) });
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j0', status: 'SUCCESS', itinerary: [{ status: 'NO_TIMETABLE', segments: null }] }] }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Vienna', destination: 'Munich', date: '2027-04-10', travelers: 1 };
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    await settle();
+    const calls = mockFetch.mock.calls.length;
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    expect(mockFetch.mock.calls.length).toBe(calls);
+  });
+
+  it('still caches an honest "no trains on this route" answer', async () => {
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) {
+        // Deutsche Bahn answers: no journeys.
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ journeys: [] }) });
+      }
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) return Promise.resolve(gqlOk({ getJourneys: [] }));
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Reykjavik', destination: 'Akureyri', date: '2026-10-01', travelers: 1 };
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    await settle();
     const callsAfterFirst = mockFetch.mock.calls.length;
     await expect(searchTrains(params)).resolves.toEqual([]);
     expect(mockFetch.mock.calls.length).toBe(callsAfterFirst);
