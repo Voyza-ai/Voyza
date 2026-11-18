@@ -42,7 +42,7 @@ jest.mock('../services/trains', () => ({ searchTrains: jest.fn().mockResolvedVal
 import planRouter from '../routes/plan';
 import { errorHandler } from '../middleware/error';
 import { CHAT_TOOLS } from '../services/tripChat';
-import { __resetWeatherCache, setWeatherFetch, tripCityDays, typicalFor } from '../services/weather';
+import { __resetWeatherCache, __setStationWaitMs, setWeatherFetch, tripCityDays, typicalFor } from '../services/weather';
 import { packingFacts } from '../services/packing';
 import { addDays, todayIso } from '../utils/dates';
 
@@ -466,5 +466,61 @@ describe('typical figures are the same in every view', () => {
     withStation();
     const second = paris(await request(app).post('/api/plan/weather').send(body(trip(60))));
     expect(second).toEqual(first);
+  });
+});
+
+/**
+ * London used NASA's grid (lows ~2°C cold) though Heathrow is close: its
+ * 2016–2025 record rarely has a high and a low on the same day, and its ten
+ * years took 28 s to download (live, 2026-11-18).
+ */
+describe('a patchy, slow station', () => {
+  afterEach(() => __setStationWaitMs(null));
+
+  it('averages highs and lows each from the days that have them', () => {
+    const hi: Record<string, number> = {};
+    const lo: Record<string, number> = {};
+    for (let y = 2016; y <= 2025; y++) {
+      for (let k = -3; k <= 3; k++) {
+        const d = addDays(`${y}-03-14`, k).replace(/-/g, '');
+        // Never both on one day: highs on even offsets, lows on odd ones.
+        if (k % 2 === 0) hi[d] = 12;
+        else lo[d] = 5;
+      }
+    }
+    const t = typicalFor({ years: [2016, 2025], source: 'NOAA GHCN-Daily, Heathrow station', hi, lo, pr: {} }, '2027-03-14');
+    expect(t).toMatchObject({ highC: 12, lowC: 5 });
+  });
+
+  it('a station slower than the wait: this request uses the grid, the next one the station (its download was kept)', async () => {
+    __setStationWaitMs(30);
+    const json = (body: any) => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => body }) as any;
+    const rows: any[] = [];
+    for (let d = `${YEAR - 10}-01-01`; d <= `${YEAR - 1}-12-31`; d = addDays(d, 1)) rows.push({ STATION: 'UKM00003772', DATE: d, TMAX: '13', TMIN: '6', PRCP: '0' });
+    const station = {
+      stations: [{ id: 'UKM00003772', name: 'HEATHROW, UK', dataTypes: [{ id: 'TMAX', coverage: 90, endDate: `${YEAR - 1}-12-31` }, { id: 'TMIN', coverage: 90, endDate: `${YEAR - 1}-12-31` }] }],
+      boundingPoints: [{ coordinates: [-0.461, 51.478] }],
+    };
+    setWeatherFetch((async (url: any) => {
+      const u = String(url);
+      if (u.includes('ncei.noaa.gov')) {
+        if (u.includes('/search/')) return json({ results: [station] });
+        await new Promise((r) => setTimeout(r, 150)); // the slow part: the data
+        return json(rows);
+      }
+      if (u.includes('api.met.no')) throw new Error('MET down');
+      if (u.includes('power.larc.nasa.gov')) return json(nasaJson(() => ({ hi: 11, lo: 3 })));
+      throw new Error(`unexpected fetch ${u}`);
+    }) as any);
+    const ask = (from: string, to: string) =>
+      request(app).post('/api/plan/weather').send({ origin: { city: 'New York' }, cities: [{ name: 'London', country: 'United Kingdom', dates: { arrival: from, departure: to } }] });
+    const a = addDays(TODAY, 60);
+    const first = (await ask(a, addDays(a, 1))).body.cities[0].days;
+    expect(first[0]).toMatchObject({ kind: 'typical', source: 'NASA POWER', highC: 11, lowC: 3 });
+    await new Promise((r) => setTimeout(r, 300)); // the station's download finishes in the background
+    const b = addDays(TODAY, 90);
+    const second = (await ask(b, addDays(b, 1))).body.cities[0].days;
+    expect(second[0]).toMatchObject({ kind: 'typical', highC: 13, lowC: 6 });
+    expect(second[0].source).toMatch(/Heathrow/);
   });
 });
