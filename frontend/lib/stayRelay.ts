@@ -46,9 +46,7 @@ export function relayMovedStay(
   const cover = isLast && !stay.includes(city.dates.departure) ? [...stay, city.dates.departure] : stay;
   if (cover.every((d) => old[d] !== undefined)) return null;
 
-  // A dinner plan is not a planned stop and is not re-planned here: the
-  // schedule sync keeps it on a night of the stay (lib/scheduleSync).
-  const hasOwn = (d: string) => (old[d] ?? []).some((e) => e.category !== 'transport' && !e.dinner);
+  const hasOwn = (d: string) => (old[d] ?? []).some((e) => e.category !== 'transport');
   // Days that legitimately sit outside the nights of the stay: the fly-home
   // morning of the last city and the home-departure day of the first.
   const ownDays = new Set(stay);
@@ -64,12 +62,7 @@ export function relayMovedStay(
   // The traveller's own blocks (added by hand) on days still in the stay
   // stay where they are; every planned stop is re-planned.
   const own = (e: ScheduledEvent) => e.category === 'custom' || e.category === 'free';
-  // A dinner plan's restaurant is never re-planned as a meal: noted up front,
-  // since a planned meal there can sit on an earlier day than the dinner
-  // (live, after a drag: L'Ami Jean as the dinner and as Jan 14's 19:00 meal).
-  const seen = new Set<string>(
-    Object.values(old).flatMap((es) => es.filter((e) => e.dinner).map((e) => itemKey(e.dinner!.restaurant))),
-  );
+  const seen = new Set<string>();
 
   // Picks taken back off every other day of the old schedule.
   const activities: ActivitySuggestion[] = [];
@@ -78,10 +71,6 @@ export function relayMovedStay(
   for (const d of days) {
     for (const e of [...old[d]].sort((a, b) => a.startTime.localeCompare(b.startTime))) {
       if (e.category !== 'activity' && e.category !== 'restaurant') continue;
-      if (e.dinner) {
-        seen.add(itemKey(e.dinner.restaurant));
-        continue;
-      }
       const stop = parseStop(e);
       const key = itemKey(stop.name);
       if (seen.has(key)) continue;
