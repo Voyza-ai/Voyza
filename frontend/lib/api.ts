@@ -796,6 +796,8 @@ export async function searchActivities(params: {
 
 // ─── Restaurants (Claude-picked) ─────────────────────────────
 export type RestaurantSuggestion = {
+  /** Street address, once the POI provider located it (backend /places). */
+  address?: string;
   name: string;
   cuisine: string;
   priceRange: '$' | '$$' | '$$$' | '$$$$';
@@ -831,6 +833,8 @@ export type ResolvedPlace = {
   lat?: number;
   lng?: number;
   placeId?: string;
+  /** Street address from the provider, when it gave one. */
+  address?: string;
   /** The provider had not answered by the deadline (Nominatim queue). */
   pending?: boolean;
 };

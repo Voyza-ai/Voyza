@@ -154,7 +154,7 @@ export default function CityActivitiesCard({
         </div>
       )}
 
-      {/* Dinner plans made with BlueMurr AI — plans, not bookings. */}
+      {/* Reservations made with BlueMurr AI — "Not booked yet" until the traveller books them. */}
       {dinners.length > 0 && (
         <>
           <div className="h-[2px] rounded-full mx-6" style={{ background: color.border }} />
@@ -166,7 +166,7 @@ export default function CityActivitiesCard({
                   <span className="truncate font-medium">{event.dinner!.restaurant}</span>
                 </div>
                 <div className="text-[11px] pl-[18px]" style={{ color: `${color.text}99` }}>
-                  Dinner · {nightLabel(date)} · {timeLabel(event.startTime)} · {event.dinner!.partySize}{' '}
+                  Reservation · {nightLabel(date)} · {timeLabel(event.startTime)} · {event.dinner!.partySize}{' '}
                   {event.dinner!.partySize === 1 ? 'person' : 'people'}
                 </div>
                 <div className="pl-[18px]">

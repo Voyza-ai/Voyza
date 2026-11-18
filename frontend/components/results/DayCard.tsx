@@ -219,7 +219,7 @@ export default function DayCard({
                 </div>
                 {height > 30 && (
                   <div className="text-[9px] mt-0.5 truncate" style={{ color: `${accent}80` }}>
-                    {evt.dinner ? `Dinner · ${evt.startTime} · ${evt.dinner.partySize} ppl` : `${evt.startTime} – ${evt.endTime}`}
+                    {evt.dinner ? `Reservation · ${evt.startTime} · ${evt.dinner.partySize} ppl` : `${evt.startTime} – ${evt.endTime}`}
                   </div>
                 )}
                 {evt.dinner && height > 44 && (

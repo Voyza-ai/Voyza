@@ -1,8 +1,85 @@
 'use client';
 
-import { ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { ExternalLink, MapPin } from 'lucide-react';
 import type { DinnerPlan } from '@/lib/types';
 import { nightLabel } from '@/lib/dinnerPlace';
+
+/** Google Maps directions to the restaurant — by its address when known, else its name in its city. */
+export function directionsUrl(d: Pick<DinnerPlan, 'restaurant' | 'city' | 'address'>): string {
+  const to = d.address ? `${d.restaurant}, ${d.address}` : `${d.restaurant}, ${d.city}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(to)}`;
+}
+
+/** Google Maps search for the restaurant in its city: its page shows the address. */
+export function placeUrl(d: Pick<DinnerPlan, 'restaurant' | 'city' | 'address'>): string {
+  const q = d.address ? `${d.restaurant}, ${d.address}` : `${d.restaurant}, ${d.city}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+}
+
+const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
+/**
+ * The reservation's address on demand: "Address" shows it (selectable, to
+ * copy) with Directions; without a known address it opens the restaurant on
+ * the map, where the address is.
+ */
+export function ReservationAddress({ dinner, color, size = 'sm' }: { dinner: DinnerPlan; color: string; size?: 'xs' | 'sm' }) {
+  const [open, setOpen] = useState(false);
+  const icon = size === 'xs' ? 8 : 9;
+  if (!dinner.address) {
+    return (
+      <a
+        href={placeUrl(dinner)}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={stop}
+        onMouseDown={stop}
+        className="inline-flex items-center gap-0.5 font-semibold whitespace-nowrap hover:underline"
+        style={{ color }}
+        title={`Opens ${dinner.restaurant} on Google Maps, with its address`}
+        data-testid="reservation-address-map"
+      >
+        <MapPin size={icon} /> Address
+      </a>
+    );
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        onMouseDown={stop}
+        className="inline-flex items-center gap-0.5 font-semibold whitespace-nowrap hover:underline"
+        style={{ color }}
+        aria-expanded={open}
+        data-testid="reservation-address-toggle"
+      >
+        <MapPin size={icon} /> {open ? 'Hide address' : 'Address'}
+      </button>
+      {open && (
+        <span className="basis-full flex items-center gap-1.5 flex-wrap" onClick={stop} onMouseDown={stop} data-testid="reservation-address">
+          <span className="select-text" style={{ color }}>
+            {dinner.address}
+          </span>
+          <a
+            href={directionsUrl(dinner)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-0.5 font-semibold whitespace-nowrap hover:underline"
+            style={{ color: '#2e6bc4' }}
+            data-testid="reservation-directions"
+          >
+            Directions <ExternalLink size={icon} />
+          </a>
+        </span>
+      )}
+    </>
+  );
+}
 
 /**
  * "Not booked yet" + Reserve, for a dinner plan wherever the trip shows it
@@ -46,6 +123,7 @@ export default function DinnerBadge({
           Reserve <ExternalLink size={size === 'xs' ? 8 : 9} />
         </a>
       )}
+      {showReserve && <ReservationAddress dinner={dinner} color="#2e6bc4" size={size} />}
       {dinner.movedFrom && (
         <span className="whitespace-nowrap" style={{ color: `${accent}99` }} data-testid="dinner-moved">
           moved from {nightLabel(dinner.movedFrom)} — your dates changed

@@ -64,7 +64,7 @@ export function googlePlacesProvider(apiKey: string, fetchImpl: typeof fetch = f
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.location,places.types',
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.location,places.types,places.formattedAddress',
         },
         body: JSON.stringify(body),
         signal: withTimeout(signal),
@@ -81,6 +81,7 @@ export function googlePlacesProvider(apiKey: string, fetchImpl: typeof fetch = f
         lng: lng as number,
         placeId: `google:${hit.id}`,
         name: hit.displayName?.text,
+        ...(typeof hit.formattedAddress === 'string' && hit.formattedAddress.trim() ? { address: hit.formattedAddress.trim() } : {}),
         settlement: types.length > 0 && types.every((t) => GOOGLE_AREA_TYPES.has(t)),
       };
     },
@@ -119,7 +120,14 @@ export function foursquareProvider(apiKey: string, fetchImpl: typeof fetch = fet
       const lng = num(hit.longitude ?? hit.geocodes?.main?.longitude);
       const id = hit.fsq_place_id ?? hit.fsq_id;
       if (!id || !validLatLng(lat, lng)) return null;
-      return { lat, lng: lng as number, placeId: `fsq:${id}`, name: hit.name };
+      const address = hit.location?.formatted_address;
+      return {
+        lat,
+        lng: lng as number,
+        placeId: `fsq:${id}`,
+        name: hit.name,
+        ...(typeof address === 'string' && address.trim() ? { address: address.trim() } : {}),
+      };
     },
   };
 }
@@ -165,6 +173,7 @@ export function nominatimProvider(
         format: 'jsonv2',
         limit: '1',
         'accept-language': 'en',
+        addressdetails: '1',
       });
       if (near) {
         // left,top,right,bottom; bounded=1 keeps a same-named place on another
@@ -194,6 +203,7 @@ export function nominatimProvider(
           lng: lng as number,
           placeId: `osm:${osmType}${hit.osm_id}`,
           name: hit.name || undefined,
+          ...(osmAddress(hit) ? { address: osmAddress(hit)! } : {}),
           settlement:
             category === 'place' || (category === 'boundary' && hit.type === 'administrative'),
         } satisfies PoiHit;
@@ -203,3 +213,19 @@ export function nominatimProvider(
 }
 
 export type { LatLng };
+
+/**
+ * A short street address from a Nominatim row ("27 Rue Malar, 75007 Paris"),
+ * built from its address parts; its display_name lists every district and
+ * region. Null without at least a road.
+ */
+export function osmAddress(hit: any): string | null {
+  const a = hit?.address;
+  if (!a || typeof a !== 'object') return null;
+  const road = a.road ?? a.pedestrian ?? a.footway ?? a.square;
+  if (!road) return null;
+  const street = [a.house_number, road].filter(Boolean).join(' ');
+  const town = a.city ?? a.town ?? a.village ?? a.municipality;
+  const place = [a.postcode, town].filter(Boolean).join(' ');
+  return [street, place].filter(Boolean).join(', ');
+}

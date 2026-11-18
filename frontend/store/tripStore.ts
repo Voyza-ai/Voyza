@@ -686,7 +686,11 @@ export function mergePlaces(picks: CityPicks, places: ResolvedPlace[]): CityPick
   };
   return {
     activities: picks.activities.map((a, i) => (hasCoords(a) ? a : { ...a, ...(at(i) ?? {}) })),
-    restaurants: picks.restaurants.map((r, i) => (hasCoords(r) ? r : { ...r, ...(at(nA + i) ?? {}) })),
+    restaurants: picks.restaurants.map((r, i) => {
+      const located = hasCoords(r) ? r : { ...r, ...(at(nA + i) ?? {}) };
+      const address = places[nA + i]?.address;
+      return address && !located.address ? { ...located, address } : located;
+    }),
   };
 }
 
@@ -708,8 +712,14 @@ export function withCityGeo(
   const idx = trip.cities.findIndex((c) => c.name === cityName);
   if (idx < 0) return trip;
   const old = trip.cities[idx];
-  const located = new Map(after.restaurants.filter(hasCoords).map((r) => [r.name, coordsOf(r)!]));
-  const restaurants = old.restaurants.map((r) => (hasCoords(r) || !located.has(r.name) ? r : { ...r, ...located.get(r.name)! }));
+  const located = new Map(
+    after.restaurants.filter(hasCoords).map((r) => [r.name, { ...coordsOf(r)!, ...(r.address ? { address: r.address } : {}) }]),
+  );
+  const restaurants = old.restaurants.map((r) => {
+    const hit = located.get(r.name);
+    if (!hit || (hasCoords(r) && (r.address || !hit.address))) return r;
+    return hasCoords(r) ? { ...r, address: hit.address } : { ...r, ...hit };
+  });
   const city: City = { ...old, restaurants };
   const cities = [...trip.cities];
   cities[idx] = city;

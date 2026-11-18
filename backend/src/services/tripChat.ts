@@ -68,7 +68,7 @@ import {
 import { getCityCountry } from '../data/cityCountries';
 import { parseDurationMinutes } from '../utils/duration';
 import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
-import { dinnerEditNotes, diningContext, proposeAddDinner, proposeChangeDinner, proposeRemoveDinner } from './dinner';
+import { dinnerEditNotes, diningContext, proposeAddDinner, proposeChangeDinner, proposeRemoveDinner, withRestaurantAddress } from './dinner';
 import {
   buildTransportProposal,
   describeChoice,
@@ -562,8 +562,8 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
     };
   }
 
-  if (toolName === 'add_dinner') return proposeAddDinner(currentTrip, toolInput);
-  if (toolName === 'change_dinner') return proposeChangeDinner(currentTrip, toolInput);
+  if (toolName === 'add_dinner') return withRestaurantAddress(currentTrip, proposeAddDinner(currentTrip, toolInput));
+  if (toolName === 'change_dinner') return withRestaurantAddress(currentTrip, proposeChangeDinner(currentTrip, toolInput));
   if (toolName === 'remove_dinner') return proposeRemoveDinner(currentTrip, toolInput);
 
   if (toolName === 'compare_modes') return compareModes(currentTrip, legs, toolInput);

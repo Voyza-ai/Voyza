@@ -61,6 +61,13 @@ jest.mock('../services/optimizer', () => ({
   },
 }));
 
+// The restaurant's address comes from the POI provider; scripted here.
+const mockResolvePlaces = jest.fn(async (_city: string, _country: any, items: any[], _opts?: any): Promise<any[]> => items.map((i: any) => ({ name: i.name })));
+jest.mock('../services/places', () => ({
+  ...jest.requireActual('../services/places'),
+  resolvePlaces: (city: string, country: any, items: any[], opts: any) => mockResolvePlaces(city, country, items, opts),
+}));
+
 import planRouter from '../routes/plan';
 import { errorHandler } from '../middleware/error';
 import { chatSystemPrompt, CHAT_TOOLS } from '../services/tripChat';
@@ -378,5 +385,45 @@ describe('a planned evening outing that names a dinner', () => {
     expect(res.body.type).toBe('proposal');
     expect(res.body.proposal.replacesPlanned).toBe('Dinner at Bouillon Chartier');
     expect(res.body.reply).toContain('It takes the place of Dinner at Bouillon Chartier, which was planned for that evening.');
+  });
+});
+
+
+describe('the reservation carries the restaurant address', () => {
+  it('add: the POI provider address and coordinates go on the reservation', async () => {
+    mockResolvePlaces.mockImplementationOnce(async (_c: string, _k: any, items: any[]) =>
+      items.map((i: any) => ({ name: i.name, lat: 48.856, lng: 2.381, placeId: 'osm:N1', address: '80 Rue de Charonne, 75011 Paris' })),
+    );
+    const res = await chat('add_dinner', { city: 'Paris', restaurant: 'Septime' });
+    expect(mockResolvePlaces).toHaveBeenCalledWith('Paris', 'France', [{ name: 'Septime', kind: 'restaurant' }], expect.objectContaining({ deadlineMs: 4000 }));
+    expect(res.body.proposal.after.event.dinner.address).toBe('80 Rue de Charonne, 75011 Paris');
+    expect(res.body.proposal.after.event).toMatchObject({ lat: 48.856, lng: 2.381, placeId: 'osm:N1' });
+  });
+
+  it('no address found: the proposal goes without one', async () => {
+    const res = await chat('add_dinner', { city: 'Paris' });
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after.event.dinner.address).toBeUndefined();
+  });
+
+  it('change of time only keeps the address without looking it up again', async () => {
+    mockResolvePlaces.mockImplementationOnce(async (_c: string, _k: any, items: any[]) => items.map((i: any) => ({ name: i.name, address: '80 Rue de Charonne, 75011 Paris' })));
+    const first = await chat('add_dinner', { city: 'Paris', restaurant: 'Septime' });
+    const trip = withDinner(parisLondon(), first.body.proposal);
+    mockResolvePlaces.mockClear();
+    const res = await chat('change_dinner', { time: '20:00' }, trip);
+    expect(res.body.proposal.after.event.dinner.address).toBe('80 Rue de Charonne, 75011 Paris');
+    expect(mockResolvePlaces).not.toHaveBeenCalled();
+  });
+});
+
+describe('the address the trip already has is reused', () => {
+  it('a pick located with its address: no extra lookup', async () => {
+    const t = parisLondon();
+    t.cities[0].restaurants[1] = { ...t.cities[0].restaurants[1], lat: 48.856, lng: 2.381, address: '80 Rue de Charonne, 75011 Paris' };
+    mockResolvePlaces.mockClear();
+    const res = await chat('add_dinner', { city: 'Paris', restaurant: 'Septime' }, t);
+    expect(res.body.proposal.after.event.dinner.address).toBe('80 Rue de Charonne, 75011 Paris');
+    expect(mockResolvePlaces).not.toHaveBeenCalled();
   });
 });

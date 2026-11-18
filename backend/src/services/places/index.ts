@@ -31,7 +31,7 @@ const MISS_TTL_MS = 24 * 60 * 60 * 1000;
 /** Parallel lookups for the keyed providers (Nominatim is serial regardless). */
 const KEYED_CONCURRENCY = 6;
 
-type Cached = { lat: number; lng: number; placeId: string } | null;
+type Cached = { lat: number; lng: number; placeId: string; address?: string } | null;
 
 let providerOverride: PoiProvider | null = null;
 let memoProvider: PoiProvider | null = null;
@@ -157,7 +157,7 @@ async function lookUp(
   for (const q of queriesFor(item, city, country)) {
     try {
       const hit = await gate(provider, () => provider.search(q, centre));
-      if (acceptable(hit, centre)) return { lat: hit.lat, lng: hit.lng, placeId: hit.placeId };
+      if (acceptable(hit, centre)) return { lat: hit.lat, lng: hit.lng, placeId: hit.placeId, ...(hit.address ? { address: hit.address } : {}) };
     } catch (err) {
       // Timeout, HTTP error, or a full Nominatim queue: no answer this time,
       // and NOT cached as a miss — a later call may well succeed.
@@ -192,7 +192,7 @@ function lookupTask(city: string, country: string | undefined, item: PlaceReques
 }
 
 const toResolved = (item: PlaceRequestItem, v: Cached | undefined, pending: boolean): ResolvedPlace =>
-  v ? { name: item.name, lat: v.lat, lng: v.lng, placeId: v.placeId } : pending ? { name: item.name, pending: true } : { name: item.name };
+  v ? { name: item.name, lat: v.lat, lng: v.lng, placeId: v.placeId, ...(v.address ? { address: v.address } : {}) } : pending ? { name: item.name, pending: true } : { name: item.name };
 
 /**
  * Coordinates for each item, in input order, answered within `deadlineMs`.

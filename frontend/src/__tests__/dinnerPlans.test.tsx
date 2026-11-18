@@ -195,7 +195,7 @@ describe('the chat card and the guide', () => {
     fireEvent.change(input, { target: { value: 'Can you add a dinner reservation for one night in Rome' } });
     fireEvent.submit(input.closest('form')!);
     const card = await screen.findByTestId('dinner-card');
-    expect(within(card).getByText('Add dinner')).toBeInTheDocument();
+    expect(within(card).getByText('Add reservation')).toBeInTheDocument();
     expect(within(card).getByTestId('dinner-not-booked')).toHaveTextContent('Not booked yet');
     expect(within(card).getByTestId('dinner-when')).toHaveTextContent('Tue, Jun 16 · 7:30 PM · 2 people · Rome');
     expect(within(card).queryByTestId('dinner-reserve')).toBeNull();
@@ -218,7 +218,7 @@ describe('the chat card and the guide', () => {
     fireEvent.change(input, { target: { value: 'make it 8pm' } });
     fireEvent.submit(input.closest('form')!);
     const card = await screen.findByTestId('dinner-card');
-    expect(within(card).getByText('Change dinner')).toBeInTheDocument();
+    expect(within(card).getByText('Change reservation')).toBeInTheDocument();
     expect(within(card).getAllByText('Da Enzo')).toHaveLength(1);
     expect(within(card).getByTestId('dinner-when')).toHaveTextContent('Tue, Jun 16 · 7:30 PM → 8:00 PM · 2 people · Rome');
   });
@@ -244,7 +244,7 @@ describe('the chat card and the guide', () => {
     );
     const g = screen.getByTestId('guide-dinners');
     expect(g).toHaveTextContent('Da Enzo');
-    expect(g).toHaveTextContent('Dinner · Tue, Jun 16 · 7:30 PM · 2 people');
+    expect(g).toHaveTextContent('Reservation · Tue, Jun 16 · 7:30 PM · 2 people');
     expect(g).toHaveTextContent('Not booked yet');
     expect(within(g).getByTestId('dinner-badge-reserve')).toHaveAttribute('href', expect.stringContaining('google.com/maps/search'));
   });

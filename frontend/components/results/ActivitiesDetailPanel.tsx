@@ -384,7 +384,7 @@ function ActivityList({
   );
 }
 
-/* ----------------------------- Dinner plans ----------------------------- */
+/* ----------------------------- Reservations ----------------------------- */
 
 /** Dinners planned with BlueMurr AI for this city — not booked; Reserve opens the restaurant. */
 function DinnerPlans({ city, color }: { city: City; color: { text: string; border: string } }) {
@@ -393,7 +393,7 @@ function DinnerPlans({ city, color }: { city: City; color: { text: string; borde
   return (
     <div className="mb-6" data-testid="panel-dinners">
       <div className="text-[11px] uppercase tracking-[0.18em] font-semibold mb-3" style={{ color: `${color.text}aa` }}>
-        Dinner plans
+        Reservations
       </div>
       <ul className="flex flex-col gap-2.5">
         {dinners.map(({ date, event }) => (

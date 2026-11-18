@@ -29,6 +29,7 @@ import {
 import { getCityColor } from '@/lib/cityColors';
 import { nightsBetween } from '@/lib/hotelScore';
 import { applyDinnerProposal, nightLabel, timeLabel } from '@/lib/dinners';
+import { ReservationAddress } from './DinnerBadge';
 import { track } from '@/lib/track';
 
 type Message = {
@@ -777,9 +778,9 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
 // once accepted offers the Reserve link the traveller books it with.
 
 const DINNER_TITLE: Record<DinnerProposal['action'], string> = {
-  add: 'Add dinner',
-  change: 'Change dinner',
-  remove: 'Remove dinner',
+  add: 'Add reservation',
+  change: 'Change reservation',
+  remove: 'Remove reservation',
 };
 
 type DinnerSide = NonNullable<DinnerProposal['after']>;
@@ -815,6 +816,11 @@ function DinnerLine({ side, muted, from }: { side: DinnerSide; muted?: boolean; 
         <div className="text-[11px] text-white/70" data-testid="dinner-when">
           {dinnerWhen(side, from)}
         </div>
+        {d.address && (
+          <div className="text-[11px] text-white/50" data-testid="dinner-address">
+            {d.address}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -921,6 +927,11 @@ function DinnerProposalCard({
             >
               Reserve <ExternalLink size={10} />
             </a>
+          )}
+          {state === 'accepted' && proposal.action !== 'remove' && (
+            <span className="text-[11px]">
+              <ReservationAddress dinner={d} color="#9cc0fa" />
+            </span>
           )}
         </div>
       )}

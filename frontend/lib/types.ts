@@ -104,6 +104,8 @@ export type Restaurant = {
   lng?: number;
   /** Provider-scoped id: "google:…", "fsq:…" or "osm:N123". */
   placeId?: string;
+  /** Street address from the POI provider, when it gave one (a reservation reuses it). */
+  address?: string;
 };
 
 export type Activity = {
@@ -197,6 +199,8 @@ export type DinnerPlan = {
   reserveVia: string;
   /** The night it was on before the stay's dates moved it (lib/scheduleSync). */
   movedFrom?: string;
+  /** Street address from the POI provider (backend services/places), when it found one. */
+  address?: string;
 };
 
 /** The slots `buildDayTransportContext` fills on a travel day. */

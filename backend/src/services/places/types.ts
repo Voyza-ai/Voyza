@@ -18,6 +18,8 @@ export type PoiHit = LatLng & {
   placeId: string;
   /** The provider's own display name for the place. */
   name?: string;
+  /** Street address as the provider writes it ("27 Rue Malar, 75007 Paris"), when it gives one. */
+  address?: string;
   /**
    * True when the hit is a town, district or administrative area rather than
    * a venue. "Explore Paris old town" resolving to Paris itself is a wrong
@@ -50,6 +52,8 @@ export type ResolvedPlace = {
   lat?: number;
   lng?: number;
   placeId?: string;
+  /** Street address, from the provider. Absent when it gave none. */
+  address?: string;
   /** Still queued at the provider when the deadline passed. */
   pending?: boolean;
 };

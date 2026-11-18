@@ -15,6 +15,7 @@
  * it). Nothing here writes anywhere.
  */
 import { addDays } from '../utils/dates';
+import { resolvePlaces } from './places';
 
 /** The `dinner` record on a schedule event. Mirrors frontend lib/types.ts DinnerPlan. */
 export type DinnerPlan = {
@@ -29,6 +30,8 @@ export type DinnerPlan = {
   reserveVia: string;
   /** The night it was on before the stay's dates moved it (frontend scheduleSync). */
   movedFrom?: string;
+  /** Street address from the POI provider (never the AI), when it found one. */
+  address?: string;
 };
 
 export type DinnerEvent = {
@@ -271,6 +274,7 @@ function buildEvent(id: string, trip: any, cityName: string, time: string, party
       status: 'not_booked',
       reserveUrl: link.url,
       reserveVia: link.via,
+      ...(typeof pick.address === 'string' && pick.address.trim() ? { address: pick.address.trim() } : {}),
     },
   };
 }
@@ -445,7 +449,7 @@ export function proposeChangeDinner(trip: any, input: any): DinnerResult {
   const picks: any[] = Array.isArray(city.restaurants) ? city.restaurants.filter((r: any) => r && typeof r.name === 'string' && r.name.trim()) : [];
   const cuisine = typeof input?.cuisine === 'string' ? input.cuisine.trim() : '';
   const price = typeof input?.priceRange === 'string' && PRICE.test(input.priceRange.trim()) ? input.priceRange.trim() : '';
-  const current = { name: d.event.dinner.restaurant, cuisine: d.event.dinner.cuisine, priceRange: d.event.dinner.priceRange, lat: d.event.lat, lng: d.event.lng, placeId: d.event.placeId };
+  const current = { name: d.event.dinner.restaurant, cuisine: d.event.dinner.cuisine, priceRange: d.event.dinner.priceRange, lat: d.event.lat, lng: d.event.lng, placeId: d.event.placeId, address: d.event.dinner.address };
   let pick: any = current;
   if (named && norm(named) !== norm(d.event.dinner.restaurant)) {
     pick = picks.find((r) => norm(r.name) === norm(named)) ?? picks.find((r) => norm(r.name).includes(norm(named)) || norm(named).includes(norm(r.name))) ?? { name: named };
@@ -543,6 +547,44 @@ export function dinnerNightAfter(oldNights: string[] | null, nights: string[], d
 export function nearestNight(nights: string[], day: string): string {
   const t = (s: string) => Date.parse(`${s}T00:00:00Z`);
   return [...nights].sort((a, b) => Math.abs(t(a) - t(day)) - Math.abs(t(b) - t(day)) || (a < b ? 1 : -1))[0];
+}
+
+/** How long a proposal waits for the restaurant's address before going without it. */
+export const ADDRESS_DEADLINE_MS = 4000;
+
+/**
+ * The proposal with the restaurant's street address on it, looked up with
+ * the POI provider the planner already uses (Google / Foursquare /
+ * OpenStreetMap — never the AI). Kept from the dinner being changed when the
+ * restaurant is the same. No address within the deadline: the proposal goes
+ * without one, and the card offers the restaurant on the map instead.
+ */
+export async function withRestaurantAddress(trip: any, result: DinnerResult): Promise<DinnerResult> {
+  if (result.type !== 'proposal' || !result.proposal.after) return result;
+  const event = result.proposal.after.event;
+  const plan = event.dinner;
+  const before = result.proposal.before?.event;
+  // The restaurant pick already carries its address (frontend kept it from /places).
+  if (plan.address) return result;
+  if (before?.dinner?.address && norm(before.dinner.restaurant) === norm(plan.restaurant)) {
+    plan.address = before.dinner.address;
+    return result;
+  }
+  const city = (trip?.cities ?? []).find((c: any) => norm(c?.name) === norm(plan.city));
+  try {
+    const [hit] = await resolvePlaces(plan.city, city?.country ?? undefined, [{ name: plan.restaurant, kind: 'restaurant' }], {
+      deadlineMs: ADDRESS_DEADLINE_MS,
+    });
+    if (hit?.address) plan.address = hit.address;
+    if (typeof event.lat !== 'number' && typeof hit?.lat === 'number' && typeof hit?.lng === 'number') {
+      event.lat = hit.lat;
+      event.lng = hit.lng;
+      if (hit.placeId) event.placeId = hit.placeId;
+    }
+  } catch {
+    /* no address: the card offers the map */
+  }
+  return result;
 }
 
 /** The dinners and dining picks, for the model's TRIP CONTEXT. */
