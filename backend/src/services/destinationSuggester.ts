@@ -33,6 +33,7 @@ import {
   buildDestinationSuggestionsUserMessage,
   SuggestDestinationsInput,
 } from '../prompts/destinationSuggestions';
+import { createMessage } from './aiUsage';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -446,7 +447,7 @@ export async function suggestDestinationsForVibe(
   if (anthropic) {
     for (attempts = 1; attempts <= MAX_ATTEMPTS; attempts++) {
       try {
-        const response = await anthropic.messages.create({
+        const response = await createMessage(anthropic, 'destination_suggester', {
           model: DEFAULT_MODEL,
           max_tokens: 2048,
           temperature: TEMPERATURE,

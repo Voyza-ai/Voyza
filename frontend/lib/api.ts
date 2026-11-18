@@ -327,6 +327,7 @@ export async function suggestDestinations(params: {
 // can render a pickable card list later. Cached 7 days server-side.
 
 import type { ScheduledEvent, Trip, VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
+import { track } from './track';
 
 export type SuggestDestinationsForVibeResult = {
   suggestions: VibeDestinationSuggestion[];
@@ -933,7 +934,7 @@ export async function inviteToCanvas(
 
 // ─── Trip CRUD ──────────────────────────────────────────────
 export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }> {
-  return apiFetch<{ tripId: string; trip: any }>('/api/trips', {
+  const saved = apiFetch<{ tripId: string; trip: any }>('/api/trips', {
     method: 'POST',
     body: JSON.stringify({
       title: trip.title,
@@ -964,6 +965,11 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
       returnLeg: trip.origin?.returnLeg ?? null,
     }),
   });
+  saved.then(
+    () => track('trip_saved', { cities: Array.isArray(trip?.cities) ? trip.cities.length : null }),
+    () => track('trip_save_failed'),
+  );
+  return saved;
 }
 
 export async function getTrips(): Promise<{ trips: any[] }> {
