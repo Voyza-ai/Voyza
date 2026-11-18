@@ -461,6 +461,53 @@ export const ACTIVITY_FALLBACK_MIN = {
   evening: 2 * 60,
 } as const;
 
+/**
+ * Latest a morning or afternoon stop may end — a sight of the day is not put
+ * at night (live: a walking tour at 20:15 on an arrival day, a market at
+ * 20:31). One longer than the afternoon allows may still run from its
+ * earliest start. Evening stops run to the end of the day.
+ */
+export const DAYTIME_END_MIN = 19 * 60 + 30;
+
+/** Latest end for a stop of `slot` that needs `durationMin`, inside a day ending at `dayEnd`. */
+export function slotLatestEnd(slot: 'morning' | 'afternoon' | 'evening', durationMin: number, dayEnd: number): number {
+  if (slot === 'evening') return dayEnd;
+  return Math.min(dayEnd, Math.max(DAYTIME_END_MIN, ACTIVITY_EARLIEST_MIN[slot] + durationMin));
+}
+
+/** "Dinner at L'Ami Jean", "Supper club": an outing that is the evening's meal by its name. */
+export const namesDinner = (name: string): boolean => /\b(dinner|supper)\b/i.test(name);
+
+/**
+ * A pick that suits breakfast: one the AI gave as breakfast, or an inexpensive
+ * café, bakery, crêperie or market it gave as "any" meal. A sit-down
+ * restaurant is not breakfast (live: Le Comptoir du Relais and Septime at
+ * 08:00).
+ */
+export function suitsBreakfast(r: Pick<RestaurantSuggestion, 'name' | 'cuisine' | 'priceRange' | 'mealType'>): boolean {
+  if (r.mealType === 'breakfast') return true;
+  if (r.mealType !== 'any' || (r.priceRange !== '$' && r.priceRange !== '$$')) return false;
+  return /caf[eé]|coffee|bakery|boulangerie|p[aâ]tisserie|brunch|breakfast|cr[eê]pe|bagel|croissant|\bdeli\b|\bdiner\b|market/i.test(`${r.name} ${r.cuisine}`);
+}
+
+const spotKey = (name: string) =>
+  name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’‘]/g, "'")
+    .trim()
+    .toLowerCase();
+
+/**
+ * Whether restaurant `name` is already one of the activities — "Dinner at
+ * L'Ami Jean" next to L'Ami Jean, "Marché des Enfants Rouges food stalls"
+ * next to the market — so it is not planned a second time as a meal.
+ */
+export function restaurantInActivities(name: string, activityNames: string[]): boolean {
+  const k = spotKey(name);
+  return k.length >= 4 && activityNames.some((a) => spotKey(a).includes(k));
+}
+
 /** One thing the planner is asked to place. Its duration is never reduced. */
 export type PlanItem = {
   /** Caller's handle; echoed back on the placement or the drop. */
@@ -787,12 +834,13 @@ export function buildDefaultSchedule(
 
   const makers = new Map<string, (startMin: number, endMin: number) => ScheduledEvent>();
 
-  // Curated activities keep the 09:00–21:00 daytime window this path has
-  // always used; only the truncation is gone.
+  // Curated activities keep to the daytime, from 09:00; only the truncation
+  // is gone. "Dinner at …" is not a daytime activity: it is the dinner.
   const activityOpen = Math.max(dayStart, 9 * 60);
-  const activityClose = Math.min(dayEnd, 21 * 60);
+  const activityClose = Math.min(dayEnd, DAYTIME_END_MIN);
+  const outing = city.activities.find(namesDinner);
 
-  const sequence: PlanItem[] = city.activities.map((a, i) => {
+  const sequence: PlanItem[] = city.activities.filter((a) => !namesDinner(a)).map((a, i) => {
     const key = `activity-${i}`;
     makers.set(key, (startMin, endMin) => ({
       id: newId(),
@@ -810,9 +858,12 @@ export function buildDefaultSchedule(
   });
 
   // First curated restaurant is lunch, second is dinner — same intent as
-  // before, but each now lands anywhere inside its window.
+  // before, but each now lands anywhere inside its window. A restaurant an
+  // activity already is ("Dinner at L'Ami Jean") is not a meal as well, and
+  // a "Dinner at …" outing takes the dinner.
   const mealWindows = [MEAL_WINDOWS.lunch, MEAL_WINDOWS.dinner];
-  const flexible: PlanItem[] = city.restaurants.slice(0, 2).map((r, i) => {
+  const spots = city.restaurants.filter((r) => !restaurantInActivities(r.name, city.activities)).slice(0, outing ? 1 : 2);
+  const flexible: PlanItem[] = spots.map((r, i) => {
     const key = `restaurant-${i}`;
     const window = mealWindows[i];
     makers.set(key, (startMin, endMin) => ({
@@ -832,6 +883,23 @@ export function buildDefaultSchedule(
       idealStart: window.ideal,
     };
   });
+
+  if (outing) {
+    makers.set('outing', (startMin, endMin) => ({
+      id: newId(),
+      title: outing,
+      startTime: minutesToTime(startMin),
+      endTime: minutesToTime(endMin),
+      category: 'restaurant',
+    }));
+    flexible.push({
+      key: 'outing',
+      durationMin: MEAL_DURATION_MIN.dinner,
+      earliestStart: MEAL_WINDOWS.dinner.open,
+      latestEnd: Math.min(dayEnd, DAY_CLOSE_MIN),
+      idealStart: MEAL_WINDOWS.dinner.ideal,
+    });
+  }
 
   const plan = planDay({ dayStart, dayEnd, busyRanges, sequence, flexible });
 
@@ -932,18 +1000,25 @@ export function buildCityScheduleFromSuggestions(
   const dayCount = isLastCity ? stayDays + 1 : stayDays;
 
   type ActBucket = 'morning' | 'afternoon' | 'evening';
+  // "Dinner at …" is an evening whatever time of day it came with (a re-plan
+  // offers curated names as afternoons).
+  const timeOf = (s: ActivitySuggestion): ActBucket => (namesDinner(s.name) ? 'evening' : s.timeOfDay);
   const actBuckets: Record<ActBucket, ActivitySuggestion[]> = {
-    morning: activities.filter((s) => s.timeOfDay === 'morning'),
-    afternoon: activities.filter((s) => s.timeOfDay === 'afternoon'),
-    evening: activities.filter((s) => s.timeOfDay === 'evening'),
+    morning: activities.filter((s) => timeOf(s) === 'morning'),
+    afternoon: activities.filter((s) => timeOf(s) === 'afternoon'),
+    evening: activities.filter((s) => timeOf(s) === 'evening'),
   };
 
+  // A restaurant one of the activities already is ("Dinner at L'Ami Jean")
+  // is not planned again as a meal.
+  const activityNames = activities.map((a) => a.name);
+  const meals = restaurants.filter((r) => !restaurantInActivities(r.name, activityNames));
   type RestBucket = 'breakfast' | 'lunch' | 'dinner' | 'any';
   const restBuckets: Record<RestBucket, RestaurantSuggestion[]> = {
-    breakfast: restaurants.filter((r) => r.mealType === 'breakfast'),
-    lunch: restaurants.filter((r) => r.mealType === 'lunch'),
-    dinner: restaurants.filter((r) => r.mealType === 'dinner'),
-    any: restaurants.filter((r) => r.mealType === 'any'),
+    breakfast: meals.filter((r) => r.mealType === 'breakfast'),
+    lunch: meals.filter((r) => r.mealType === 'lunch'),
+    dinner: meals.filter((r) => r.mealType === 'dinner'),
+    any: meals.filter((r) => r.mealType === 'any'),
   };
 
   /**
@@ -955,10 +1030,12 @@ export function buildCityScheduleFromSuggestions(
     preferred: Exclude<RestBucket, 'any'>,
     near: Located | null = null,
   ): { suggestion: RestaurantSuggestion; bucket: RestBucket } | undefined => {
+    // Breakfast takes an "any" pick only when it suits breakfast.
+    const anyFits = (r: RestaurantSuggestion) => preferred !== 'breakfast' || suitsBreakfast(r);
     if (hasCoords(near)) {
       const pool: Array<{ suggestion: RestaurantSuggestion; bucket: RestBucket }> = [
         ...restBuckets[preferred].map((r) => ({ suggestion: r, bucket: preferred as RestBucket })),
-        ...restBuckets.any.map((r) => ({ suggestion: r, bucket: 'any' as RestBucket })),
+        ...restBuckets.any.filter(anyFits).map((r) => ({ suggestion: r, bucket: 'any' as RestBucket })),
       ];
       const at = nearestIndex(near, pool.map((c) => c.suggestion));
       if (at >= 0) {
@@ -970,8 +1047,8 @@ export function buildCityScheduleFromSuggestions(
     }
     const fromPreferred = restBuckets[preferred].shift();
     if (fromPreferred) return { suggestion: fromPreferred, bucket: preferred };
-    const fromAny = restBuckets.any.shift();
-    if (fromAny) return { suggestion: fromAny, bucket: 'any' };
+    const at = restBuckets.any.findIndex(anyFits);
+    if (at >= 0) return { suggestion: restBuckets.any.splice(at, 1)[0], bucket: 'any' };
     return undefined;
   };
 
@@ -1052,7 +1129,10 @@ export function buildCityScheduleFromSuggestions(
     advance(afternoon);
     const evening = takeActivity('evening', anchor);
     advance(evening);
-    const dinner = takeRestaurant('dinner', anchor);
+    // An evening food outing — a food tour, "Dinner at …" — IS the day's
+    // dinner (live: The Ledbury at 18:00, then a food tour at 20:45).
+    const eveningMeal = !!evening && (evening.category === 'food' || namesDinner(evening.name));
+    const dinner = eveningMeal ? undefined : takeRestaurant('dinner', anchor);
     const chosenActivities: Record<ActBucket, ActivitySuggestion | undefined> = { morning, afternoon, evening };
     const chosenMeals: Record<'breakfast' | 'lunch' | 'dinner', ReturnType<typeof takeRestaurant>> = {
       breakfast,
@@ -1073,19 +1153,20 @@ export function buildCityScheduleFromSuggestions(
         startTime: minutesToTime(startMin),
         endTime: minutesToTime(endMin),
         category:
-          suggestion.category === 'food' || suggestion.category === 'nightlife'
+          suggestion.category === 'food' || suggestion.category === 'nightlife' || namesDinner(suggestion.name)
             ? 'restaurant'
             : 'activity',
         notes: suggestion.reason,
         ...coordsOf(suggestion),
       }));
+      const durationMin = Number.isFinite(suggestion.durationHours)
+        ? plannedDuration(suggestion.durationHours * 60)
+        : ACTIVITY_FALLBACK_MIN[bucket];
       sequence.push({
         key,
-        durationMin: Number.isFinite(suggestion.durationHours)
-          ? plannedDuration(suggestion.durationHours * 60)
-          : ACTIVITY_FALLBACK_MIN[bucket],
+        durationMin,
         earliestStart: ACTIVITY_EARLIEST_MIN[bucket],
-        latestEnd: dayEnd,
+        latestEnd: slotLatestEnd(bucket, durationMin, dayEnd),
       });
     });
 

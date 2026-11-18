@@ -35,6 +35,7 @@ import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
 import NightsPicker from './NightsPicker';
+import { moneyBucket, track } from '@/lib/track';
 
 /**
  * The three `LocationAnswer` branches collapsed to the `string[]` that
@@ -473,6 +474,7 @@ export default function PlanningChat() {
       budget: 'budget',
     };
     setAnswer('planningMode', modeMap[selectedIntent]);
+    track('plan_started', { mode: modeMap[selectedIntent] });
 
     const labels: Record<string, string> = {
       place: 'I have a place in mind',
@@ -1535,6 +1537,15 @@ export default function PlanningChat() {
     const travelers = parsed.travelers ?? answers.travelers ?? 1;
     setFindTripLoading(true);
     setFindTripError(null);
+    const searchStarted = Date.now();
+    track('trip_search_started', {
+      mode: answers.planningMode ?? 'destination',
+      cities: Array.isArray(parsed.destinations) ? parsed.destinations.length : null,
+      travelers,
+      nights: typeof answers.nights === 'number' ? answers.nights : null,
+      round_trip: answers.returnToHome !== false,
+      has_budget: typeof (parsed.budget ?? answers.budget) === 'number',
+    });
 
     try {
       // Normalize whatever the user / AI produced into YYYY-MM-DD. The
@@ -1792,9 +1803,16 @@ export default function PlanningChat() {
       // Step 4 lands on /results: the trip goes on screen now, and each city's
       // AI picks fill in when they answer (startTripPicks).
       startTripPicks(trip, picksRequests, picksInFlight);
+      track('trip_search_succeeded', {
+        cities: trip.cities.length,
+        travelers: trip.travelers,
+        seconds: Math.round((Date.now() - searchStarted) / 1000),
+        total: moneyBucket(trip.totalCost),
+      });
       router.push('/results');
     } catch (err: unknown) {
       const friendly = plannerErrorMessage(err);
+      track('trip_search_failed', { seconds: Math.round((Date.now() - searchStarted) / 1000), error: String(friendly).slice(0, 80) });
       setFindTripError(friendly);
       setMessages((prev) => {
         // Avoid stacking identical error bubbles if the user spams the button.

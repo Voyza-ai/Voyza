@@ -7,6 +7,7 @@ import { Eye, EyeOff, Mail } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 import { confirmRedirectUrl, resendConfirmation, safeReturnPath } from '@/lib/authEmail';
+import { track } from '@/lib/track';
 
 function getPasswordStrength(pw: string): { label: string; color: string; width: string } {
   if (!pw || pw.length < 8) return { label: 'Weak', color: '#dc2626', width: '33%' };
@@ -75,6 +76,7 @@ function SignupInner() {
     });
 
     setLoading(false);
+    track(authError ? 'signup_failed' : 'signed_up');
 
     if (authError) {
       setError(authError.message);
