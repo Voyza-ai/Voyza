@@ -170,8 +170,25 @@ function pickOfferCandidates(count: number): number[] {
   return [0, Math.floor(count / 2), count - 1];
 }
 
+/**
+ * What a search found, and whether that is the whole answer. `complete` is
+ * false when a call failed or timed out — the journey list, a location
+ * lookup, or pricing for one of the picked journeys. An incomplete result is
+ * still the best we have for THIS request, but it says nothing about the
+ * route, so callers must not remember it (trains.ts drops it from its 10-min
+ * cache). Before this a cold search that timed out returned [] that was
+ * cached like "no trains here": every trip search for the next 10 minutes
+ * priced the route on flights only, even once All Aboard was warm.
+ */
+export type AllAboardResult = { offers: ProviderTrainOffer[]; complete: boolean };
+
+/** Offers only — the result of {@link searchAllAboardDetailed} without its completeness flag. */
 export async function searchAllAboard(params: SearchParams): Promise<ProviderTrainOffer[]> {
-  if (!env.ALLABOARD_API_KEY) return [];
+  return (await searchAllAboardDetailed(params)).offers;
+}
+
+export async function searchAllAboardDetailed(params: SearchParams): Promise<AllAboardResult> {
+  if (!env.ALLABOARD_API_KEY) return { offers: [], complete: true };
   const { origin, destination, date } = params;
   const session = randomUUID();
 
@@ -182,7 +199,7 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
     ]);
     if (!fromUid || !toUid) {
       logger.info('All Aboard: city not in coverage', { origin, destination });
-      return [];
+      return { offers: [], complete: true };
     }
 
     const data = await gql<{ getJourneys: AaJourney[] }>(
@@ -210,7 +227,7 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
     const journeys = (data.getJourneys ?? []).filter(
       (j) => segmentsOf(j.itinerary).length > 0,
     );
-    if (journeys.length === 0) return [];
+    if (journeys.length === 0) return { offers: [], complete: true };
 
     // Live-price a spread of the day's journeys. USD is requested natively so
     // no FX conversion is needed. Amounts arrive in cents. Failures are
@@ -233,6 +250,7 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
     const passengers = Array.from({ length: party }, () => '{type: ADULT}').join(', ');
     const candidates = pickOfferCandidates(journeys.length);
     const priced = new Map<number, number>();
+    let pricingFailed = false;
     await Promise.all(
       candidates.map(async (idx) => {
         try {
@@ -295,6 +313,7 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
           }
           if (usdAmounts.length > 0) priced.set(idx, Math.min(...usdAmounts) / party);
         } catch (err: any) {
+          pricingFailed = true;
           logger.warn('All Aboard offer pricing failed (non-fatal)', {
             message: err?.message,
             journey: journeys[idx]?.id,
@@ -341,13 +360,13 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
       .filter((x) => !priced.has(x.idx))
       .map((x) => x.offer)
       .slice(0, pricedOffers.length > 0 ? 1 : MAX_UNPRICED);
-    return [...pricedOffers, ...unpricedOffers];
+    return { offers: [...pricedOffers, ...unpricedOffers], complete: !pricingFailed };
   } catch (err: any) {
     logger.warn('All Aboard search failed (non-fatal)', {
       message: err?.message,
       origin,
       destination,
     });
-    return [];
+    return { offers: [], complete: false };
   }
 }
