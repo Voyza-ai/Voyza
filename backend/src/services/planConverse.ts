@@ -3,6 +3,7 @@ import { stripOriginFiller } from './location/originPhrase';
 import { AppError } from '../middleware/error';
 import { guardHomeAnswers } from './homeAnswers';
 import { logger } from '../utils/logger';
+import { createMessage } from './aiUsage';
 
 /**
  * The conversational planning brain.
@@ -194,7 +195,7 @@ export async function converse(params: {
   const { message, history, known, userLocation } = params;
 
   try {
-    const response = await anthropic.messages.create({
+    const response = await createMessage(anthropic, 'plan_converse', {
       model: DEFAULT_MODEL,
       max_tokens: 700,
       system: systemPrompt(known, userLocation),

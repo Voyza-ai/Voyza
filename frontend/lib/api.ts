@@ -326,7 +326,8 @@ export async function suggestDestinations(params: {
 // schema (why it fits, cost range, best months, caveats) so the UI
 // can render a pickable card list later. Cached 7 days server-side.
 
-import type { ScheduledEvent, Trip, VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
+import type { Trip, VibeDestinationSuggestion, VibeTierUpSuggestion } from './types';
+import { track } from './track';
 
 export type SuggestDestinationsForVibeResult = {
   suggestions: VibeDestinationSuggestion[];
@@ -523,22 +524,7 @@ export type ChatProposal =
       proposedTrip: any;
     }
   | CityEditProposal
-  | TransportChangeProposal
-  | DinnerProposal;
-
-/**
- * A dinner plan added, changed or removed (backend services/dinner.ts).
- * `before` / `after` carry the whole schedule event and the night it sits on.
- * Applied by lib/dinners.ts applyDinnerProposal; nothing is booked.
- */
-export type DinnerProposal = {
-  kind: 'dinner';
-  action: 'add' | 'change' | 'remove';
-  city: string;
-  before: { date: string; event: ScheduledEvent } | null;
-  after: { date: string; event: ScheduledEvent } | null;
-  replacesPlanned?: string | null;
-};
+  | TransportChangeProposal;
 
 /**
  * One way to travel a leg, as the chat proposes or lists it (backend
@@ -969,7 +955,7 @@ export async function inviteToCanvas(
 
 // ─── Trip CRUD ──────────────────────────────────────────────
 export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }> {
-  return apiFetch<{ tripId: string; trip: any }>('/api/trips', {
+  const saved = apiFetch<{ tripId: string; trip: any }>('/api/trips', {
     method: 'POST',
     body: JSON.stringify({
       title: trip.title,
@@ -1000,6 +986,11 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
       returnLeg: trip.origin?.returnLeg ?? null,
     }),
   });
+  saved.then(
+    () => track('trip_saved', { cities: Array.isArray(trip?.cities) ? trip.cities.length : null }),
+    () => track('trip_save_failed'),
+  );
+  return saved;
 }
 
 export async function getTrips(): Promise<{ trips: any[] }> {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Plane, TrainFront, Moon, Utensils } from 'lucide-react';
+import { Plane, TrainFront, Moon } from 'lucide-react';
 import { Trip, City, TransportMode } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
@@ -321,24 +321,6 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                           )}
                         </div>
                       )}
-
-                      {/* A dinner plan on this night: its time and restaurant, marked not booked. */}
-                      {(() => {
-                        const dinner = cell.city?.schedule?.[cell.iso]?.find((e) => e.dinner);
-                        if (!dinner || !theme) return null;
-                        return (
-                          <div
-                            className="mt-1 flex items-center gap-1 rounded px-1 py-[1px] min-w-0"
-                            style={{ border: `1px dashed ${theme.text}88`, background: '#ffffffb0' }}
-                            title={`Dinner at ${dinner.dinner!.restaurant}, ${dinner.startTime} — not booked yet`}
-                            data-testid="calendar-dinner"
-                          >
-                            <Utensils size={8} style={{ color: theme.text, flexShrink: 0 }} />
-                            <span className="text-[9px] font-mono flex-shrink-0" style={{ color: theme.text }}>{dinner.startTime}</span>
-                            <span className="text-[9px] truncate" style={{ color: theme.text }}>{dinner.dinner!.restaurant}</span>
-                          </div>
-                        );
-                      })()}
 
                       {/* The day's weather in its city, centred on the bottom line. Only on
                           a city's own days — not on the grey travel days around them. */}

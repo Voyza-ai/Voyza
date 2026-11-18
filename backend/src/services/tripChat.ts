@@ -15,8 +15,6 @@
  *        { type: 'answer' }                                  nothing to apply
  *        { type: 'proposal', proposal }                      Accept / Reject;
  *              proposal.kind: 'date_shift' | 'city_edit' | 'transport_change'
- *              | 'dinner' (dinner.ts DinnerProposal: a dinner plan added,
- *              changed or removed — never a booking)
  *              transport_change = { leg { id, kind, index, from, to, date },
  *              before, after (LegChoice), priceDelta, firstStay, totals
  *              { before, after, delta } | null } — tripLegs.ts
@@ -69,7 +67,6 @@ import { getCityCountry } from '../data/cityCountries';
 import { parseDurationMinutes } from '../utils/duration';
 import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
 import { runPackingTool, runWeatherTool, WEATHER_PROMPT_LINE, WEATHER_TOOLS } from './weatherChat';
-import { dinnerEditNotes, diningContext, proposeAddDinner, proposeChangeDinner, proposeRemoveDinner } from './dinner';
 import {
   buildTransportProposal,
   describeChoice,
@@ -105,6 +102,7 @@ import {
   verifyTransportProposal,
   whichLegReply,
 } from './tripLegs';
+import { createMessage } from './aiUsage';
 
 export type ChatTurn = { role: 'user' | 'assistant'; content: string };
 
@@ -386,56 +384,6 @@ export const CHAT_TOOLS = [
       required: ['old', 'new', 'explanation'],
     },
   },
-  {
-    name: 'add_dinner',
-    description:
-      'Add a dinner plan to the trip: "add a dinner reservation for one night in Paris", "book us dinner at Septime on the 15th", "somewhere Italian and cheap in Rome tomorrow at 8". Nothing is actually booked (BlueMurr has no booking partner) — the user gets the dinner on their schedule marked "Not booked yet" with a Reserve link, as a proposal to Accept. Call it straight away: do NOT answer that you cannot make reservations, and do not ask which night or restaurant when the user left it open — leave those null and the server picks a night of that city\'s stay and a restaurant from the city\'s dining picks (honouring cuisine / price hints).',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        city: { type: 'string', description: 'Trip city the dinner is in, exact trip spelling.' },
-        date: { type: ['string', 'null'], description: 'YYYY-MM-DD night, ONLY if the user named one ("on the 15th", "our last night there" → that date from the city\'s nights). Null for "one night" / "some night".' },
-        time: { type: ['string', 'null'], description: 'HH:MM 24-hour, only if the user said ("8pm" → "20:00"). Null → 19:30.' },
-        restaurant: { type: ['string', 'null'], description: 'The restaurant the user named, or one from that city\'s diningPicks they referred to. Null to let the server pick.' },
-        cuisine: { type: ['string', 'null'], description: 'Cuisine hint ("Italian", "sushi", "French bistro"), or null.' },
-        priceRange: { type: ['string', 'null'], enum: ['$', '$$', '$$$', '$$$$', null], description: '"cheap" → "$", "mid-range" → "$$", "fancy" / "splurge" → "$$$" or "$$$$"; null if not said.' },
-        partySize: { type: ['number', 'null'], description: 'Only if the user gave a number of people different from the trip\'s travellers. Null otherwise.' },
-      },
-      required: ['city'],
-    },
-  },
-  {
-    name: 'change_dinner',
-    description:
-      'Change a dinner already on the trip (TRIP CONTEXT dining.dinners): "make it 8pm", "move it to the next night", "switch it to Le Comptoir", "make it for 4". Pass only what changes. The user Accepts the change.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        dinnerId: { type: ['string', 'null'], description: 'dinnerId from dining.dinners; null if there is only one dinner.' },
-        city: { type: ['string', 'null'], description: 'City of the dinner meant, when the user said which.' },
-        date: { type: ['string', 'null'], description: 'New night YYYY-MM-DD, or null.' },
-        shiftNights: { type: ['number', 'null'], description: '"the next night" → 1, "the night before" → -1. Null otherwise.' },
-        time: { type: ['string', 'null'], description: 'New HH:MM 24-hour time, or null.' },
-        restaurant: { type: ['string', 'null'], description: 'A new restaurant the user NAMED ("switch it to Le Comptoir"), or null. Never a cuisine or a price: those go in cuisine / priceRange.' },
-        cuisine: { type: ['string', 'null'], description: '"make it Italian", "somewhere with sushi" → the cuisine; the server picks a restaurant of that kind from the city\'s dining picks. Null otherwise.' },
-        priceRange: { type: ['string', 'null'], enum: ['$', '$$', '$$$', '$$$$', null], description: '"somewhere cheaper" → "$" or "$$"; "fancier" → "$$$". Null otherwise.' },
-        partySize: { type: ['number', 'null'], description: 'New number of people, or null.' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'remove_dinner',
-    description: 'Take a dinner off the trip: "cancel the dinner", "remove the Paris dinner". The user Accepts it.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        dinnerId: { type: ['string', 'null'], description: 'dinnerId from dining.dinners; null if there is only one dinner.' },
-        city: { type: ['string', 'null'], description: 'City of the dinner meant, when the user said which.' },
-      },
-      required: [],
-    },
-  },
   ...WEATHER_TOOLS,
 ];
 
@@ -462,9 +410,7 @@ Tools:
 9. set_min_days — a minimum stay in a city.
 10. add_city / remove_city / replace_city — add, drop or swap a city. Each change is shown to the user as a diff to Accept, so call the tool directly instead of asking "are you sure?".
 11. reorder_cities — change the order of the trip's cities, group a country's cities, or find the best order.
-12. add_dinner / change_dinner / remove_dinner — a dinner plan on a night of a city's stay ("add a dinner reservation for one night in Paris", "make it 8pm", "cancel the dinner"). You CAN do this: never answer that you can't make reservations or point the user to OpenTable / TheFork / Resy instead. The dinner is added to their schedule as "Not booked yet" with a Reserve link — the server says so; never claim a table is booked or confirmed. When the night or restaurant is left open, call add_dinner with them null instead of asking.
-
-13. ${WEATHER_PROMPT_LINE}
+12. ${WEATHER_PROMPT_LINE}
 ALWAYS pick exactly one tool per turn.
 
 Each request stands on its own: never carry a time bound, airline or other filter over from an earlier message unless the user clearly refers back to it ("the same time", "that one"). "Make it cheaper" with no leg named: ask which leg (ask_which_leg).
@@ -480,7 +426,7 @@ If the user references a city that isn't in the trip for a pin or a min stay, an
 Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them. Prices in TRIP CONTEXT are totals for all travellers.${perPersonWord() ? ` The user is viewing PER-PERSON prices: quote every amount per person (the total divided by ${currentTrip?.travelers} travellers, rounded) and say "per person".` : ''}
 
 TRIP CONTEXT (read-only):
-${JSON.stringify({ ...context, dining: diningContext(currentTrip) }, null, 2)}
+${JSON.stringify(context, null, 2)}
 `;
 }
 
@@ -511,7 +457,7 @@ async function runTripChatInUnits(input: TripChatInput): Promise<TripChatResult>
 
   let response: any;
   try {
-    response = await anthropic.messages.create({
+    response = await createMessage(anthropic, 'chat', {
       model: DEFAULT_MODEL,
       max_tokens: 1024,
       system: chatSystemPrompt(currentTrip),
@@ -559,16 +505,13 @@ export async function runTool(currentTrip: any, toolName: string, toolInput: any
     // before anything was searched (see compare_modes, D-07).
     return {
       type: 'proposal',
-      reply: `${describeCityEdit(built.proposal)}${built.proposal.placementNote ? ` ${built.proposal.placementNote}` : ''} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)}${choiceWords(built.proposal)}${dinnerWords(currentTrip, built.proposal)} Accept to apply it.`,
+      reply: `${describeCityEdit(built.proposal)}${built.proposal.placementNote ? ` ${built.proposal.placementNote}` : ''} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)}${choiceWords(built.proposal)} Accept to apply it.`,
       proposal: built.proposal,
     };
   }
 
   if (toolName === 'get_weather') return runWeatherTool(currentTrip, toolInput, message ?? '');
   if (toolName === 'packing_list') return runPackingTool(currentTrip, toolInput, message ?? '');
-  if (toolName === 'add_dinner') return proposeAddDinner(currentTrip, toolInput);
-  if (toolName === 'change_dinner') return proposeChangeDinner(currentTrip, toolInput);
-  if (toolName === 'remove_dinner') return proposeRemoveDinner(currentTrip, toolInput);
 
   if (toolName === 'compare_modes') return compareModes(currentTrip, legs, toolInput);
   if (toolName === 'set_transport_window' || toolName === 'show_transport_options') {
@@ -1060,7 +1003,7 @@ async function dateTool(currentTrip: any, toolName: string, toolInput: any): Pro
     priced.proposal.constraints = proposedConstraints;
     return {
       type: 'proposal',
-      reply: `${replyText} ${plan.note}${homeFlightChanges(currentTrip, priced.proposal)}${choiceWords(priced.proposal)}${dinnerWords(currentTrip, priced.proposal)} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
+      reply: `${replyText} ${plan.note}${homeFlightChanges(currentTrip, priced.proposal)}${choiceWords(priced.proposal)} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
       proposal: priced.proposal,
     };
   }
@@ -1183,7 +1126,7 @@ async function reorderCities(currentTrip: any, rawInput: any): Promise<TripChatR
   const p = built.proposal;
   return {
     type: 'proposal',
-    reply: `Here's your trip as ${p.after.map((s) => s.name).join(' → ')}.${why} ${p.note}${homeFlightChanges(currentTrip, p)}${choiceWords(p)}${dinnerWords(currentTrip, p)} Accept to apply it.`,
+    reply: `Here's your trip as ${p.after.map((s) => s.name).join(' → ')}.${why} ${p.note}${homeFlightChanges(currentTrip, p)}${choiceWords(p)} Accept to apply it.`,
     proposal: p,
   };
 }
@@ -1206,12 +1149,6 @@ function countryCode(name: string): string {
   }
   return name.trim().toUpperCase();
 }
-
-/** What a city / date edit does to the trip's dinner plans, as sentences. */
-const dinnerWords = (trip: any, p: CityEditProposal) => {
-  const notes = dinnerEditNotes(trip, p.after);
-  return notes ? ` ${notes}` : '';
-};
 
 /** What a re-search did with the legs the user had chosen, as sentences. */
 const choiceWords = (p: CityEditProposal) => (p.choiceNotes?.length ? ` ${p.choiceNotes.join(' ')}` : '');

@@ -21,6 +21,7 @@ import {
   type ResolvedPlace,
 } from '../services/places';
 import { travelLegs } from '../services/places/travel';
+import { createMessage } from '../services/aiUsage';
 
 const router = Router();
 
@@ -195,7 +196,7 @@ router.post(
     if (anthropic) {
       try {
       const { DEFAULT_MODEL } = require('../services/anthropic');
-      const response = await anthropic.messages.create({
+      const response = await createMessage(anthropic, 'interpret', {
         model: DEFAULT_MODEL,
         max_tokens: 1024,
         system: `You are a travel planning assistant. Parse the user's trip description into structured data.
@@ -468,7 +469,7 @@ router.post(
     if (anthropic && candidates.length > 0) {
       try {
         const { DEFAULT_MODEL } = require('../services/anthropic');
-        const response = await anthropic.messages.create({
+        const response = await createMessage(anthropic, 'suggest_destinations', {
           model: DEFAULT_MODEL,
           max_tokens: 512,
           system: 'You rank travel destinations. Respond with ONLY a JSON array of { name, reason } sorted by best fit. No markdown fences, no explanation.',
@@ -663,7 +664,7 @@ router.post(
       });
 
     try {
-      const response = await anthropic.messages.create({
+      const response = await createMessage(anthropic, 'chat_suggestions', {
         model: DEFAULT_MODEL,
         max_tokens: 400,
         // The chat's tools are listed so suggestions stay inside them: the
@@ -859,7 +860,7 @@ router.post(
       const vibeHint = vibe ? `The traveler's vibe is: ${vibe}. ` : '';
       const groupHint = travelers && travelers > 1 ? `They're traveling as a group of ${travelers}. ` : '';
 
-      const response = await anthropic.messages.create({
+      const response = await createMessage(anthropic, 'activities', {
         model: DEFAULT_MODEL,
         max_tokens: 1024,
         system: `You recommend things to do in a city. ${vibeHint}${groupHint}${otherStopsHint(city, otherCities)}Pick ${n} diverse activities — a mix of must-see landmarks, cultural experiences, food, and a couple lesser-known picks. Avoid generic listicle fodder.
@@ -930,7 +931,7 @@ router.post(
         ? `Their total trip budget is $${budget} — recommend a mix but skew toward mid-range.`
         : 'Mix a couple affordable spots, a couple mid-range, and one special splurge.';
 
-      const response = await anthropic.messages.create({
+      const response = await createMessage(anthropic, 'restaurants', {
         model: DEFAULT_MODEL,
         max_tokens: 1024,
         system: `You recommend restaurants in a city. ${vibeHint}${groupHint}${otherStopsHint(city, otherCities)}Pick 5 diverse spots representing local specialties. Avoid generic chain restaurants and tourist traps. ${budgetHint}

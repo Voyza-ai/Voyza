@@ -9,7 +9,6 @@ import { parseLocal } from '@/lib/dateHelpers';
 import TravelConnectors from './TravelConnectors';
 import { useDayHubs } from '@/lib/tripHubs';
 import { blockLayout } from '@/lib/blockLayout';
-import DinnerBadge from './DinnerBadge';
 import WeatherChip from './WeatherChip';
 import type { DayWeather } from '@/lib/api';
 
@@ -231,12 +230,7 @@ export default function DayCard({
                 </div>
                 {height > 30 && (
                   <div className="text-[9px] mt-0.5 truncate" style={{ color: `${accent}80` }}>
-                    {evt.dinner ? `Dinner · ${evt.startTime} · ${evt.dinner.partySize} ppl` : `${evt.startTime} – ${evt.endTime}`}
-                  </div>
-                )}
-                {evt.dinner && height > 44 && (
-                  <div className="mt-0.5">
-                    <DinnerBadge dinner={evt.dinner} accent={accent} size="xs" />
+                    {evt.startTime} – {evt.endTime}
                   </div>
                 )}
               </div>

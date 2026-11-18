@@ -13,7 +13,6 @@ import {
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { applyUserEdit, reconcileTripTransport } from '@/lib/transportReconcile';
 import { syncTripSchedules } from '@/lib/scheduleSync';
-import { insertDinner, isDinner } from '@/lib/dinnerPlace';
 import { isApplyingRemote } from '@/lib/tripCollab';
 import { liveTripTotal } from '@/lib/tripTotals';
 import type { CanvasIntent } from '@/lib/canvasHandoff';
@@ -606,18 +605,6 @@ function settleCityPicks(run: string, cityName: string, rawPicks: CityPicks) {
 }
 
 /**
- * `restaurants` without the ones a dinner plan in `city` already uses: the
- * planner must not place them again (live, a re-plan put Septime on Friday
- * while it was Wednesday's dinner plan).
- */
-function withoutDinnerSpots<R extends { name: string }>(city: City, restaurants: R[]): R[] {
-  const taken = new Set(
-    Object.values(city.schedule ?? {}).flatMap((es) => es.filter(isDinner).map((e) => e.dinner!.restaurant.trim().toLowerCase())),
-  );
-  return taken.size ? restaurants.filter((r) => !taken.has(r.name.trim().toLowerCase())) : restaurants;
-}
-
-/**
  * `trip` with one city's AI picks added: its activity and restaurant lists
  * (only where still empty — never over the traveller's own) and its schedule,
  * built by the same scheduler the planner used, around the transport as it
@@ -642,12 +629,11 @@ function withCityPicks(trip: Trip, cityName: string, picks: CityPicks, legs?: Tr
   };
   cities[idx] = city;
   const next: Trip = { ...trip, cities };
-  const built = buildCityScheduleFromSuggestions(picks.activities, withoutDinnerSpots(old, picks.restaurants), city, idx, next, { legs });
+  const built = buildCityScheduleFromSuggestions(picks.activities, picks.restaurants, city, idx, next, { legs });
   const schedule = { ...(old.schedule ?? {}) };
   for (const [day, events] of Object.entries(built.schedule)) {
     const mine = schedule[day];
-    // A dinner plan made before the picks landed keeps its evening.
-    if (!mine || mine.every((e) => e.category === 'transport' || isDinner(e))) schedule[day] = withDinnersOf(mine, events);
+    if (!mine || mine.every((e) => e.category === 'transport')) schedule[day] = events;
   }
   cities[idx] = { ...city, schedule, unscheduled: built.unscheduled };
   return next;
@@ -720,32 +706,23 @@ export function withCityGeo(
   const prior = buildCityScheduleFromSuggestions(before.activities, before.restaurants, city, idx, next, {
     legs: beforeLegs,
   });
-  const built = buildCityScheduleFromSuggestions(after.activities, withoutDinnerSpots(old, after.restaurants), city, idx, next, { legs });
+  const built = buildCityScheduleFromSuggestions(after.activities, after.restaurants, city, idx, next, { legs });
   const schedule = { ...(old.schedule ?? {}) };
   let changed = false;
   for (const [day, events] of Object.entries(built.schedule)) {
     const mine = schedule[day];
-    // A day with a dinner plan on it counts as untouched when the rest of it
-    // is the planner's: the dinner is put back on the re-planned day.
     const untouched =
       !mine ||
-      mine.every((e) => e.category === 'transport' || isDinner(e)) ||
-      sameDayAsBuilt(mine, withDinnersOf(mine, prior.schedule[day] ?? []));
+      mine.every((e) => e.category === 'transport') ||
+      sameDayAsBuilt(mine, prior.schedule[day]);
     if (untouched) {
-      schedule[day] = withDinnersOf(mine, events);
+      schedule[day] = events;
       changed = true;
     }
   }
   if (!changed && restaurants === old.restaurants) return trip;
   cities[idx] = { ...city, schedule, unscheduled: changed ? built.unscheduled : old.unscheduled };
   return next;
-}
-
-/** `events` with the dinner plans of `mine` put back on (lib/dinnerPlace). */
-function withDinnersOf(mine: ScheduledEvent[] | undefined, events: ScheduledEvent[]): ScheduledEvent[] {
-  let out = events;
-  for (const d of (mine ?? []).filter(isDinner)) out = insertDinner(out, d).events;
-  return out;
 }
 
 /**

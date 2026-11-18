@@ -4,8 +4,6 @@ import { motion } from 'framer-motion';
 import { MapPin, Utensils, ChevronRight } from 'lucide-react';
 import { City } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
-import { cityDinners, nightLabel, timeLabel } from '@/lib/dinnerPlace';
-import DinnerBadge from './DinnerBadge';
 
 type CityActivitiesCardProps = {
   city: City;
@@ -42,9 +40,8 @@ export default function CityActivitiesCard({
   const color = getCityColor(city.colorIndex ?? cityIndex);
   const hasActivities = city.activities.length > 0;
   const hasRestaurants = city.restaurants.length > 0;
-  const dinners = cityDinners(city);
 
-  if (!hasActivities && !hasRestaurants && dinners.length === 0) {
+  if (!hasActivities && !hasRestaurants) {
     return loading ? (
       <LoadingCard color={color} isActive={isActive} isDimmed={isDimmed} onHover={onHover} onLeave={onLeave} />
     ) : null;
@@ -152,30 +149,6 @@ export default function CityActivitiesCard({
             )}
           </ul>
         </div>
-      )}
-
-      {/* Dinner plans made with BlueMurr AI — plans, not bookings. */}
-      {dinners.length > 0 && (
-        <>
-          <div className="h-[2px] rounded-full mx-6" style={{ background: color.border }} />
-          <ul className="px-6 py-3 flex flex-col gap-2" data-testid="guide-dinners">
-            {dinners.map(({ date, event }) => (
-              <li key={event.id} className="flex flex-col gap-0.5">
-                <div className="text-[13px] leading-snug flex items-center gap-1.5" style={{ color: color.text }}>
-                  <Utensils size={11} className="flex-shrink-0" />
-                  <span className="truncate font-medium">{event.dinner!.restaurant}</span>
-                </div>
-                <div className="text-[11px] pl-[18px]" style={{ color: `${color.text}99` }}>
-                  Dinner · {nightLabel(date)} · {timeLabel(event.startTime)} · {event.dinner!.partySize}{' '}
-                  {event.dinner!.partySize === 1 ? 'person' : 'people'}
-                </div>
-                <div className="pl-[18px]">
-                  <DinnerBadge dinner={event.dinner!} accent={color.text} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
       )}
     </motion.div>
   );

@@ -137,8 +137,7 @@ export function applyCityEdit(input: Trip, proposal: CityEditProposal): Trip {
 
 /**
  * The traveller's own events (added by hand, or stops they reshaped) on a city
- * the edit removed or replaced are not dropped with it (a dinner plan is: it
- * belongs to its restaurant's city, and the chat's reply says it goes): each goes to the city
+ * the edit removed or replaced are not dropped with it: each goes to the city
  * that now holds its day — a replacement takes the replaced city's days —
  * or, for a day the trip no longer has, the nearest city. The schedule sync
  * (lib/scheduleSync) then moves any that sit on a travel block, or outside the

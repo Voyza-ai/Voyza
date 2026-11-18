@@ -3,6 +3,7 @@ import '@/styles/globals.css';
 import AuthProvider from '@/components/shared/AuthProvider';
 import LeaveGuardModal from '@/components/shared/LeaveGuardModal';
 import { SITE_URL } from '@/lib/site';
+import PageviewTracker from '@/components/shared/PageviewTracker';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -22,6 +23,7 @@ export default function RootLayout({
         <AuthProvider>
           {children}
           <LeaveGuardModal />
+          <PageviewTracker />
         </AuthProvider>
       </body>
     </html>
