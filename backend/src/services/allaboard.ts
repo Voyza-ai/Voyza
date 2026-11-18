@@ -13,7 +13,9 @@ import type { ProviderTrainOffer } from './trains';
  *
  * API shape (test gateway, key is test-scoped):
  *   getLocations(query)            → city/station uids (fast)
- *   getJourneys(origin, dest, date)→ timetable journeys, NO prices (fast, ~1-2s)
+ *   getJourneys(origin, dest, date)→ timetable journeys, NO prices (~1-4s warm;
+ *                                    10s+ on a route the gateway hasn't
+ *                                    seen lately)
  *   getJourneyOffer(journey, …)    → live fares from the operators (SLOW —
  *                                    30s+ cold, ~3s once their cache is warm)
  *
@@ -22,7 +24,17 @@ import type { ProviderTrainOffer } from './trains';
  * honest-data pattern used for Deutsche Bahn fares.
  */
 
-const JOURNEY_TIMEOUT_MS = 10_000;
+/** getLocations: a name lookup, fast even cold. */
+const LOCATION_TIMEOUT_MS = 10_000;
+/**
+ * getJourneys. Was 10s, shared with getLocations, and a cold route routinely
+ * ran past it: in one afternoon of trip searches (2026-11-18) 100 journey
+ * calls aborted at 10s, and each of those legs was planned on a flight —
+ * Vienna → Munich, Prague → Budapest, Amsterdam → Paris, Venice → Milan all
+ * came back as trains on the next search. Legs search in parallel (8 slots),
+ * so the wait is paid once per wave, not per leg.
+ */
+const JOURNEY_TIMEOUT_MS = 25_000;
 const OFFER_TIMEOUT_MS = 30_000;
 /** How many journeys get live-priced per search (spread across the day). */
 const OFFER_CANDIDATES = 3;
@@ -116,7 +128,7 @@ async function resolveLocationUid(city: string, session: string): Promise<string
     `query($q: String!) { getLocations(query: $q) { uid name } }`,
     { q: city },
     session,
-    JOURNEY_TIMEOUT_MS,
+    LOCATION_TIMEOUT_MS,
   );
 
   const want = normalizeForMatch(city);
@@ -139,13 +151,31 @@ type AaSegment = {
 
 type AaJourney = {
   id: string;
-  itinerary?: Array<{ segments?: AaSegment[] }>;
+  /** LOADING | SUCCESS | ERROR. */
+  status?: string;
+  /** SegmentCollection.status: SUCCESS, RATE_LIMITED, NO_TIMETABLE, … */
+  itinerary?: Array<{ status?: string; segments?: AaSegment[] }>;
 };
+
+/**
+ * Statuses that mean "no answer yet", not "no trains". The gateway still
+ * returns a journey for these, with `segments: null`, so without reading the
+ * status they looked exactly like an empty timetable and were cached as one.
+ * Seen 2026-11-18: the key's 500-an-hour timetable quota ran out and every
+ * search came back RATE_LIMITED for the rest of the hour — on production too,
+ * which shares the key. The others (NO_TIMETABLE, NO_FARES, UNABLE_TO_SELL,
+ * OUTSIDE_TIMETABLE, ONE_DAY, …) are real answers about the route.
+ */
+const TRANSIENT_STATUSES = new Set(['LOADING', 'ERROR', 'RATE_LIMITED', 'INDETERMINATE', 'UNKNOWN']);
+
+function transientStatuses(statuses: Array<string | undefined>): string[] {
+  return [...new Set(statuses.filter((x): x is string => !!x && TRANSIENT_STATUSES.has(x)))];
+}
 
 type AaOffer = { id: string; price?: { amount?: number; currency?: string } };
 
 type AaJourneyOffer = {
-  itinerary?: Array<{ segments?: AaSegment[]; offers?: AaOffer[] }>;
+  itinerary?: Array<{ status?: string; segments?: AaSegment[]; offers?: AaOffer[] }>;
 };
 
 /** Flatten an itinerary's SegmentCollections into one segment list. */
@@ -206,8 +236,10 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
       `query($o: ID!, $d: ID!, $date: Date!) {
         getJourneys(origin: $o, destination: $d, date: $date) {
           id
+          status
           itinerary {
             ... on SegmentCollection {
+              status
               segments {
                 origin { name }
                 destination { name }
@@ -224,10 +256,16 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
       JOURNEY_TIMEOUT_MS,
     );
 
-    const journeys = (data.getJourneys ?? []).filter(
-      (j) => segmentsOf(j.itinerary).length > 0,
+    const returned = data.getJourneys ?? [];
+    const notYet = transientStatuses(
+      returned.flatMap((j) => [j.status, ...(j.itinerary ?? []).map((it) => it.status)]),
     );
-    if (journeys.length === 0) return { offers: [], complete: true };
+    if (notYet.length > 0) {
+      logger.warn('All Aboard journey search incomplete', { origin, destination, date, statuses: notYet });
+    }
+    const journeys = returned.filter((j) => segmentsOf(j.itinerary).length > 0);
+    if (journeys.length === 0) return { offers: [], complete: notYet.length === 0 };
+    let pricingFailed = notYet.length > 0;
 
     // Live-price a spread of the day's journeys. USD is requested natively so
     // no FX conversion is needed. Amounts arrive in cents. Failures are
@@ -250,7 +288,6 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
     const passengers = Array.from({ length: party }, () => '{type: ADULT}').join(', ');
     const candidates = pickOfferCandidates(journeys.length);
     const priced = new Map<number, number>();
-    let pricingFailed = false;
     await Promise.all(
       candidates.map(async (idx) => {
         try {
@@ -258,7 +295,7 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
             `query($j: ID!) {
               getJourneyOffer(journey: $j, passengers: [${passengers}], currency: "USD") {
                 itinerary {
-                  ... on SegmentCollection { offers { id price { amount currency } } }
+                  ... on SegmentCollection { status offers { id price { amount currency } } }
                 }
               }
             }`,
@@ -282,6 +319,15 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
           // than believed. Rates are per unit, so convert after the cents
           // divide.
           const { convertToUsd } = await import('./currency');
+          // RATE_LIMITED (the separate 500/hour offer quota) and friends:
+          // no fare yet, which is not "no fare" — keep it out of the cache.
+          const offerNotYet = transientStatuses(
+            (offerData.getJourneyOffer.itinerary ?? []).map((item) => item.status),
+          );
+          if (offerNotYet.length > 0) {
+            pricingFailed = true;
+            logger.warn('All Aboard offer pricing incomplete', { journey: journeys[idx]?.id, statuses: offerNotYet });
+          }
           const offers = (offerData.getJourneyOffer.itinerary ?? []).flatMap(
             (item) => item.offers ?? [],
           );

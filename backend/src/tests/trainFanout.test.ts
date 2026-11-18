@@ -250,6 +250,98 @@ describe('searchTrains fan-out', () => {
     expect(second[0].price).toBe(30);
   });
 
+  it('a RATE_LIMITED answer is not "no trains": it is not cached, and the next search finds the train', async () => {
+    // The gateway's real reply once the key's 500/hour timetable quota ran
+    // out (2026-11-18): a journey with status ERROR whose SegmentCollection is
+    // RATE_LIMITED and has segments: null.
+    let limited = true;
+    let journeyCalls = 0;
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.reject(new Error('DB REST down'));
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        journeyCalls++;
+        if (limited) {
+          return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j0', status: 'ERROR', itinerary: [{ status: 'RATE_LIMITED', segments: null }] }] }));
+        }
+        return Promise.resolve(
+          gqlOk({
+            getJourneys: [
+              {
+                id: 'j1',
+                status: 'SUCCESS',
+                itinerary: [{ status: 'SUCCESS', segments: [{ origin: { name: 'Zürich HB' }, destination: { name: 'Milano Centrale' }, departureAt: '2026-12-28T07:33', arrivalAt: '2026-12-28T10:50', operator: { name: 'SBB' } }] }],
+              },
+            ],
+          }),
+        );
+      }
+      if (query.includes('getJourneyOffer')) {
+        return Promise.resolve(gqlOk({ getJourneyOffer: { itinerary: [{ status: 'SUCCESS', offers: [{ id: 'o1', price: { amount: 7351, currency: 'USD' } }] }] } }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Zurich', destination: 'Milan', date: '2026-12-28', travelers: 1 };
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    await settle();
+    limited = false;
+    const second = await searchTrains(params);
+    expect(journeyCalls).toBe(2);
+    expect(second).toHaveLength(1);
+    expect(second[0].operator).toBe('SBB');
+    expect(second[0].price).toBeCloseTo(73.51, 2);
+  });
+
+  it('a RATE_LIMITED fare is not cached either, so the price is fetched again', async () => {
+    let limited = true;
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.reject(new Error('DB REST down'));
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j1', status: 'SUCCESS', itinerary: [{ status: 'SUCCESS', segments: [{ origin: { name: 'A' }, destination: { name: 'B' }, departureAt: '2026-12-28T07:00', arrivalAt: '2026-12-28T09:00', operator: { name: 'SBB' } }] }] }] }));
+      }
+      if (query.includes('getJourneyOffer')) {
+        if (limited) return Promise.resolve(gqlOk({ getJourneyOffer: { itinerary: [{ status: 'RATE_LIMITED', offers: null }] } }));
+        return Promise.resolve(gqlOk({ getJourneyOffer: { itinerary: [{ status: 'SUCCESS', offers: [{ id: 'o1', price: { amount: 4000, currency: 'USD' } }] }] } }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Basel', destination: 'Bern', date: '2026-12-28', travelers: 1 };
+    expect((await searchTrains(params))[0].price).toBeNull();
+    await settle();
+    limited = false;
+    expect((await searchTrains(params))[0].price).toBe(40);
+  });
+
+  it('NO_TIMETABLE is a real answer and is cached', async () => {
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ journeys: [] }) });
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j0', status: 'SUCCESS', itinerary: [{ status: 'NO_TIMETABLE', segments: null }] }] }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Vienna', destination: 'Munich', date: '2027-04-10', travelers: 1 };
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    await settle();
+    const calls = mockFetch.mock.calls.length;
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    expect(mockFetch.mock.calls.length).toBe(calls);
+  });
+
   it('still caches an honest "no trains on this route" answer', async () => {
     mockFetch.mockImplementation((url: string, init?: any) => {
       if (!String(url).includes('allaboard.eu')) {
