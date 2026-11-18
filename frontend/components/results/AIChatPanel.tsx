@@ -27,6 +27,7 @@ import {
 } from '@/lib/transportChange';
 import { getCityColor } from '@/lib/cityColors';
 import { nightsBetween } from '@/lib/hotelScore';
+import { track } from '@/lib/track';
 
 type Message = {
   id: number;
@@ -398,9 +399,14 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
+    track('ai_chat_sent', { turn: messages.filter((m) => m.role === 'user').length + 1 });
 
     try {
       const result = await planChat({ message: trimmed, currentTrip: trip, history, priceMode });
+      track('ai_chat_answered', {
+        type: result.type,
+        proposal: result.type === 'proposal' ? (result.proposal as any)?.kind ?? null : null,
+      });
 
       if (result.type === 'leg_refresh') {
         // The chat wants to update the transport card directly — no inline
@@ -482,6 +488,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
     // updated the page that hosts this panel mid-render.
     const msg = messages.find((m) => m.id === messageId);
     if (!msg?.proposal || msg.proposalState !== 'pending') return;
+    track('ai_proposal_decided', { kind: msg.proposal.kind, decision: 'accepted' });
     if (msg.proposal.kind === 'city_edit') {
       // Built on the trip as it is NOW (picks may have landed since the card
       // appeared); the priced pieces are the proposal's.
@@ -532,6 +539,8 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
   };
 
   const rejectProposal = (messageId: number) => {
+    const msg = messages.find((m) => m.id === messageId);
+    if (msg?.proposal) track('ai_proposal_decided', { kind: msg.proposal.kind, decision: 'rejected' });
     setMessages((prev) =>
       prev.map((m) =>
         m.id === messageId ? { ...m, proposalState: 'rejected' } : m,

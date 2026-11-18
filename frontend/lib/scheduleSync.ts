@@ -7,7 +7,10 @@ import {
   MEAL_DURATION_MIN,
   MEAL_WINDOWS,
   buildDayTransportContext,
+  namesDinner,
   planDay,
+  restaurantInActivities,
+  slotLatestEnd,
   type DayTransportContext,
   type PlanItem,
 } from './dayScheduleDefaults';
@@ -337,6 +340,7 @@ export function syncCitySchedule(
       if (!win) continue;
       const events = next[d];
       if (s.meal && events.some((e) => isMealOf(e, s.meal!))) continue;
+      if (s.slot === 'evening' && isFoodOuting(s.event) && events.some((e) => isMealOf(e, 'dinner'))) continue;
       const placed = placeStop(events, travelRanges(events, ctxs.get(d)!), win, s);
       if (placed) {
         write(d, [...events, placed].sort(byStart));
@@ -453,14 +457,18 @@ function picksOf(city: City, rank: number): Stop[] {
   const out: Stop[] = [];
   const needed = new Map((city.unscheduled ?? []).map((u) => [itemKey(u.title), u.durationMin]));
   city.activities.forEach((name) => {
+    // "Dinner at L'Ami Jean" is an evening, at a restaurant.
+    const dinner = namesDinner(name);
     out.push({
       key: itemKey(name),
-      event: { id: '', title: name, startTime: '00:00', endTime: '00:00', category: 'activity' },
-      durationMin: needed.get(itemKey(name)) ?? DEFAULT_ACTIVITY_MIN,
+      event: { id: '', title: name, startTime: '00:00', endTime: '00:00', category: dinner ? 'restaurant' : 'activity' },
+      slot: dinner ? 'evening' : undefined,
+      durationMin: needed.get(itemKey(name)) ?? (dinner ? MEAL_DURATION_MIN.dinner : DEFAULT_ACTIVITY_MIN),
       rank,
     });
   });
-  city.restaurants.forEach((r) => {
+  // A restaurant one of the activities already is is not a meal as well.
+  city.restaurants.filter((r) => !restaurantInActivities(r.name, city.activities)).forEach((r) => {
     out.push({
       key: itemKey(r.name),
       event: {
@@ -516,7 +524,16 @@ function travelRanges(events: ScheduledEvent[], ctx: DayTransportContext): Range
 }
 
 const isMealOf = (e: ScheduledEvent, meal: Meal) =>
-  e.category === 'restaurant' && !!parseStop(e).meal && mealAt(toMin(e.startTime)) === meal;
+  (e.category === 'restaurant' && !!parseStop(e).meal && mealAt(toMin(e.startTime)) === meal) ||
+  (meal === 'dinner' && isFoodOuting(e) && toMin(e.startTime) >= 17 * 60);
+
+/**
+ * A food outing — "Dinner at L'Ami Jean", a food tour, a market — shown as a
+ * restaurant block without a meal of its own. In the evening it is the day's
+ * dinner (live: a dinner at 18:00, then a food tour at 20:45).
+ */
+const isFoodOuting = (e: ScheduledEvent) =>
+  e.category === 'restaurant' && !parseStop(e).meal && /\b(dinner|supper|food|tasting|market|feast)\b/i.test(e.title);
 
 /** Cover days, nearest to `day` first (later before earlier on a tie); in order without one. */
 function nearestFirst(cover: string[], day: string | undefined): string[] {
@@ -551,7 +568,11 @@ function placeOn(
   if (near && s0 >= win[0] && e0 <= win[1] && !busy.some((b) => overlaps([s0, e0], b))) return e;
   const meal = !near && e.category === 'restaurant' && parseStop(e).meal ? MEAL_WINDOWS[mealAt(s0)] : null;
   const lo = Math.max(win[0], meal ? meal.open : 0, near ? 0 : how.from);
-  const hi = Math.min(win[1], meal ? meal.close : 24 * 60);
+  // A planned morning or afternoon stop moved later is not moved into the
+  // night (live: Marché des Enfants Rouges at 20:31); with no room it moves
+  // to another day instead.
+  const daytime = !near && !meal ? slotLatestEnd(slotAt(s0), dur, 24 * 60) : 24 * 60;
+  const hi = Math.min(win[1], meal ? meal.close : 24 * 60, daytime);
   const item = { key: 'x', durationMin: dur, earliestStart: lo, latestEnd: hi };
   const plan = planDay({
     dayStart: lo,
@@ -604,11 +625,14 @@ function fillDay(events: ScheduledEvent[], travel: Range[], win: Range, pool: St
       const s = take((x) => !x.meal && x.event.category !== 'restaurant' && x.slot === slot) ??
         // A pick with no time of its own suits a morning or an afternoon.
         (slot !== 'evening' ? take((x) => !x.meal && x.event.category === 'activity' && !x.slot) : undefined) ??
-        take((x) => !x.meal && x.slot === slot);
+        // An evening food outing only where the day has no dinner yet.
+        take((x) => !x.meal && x.slot === slot && !(slot === 'evening' && isFoodOuting(x.event) && has.meal('dinner')));
       if (s) chosen.push({ stop: s, slot });
     }
+    // An evening food outing just chosen is that evening's dinner.
+    const outingDinner = chosen.some(({ stop, slot }) => slot === 'evening' && isFoodOuting(stop.event));
     for (const meal of ['breakfast', 'lunch', 'dinner'] as const) {
-      if (has.meal(meal)) continue;
+      if (has.meal(meal) || (meal === 'dinner' && outingDinner)) continue;
       const s = take((x) => x.meal === meal) ??
         (meal !== 'breakfast' ? take((x) => !x.meal && !x.slot && x.event.category === 'restaurant') : undefined);
       if (s) chosen.push({ stop: s, meal });
@@ -636,7 +660,8 @@ function fillDay(events: ScheduledEvent[], travel: Range[], win: Range, pool: St
         key,
         durationMin: stop.durationMin,
         earliestStart: ACTIVITY_EARLIEST_MIN[slot ?? 'morning'],
-        latestEnd: win[1],
+        // A sight of the day is not put at night.
+        latestEnd: slotLatestEnd(slot ?? 'morning', stop.durationMin, win[1]),
       });
     }
   });

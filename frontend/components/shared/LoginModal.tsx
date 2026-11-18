@@ -10,6 +10,7 @@ import { useAuthStore } from '@/store/authStore';
 import { isUnconfirmedEmailError, safeReturnPath } from '@/lib/authEmail';
 import { allowUnload } from '@/lib/leaveGuard';
 import UnconfirmedEmailNotice from './UnconfirmedEmailNotice';
+import { track } from '@/lib/track';
 
 /** The page the modal is open on, if it's one worth coming back to. */
 const here = (): string | null =>
@@ -61,6 +62,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess, subtitle = 'Sig
     });
 
     setLoading(false);
+    if (!authError) track('logged_in', { method: 'password' });
 
     if (authError) {
       setError(authError.message);

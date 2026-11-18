@@ -23,6 +23,7 @@ import {
   coverImageFor,
   type GenerationCombo,
 } from '../services/presetGeneration';
+import { createMessage } from '../services/aiUsage';
 
 const DIR = path.join(__dirname, '..', 'data', 'presets');
 const curated: PresetData[] = JSON.parse(readFileSync(path.join(DIR, 'curated.json'), 'utf8'));
@@ -38,7 +39,7 @@ const comboKey = (c: GenerationCombo) => `${c.vibe}|${c.region}|${c.duration}|${
 async function generateOne(combo: GenerationCombo, index: number, avoid: string[]) {
   const anthropic = getAnthropic();
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const res = await anthropic.messages.create({
+    const res = await createMessage(anthropic, 'preset_generation', {
       model: DEFAULT_MODEL,
       max_tokens: 4000,
       tools: [PRESET_TOOL as any],
