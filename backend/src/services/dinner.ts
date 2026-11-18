@@ -141,7 +141,14 @@ const stopName = (title: string) => /^(.*\S)\s+\([^()]+\)$/.exec(title)?.[1] ?? 
 /** The dinner the planner put on an evening (a planned restaurant stop from 17:00), if any. */
 function plannedDinnerOn(city: any, date: string): string | null {
   const e = (city?.schedule?.[date] ?? []).find(
-    (x: any) => x && !x.dinner && x.category === 'restaurant' && typeof x.plannedDurationMin === 'number' && toMin(String(x.startTime)) >= 17 * 60,
+    (x: any) =>
+      x &&
+      !x.dinner &&
+      typeof x.plannedDurationMin === 'number' &&
+      toMin(String(x.startTime)) >= 17 * 60 &&
+      // A restaurant meal, or an outing that names a dinner ("Dinner at
+      // Bouillon Chartier") — the frontend replaces either (lib/dinnerPlace).
+      (x.category === 'restaurant' || /\b(dinner|supper)\b/i.test(String(x.title))),
   );
   return e ? stopName(String(e.title)) : null;
 }

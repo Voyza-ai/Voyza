@@ -363,3 +363,20 @@ describe('"make it Italian instead": a cuisine is not a restaurant name', () => 
     expect(res.body.reply).toContain('None of your other Paris dining picks is Thai');
   });
 });
+
+describe('a planned evening outing that names a dinner', () => {
+  // Live: "Dinner at Bouillon Chartier" (an activity pick) stood at 17:00 and
+  // the new dinner went on at 19:30 beside it. The frontend now replaces it;
+  // the reply says so, as it does for a planned restaurant meal.
+  it('the reply says the dinner takes its place', async () => {
+    const t = parisLondon();
+    t.cities[0].schedule['2026-12-15'] = [
+      { id: 'p1', title: 'Louvre', startTime: '10:00', endTime: '13:00', category: 'activity', plannedDurationMin: 180 },
+      { id: 'o1', title: 'Dinner at Bouillon Chartier', startTime: '17:00', endTime: '19:00', category: 'activity', plannedDurationMin: 120 },
+    ];
+    const res = await chat('add_dinner', { city: 'Paris', date: '2026-12-15', restaurant: 'Septime' }, t);
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.replacesPlanned).toBe('Dinner at Bouillon Chartier');
+    expect(res.body.reply).toContain('It takes the place of Dinner at Bouillon Chartier, which was planned for that evening.');
+  });
+});

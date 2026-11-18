@@ -1,5 +1,5 @@
 import type { City, ScheduledEvent, UnscheduledItem } from './types';
-import { DAY_CLOSE_MIN, DAY_OPEN_MIN, planDay } from './dayScheduleDefaults';
+import { DAY_CLOSE_MIN, DAY_OPEN_MIN, namesDinner, planDay } from './dayScheduleDefaults';
 import { parseLocal, toIso } from './dateHelpers';
 import { parseStop } from './stayRelay';
 
@@ -86,8 +86,13 @@ export function insertDinner(
     }
     const s = spanOf(e);
     const hits = overlaps(s, span);
-    const eveningMeal = e.category === 'restaurant' && s[0] >= 17 * 60 && (hits || !!parseStop(e).meal);
-    if (eveningMeal) continue; // the evening's planned dinner: this dinner replaces it
+    // The evening's planned dinner — a restaurant meal, or an outing the
+    // planner placed that names one ("Dinner at Bouillon Chartier", from the
+    // activity picks) — is replaced by this dinner. Live: both stood on one
+    // evening, 17:00 and 19:30.
+    const evening = s[0] >= 17 * 60;
+    const eveningMeal = evening && ((e.category === 'restaurant' && (hits || !!parseStop(e).meal)) || namesDinner(parseStop(e).name));
+    if (eveningMeal) continue;
     if (hits) bump.push(e);
     else keep.push(e);
   }
