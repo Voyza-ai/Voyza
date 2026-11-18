@@ -176,6 +176,16 @@ describe('"add a dinner reservation for one night in Paris"', () => {
     expect(res.body.proposal.after.event.dinner.restaurant).toBe('Septime');
   });
 
+  it('never picks the restaurant that is already lunch that same day (live: L\'Ami Jean for lunch and dinner on Jan 17)', async () => {
+    const trip = parisLondon();
+    trip.cities[0].schedule['2026-12-16'] = [
+      { id: 'l', title: 'Le Comptoir du Relais (French bistro)', startTime: '12:00', endTime: '13:00', category: 'restaurant', plannedDurationMin: 60 },
+    ];
+    const res = await chat('add_dinner', { city: 'Paris', date: '2026-12-16' }, trip);
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.proposal.after.event.dinner.restaurant).not.toBe('Le Comptoir du Relais');
+  });
+
   it('when every pick is already on the schedule, it still proposes one rather than refusing', async () => {
     const trip = parisLondon();
     trip.cities[0].schedule['2026-12-14'] = [
@@ -285,6 +295,15 @@ describe('edits elsewhere say what happens to the dinner', () => {
     const res = await chat('remove_city', { city: 'Paris', explanation: 'x' }, trip);
     expect(res.body.type).toBe('proposal');
     expect(res.body.reply).toContain('Your dinner at Septime (Tue, Dec 15) is removed with Paris.');
+  });
+
+  it('reordering the cities says the dinner moves with the stay, on the same night of it', async () => {
+    // Paris Dec 14–17 (dinner on its 2nd night, Dec 15) → London first, Paris Dec 16–19.
+    const first = await chat('add_dinner', { city: 'Paris', date: '2026-12-15' });
+    const trip = withDinner(parisLondon(), first.body.proposal);
+    const res = await chat('reorder_cities', { order: ['London', 'Paris'], explanation: 'x' }, trip);
+    expect(res.body.type).toBe('proposal');
+    expect(res.body.reply).toMatch(/Your dinner at \S.* \(Tue, Dec 15\) moves with your Paris stay to Thu, Dec 17 — still your second night there\./);
   });
 
   it('a pin that takes the dinner\'s night away says where it moves', async () => {

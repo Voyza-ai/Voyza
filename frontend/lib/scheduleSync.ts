@@ -16,7 +16,7 @@ import { parseStop, relayMovedStay } from './stayRelay';
 import { homeDepartureDay } from './tripSpan';
 import { parseLocal, toIso } from './dateHelpers';
 import { coordsOf, travelBetween } from './geoSchedule';
-import { insertDinner, isDinner, nearestNight, stayNights } from './dinnerPlace';
+import { dinnerNightAfter, insertDinner, isDinner, stayNights } from './dinnerPlace';
 
 /**
  * Keep a city's day plans in step with its dates and transport.
@@ -281,8 +281,13 @@ export function syncCitySchedule(
   const removedKeys = Object.keys(original).some((d) => !coverSet.has(d));
 
   // The pool, best first: what just moved, then the lost days' stops, then
-  // picks no day uses.
+  // picks no day uses. A dinner plan's restaurant counts as used wherever the
+  // dinner sits now — it is put back on its night only at the end, and a
+  // moved stay's dinner is still on an old date here (live, after a drag:
+  // Septime filled Jan 14's evening while it was Jan 13's dinner).
+  const dinnerSpots = new Set(Object.values(original).flat().filter(isDinner).map((e) => itemKey(e.dinner!.restaurant)));
   const onStay = placedKeys();
+  dinnerSpots.forEach((k) => onStay.add(k));
   const pool: Stop[] = [];
   const inPool = new Set<string>();
   const add = (s: Stop) => {
@@ -373,23 +378,27 @@ export function syncCitySchedule(
   for (const d of cover) {
     const win = fillable(d);
     if (!win || !eligible.has(d) || next[d].some((e) => e.category !== 'transport')) continue;
-    write(d, fillDay(next[d], travelRanges(next[d], ctxs.get(d)!), win, defaultsFor(city, d, cover, next)));
+    write(d, fillDay(next[d], travelRanges(next[d], ctxs.get(d)!), win, defaultsFor(city, d, cover, next, dinnerSpots)));
   }
 
   // Dinner plans (ScheduledEvent.dinner): each stays on its night at its
-  // time. One whose night the stay no longer has moves to the nearest night
-  // it still has (a later one on a tie — the backend's chat reply says the
-  // same), keeps its time and records where it came from, so the views can
-  // say it moved. It never moves to another city, and never lands on the
-  // fly-home morning, which is not a night. It takes the place of a dinner
-  // the planner put on that evening.
+  // time. A stay that moved wholesale (a reorder) takes its dinner to the
+  // same night of the stay; otherwise one whose night the stay no longer has
+  // moves to the nearest night it still has (a later one on a tie) — see
+  // dinnerNightAfter; the backend's chat reply says the same. It keeps its
+  // time and records where it came from, so the views can say it moved. It
+  // never moves to another city, and never lands on the fly-home morning,
+  // which is not a night. It takes the place of a dinner the planner put on
+  // that evening.
   const dinners: Array<{ e: ScheduledEvent; day: string }> = [];
   for (const [d, events] of Object.entries(original)) for (const e of events) if (isDinner(e)) dinners.push({ e, day: d });
   if (dinners.length > 0) {
     const nights = stayNights(city);
+    const prevCity = prev ? prev.trip.cities[prev.cityIndex] : null;
+    const oldNights = prevCity ? stayNights(prevCity) : null;
     for (const d of Object.keys(next)) if (next[d].some(isDinner)) next[d] = next[d].filter((e) => !isDinner(e));
     for (const { e, day } of dinners) {
-      const target = nights.includes(day) ? day : nearestNight(nights, day);
+      const target = dinnerNightAfter(oldNights, nights, day);
       if (!target || !next[target]) continue;
       const ev = target === day ? e : { ...e, dinner: { ...e.dinner!, movedFrom: e.dinner!.movedFrom ?? day } };
       const placed = insertDinner(next[target], ev, target);
@@ -515,7 +524,7 @@ function picksOf(city: City, rank: number): Stop[] {
  * planned there — its time of day, length and place — so an evening food
  * tour is not put in a morning slot as a bare name.
  */
-function defaultsFor(city: City, day: string, cover: string[], schedule: Record<string, ScheduledEvent[]>): Stop[] {
+function defaultsFor(city: City, day: string, cover: string[], schedule: Record<string, ScheduledEvent[]>, dinnerSpots: Set<string>): Stop[] {
   const at = new Map<string, { gap: number; event: ScheduledEvent }>();
   const t = parseLocal(day).getTime();
   for (const d of cover) {
@@ -527,7 +536,9 @@ function defaultsFor(city: City, day: string, cover: string[], schedule: Record<
       if (!held || gap < held.gap) at.set(k, { gap, event: e });
     }
   }
+  // A restaurant a dinner plan uses is not placed again on an empty day.
   return picksOf(city, 3)
+    .filter((s) => !dinnerSpots.has(s.key))
     .map((s, i) => {
       const held = at.get(s.key);
       return { s: held ? { ...stopOf(held.event, 3), event: { ...stopOf(held.event, 3).event, id: '' } } : s, i, gap: held?.gap ?? Infinity };

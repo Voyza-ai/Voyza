@@ -147,17 +147,20 @@ function plannedDinnerOn(city: any, date: string): string | null {
 }
 
 /**
- * Restaurants the city's schedule already has on days other than `night`:
- * the planner's meals and other dinner plans. A new dinner avoids them —
+ * Restaurants the city's schedule already has other than that night's
+ * planned dinner: the planner's meals on other days, that same day's
+ * breakfast or lunch, and other dinner plans. A new dinner avoids them —
  * live, "add a dinner for one night in Paris" picked Clown Bar for Saturday
- * while the schedule already had Clown Bar for Friday's dinner.
+ * while the schedule had Clown Bar for Friday's dinner, and "dinner on our
+ * last night" picked L'Ami Jean on a day whose lunch was L'Ami Jean.
  */
 function restaurantsOnOtherDays(city: any, night: string): Set<string> {
   const out = new Set<string>();
   for (const [date, events] of Object.entries(city?.schedule ?? {})) {
-    if (date === night) continue;
     for (const e of (events as any[]) ?? []) {
       if (!e) continue;
+      // That night's evening meal is the one the dinner takes the place of.
+      if (date === night && (e.dinner || toMin(String(e.startTime)) >= 17 * 60)) continue;
       if (e.dinner && typeof e.dinner.restaurant === 'string') out.add(norm(e.dinner.restaurant));
       else if (e.category === 'restaurant' && typeof e.title === 'string') out.add(norm(stopName(e.title)));
     }
@@ -500,11 +503,33 @@ export function dinnerEditNotes(trip: any, after: Array<{ name: string; arrival:
       continue;
     }
     const nights = stayNights({ dates: { arrival: stop.arrival, departure: stop.departure } });
-    if (nights.length === 0 || nights.includes(d.date)) continue;
-    const to = nearestNight(nights, d.date);
-    out.push(`${what} moves to ${nightLabel(to)}, the nearest night you're still in ${d.city}.`);
+    const oldNights = stayNights(trip.cities[d.cityIndex]);
+    const to = dinnerNightAfter(oldNights, nights, d.date);
+    if (!to || to === d.date) continue;
+    const n = nights.indexOf(to);
+    out.push(
+      oldNights.length === nights.length && oldNights[0] !== nights[0]
+        ? `${what} moves with your ${d.city} stay to ${nightLabel(to)} — still your ${ORDINAL[n] ?? `${n + 1}th`} night there.`
+        : `${what} moves to ${nightLabel(to)}, the nearest night you're still in ${d.city}.`,
+    );
   }
   return out.join(' ');
+}
+
+/**
+ * The night a dinner sits on after its stay's dates change: a stay moved
+ * wholesale (same number of nights, new dates — a reorder) takes it to the
+ * same night of the stay; otherwise it keeps its date while the stay has
+ * that night, else the nearest night. Same rule as frontend
+ * lib/dinnerPlace.ts dinnerNightAfter.
+ */
+export function dinnerNightAfter(oldNights: string[] | null, nights: string[], day: string): string | null {
+  if (nights.length === 0) return null;
+  if (oldNights && oldNights.length === nights.length && oldNights[0] !== nights[0]) {
+    const i = oldNights.indexOf(day);
+    if (i >= 0) return nights[i];
+  }
+  return nights.includes(day) ? day : nearestNight(nights, day);
 }
 
 /** The night nearest `day`; a later one on a tie. Same rule as frontend lib/dinners.ts. */

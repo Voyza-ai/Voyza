@@ -46,6 +46,24 @@ export function nearestNight(nights: string[], day: string): string | null {
 }
 
 /**
+ * The night a dinner sits on after its stay's dates change. A stay that moved
+ * wholesale — the same number of nights on new dates, as when the cities are
+ * reordered or an earlier city changes length — takes its dinner with it to
+ * the same night of the stay: the second night in Paris stays the second
+ * night. Otherwise the dinner keeps its date while the stay still has that
+ * night, and moves to the nearest night it has when not. Same rule as
+ * backend services/dinner.ts dinnerNightAfter.
+ */
+export function dinnerNightAfter(oldNights: string[] | null, nights: string[], day: string): string | null {
+  if (nights.length === 0) return null;
+  if (oldNights && oldNights.length === nights.length && oldNights[0] !== nights[0]) {
+    const i = oldNights.indexOf(day);
+    if (i >= 0) return nights[i];
+  }
+  return nights.includes(day) ? day : nearestNight(nights, day);
+}
+
+/**
  * `dinner` put on a day's events. It takes the place of the dinner the
  * planner had put on that evening; a planned activity it overlaps moves to
  * the free time nearest it that day, or — when the day has none — is

@@ -117,6 +117,31 @@ describe('edits elsewhere keep the dinner on a night of its own stay', () => {
     expect(syncCitySchedule(synced, 0)).toBeNull();
   });
 
+  it('cities reordered (Florence first): the stay moves wholesale and its dinner keeps the same night of the stay', () => {
+    // Rome Jun 15–18 (dinner on its 2nd night, Jun 16) → Florence first, Rome Jun 17–20.
+    const before = applyDinnerProposal(trip(), add('2026-06-16'))!;
+    const [rome, florence] = before.cities;
+    const after: Trip = {
+      ...before,
+      cities: [
+        { ...florence, dates: { arrival: '2026-06-15', departure: '2026-06-17' } },
+        { ...rome, dates: { arrival: '2026-06-17', departure: '2026-06-20' } },
+      ],
+    };
+    const synced = syncTripSchedules(before, after);
+    const ds = dinnersOf(synced);
+    expect(ds).toHaveLength(1);
+    // Still Rome's second night (Jun 18), not the nearest date (Jun 17, the arrival night).
+    expect(ds[0]).toMatchObject({ city: 'Rome', d: '2026-06-18' });
+    expect(ds[0].e.startTime).toBe('19:30');
+    expect(ds[0].e.dinner!.movedFrom).toBe('2026-06-16');
+    // The moved stay is re-planned without putting the dinner's restaurant on
+    // another meal (live, after a drag: Septime as Jan 14's 19:00 meal too).
+    const romeAfter = synced.cities.find((c) => c.name === 'Rome')!;
+    const daEnzo = Object.entries(romeAfter.schedule ?? {}).flatMap(([d, es]) => es.filter((e) => !e.dinner && /Da Enzo/.test(e.title)).map((e) => `${d} ${e.startTime}`));
+    expect(daEnzo).toEqual([]);
+  });
+
   it('a dinner on a night still in the stay does not move, and a plain sync leaves it alone', () => {
     const t = applyDinnerProposal(trip(), add())!;
     const out = syncCitySchedule(t, 0);
@@ -142,6 +167,21 @@ describe('edits elsewhere keep the dinner on a night of its own stay', () => {
     const located = { activities: [{ ...picks.activities[0], lat: 41.9, lng: 12.47 }], restaurants: [] } as any;
     const next = withCityGeo(t, 'Rome', picks, located);
     expect(dinnersOf(next).map((x) => x.d)).toEqual(['2026-06-15']);
+  });
+
+  it('the re-plan never puts the dinner\'s restaurant on another day (live: Septime on Friday while it was Wednesday\'s dinner)', () => {
+    // A stay laid out by the planner (no hand-made days), as live.
+    const t = applyDinnerProposal(buildTrip(), add('2026-06-15'))!;
+    const rest = (name: string, lat?: number) => ({ name, cuisine: 'Italian', priceRange: '$$', ...(lat ? { lat, lng: 12.47 } : {}) });
+    const picks = {
+      activities: [{ name: 'Pantheon', category: 'landmark', timeOfDay: 'morning', durationHours: 1, reason: '' }],
+      restaurants: [rest('Da Enzo'), rest('Armando')],
+    } as any;
+    const located = { activities: [{ ...picks.activities[0], lat: 41.9, lng: 12.47 }], restaurants: [rest('Da Enzo', 41.89), rest('Armando', 41.9)] } as any;
+    const next = withCityGeo(t, 'Rome', picks, located);
+    const rome = next.cities[0];
+    const daEnzo = Object.entries(rome.schedule ?? {}).flatMap(([d, es]) => es.filter((e) => /Da Enzo/.test(e.title)).map((e) => `${d}${e.dinner ? ' dinner' : ''}`));
+    expect(daEnzo).toEqual(['2026-06-15 dinner']);
   });
 });
 

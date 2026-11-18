@@ -2,6 +2,7 @@ import type { DinnerProposal } from './api';
 import type { Trip, UnscheduledItem } from './types';
 import { syncCitySchedule } from './scheduleSync';
 import { insertDinner, stayNights } from './dinnerPlace';
+import { parseStop } from './stayRelay';
 
 export { cityDinners, isDinner, nightLabel, timeLabel } from './dinnerPlace';
 
@@ -47,6 +48,16 @@ export function applyDinnerProposal(trip: Trip, p: DinnerProposal): Trip | null 
     schedule[p.after.date] = placed.events;
     const names = new Set(placed.dropped.map((u) => u.title.toLowerCase()));
     unscheduled = [...unscheduled.filter((u) => !names.has(u.title.toLowerCase())), ...placed.dropped];
+    // The dinner's restaurant is not also a planned meal elsewhere in the
+    // stay (a stay laid out just above can have it as another day's lunch).
+    // Only the planner's stops go; the traveller's own blocks stay.
+    const spot = p.after.event.dinner!.restaurant.trim().toLowerCase();
+    for (const [d, evs] of Object.entries(schedule)) {
+      const kept = evs.filter(
+        (e) => e.dinner || e.category !== 'restaurant' || typeof e.plannedDurationMin !== 'number' || parseStop(e).name.trim().toLowerCase() !== spot,
+      );
+      if (kept.length !== evs.length) schedule[d] = kept;
+    }
   }
   const cities = [...trip.cities];
   cities[idx] = { ...city, schedule, unscheduled };

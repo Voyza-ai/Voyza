@@ -64,7 +64,12 @@ export function relayMovedStay(
   // The traveller's own blocks (added by hand) on days still in the stay
   // stay where they are; every planned stop is re-planned.
   const own = (e: ScheduledEvent) => e.category === 'custom' || e.category === 'free';
-  const seen = new Set<string>();
+  // A dinner plan's restaurant is never re-planned as a meal: noted up front,
+  // since a planned meal there can sit on an earlier day than the dinner
+  // (live, after a drag: L'Ami Jean as the dinner and as Jan 14's 19:00 meal).
+  const seen = new Set<string>(
+    Object.values(old).flatMap((es) => es.filter((e) => e.dinner).map((e) => itemKey(e.dinner!.restaurant))),
+  );
 
   // Picks taken back off every other day of the old schedule.
   const activities: ActivitySuggestion[] = [];
