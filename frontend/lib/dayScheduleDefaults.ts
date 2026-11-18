@@ -1,7 +1,8 @@
-import { City, Trip, ScheduledEvent, Transport, HomeLeg, UnscheduledItem } from './types';
+import { City, Trip, ScheduledEvent, Transport, UnscheduledItem } from './types';
 import { parseLocal, toIso } from './dateHelpers';
 import { homeDepartureDay } from './tripSpan';
 import { cityFlightCodeLocally } from './locationResolver';
+import { homeLegToTransport } from './cityLegs';
 // `import type` only — keeps the fetch layer in lib/api out of this
 // module's runtime graph while still typing the AI's suggestion shapes.
 import type { ActivitySuggestion, RestaurantSuggestion } from './api';
@@ -102,28 +103,6 @@ const minutesToTime = (mins: number): string => {
 
 let _idCounter = 0;
 const newId = () => `evt-${Date.now()}-${++_idCounter}`;
-
-/**
- * Adapt a `HomeLeg` (the home-anchor flight shape) into a `Transport`-
- * shaped object so the rest of `buildDefaultSchedule` can read it
- * uniformly. The HomeLeg has `originAirport` / `destAirport` IATA codes
- * but no full station strings — we map IATA into `fromStation` /
- * `toStation` so the "Head to {airport}" titles still read sensibly.
- */
-const homeLegToTransport = (leg: HomeLeg | null | undefined): Transport | null => {
-  if (!leg) return null;
-  return {
-    mode: 'flight',
-    operator: leg.operator ?? '',
-    duration: '',
-    price: leg.price ?? 0,
-    departTime: leg.departTime ?? undefined,
-    arriveTime: leg.arriveTime ?? undefined,
-    departDate: leg.departDate ?? undefined,
-    fromStation: leg.originAirport ?? undefined,
-    toStation: leg.destAirport ?? undefined,
-  };
-};
 
 /**
  * Per-day result of resolving a city's transport context.
