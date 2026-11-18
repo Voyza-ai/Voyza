@@ -24,7 +24,7 @@ const toF = (c: number) => Math.round((c * 9) / 5 + 32);
 const r = (n: number) => Math.round(n);
 
 /** A US home gets °F beside °C. */
-function isUsHome(trip: any): boolean {
+export function isUsHome(trip: any): boolean {
   const home = String(trip?.origin?.city ?? '').trim();
   return !!home && cityGeo(home)?.country === 'US';
 }

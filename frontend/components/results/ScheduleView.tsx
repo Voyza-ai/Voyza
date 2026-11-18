@@ -8,6 +8,7 @@ import { syncCitySchedule } from '@/lib/scheduleSync';
 import { homeDepartureDay } from '@/lib/tripSpan';
 import { useTripStore } from '@/store/tripStore';
 import DayCard from './DayCard';
+import { useTripWeather } from '@/lib/tripWeather';
 import DayPlanner from './DayPlanner';
 
 /**
@@ -37,6 +38,7 @@ type ScheduleViewProps = {
 };
 
 export default function ScheduleView({ trip }: ScheduleViewProps) {
+  const weather = useTripWeather(trip);
   // ISO date of the day whose DayPlanner modal is currently open. Null = no
   // modal. Single click on any card sets it.
   const [editorDate, setEditorDate] = useState<string | null>(null);
@@ -215,6 +217,9 @@ export default function ScheduleView({ trip }: ScheduleViewProps) {
               trip={trip}
               events={events}
               travelMode={travelByDate.get(iso) ?? null}
+              weather={weather.at(city?.name, iso)}
+              fahrenheit={weather.fahrenheit}
+              typicalYears={weather.typicalYears}
               onOpenEditor={() => setEditorDate(iso)}
             />
           );

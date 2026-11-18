@@ -7,6 +7,8 @@ import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { converse } from '../services/planConverse';
 import { runTripChat } from '../services/tripChat';
+import { tripWeather } from '../services/weather';
+import { isUsHome } from '../services/weatherChat';
 import { reviseDestinations } from '../services/destinationRevision';
 import { todayIso } from '../utils/dates';
 
@@ -575,6 +577,38 @@ router.post(
     // The chat's core lives in services/tripChat.ts (runTripChat), shared
     // with other callers (e.g. a future iMessage bot; none in this repo yet).
     res.json(await runTripChat({ message, currentTrip, history, priceMode }));
+  }),
+);
+
+// ─── POST /api/plan/weather ──────────────────────────────────
+// Each trip day's weather for the Calendar and Schedule views: MET Norway's
+// forecast where it reaches, typical for the date (past years' averages)
+// beyond it — the same data the chat's weather answers use
+// (services/weather.ts). A day no source covers is left out, never guessed.
+// Read-only: nothing is written.
+const weatherSchema = z.object({
+  origin: z.object({ city: z.string().max(120).nullish() }).nullish(),
+  cities: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(120),
+        country: z.string().max(120).nullish(),
+        dates: z.object({ arrival: z.string().max(10), departure: z.string().max(10) }),
+      }),
+    )
+    .min(1)
+    .max(30),
+});
+
+router.post(
+  '/weather',
+  asyncHandler(async (req, res) => {
+    const trip = weatherSchema.parse(req.body);
+    const { cities } = await tripWeather(trip);
+    res.json({
+      fahrenheit: isUsHome(trip),
+      cities: cities.map((c) => ({ city: c.city, days: c.days, missing: c.missing, typicalYears: c.typicalYears ?? null })),
+    });
   }),
 );
 

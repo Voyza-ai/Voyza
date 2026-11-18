@@ -374,3 +374,49 @@ describe('packing_list', () => {
     expect(res.body.reply).not.toMatch(/°C/);
   });
 });
+
+/**
+ * POST /api/plan/weather: the same data, per day, for the Calendar and
+ * Schedule views. No model call — the numbers are the providers' own.
+ */
+describe('POST /api/plan/weather (calendar and schedule)', () => {
+  const body = (t: any) => ({ origin: { city: t.origin.city }, cities: t.cities.map((c: any) => ({ name: c.name, country: c.country, dates: c.dates })) });
+
+  it('gives each city its own days: forecast where MET Norway reaches, typical beyond, °F for a US home', async () => {
+    fakeWeather({ met: metJson((i) => ({ hi: 10 + i, lo: 3, rainMm: i === 1 ? 4.5 : 0, sym: i === 1 ? 'rain' : 'clearsky_day' })), nasa: nasaJson(PARIS_CLIMATE), noaa: 'none' });
+    const t = trip(1);
+    const res = await request(app).post('/api/plan/weather').send(body(t));
+    expect(res.status).toBe(200);
+    expect(res.body.fahrenheit).toBe(true);
+    const paris = res.body.cities.find((c: any) => c.city === 'Paris');
+    expect(paris.days.map((d: any) => d.date)).toEqual([addDays(TODAY, 1), addDays(TODAY, 2), addDays(TODAY, 3)]);
+    expect(paris.days[0]).toMatchObject({ kind: 'forecast', summary: 'rain', precipMm: 4.5, highC: 11 });
+    expect(paris.days[1]).toMatchObject({ kind: 'forecast', summary: 'sunny' });
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('a trip months away gets typical days, labelled as such, with the years they average', async () => {
+    fakeWeather({ met: 'fail', nasa: nasaJson(PARIS_CLIMATE), noaa: 'none' });
+    const t = trip(60);
+    const res = await request(app).post('/api/plan/weather').send(body(t));
+    const paris = res.body.cities.find((c: any) => c.city === 'Paris');
+    expect(paris.days.length).toBe(3);
+    expect(paris.days.every((d: any) => d.kind === 'typical' && typeof d.wetDayShare === 'number')).toBe(true);
+    expect(paris.typicalYears).toBe(`${YEAR - 10}–${YEAR - 1}`);
+  });
+
+  it('a day no provider answers for is listed as missing, not guessed', async () => {
+    fakeWeather({ met: 'fail', nasa: 'fail', noaa: 'fail' });
+    const res = await request(app).post('/api/plan/weather').send(body(trip(1)));
+    expect(res.status).toBe(200);
+    for (const c of res.body.cities) {
+      expect(c.days).toEqual([]);
+      expect(c.missing.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects a body without cities', async () => {
+    const res = await request(app).post('/api/plan/weather').send({ origin: { city: 'New York' } });
+    expect(res.status).toBe(400);
+  });
+});

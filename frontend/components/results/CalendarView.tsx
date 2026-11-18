@@ -8,6 +8,8 @@ import { getCityColor } from '@/lib/cityColors';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
 import { homeDepartureDay } from '@/lib/tripSpan';
 import DayPlanner from './DayPlanner';
+import WeatherChip from './WeatherChip';
+import { useTripWeather } from '@/lib/tripWeather';
 
 type CalendarViewProps = {
   trip: Trip;
@@ -29,6 +31,7 @@ type DayCell = {
 };
 
 export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
+  const weather = useTripWeather(trip);
   const [selectedDay, setSelectedDay] = useState<DayCell | null>(null);
 
   // Filter to cities with valid dates for calendar rendering
@@ -232,7 +235,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
               <div className="grid grid-cols-7 gap-2">
                 {cells.map((cell, ci) => {
                   if (!cell.isInMonth) {
-                    return <div key={ci} className="h-[88px]" />;
+                    return <div key={ci} className="h-[104px]" />;
                   }
 
                   const theme = cell.city && cell.cityIndex != null
@@ -246,7 +249,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                         if (cell.city || cell.isDeparture) setSelectedDay(cell);
                       }}
                       whileHover={cell.city || cell.isDeparture ? { scale: 1.04 } : undefined}
-                      className="relative h-[88px] rounded-xl border overflow-hidden text-left p-2 transition-colors"
+                      className="relative h-[104px] rounded-xl border overflow-hidden text-left p-2 transition-colors flex flex-col"
                       style={{
                         background: theme
                           ? theme.bg
@@ -337,6 +340,17 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                         );
                       })()}
 
+                      {/* The day's weather in its city, centred on the bottom line. Only on
+                          a city's own days — not on the grey travel days around them. */}
+                      {(() => {
+                        const day = theme && cell.city ? weather.at(cell.city.name, cell.iso) : null;
+                        return day ? (
+                          <div className="mt-auto pt-1 flex justify-center">
+                            <WeatherChip day={day} fahrenheit={weather.fahrenheit} typicalYears={weather.typicalYears} accent={theme!.text} variant="inline" />
+                          </div>
+                        ) : null;
+                      })()}
+
                       {/* Departure-only cell — last city's outbound flight (e.g. flying home).
                           City is null because the dep date isn't mapped to any in-trip city. */}
                       {!cell.city && cell.isDeparture && cell.departureTime && (
@@ -363,6 +377,11 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
       {/* Footer summary */}
       <div className="mt-8 text-gray-400 text-[12px] text-center">
         {totalNights} nights · {trip.cities.length} cities · click a day to see its itinerary
+        {weather.typicalYears && (
+          <div className="mt-1" data-testid="weather-typical-note">
+            Weather marked avg: typical for the date ({weather.typicalYears} average), not a forecast
+          </div>
+        )}
       </div>
 
       {/* Day planner — Google Calendar style. The fly-home day has no city

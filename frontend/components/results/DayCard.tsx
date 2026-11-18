@@ -10,6 +10,8 @@ import TravelConnectors from './TravelConnectors';
 import { useDayHubs } from '@/lib/tripHubs';
 import { blockLayout } from '@/lib/blockLayout';
 import DinnerBadge from './DinnerBadge';
+import WeatherChip from './WeatherChip';
+import type { DayWeather } from '@/lib/api';
 
 /**
  * Read-only single-day column rendered side-by-side with peers in
@@ -43,6 +45,10 @@ type DayCardProps = {
    * the header. Null on stationary days.
    */
   travelMode?: TransportMode | null;
+  /** The day's weather in its city, when it has come in. */
+  weather?: DayWeather | null;
+  fahrenheit?: boolean;
+  typicalYears?: string | null;
   onOpenEditor: () => void;
 };
 
@@ -84,6 +90,9 @@ export default function DayCard({
   trip = null,
   events,
   travelMode = null,
+  weather = null,
+  fahrenheit = false,
+  typicalYears = null,
   onOpenEditor,
 }: DayCardProps) {
   const hubs = useDayHubs(trip, cityIndex, date);
@@ -141,8 +150,11 @@ export default function DayCard({
           >
             {weekday}
           </div>
-          <div className="text-[18px] font-semibold leading-tight" style={{ color: accent }}>
-            {label}
+          <div className="flex items-center gap-2">
+            <div className="text-[18px] font-semibold leading-tight" style={{ color: accent }}>
+              {label}
+            </div>
+            {weather && <WeatherChip day={weather} fahrenheit={fahrenheit} typicalYears={typicalYears} accent={accent} />}
           </div>
         </div>
         <div className="text-right min-w-0">
