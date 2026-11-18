@@ -1,4 +1,4 @@
-import { keepOwnCity, otherStopsHint } from '../utils/cityPicks';
+import { breakfastPickCount, keepOwnCity, otherStopsHint, restaurantPickCount } from '../utils/cityPicks';
 import { stripOriginFiller } from '../services/location/originPhrase';
 import { Router } from 'express';
 import { z } from 'zod';
@@ -913,17 +913,21 @@ const restaurantsSchema = z.object({
   vibe: z.string().optional(),
   travelers: z.number().int().positive().optional(),
   budget: z.number().int().positive().optional(),
+  /** Nights in the city: a longer stay gets more places (restaurantPickCount). */
+  nights: z.number().int().positive().max(60).optional(),
   otherCities: z.array(z.string().max(120)).max(30).optional(),
 });
 
 router.post(
   '/restaurants',
   asyncHandler(async (req, res) => {
-    const { city, country, vibe, travelers, budget, otherCities } = restaurantsSchema.parse(req.body);
+    const { city, country, vibe, travelers, budget, nights, otherCities } = restaurantsSchema.parse(req.body);
     const anthropic = getAnthropicSafe();
 
     if (anthropic) {
       const { DEFAULT_MODEL } = require('../services/anthropic');
+      const n = restaurantPickCount(nights);
+      const breakfasts = breakfastPickCount(nights);
 
       const vibeHint = vibe ? `The traveler's vibe is: ${vibe}. ` : '';
       const groupHint = travelers && travelers > 1 ? `Group of ${travelers}. ` : '';
@@ -933,8 +937,8 @@ router.post(
 
       const response = await createMessage(anthropic, 'restaurants', {
         model: DEFAULT_MODEL,
-        max_tokens: 1024,
-        system: `You recommend restaurants in a city. ${vibeHint}${groupHint}${otherStopsHint(city, otherCities)}Pick 5 diverse spots representing local specialties. Avoid generic chain restaurants and tourist traps. ${budgetHint}
+        max_tokens: n > 6 ? 2048 : 1024,
+        system: `You recommend restaurants in a city. ${vibeHint}${groupHint}${otherStopsHint(city, otherCities)}Pick ${n} diverse spots representing local specialties, all different places: ${breakfasts === 1 ? 'one of them a breakfast place' : `${breakfasts} of them breakfast places`} (a café, bakery or market, mealType "breakfast"), the rest for lunch or dinner. Avoid generic chain restaurants and tourist traps. ${budgetHint}
 
 Respond with ONLY a JSON array, no markdown fences, no explanation. Each item:
 {
