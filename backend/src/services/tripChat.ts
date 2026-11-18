@@ -101,6 +101,7 @@ import {
   verifyTransportProposal,
   whichLegReply,
 } from './tripLegs';
+import { createMessage } from './aiUsage';
 
 export type ChatTurn = { role: 'user' | 'assistant'; content: string };
 
@@ -454,7 +455,7 @@ async function runTripChatInUnits(input: TripChatInput): Promise<TripChatResult>
 
   let response: any;
   try {
-    response = await anthropic.messages.create({
+    response = await createMessage(anthropic, 'chat', {
       model: DEFAULT_MODEL,
       max_tokens: 1024,
       system: chatSystemPrompt(currentTrip),
