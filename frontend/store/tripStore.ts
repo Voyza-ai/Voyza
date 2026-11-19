@@ -483,7 +483,7 @@ export async function requestCityPicks(req: CityPicksRequest): Promise<CityPicks
     searchActivities({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, nights: req.nights, otherCities: req.otherCities }).catch(
       () => [] as ActivitySuggestion[],
     ),
-    searchRestaurants({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, budget: req.budget, otherCities: req.otherCities }).catch(
+    searchRestaurants({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, budget: req.budget, nights: req.nights, otherCities: req.otherCities }).catch(
       () => [] as RestaurantSuggestion[],
     ),
   ]);

@@ -834,6 +834,8 @@ export async function searchRestaurants(params: {
   vibe?: string;
   travelers?: number;
   budget?: number;
+  /** Nights in the city: a longer stay gets more places. */
+  nights?: number;
   otherCities?: string[];
 }): Promise<RestaurantSuggestion[]> {
   const data = await withTimeout(AI_PICKS_TIMEOUT_MS, (signal) =>

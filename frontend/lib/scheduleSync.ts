@@ -492,7 +492,9 @@ function picksOf(city: City, rank: number): Stop[] {
  * The city's picks for a day that has nothing left to take: those placed
  * furthest from it first. A pick already on the stay is offered as it was
  * planned there — its time of day, length and place — so an evening food
- * tour is not put in a morning slot as a bare name.
+ * tour is not put in a morning slot as a bare name. A restaurant already on
+ * the stay is not offered again: that meal stays open (live: E. Pellicci for
+ * breakfast three mornings running, St. JOHN twice).
  */
 function defaultsFor(city: City, day: string, cover: string[], schedule: Record<string, ScheduledEvent[]>): Stop[] {
   const at = new Map<string, { gap: number; event: ScheduledEvent }>();
@@ -507,6 +509,7 @@ function defaultsFor(city: City, day: string, cover: string[], schedule: Record<
     }
   }
   return picksOf(city, 3)
+    .filter((s) => !(at.get(s.key)?.event.category === 'restaurant' || (s.event.category === 'restaurant' && at.has(s.key))))
     .map((s, i) => {
       const held = at.get(s.key);
       return { s: held ? { ...stopOf(held.event, 3), event: { ...stopOf(held.event, 3).event, id: '' } } : s, i, gap: held?.gap ?? Infinity };

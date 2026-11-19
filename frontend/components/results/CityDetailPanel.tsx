@@ -30,6 +30,7 @@ import { nightsBetween } from '@/lib/hotelScore';
 import { getCityColor, CITY_COLORS } from '@/lib/cityColors';
 import { hasStay } from './CityCard';
 import { VIBE_LABEL } from '@/lib/cityTheme';
+import { effectiveTransportIn, effectiveTransportOut } from '@/lib/cityLegs';
 
 type CityDetailPanelProps = {
   trip: Trip;
@@ -223,8 +224,8 @@ export default function CityDetailPanel({
 
           {/* Travel summary — dark city-color block */}
           <TravelSummary
-            arrive={city.transportIn}
-            depart={city.transportOut}
+            arrive={effectiveTransportIn(trip, cityIndex)}
+            depart={effectiveTransportOut(trip, cityIndex)}
             arriveDate={city.dates.arrival}
             departDate={city.dates.departure}
             color={color}
