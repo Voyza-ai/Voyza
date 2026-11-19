@@ -84,6 +84,10 @@ export type Hotel = {
   /** Where the hotel is, from the provider — pins it on the city guide's hotel map. */
   lat?: number;
   lng?: number;
+  /** Photos of the hotel, large size, best first. Absent on trips saved before photos were kept. */
+  photos?: string[];
+  /** Booking's id for the hotel — what its photo gallery is looked up by. */
+  providerId?: string;
 };
 
 /** A user-supplied hotel/Airbnb that overrides the ranked list selection. */

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { hotelSearchLimiter } from '../middleware/rateLimit';
 import { searchHotels } from '../services/hotels';
+import { hotelPhotos } from '../services/hotelPhotos';
 
 const router = Router();
 
@@ -30,6 +31,22 @@ router.post(
     const input = searchSchema.parse(req.body);
     const hotels = await searchHotels(input);
     res.json({ hotels });
+  }),
+);
+
+// A hotel's photo gallery for the city guide. Booking hotel ids are numeric;
+// anything else is refused before it reaches the metered API.
+const photosSchema = z.object({ hotelId: z.string().regex(/^\d{1,12}$/, 'Booking hotel id') });
+
+router.get(
+  '/photos',
+  hotelSearchLimiter,
+  asyncHandler(async (req, res) => {
+    const { hotelId } = photosSchema.parse(req.query);
+    const photos = await hotelPhotos(hotelId);
+    // Photos of a hotel change rarely; let the browser keep them for an hour.
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.json({ photos });
   }),
 );
 

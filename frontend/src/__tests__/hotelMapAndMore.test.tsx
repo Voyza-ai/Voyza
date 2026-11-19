@@ -4,27 +4,26 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import { useTripStore } from '@/store/tripStore';
 import { searchHotels } from '@/lib/api';
-import { hotelWindow, newHotelsOnly, locateHotels, type HotelEntry } from '@/lib/hotelMap';
+import { hotelWindow, newHotelsOnly, locateHotels, activitySpots, type HotelEntry } from '@/lib/hotelMap';
 import { buildTrip, buildCity } from './fixtures';
-import type { Hotel, Trip } from '@/lib/types';
+import type { Hotel, ScheduledEvent, Trip } from '@/lib/types';
 
 /**
- * The city guide's "Find more hotels" and "Open map" — the two buttons that
- * used to sit there greyed out as "Coming soon".
+ * The city guide's "Find more hotels" (once a greyed-out "Coming soon"), and
+ * the hotel map that now sits beside the guide.
  */
 
 // The map itself needs WebGL; here it is a stub that lists what it was given
 // and offers the card's "Choose this hotel".
-jest.mock('@/components/results/HotelMapModal', () => ({
+jest.mock('@/components/results/HotelMapPanel', () => ({
   __esModule: true,
-  default: ({ entries, onSelect, onClose }: any) => (
-    <div data-testid="hotel-map-modal">
+  default: ({ entries, onSelect, selectedIndex }: any) => (
+    <div data-testid="hotel-map-panel" data-selected={selectedIndex ?? ''}>
       {entries.map((e: any) => (
         <button key={e.index} type="button" onClick={() => onSelect(e.index)}>
           {`map: choose ${e.hotel.name}`}
         </button>
       ))}
-      <button type="button" onClick={onClose}>map: close</button>
     </div>
   ),
 }));
@@ -192,7 +191,8 @@ describe('CityDetailPanel — Find more hotels', () => {
     useTripStore.setState({ currentTrip: tripWith(hotels(1, 10)), priceMode: 'total' });
     render(<Panel />);
     expect(screen.getByRole('button', { name: /Find more hotels/ })).toBeEnabled();
-    expect(screen.getByRole('button', { name: /Open map/ })).toBeEnabled();
+    // The map is beside the guide, not behind a button.
+    expect(screen.queryByRole('button', { name: /Open map/ })).toBeNull();
     expect(screen.queryByText(/coming soon/i)).toBeNull();
     expect(screen.queryByText('Randomize nearby')).toBeNull();
   });
@@ -262,27 +262,81 @@ describe('CityDetailPanel — Find more hotels', () => {
   });
 });
 
-describe('CityDetailPanel — Open map', () => {
-  it('opens the map with the hotels listed, and a pick made on it becomes the stay', async () => {
+describe('CityDetailPanel — the map beside it', () => {
+  const mapButtons = () =>
+    Array.from(screen.getByTestId('hotel-map-panel').querySelectorAll('button')).map((b) => b.textContent);
+
+  it('shows the hotels listed, follows a new set, and a pick made on it becomes the stay', async () => {
     useTripStore.setState({ currentTrip: tripWith(hotels(1, 10)), priceMode: 'total' });
     render(<Panel />);
+    await screen.findByTestId('hotel-map-panel');
+    expect(mapButtons()).toEqual(['map: choose Hotel 1', 'map: choose Hotel 2', 'map: choose Hotel 3', 'map: choose Hotel 4']);
     fireEvent.click(screen.getByRole('button', { name: /Find more hotels/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Open map/ }));
-    const modal = await screen.findByTestId('hotel-map-modal');
-    expect(Array.from(modal.querySelectorAll('button')).map((b) => b.textContent)).toEqual([
+    expect(mapButtons()).toEqual([
       'map: choose Hotel 1',
       'map: choose Hotel 5',
       'map: choose Hotel 6',
       'map: choose Hotel 7',
       'map: choose Hotel 8',
-      'map: close',
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'map: choose Hotel 7' }));
     expect(useTripStore.getState().currentTrip!.cities[0].hotel.name).toBe('Hotel 7');
-    // The map keeps the hotels it opened with, even though the pick moved.
-    expect(screen.getByRole('button', { name: 'map: choose Hotel 1' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'map: close' }));
-    expect(screen.queryByTestId('hotel-map-modal')).toBeNull();
+    // The pick moved out of the pinned row, but the map keeps its hotels
+    // rather than being rebuilt under the traveller.
+    expect(listedHotelNames()).toEqual(['Hotel 5', 'Hotel 6', 'Hotel 7', 'Hotel 8']);
+    expect(mapButtons()).toContain('map: choose Hotel 1');
+    // And it is told which one is now chosen, to open that hotel's card.
+    expect(screen.getByTestId('hotel-map-panel').dataset.selected).toBe('6');
+  });
+
+  it('a pick made in the guide is passed to the map', async () => {
+    useTripStore.setState({ currentTrip: tripWith(hotels(1, 10)), priceMode: 'total' });
+    render(<Panel />);
+    await screen.findByTestId('hotel-map-panel');
+    fireEvent.click(screen.getAllByRole('button').find((b) => /Hotel 3/.test(b.textContent ?? '') && /\/night/.test(b.textContent ?? ''))!);
+    expect(screen.getByTestId('hotel-map-panel').dataset.selected).toBe('2');
+  });
+
+  it('closing waits for the map and the guide to leave, then closes', async () => {
+    useTripStore.setState({ currentTrip: tripWith(hotels(1, 10)), priceMode: 'total' });
+    const onClose = jest.fn();
+    const onCloseStart = jest.fn();
+    render(<CityDetailPanel trip={useTripStore.getState().currentTrip!} cityIndex={0} onClose={onClose} onCloseStart={onCloseStart} onPrev={() => {}} onNext={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize' }));
+    // A second click while it is closing does nothing more.
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize' }));
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(onCloseStart).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('activitySpots', () => {
+  const ev = (title: string, extra: Partial<ScheduledEvent> = {}): ScheduledEvent => ({
+    id: title,
+    title,
+    startTime: '10:00',
+    endTime: '11:00',
+    category: 'activity',
+    lat: 51.5,
+    lng: -0.1,
+    ...extra,
+  });
+
+  it('takes located activities and meals once each, by name', () => {
+    const spots = activitySpots({
+      '2027-01-16': [ev('Tate Modern'), ev('Lunch', { category: 'restaurant', lat: 51.51 })],
+      '2027-01-15': [ev('British Museum'), ev('british museum ', { lat: 51.52 })],
+    });
+    expect(spots.map((s) => `${s.name}:${s.kind}`)).toEqual(['British Museum:activity', 'Tate Modern:activity', 'Lunch:restaurant']);
+  });
+
+  it('leaves out transport, free time and anything without coordinates', () => {
+    const spots = activitySpots({
+      d: [ev('Flight', { category: 'transport' }), ev('Free', { category: 'free' }), ev('Somewhere', { lat: undefined }), ev('Custom', { category: 'custom' })],
+    });
+    expect(spots).toEqual([]);
+    expect(activitySpots(undefined)).toEqual([]);
   });
 });
 

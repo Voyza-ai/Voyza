@@ -51,7 +51,18 @@ export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Ho
       ? { taxesPerNight: taxes }
       : {}),
     ...(located ? { lat: r.lat, lng: r.lng } : {}),
+    ...(r.thumbnail ? { photos: [largePhoto(r.thumbnail)] } : {}),
+    ...(r.id && /^\d+$/.test(r.id) ? { providerId: r.id } : {}),
   };
+}
+
+/**
+ * Booking's search hands back its 60px square thumbnail. The same image is
+ * served at other sizes by swapping the size segment of the path, so ask for
+ * one big enough to fill the city guide's photo strip.
+ */
+export function largePhoto(url: string): string {
+  return url.replace(/\/images\/hotel\/(square\d+|max\d+(x\d+)?)\//, '/images/hotel/max1024x768/');
 }
 
 /**

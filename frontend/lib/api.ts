@@ -137,6 +137,20 @@ export async function searchHotels(params: {
   return rankHotels(data.hotels);
 }
 
+/**
+ * A Booking hotel's photo gallery (large size, best first) for the city
+ * guide's photo strip. [] when the hotel has none or the lookup fails —
+ * the strip then keeps the one photo the search gave.
+ */
+export async function fetchHotelPhotos(hotelId: string): Promise<string[]> {
+  try {
+    const data = await apiFetch<{ photos: string[] }>(`/api/hotels/photos?hotelId=${encodeURIComponent(hotelId)}`);
+    return Array.isArray(data.photos) ? data.photos : [];
+  } catch {
+    return [];
+  }
+}
+
 // ─── Train Search ────────────────────────────────────────────
 export type TrainOffer = {
   id: string;

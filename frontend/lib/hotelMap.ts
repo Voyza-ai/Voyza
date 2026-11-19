@@ -14,7 +14,7 @@
  * name is the hotel's own, never a pub, an office, or a sibling of the chain.
  */
 
-import type { City, Hotel } from './types';
+import type { City, Hotel, ScheduledEvent } from './types';
 import type { GeoPoint } from './geocode';
 import { cityCentre } from './landmarks';
 import { distanceKm } from './citySpots';
@@ -320,4 +320,29 @@ export async function locateHotels(
     else unplaced.push(e);
   });
   return { centre, pins, unplaced };
+}
+
+/** An activity or meal on the city's days that has real coordinates. */
+export type ActivitySpot = { name: string; lat: number; lng: number; kind: 'activity' | 'restaurant' };
+
+/**
+ * The located activities and meals in a city's schedule, once each — the day
+ * planner can place the same museum on two days. Transport, free time and
+ * hand-added blocks without coordinates are left out.
+ */
+export function activitySpots(schedule: Record<string, ScheduledEvent[]> | undefined): ActivitySpot[] {
+  const seen = new Set<string>();
+  const out: ActivitySpot[] = [];
+  for (const day of Object.keys(schedule ?? {}).sort()) {
+    for (const e of schedule![day] ?? []) {
+      if (e.category !== 'activity' && e.category !== 'restaurant') continue;
+      if (typeof e.lat !== 'number' || typeof e.lng !== 'number') continue;
+      // By name: a hand-added block and a planner-placed one can both be "British Museum".
+      const key = e.title.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ name: e.title, lat: e.lat, lng: e.lng, kind: e.category });
+    }
+  }
+  return out;
 }

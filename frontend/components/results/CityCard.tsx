@@ -101,6 +101,8 @@ export default function CityCard({
       onMouseLeave={onLeave}
       onClick={onClick}
       tabIndex={0}
+      // Where the city guide grows out of when this card is clicked.
+      data-city-card={index}
       className="relative flex-shrink-0 flex-1 min-h-0 flex flex-col w-[300px] rounded-3xl border-2 cursor-pointer overflow-hidden transition-colors duration-300 outline-none"
       style={{
         background: color.bg,

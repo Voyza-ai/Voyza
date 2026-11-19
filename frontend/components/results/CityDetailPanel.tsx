@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useId, useEffect, useRef } from 'react';
+import { useState, useId, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useAnimationControls, useReducedMotion } from 'framer-motion';
 import {
   X,
   ChevronLeft,
@@ -17,7 +17,6 @@ import {
   Zap,
   Info,
   RefreshCw,
-  Map as MapIcon,
   Loader2,
   PlaneLanding,
   PlaneTakeoff,
@@ -37,13 +36,28 @@ import { searchHotels } from '@/lib/api';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { hotelWindow, newHotelsOnly, HOTELS_PER_SET, type HotelEntry } from '@/lib/hotelMap';
 import { prefetchLandmarks } from '@/lib/landmarks';
+import HotelHero, { preloadPhotos } from './HotelHero';
 
-// MapLibre needs `window`; the map is only built when it is opened.
-const HotelMapModal = dynamic(() => import('./HotelMapModal'), { ssr: false });
+// MapLibre needs `window`.
+const HotelMapPanel = dynamic(() => import('./HotelMapPanel'), { ssr: false });
+
+/** The guide's motion: one gentle ease-out for growing, sliding and shrinking. */
+const EASE = [0.22, 0.61, 0.36, 1] as const;
+const GROW_S = 0.45;
+const SHRINK_S = 0.38;
 
 type CityDetailPanelProps = {
   trip: Trip;
   cityIndex: number;
+  /**
+   * Where city `i`'s card is on screen, or null when it is not in view. The
+   * guide grows out of it on opening and shrinks back into it on closing;
+   * without one it fades.
+   */
+  originOf?: (cityIndex: number) => DOMRect | null;
+  /** Closing has begun: the guide is about to shrink back into its card. */
+  onCloseStart?: () => void;
+  /** Closing has finished. */
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
@@ -79,6 +93,8 @@ const formatDateShort = (iso: string) => {
 export default function CityDetailPanel({
   trip,
   cityIndex,
+  originOf,
+  onCloseStart,
   onClose,
   onPrev,
   onNext,
@@ -91,7 +107,11 @@ export default function CityDetailPanel({
   const priceMode = useTripStore((s) => s.priceMode);
 
   const city = trip.cities[cityIndex];
-  const color = getCityColor(city.colorIndex ?? cityIndex);
+  // The city's own pastel is the card the guide grows out of; once open, the
+  // guide is white with the city's colour kept for its accents (top strip,
+  // name, chosen hotel), so it sits quietly beside the map and BlueMurr AI.
+  const cityColor = getCityColor(city.colorIndex ?? cityIndex);
+  const color = { ...cityColor, bg: '#ffffff', border: '#e8eaef' };
   const nights = nightsBetween(city.dates.arrival, city.dates.departure);
   const eff = effectiveHotel(city);
   const [showFees, setShowFees] = useState(false);
@@ -103,21 +123,32 @@ export default function CityDetailPanel({
   const [findingHotels, setFindingHotels] = useState(false);
   const [hotelNote, setHotelNote] = useState<string | null>(null);
   const nextPageRef = useRef(1);
-  // "Open map": the rows listed when it was opened, held so picking a hotel
-  // on the map (which moves the pinned row) doesn't rebuild the map under it.
-  const [mapEntries, setMapEntries] = useState<HotelEntry[] | null>(null);
   const stayKey = `${city.name}|${city.dates.arrival}|${city.dates.departure}`;
   useEffect(() => {
     setHotelOffset(0);
     setHotelNote(null);
     setFindingHotels(false);
-    setMapEntries(null);
     nextPageRef.current = 1;
-    // Look up the city's landmarks now, so "Open map" usually has them ready.
+    // Look up the city's landmarks now, so the map usually has them ready.
     prefetchLandmarks({ name: city.name, country: city.country });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stayKey]);
   const listed = hotelWindow(city, hotelOffset);
+  // The hotels on the map: the set listed, taken afresh for a new set or a
+  // new city but not when the pick changes — picking a hotel can move the
+  // pinned row, and that should not rebuild the map under the traveller.
+  // The listed hotels' photos start loading now, so choosing one shows its
+  // photo straight away instead of an empty frame.
+  const listedPhotoKey = listed.map((e) => e.hotel.photos?.[0] ?? '').join('|');
+  useEffect(() => {
+    preloadPhotos(listed.map((e) => e.hotel.photos?.[0]).filter((u): u is string => !!u));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listedPhotoKey]);
+  const mapEntries: HotelEntry[] = useMemo(
+    () => listed,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stayKey, hotelOffset, city.hotels.length],
+  );
 
   const findMoreHotels = async () => {
     if (findingHotels) return;
@@ -186,22 +217,100 @@ export default function CityDetailPanel({
   const canPrev = cityIndex > 0;
   const canNext = cityIndex < trip.cities.length - 1;
 
+  // ── Opening and closing ──────────────────────────────────────────────
+  // Opening: the guide grows out of the city's card into the left column
+  // (its contents fading in once it is nearly there), then the map slides in
+  // beside it. Closing runs it backwards: the map slides out, the contents
+  // fade, and the guide shrinks back into the card as the flowchart returns.
+  const reduceMotion = useReducedMotion();
+  const guideRef = useRef<HTMLDivElement>(null);
+  const guideAnim = useAnimationControls();
+  const contentAnim = useAnimationControls();
+  const [mapShown, setMapShown] = useState(true);
+  const closingRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  /** The transform that puts the guide over `r`, scaled from its top-left corner. */
+  const overRect = (r: DOMRect) => {
+    const g = guideRef.current!.getBoundingClientRect();
+    return { x: r.left - g.left, y: r.top - g.top, scaleX: r.width / g.width, scaleY: r.height / g.height };
+  };
+
+  // Before the first paint, so the guide is never seen full size first.
+  useLayoutEffect(() => {
+    const from = reduceMotion ? null : originOf?.(cityIndex);
+    if (guideRef.current && from) {
+      guideAnim.set({ ...overRect(from), opacity: 1 });
+      contentAnim.set({ opacity: 0 });
+      guideAnim.start({
+        x: 0,
+        y: 0,
+        scaleX: 1,
+        scaleY: 1,
+        backgroundColor: color.bg,
+        borderColor: color.border,
+        transition: { duration: GROW_S, ease: EASE },
+      });
+      contentAnim.start({ opacity: 1, transition: { duration: 0.22, delay: GROW_S * 0.55 } });
+    } else {
+      guideAnim.set({ opacity: 0, scale: 0.97, backgroundColor: color.bg, borderColor: color.border });
+      guideAnim.start({ opacity: 1, scale: 1, transition: { duration: 0.28, ease: EASE } });
+      contentAnim.set({ opacity: 1 });
+    }
+    // Once, on opening; the prev/next arrows change the city in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const requestClose = async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    if (reduceMotion) {
+      onClose();
+      return;
+    }
+    setMapShown(false);
+    await new Promise((r) => setTimeout(r, 160));
+    if (!mountedRef.current) return;
+    await contentAnim.start({ opacity: 0, transition: { duration: 0.12 } });
+    if (!mountedRef.current) return;
+    onCloseStart?.();
+    const to = originOf?.(cityIndex);
+    if (to && guideRef.current) {
+      // Fading over the last stretch hands over to the real card underneath
+      // without a seam, even when the card has since moved a pixel or two.
+      await guideAnim.start({
+        ...overRect(to),
+        backgroundColor: cityColor.bg,
+        borderColor: cityColor.border,
+        opacity: [1, 1, 0],
+        transition: { duration: SHRINK_S, ease: EASE, opacity: { duration: SHRINK_S, times: [0, 0.7, 1] } },
+      });
+    } else {
+      await guideAnim.start({ opacity: 0, scale: 0.97, transition: { duration: 0.22, ease: EASE } });
+    }
+    if (mountedRef.current) onClose();
+  };
+
   /* Unique class for scoped scrollbar styling */
   const uid = useId().replace(/:/g, '');
   const scrollCls = `cdp-scroll-${uid}`;
 
   return (
+    <div className="h-full flex gap-3" data-testid="city-guide-split">
     <motion.div
-      initial={{ opacity: 0, scale: 0.97 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.97 }}
-      transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }}
-      className="h-full flex flex-col rounded-3xl border-2 overflow-hidden relative"
-      style={{
-        background: color.bg,
-        borderColor: color.border,
-      }}
+      ref={guideRef}
+      animate={guideAnim}
+      className="h-full flex-shrink-0 w-[clamp(420px,44%,580px)] rounded-3xl border-2 overflow-hidden relative"
+      style={{ transformOrigin: '0 0' }}
+      initial={{ backgroundColor: cityColor.bg, borderColor: cityColor.border }}
     >
+    <motion.div animate={contentAnim} className="h-full flex flex-col">
       {/* Scoped scrollbar styles */}
       <style>{`
         .${scrollCls}::-webkit-scrollbar { width: 5px; }
@@ -218,8 +327,8 @@ export default function CityDetailPanel({
 
       {/* Header — pinned */}
       <div
-        className="px-7 pt-6 pb-5 flex items-start justify-between gap-4 flex-shrink-0"
-        style={{ borderBottom: `4px solid ${color.border}` }}
+        className="px-7 pt-12 pb-4 flex-shrink-0 relative"
+        style={{ borderBottom: `1px solid ${color.border}` }}
       >
         <div className="min-w-0">
           <div
@@ -259,9 +368,9 @@ export default function CityDetailPanel({
           )}
         </div>
 
-        {/* Right column: nav controls + travel in/out summary */}
-        <div className="flex flex-col items-end gap-3 flex-shrink-0">
-          <div className="flex items-center gap-1.5">
+        {/* Nav controls, top right; travel in/out below the title */}
+        <div className="flex flex-col gap-3 mt-4">
+          <div className="absolute top-[42px] right-5 flex items-center gap-1.5">
             <button
               type="button"
               onClick={onPrev}
@@ -292,7 +401,7 @@ export default function CityDetailPanel({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="ml-1 w-8 h-8 rounded-full border flex items-center justify-center transition-all"
               style={{
                 borderColor: color.border,
@@ -305,8 +414,9 @@ export default function CityDetailPanel({
             </button>
           </div>
 
-          {/* Travel summary — dark city-color block */}
-          <TravelSummary
+          {/* Arrive / leave — one quiet line: it matters for check-in and
+              check-out, but the flights themselves live on the flowchart. */}
+          <TravelLine
             arrive={effectiveTransportIn(trip, cityIndex)}
             depart={effectiveTransportOut(trip, cityIndex)}
             // The first city's way in is the home flight, which lands on
@@ -320,14 +430,23 @@ export default function CityDetailPanel({
         </div>
       </div>
 
-      {/* Body grid — fills remaining height; each column scrolls internally */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-0">
+      {/* The chosen hotel — photos, price, booking — held in place above the list */}
+      <div className="px-7 pt-4 pb-3.5 flex-shrink-0" style={{ borderBottom: `1px solid ${color.border}` }}>
+        <HotelHero
+          hotel={selectedHotel ?? null}
+          customName={city.customHotel?.name}
+          total={stayTotal}
+          perNight={stayPerNight}
+          nights={nights}
+          accent={color}
+        />
+      </div>
 
-        {/* LEFT: Hotel picker */}
-        <div
-          className={`px-7 py-6 overflow-y-auto min-h-0 ${scrollCls}`}
-          style={{ borderRight: `4px solid ${color.border}` }}
-        >
+      {/* The list of hotels — scrolls on its own under the chosen one */}
+      <div className={`flex-1 min-h-0 overflow-y-auto ${scrollCls}`}>
+
+        {/* Hotel picker */}
+        <div className="px-7 pt-4 pb-5">
           <div className="flex items-start justify-between mb-4 gap-4">
             <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] font-semibold pt-1" style={{ color: color.text }}>
               <Building2 size={12} />
@@ -396,15 +515,6 @@ export default function CityDetailPanel({
                 {findingHotels ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
                 <span>{findingHotels ? 'Finding hotels…' : 'Find more hotels'}</span>
               </button>
-              <button
-                type="button"
-                onClick={() => setMapEntries(listed)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-colors"
-                style={{ borderColor: color.border, background: `${color.text}0c`, color: color.text }}
-              >
-                <MapIcon size={12} />
-                <span>Open map</span>
-              </button>
             </div>
           )}
           {hotelNote && (
@@ -427,17 +537,6 @@ export default function CityDetailPanel({
               />
             ))}
           </div>
-          {mapEntries && (
-            <HotelMapModal
-              city={city}
-              travelers={trip.travelers}
-              nights={nights}
-              entries={mapEntries}
-              selectedIndex={city.customHotel ? null : city.selectedHotelIndex}
-              onSelect={(i) => setSelectedHotel(cityIndex, i)}
-              onClose={() => setMapEntries(null)}
-            />
-          )}
 
           {/* Custom hotel form — `key` is load-bearing. The form seeds its five
               fields from `current` in useState initialisers, which only run on
@@ -454,11 +553,9 @@ export default function CityDetailPanel({
           />
         </div>
 
-        {/* RIGHT: Selected hotel details — slightly different tinted bg */}
-        <div
-          className={`px-6 py-5 flex flex-col gap-3 overflow-y-auto min-h-0 ${scrollCls}`}
-          style={{ background: `${color.text}06` }}
-        >
+        {/* The stay's breakdown — party, rooms, room and taxes, per person —
+            at the foot of the list, for whoever wants the arithmetic. */}
+        <div className="px-7 pt-2 pb-6 flex flex-col gap-3">
           <HotelDetail
             hotel={selectedHotel}
             isCustom={!!city.customHotel}
@@ -467,11 +564,12 @@ export default function CityDetailPanel({
             color={color}
           />
         </div>
+
       </div>
 
       {/* Color picker — top center */}
       <div
-        className="absolute top-[6px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full border backdrop-blur-sm z-10"
+        className="absolute top-[11px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full border backdrop-blur-sm z-10"
         style={{ background: `${color.text}20`, borderColor: `${color.text}35` }}
       >
         {CITY_COLORS.map((c, ci) => (
@@ -489,12 +587,36 @@ export default function CityDetailPanel({
         ))}
       </div>
     </motion.div>
+    </motion.div>
+
+    {/* The map, between the guide and BlueMurr AI. */}
+    <AnimatePresence>
+      {mapShown && (
+        <motion.div
+          key="hotel-map"
+          className="h-full flex-1 min-w-0"
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 56 }}
+          animate={{ opacity: 1, x: 0, transition: { duration: 0.4, ease: EASE, delay: reduceMotion ? 0 : GROW_S * 0.6 } }}
+          exit={{ opacity: 0, x: reduceMotion ? 0 : 56, transition: { duration: 0.22, ease: EASE } }}
+        >
+          <HotelMapPanel
+            city={city}
+            travelers={trip.travelers}
+            nights={nights}
+            entries={mapEntries}
+            selectedIndex={city.customHotel ? null : city.selectedHotelIndex}
+            onSelect={(i) => setSelectedHotel(cityIndex, i)}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </div>
   );
 }
 
 /* --------------------------- Travel summary -------------------------- */
 
-function TravelSummary({
+function TravelLine({
   arrive,
   depart,
   arriveDate,
@@ -507,70 +629,25 @@ function TravelSummary({
   departDate: string;
   color: { bg: string; text: string; border: string; name: string };
 }) {
-  return (
-    <div
-      className="flex items-stretch gap-3 rounded-2xl px-5 py-3.5"
-      style={{ background: color.text, color: color.bg }}
-    >
-      <TravelBlock
-        label="Arrive"
-        Icon={arrive.mode === 'flight' ? PlaneLanding : TrainFront}
-        location={arrive.toStation || arrive.to}
-        time={arrive.arriveTime}
-        date={arriveDate}
-        color={color}
-        inverted
-      />
-      <div className="w-[3px] self-stretch rounded-full" style={{ background: `${color.bg}30` }} />
-      <TravelBlock
-        label="Depart"
-        Icon={depart.mode === 'flight' ? PlaneTakeoff : TrainFront}
-        location={depart.fromStation || depart.from}
-        time={depart.departTime}
-        date={departDate}
-        color={color}
-        inverted
-      />
-    </div>
+  const muted = { color: `${color.text}99` };
+  const part = (label: string, Icon: LucideIcon, time: string | undefined, date: string, place: string | undefined) => (
+    <span className="flex items-center gap-1.5 whitespace-nowrap">
+      <Icon size={13} style={muted} />
+      <span style={muted}>{label}</span>
+      <span className="font-semibold tabular-nums" style={{ color: color.text }}>{formatDateShort(date)}</span>
+      {time && (
+        <>
+          <span style={muted}>·</span>
+          <span className="font-semibold tabular-nums" style={{ color: color.text }}>{time}</span>
+        </>
+      )}
+      {place && <span style={muted}>{place}</span>}
+    </span>
   );
-}
-
-function TravelBlock({
-  label,
-  Icon,
-  location,
-  time,
-  date,
-  color,
-  inverted,
-}: {
-  label: string;
-  Icon: LucideIcon;
-  location?: string;
-  time?: string;
-  date: string;
-  color: { bg: string; text: string; border: string; name: string };
-  inverted?: boolean;
-}) {
-  const fg = inverted ? color.bg : color.text;
   return (
-    <div className="flex flex-col gap-1 min-w-[170px]">
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.14em] font-medium" style={{ color: `${fg}bb` }}>
-        <Icon size={12} style={{ color: fg }} />
-        <span>{label}</span>
-      </div>
-      <div className="flex items-baseline gap-1.5">
-        <span className="text-[17px] font-bold tabular-nums leading-none" style={{ color: fg }}>
-          {time ?? '—'}
-        </span>
-        <span className="text-[11px]" style={{ color: `${fg}60` }}>·</span>
-        <span className="text-[12px] tabular-nums" style={{ color: `${fg}cc` }}>
-          {formatDateShort(date)}
-        </span>
-      </div>
-      <div className="text-[12px] truncate max-w-[200px]" style={{ color: `${fg}aa` }}>
-        {location ?? '—'}
-      </div>
+    <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[12.5px]" data-testid="travel-line">
+      {part('Arrive', arrive.mode === 'flight' ? PlaneLanding : TrainFront, arrive.arriveTime, arriveDate, arrive.toStation || arrive.to)}
+      {part('Leave', depart.mode === 'flight' ? PlaneTakeoff : TrainFront, depart.departTime, departDate, depart.fromStation || depart.from)}
     </div>
   );
 }
@@ -619,7 +696,7 @@ function HotelRow({
     <button
       type="button"
       onClick={onSelect}
-      className="text-left rounded-2xl border px-4 py-3 transition-all group"
+      className="text-left rounded-2xl border px-3.5 py-2 transition-all group"
       style={{
         background: isSelected ? `${accent}22` : `${color.bg}`,
         borderColor: isSelected ? accent : color.border,

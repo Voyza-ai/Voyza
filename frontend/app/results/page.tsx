@@ -81,6 +81,8 @@ function ResultsPageInner() {
   const tripId = searchParams.get('tripId');
   const [view, setView] = useState<ResultsView>('flowchart');
   const [openCityIndex, setOpenCityIndex] = useState<number | null>(null);
+  // The guide is on its way back into its card: the view behind it fades in.
+  const [guideClosing, setGuideClosing] = useState(false);
   const [openActivitiesIndex, setOpenActivitiesIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1154,8 +1156,24 @@ function ResultsPageInner() {
   const pricedTrip = frozenTrip ?? currentTrip;
 
   const handleCityClick = (cityIndex: number) => {
+    setGuideClosing(false);
     setOpenCityIndex(cityIndex);
     setOpenActivitiesIndex(null);
+  };
+
+  /**
+   * Where city `i`'s card is on screen, for the guide to grow out of and
+   * shrink back into — or null when it is not in view (another tab is open,
+   * or the flowchart is scrolled away from it), and the guide just fades.
+   */
+  const cityCardRect = (i: number): DOMRect | null => {
+    const area = cardsAreaRef.current;
+    const el = area?.querySelector(`[data-city-card="${i}"]`);
+    if (!area || !el) return null;
+    const r = el.getBoundingClientRect();
+    const a = area.getBoundingClientRect();
+    const visible = r.width > 0 && r.right > a.left + 40 && r.left < a.right - 40;
+    return visible ? r : null;
   };
 
   const handleActivitiesClick = (cityIndex: number) => {
@@ -1265,21 +1283,7 @@ function ResultsPageInner() {
                 })}
               </div>
             )}
-            {openCityIndex !== null ? (
-              <CityDetailPanel
-                trip={currentTrip}
-                cityIndex={openCityIndex}
-                onClose={() => setOpenCityIndex(null)}
-                onPrev={() =>
-                  setOpenCityIndex((i) => (i !== null && i > 0 ? i - 1 : i))
-                }
-                onNext={() =>
-                  setOpenCityIndex((i) =>
-                    i !== null && i < currentTrip.cities.length - 1 ? i + 1 : i
-                  )
-                }
-              />
-            ) : openActivitiesIndex !== null ? (
+            {openActivitiesIndex !== null ? (
               <ActivitiesDetailPanel
                 trip={currentTrip}
                 cityIndex={openActivitiesIndex}
@@ -1293,7 +1297,23 @@ function ResultsPageInner() {
                   )
                 }
               />
-            ) : view === 'flowchart' ? (
+            ) : (
+              /* The view stays mounted under the city guide — faded out, not
+                 unmounted — so the guide can grow out of the card that was
+                 clicked and shrink back into it, and the flowchart keeps its
+                 scroll. Hidden once faded, so it takes no clicks or tabs. */
+              <motion.div
+                className="h-full"
+                initial={false}
+                animate={
+                  openCityIndex !== null && !guideClosing
+                    ? { opacity: 0, transitionEnd: { visibility: 'hidden' } }
+                    : { opacity: 1, visibility: 'visible' }
+                }
+                transition={{ duration: 0.3, ease: [0.22, 0.61, 0.36, 1] }}
+                aria-hidden={openCityIndex !== null && !guideClosing}
+              >
+            {view === 'flowchart' ? (
               <Flowchart
                 trip={currentTrip}
                 onCityClick={handleCityClick}
@@ -1316,6 +1336,30 @@ function ResultsPageInner() {
             ) : (
               <div className="h-full overflow-y-auto">
                 <CalendarView trip={currentTrip} onCityClick={handleCityClick} />
+              </div>
+            )}
+              </motion.div>
+            )}
+            {openCityIndex !== null && (
+              <div className="absolute inset-0 z-20">
+                <CityDetailPanel
+                  trip={currentTrip}
+                  cityIndex={openCityIndex}
+                  originOf={cityCardRect}
+                  onCloseStart={() => setGuideClosing(true)}
+                  onClose={() => {
+                    setOpenCityIndex(null);
+                    setGuideClosing(false);
+                  }}
+                  onPrev={() =>
+                    setOpenCityIndex((i) => (i !== null && i > 0 ? i - 1 : i))
+                  }
+                  onNext={() =>
+                    setOpenCityIndex((i) =>
+                      i !== null && i < currentTrip.cities.length - 1 ? i + 1 : i
+                    )
+                  }
+                />
               </div>
             )}
           </div>
