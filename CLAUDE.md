@@ -14,8 +14,11 @@ Supabase service-role client.
 
 ## Working agreements
 
-- **Manually test every change before asking to push**, and ask before
-  committing and pushing. Do not commit unprompted.
+- **Manually test every change before pushing.** Commit freely on feature
+  branches, no need to ask. Push a feature branch without asking too —
+  except when the unpushed work spans 3 or more of the owner's requests;
+  then ask first. Never push to or merge into `dev` or `voyza_main` without
+  asking.
 - **Test the actual functionality**, not just that it compiles or that the
   structure looks right, before saying something works. Drive the real
   interaction in the state a user would hit, and measure it.
@@ -42,7 +45,7 @@ Supabase service-role client.
 - No "AI slop" — no glass morphism, no glows, no generic gradient-purple AI
   look. Derive from the existing product's own DNA: dark `#0f0f1a` AI
   surfaces, pastel city cards, the dashed-route motif, blue brand.
-- Get design changes approved before committing them.
+- Get design changes approved before merging them into `dev`; show screenshots or a video while they are on the feature branch.
 
 ## Reporting
 
