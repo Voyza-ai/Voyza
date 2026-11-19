@@ -149,10 +149,14 @@ function makeHotelPinEl(pin: HotelPin, picked: boolean, active: boolean, onClick
   return el;
 }
 
-const LANDMARK = SPOT_STYLE.sightseeing.color;
+/**
+ * Landmarks in a soft indigo: in the map's own blue-purple family, quieter
+ * than the hotels' violet and clearly not a hotel (no ring, no glyph).
+ */
+const LANDMARK = { dot: '#818cf8', ring: 'rgba(79,70,229,0.35)', text: '#3730a3' };
 
 /**
- * A landmark: a small amber dot (the Map tab's colour for sights) with its
+ * A landmark: a small soft-indigo dot with its
  * name beside it, no plate and no ring. Present enough to read the city by,
  * quiet enough that the hotels stay the thing on the map. Not clickable, so it
  * never takes a click meant for a hotel pin under it.
@@ -163,13 +167,13 @@ function makeLandmarkEl(l: Landmark): HTMLDivElement {
   el.style.cssText = 'width:10px;height:10px;pointer-events:none;z-index:1;';
   el.dataset.landmark = l.name;
   const dot = document.createElement('div');
-  dot.style.cssText = `width:10px;height:10px;border-radius:9999px;background:${LANDMARK};border:2px solid #fff;box-shadow:0 0 0 1px rgba(217,119,6,0.4);`;
+  dot.style.cssText = `width:10px;height:10px;border-radius:9999px;background:${LANDMARK.dot};border:2px solid #fff;box-shadow:0 0 0 1px ${LANDMARK.ring};`;
   el.appendChild(dot);
   const label = document.createElement('div');
   label.textContent = l.name;
   label.style.cssText = `
     position:absolute;left:14px;top:50%;transform:translateY(-50%);
-    white-space:nowrap;font:600 12px/1.2 system-ui,sans-serif;color:#7a3c04;letter-spacing:0.01em;
+    white-space:nowrap;font:600 12px/1.2 system-ui,sans-serif;color:${LANDMARK.text};letter-spacing:0.01em;
     text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff,0 0 3px #fff,0 0 5px #fff;
   `;
   el.appendChild(label);
