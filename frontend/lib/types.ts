@@ -81,6 +81,9 @@ export type Hotel = {
    * `effectiveRating` takes a 9.5-from-3-reviews at face value.
    */
   reviewCount?: number;
+  /** Where the hotel is, from the provider — pins it on the city guide's hotel map. */
+  lat?: number;
+  lng?: number;
 };
 
 /** A user-supplied hotel/Airbnb that overrides the ranked list selection. */

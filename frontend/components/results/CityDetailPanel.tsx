@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useId } from 'react';
+import { useState, useId, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -15,8 +16,9 @@ import {
   Award,
   Zap,
   Info,
-  Shuffle,
+  RefreshCw,
   Map as MapIcon,
+  Loader2,
   PlaneLanding,
   PlaneTakeoff,
   TrainFront,
@@ -31,6 +33,13 @@ import { getCityColor, CITY_COLORS } from '@/lib/cityColors';
 import { hasStay } from './CityCard';
 import { VIBE_LABEL } from '@/lib/cityTheme';
 import { effectiveTransportIn, effectiveTransportOut } from '@/lib/cityLegs';
+import { searchHotels } from '@/lib/api';
+import { hotelFromResult } from '@/lib/hotelShape';
+import { hotelWindow, newHotelsOnly, HOTELS_PER_SET, type HotelEntry } from '@/lib/hotelMap';
+import { prefetchLandmarks } from '@/lib/landmarks';
+
+// MapLibre needs `window`; the map is only built when it is opened.
+const HotelMapModal = dynamic(() => import('./HotelMapModal'), { ssr: false });
 
 type CityDetailPanelProps = {
   trip: Trip;
@@ -78,6 +87,7 @@ export default function CityDetailPanel({
   const setCustomHotel = useTripStore((s) => s.setCustomHotel);
   const clearCustomHotel = useTripStore((s) => s.clearCustomHotel);
   const setCityColor = useTripStore((s) => s.setCityColor);
+  const updateCity = useTripStore((s) => s.updateCity);
   const priceMode = useTripStore((s) => s.priceMode);
 
   const city = trip.cities[cityIndex];
@@ -85,6 +95,79 @@ export default function CityDetailPanel({
   const nights = nightsBetween(city.dates.arrival, city.dates.departure);
   const eff = effectiveHotel(city);
   const [showFees, setShowFees] = useState(false);
+
+  // "Find more hotels": which four of the city's hotels are listed, the next
+  // page of the search to ask for once the trip's own list is used up, and a
+  // note when there was nothing new to bring in.
+  const [hotelOffset, setHotelOffset] = useState(0);
+  const [findingHotels, setFindingHotels] = useState(false);
+  const [hotelNote, setHotelNote] = useState<string | null>(null);
+  const nextPageRef = useRef(1);
+  // "Open map": the rows listed when it was opened, held so picking a hotel
+  // on the map (which moves the pinned row) doesn't rebuild the map under it.
+  const [mapEntries, setMapEntries] = useState<HotelEntry[] | null>(null);
+  const stayKey = `${city.name}|${city.dates.arrival}|${city.dates.departure}`;
+  useEffect(() => {
+    setHotelOffset(0);
+    setHotelNote(null);
+    setFindingHotels(false);
+    setMapEntries(null);
+    nextPageRef.current = 1;
+    // Look up the city's landmarks now, so "Open map" usually has them ready.
+    prefetchLandmarks({ name: city.name, country: city.country });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stayKey]);
+  const listed = hotelWindow(city, hotelOffset);
+
+  const findMoreHotels = async () => {
+    if (findingHotels) return;
+    setHotelNote(null);
+    const next = hotelOffset + HOTELS_PER_SET;
+    // A full set of hotels the guide hasn't listed yet: show it.
+    if (next + HOTELS_PER_SET <= city.hotels.length) {
+      setHotelOffset(next);
+      return;
+    }
+    // Fewer than four left: ask the search for its next page first, so the
+    // new set is a full one.
+    setFindingHotels(true);
+    let added = 0;
+    try {
+      const page = nextPageRef.current;
+      const results = await searchHotels({
+        city: city.name,
+        checkin: city.dates.arrival,
+        checkout: city.dates.departure,
+        adults: trip.travelers,
+        page,
+      });
+      nextPageRef.current = page + 1;
+      // Identify the stay, not its slot: the trip can be re-ordered while the
+      // search runs.
+      const cities = useTripStore.getState().currentTrip?.cities ?? [];
+      const idx = cities.findIndex(
+        (c) => c.name === city.name && c.dates.arrival === city.dates.arrival && c.dates.departure === city.dates.departure,
+      );
+      if (idx >= 0) {
+        const current = cities[idx];
+        const fresh = newHotelsOnly(current.hotels, results.map(hotelFromResult));
+        if (fresh.length > 0) {
+          updateCity(idx, { hotels: [...current.hotels, ...fresh] });
+          added = fresh.length;
+        }
+      }
+    } catch {
+      // Treated as nothing new; the note below says so.
+    } finally {
+      setFindingHotels(false);
+    }
+    if (added > 0 || next < city.hotels.length) {
+      setHotelOffset(next);
+    } else {
+      setHotelOffset(0);
+      setHotelNote(`That's every hotel we found in ${city.name} — back to the top picks.`);
+    }
+  };
 
   const selectedHotel = city.customHotel
     ? null
@@ -297,55 +380,60 @@ export default function CityDetailPanel({
             )}
           </div>
 
-          {/* Coming-soon actions */}
-          <div className="flex items-center gap-2 mb-3">
-            <button
-              type="button"
-              disabled
-              title="Coming soon"
-              className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] cursor-not-allowed"
-              style={{ borderColor: color.border, background: `${color.text}12`, color: `${color.text}80` }}
-            >
-              <Shuffle size={12} />
-              <span>Randomize nearby</span>
-              <span
-                className="ml-1 px-1.5 py-[1px] rounded-full text-[9px] uppercase tracking-wider font-medium"
-                style={{ background: `${color.text}20`, color: `${color.text}aa` }}
+          {city.hotels.length > 0 && (
+            <div className="flex items-center gap-2 mb-3">
+              <button
+                type="button"
+                onClick={findMoreHotels}
+                disabled={findingHotels}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-colors disabled:cursor-wait"
+                style={{ borderColor: color.border, background: `${color.text}0c`, color: color.text }}
               >
-                Coming soon
-              </span>
-            </button>
-            <button
-              type="button"
-              disabled
-              title="Coming soon"
-              className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] cursor-not-allowed"
-              style={{ borderColor: color.border, background: `${color.text}12`, color: `${color.text}80` }}
-            >
-              <MapIcon size={12} />
-              <span>Open map</span>
-              <span
-                className="ml-1 px-1.5 py-[1px] rounded-full text-[9px] uppercase tracking-wider font-medium"
-                style={{ background: `${color.text}20`, color: `${color.text}aa` }}
+                {findingHotels ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                <span>{findingHotels ? 'Finding hotels…' : 'Find more hotels'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMapEntries(listed)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-colors"
+                style={{ borderColor: color.border, background: `${color.text}0c`, color: color.text }}
               >
-                Coming soon
-              </span>
-            </button>
-          </div>
+                <MapIcon size={12} />
+                <span>Open map</span>
+              </button>
+            </div>
+          )}
+          {hotelNote && (
+            <div className="text-[11.5px] mb-2" style={{ color: `${color.text}99` }}>
+              {hotelNote}
+            </div>
+          )}
 
           <div className="flex flex-col gap-2">
-            {city.hotels.slice(0, 4).map((h, i) => (
+            {listed.map(({ hotel: h, index: i, pinned }, k) => (
               <HotelRow
-                key={h.name}
+                key={`${i}:${h.name}`}
                 hotel={h}
                 rank={i}
                 isSelected={!city.customHotel && city.selectedHotelIndex === i}
                 nights={nights}
                 color={color}
                 onSelect={() => setSelectedHotel(cityIndex, i)}
+                caption={pinned ? 'Your pick' : k === 1 && listed[0].pinned ? 'More hotels' : undefined}
               />
             ))}
           </div>
+          {mapEntries && (
+            <HotelMapModal
+              city={city}
+              travelers={trip.travelers}
+              nights={nights}
+              entries={mapEntries}
+              selectedIndex={city.customHotel ? null : city.selectedHotelIndex}
+              onSelect={(i) => setSelectedHotel(cityIndex, i)}
+              onClose={() => setMapEntries(null)}
+            />
+          )}
 
           {/* Custom hotel form — `key` is load-bearing. The form seeds its five
               fields from `current` in useState initialisers, which only run on
@@ -492,6 +580,7 @@ function HotelRow({
   nights,
   color,
   onSelect,
+  caption,
 }: {
   hotel: Hotel;
   rank: number;
@@ -499,6 +588,8 @@ function HotelRow({
   nights: number;
   color: { bg: string; text: string; border: string; name: string };
   onSelect: () => void;
+  /** A small label above the row — "Your pick" when the pick is shown ahead of a new set. */
+  caption?: string;
 }) {
   const priceMode = useTripStore((s) => s.priceMode);
   const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
@@ -515,6 +606,12 @@ function HotelRow({
   const accent = color.text;
 
   return (
+    <>
+    {caption && (
+      <div className="text-[10px] uppercase tracking-[0.16em] font-semibold mt-1 -mb-0.5" style={{ color: `${accent}99` }}>
+        {caption}
+      </div>
+    )}
     <button
       type="button"
       onClick={onSelect}
@@ -600,6 +697,7 @@ function HotelRow({
         </div>
       </div>
     </button>
+    </>
   );
 }
 

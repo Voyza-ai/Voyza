@@ -23,6 +23,7 @@ import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import NoRailDataNotice from '@/components/results/NoRailDataNotice';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
+import MissingPricesNotice from '@/components/results/MissingPricesNotice';
 import { searchHotels, fetchHomeLegs, updateTrip, compareLeg, type LegComparison } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
@@ -1223,6 +1224,7 @@ function ResultsPageInner() {
             <BudgetOverBanner budget={currentTrip.budget} totalCost={liveTripTotal(pricedTrip)} />
           )}
           <NoRailDataNotice trip={currentTrip} />
+          <MissingPricesNotice trip={currentTrip} />
           {currentTrip.vibeTierUp && (
             <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
           )}

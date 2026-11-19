@@ -16,6 +16,9 @@ const searchSchema = z.object({
   // the service directly get the same answer as this endpoint.
   rooms: z.number().int().positive().optional(),
   maxPrice: z.number().positive().optional(),
+  // A later page of the same search — the city guide's "Find more hotels".
+  // Capped: each page is a metered RapidAPI call.
+  page: z.number().int().min(0).max(5).optional(),
 });
 
 router.post(

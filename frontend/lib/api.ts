@@ -106,6 +106,9 @@ export type HotelResult = {
    */
   priceSuspect?: boolean;
   priceSuspectReason?: string;
+  /** Where Booking says the property is. Absent on a row without a usable pair. */
+  lat?: number;
+  lng?: number;
 };
 
 
@@ -116,6 +119,8 @@ export async function searchHotels(params: {
   adults?: number;
   rooms?: number;
   maxPrice?: number;
+  /** A later page of the same search (0 = the first, the default). */
+  page?: number;
 }): Promise<HotelResult[]> {
   const data = await apiFetch<{ hotels: HotelResult[] }>('/api/hotels/search', {
     method: 'POST',

@@ -37,6 +37,8 @@ import type { Hotel } from './types';
  */
 export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Hotel {
   const taxes = r.taxesPerNight;
+  const located =
+    typeof r.lat === 'number' && typeof r.lng === 'number' && Number.isFinite(r.lat) && Number.isFinite(r.lng);
   return {
     name: r.name,
     rating: r.rating,
@@ -48,6 +50,7 @@ export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Ho
     ...(typeof taxes === 'number' && Number.isFinite(taxes) && taxes >= 0
       ? { taxesPerNight: taxes }
       : {}),
+    ...(located ? { lat: r.lat, lng: r.lng } : {}),
   };
 }
 
