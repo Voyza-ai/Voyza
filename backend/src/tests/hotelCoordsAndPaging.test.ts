@@ -98,6 +98,32 @@ describe('coordsFromRow', () => {
   });
 });
 
+describe('hotel search rows carry district and address', () => {
+  it('as Booking sent them, trimmed; absent when Booking had none', async () => {
+    mockFetch.mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve(
+            String(url).includes('/locations')
+              ? [{ dest_id: '-2', dest_type: 'city' }]
+              : {
+                  result: [600, 900, 1200, 1500, 1800].map((p, i) =>
+                    raw(`d${i}`, p, i === 0 ? { district: ' Tower Hamlets ', address: '86 Brick Lane' } : { district: '', address: null }),
+                  ),
+                },
+          ),
+      }),
+    );
+    const hotels = await searchHotels(base());
+    expect(hotels.find((h) => h.name === 'Hotel d0')).toMatchObject({ district: 'Tower Hamlets', address: '86 Brick Lane' });
+    const other = hotels.find((h) => h.name === 'Hotel d1')!;
+    expect(other.district).toBeUndefined();
+    expect(other.address).toBeUndefined();
+  });
+});
+
 describe('hotel search rows carry coordinates', () => {
   it('each hotel keeps the latitude/longitude Booking sent', async () => {
     const hotels = await searchHotels(base());

@@ -88,6 +88,14 @@ export type Hotel = {
   photos?: string[];
   /** Booking's id for the hotel — what its photo gallery is looked up by. */
   providerId?: string;
+  /** Street address from Booking ("86 Brick Lane"). */
+  address?: string;
+  /**
+   * The neighbourhood a traveller would know it by ("Spitalfields"), from the
+   * hotel's coordinates — see lib/hotelArea.ts. Absent until looked up, and
+   * when nothing trustworthy was found.
+   */
+  neighbourhood?: string;
 };
 
 /** A user-supplied hotel/Airbnb that overrides the ranked list selection. */

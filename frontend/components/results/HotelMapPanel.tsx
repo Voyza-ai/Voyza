@@ -572,7 +572,9 @@ export default function HotelMapPanel({
           {active && (
             <HotelCard
               key={active.index}
-              pin={active}
+              // The trip's copy of the hotel, so a neighbourhood looked up
+              // after the map was built shows on the card.
+              pin={city.hotels[active.index]?.name === active.hotel.name ? { ...active, hotel: city.hotels[active.index] } : active}
               picked={active.index === selectedIndex}
               nights={nights}
               travelers={travelers}
@@ -663,10 +665,10 @@ function HotelCard({
             <span>{reviews.toLocaleString()} reviews</span>
           </>
         )}
-        {h.area && (
+        {h.neighbourhood && (
           <>
             <span className="text-[#9fb8dc]">·</span>
-            <span className="truncate">{h.area}</span>
+            <span className="truncate">{h.neighbourhood}</span>
           </>
         )}
       </div>

@@ -5,6 +5,10 @@ import { logger } from '../utils/logger';
 export type HotelResult = {
   id: string;
   name: string;
+  /** Booking's district for the property — usually the borough ("Camden"). */
+  district?: string;
+  /** Street address as Booking gives it ("86 Brick Lane"). */
+  address?: string;
   price: number;
   pricePerNight: number;
   currency: string;
@@ -1438,6 +1442,8 @@ async function searchVettedHotels(params: {
         ),
         amenities: [] as string[],
         ...(coordsFromRow(h) ?? {}),
+        ...(typeof h.district === 'string' && h.district.trim() ? { district: h.district.trim() } : {}),
+        ...(typeof h.address === 'string' && h.address.trim() ? { address: h.address.trim() } : {}),
         ...(occupancyShortfall(h, adults) ? { priceSuspect: true, priceSuspectReason: 'occupancy-short' as const } : {}),
       };
     };

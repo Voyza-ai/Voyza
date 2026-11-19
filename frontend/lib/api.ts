@@ -109,6 +109,10 @@ export type HotelResult = {
   /** Where Booking says the property is. Absent on a row without a usable pair. */
   lat?: number;
   lng?: number;
+  /** Booking's district, usually the borough ("Camden"). */
+  district?: string;
+  /** Street address ("86 Brick Lane"). */
+  address?: string;
 };
 
 

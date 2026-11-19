@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, ExternalLink, Star, Building2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, Star, Building2, MapPin } from 'lucide-react';
 import type { Hotel } from '@/lib/types';
 import { fetchHotelPhotos } from '@/lib/api';
 
@@ -10,12 +10,13 @@ import { fetchHotelPhotos } from '@/lib/api';
 const galleries = new Map<string, Promise<string[]>>();
 
 /** A hotel's gallery: Booking's photo list once it is in, the search's one photo until then. */
-export function useHotelPhotos(hotel: Hotel | null): string[] {
+export function useHotelPhotos(hotel: Hotel | null, onGallery?: (name: string, photos: string[]) => void): string[] {
   const base = hotel?.photos ?? [];
   const id = hotel?.providerId;
   const [gallery, setGallery] = useState<{ id: string; photos: string[] } | null>(null);
+  const alreadySaved = base.length > 1;
   useEffect(() => {
-    if (!id) return;
+    if (!id || alreadySaved) return;
     let live = true;
     if (!galleries.has(id)) {
       const p = fetchHotelPhotos(id);
@@ -28,14 +29,27 @@ export function useHotelPhotos(hotel: Hotel | null): string[] {
     galleries.get(id)!.then((photos) => {
       if (live && photos.length > 0) setGallery({ id, photos });
     });
+    // Nothing to fetch when the trip already holds the gallery (it was
+    // written back the first time), so `base` alone is used below.
     return () => {
       live = false;
     };
   }, [id]);
-  if (!gallery || gallery.id !== id) return base;
-  // The search's photo leads (it is the one already on screen), then the rest.
-  const first = base[0];
-  return first ? [first, ...gallery.photos.filter((u) => !samePhoto(u, first))] : gallery.photos;
+  const merged =
+    !gallery || gallery.id !== id
+      ? base
+      : base[0]
+        ? // The search's photo leads (it is the one already on screen), then the rest.
+          [base[0], ...gallery.photos.filter((u) => !samePhoto(u, base[0]))]
+        : gallery.photos;
+  // The gallery is written back onto the trip's hotel, so it is saved with
+  // the trip and a reopened trip shows it without asking Booking again.
+  const mergedKey = merged.join('|');
+  useEffect(() => {
+    if (hotel && onGallery && merged.length > base.length) onGallery(hotel.name, merged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergedKey]);
+  return merged;
 }
 
 /** Two Booking URLs of the same photo at different sizes. */
@@ -63,6 +77,7 @@ type Accent = { bg: string; text: string; border: string };
  */
 export default function HotelHero({
   hotel,
+  onGallery,
   customName,
   total,
   perNight,
@@ -70,6 +85,8 @@ export default function HotelHero({
   accent,
 }: {
   hotel: Hotel | null;
+  /** The hotel's full gallery arrived: keep it on the trip. */
+  onGallery?: (name: string, photos: string[]) => void;
   /** The traveller's own stay, when they entered one — it has no photos. */
   customName?: string;
   total: number;
@@ -77,7 +94,7 @@ export default function HotelHero({
   nights: number;
   accent: Accent;
 }) {
-  const photos = useHotelPhotos(customName ? null : hotel);
+  const photos = useHotelPhotos(customName ? null : hotel, onGallery);
   const reviews = typeof hotel?.reviewCount === 'number' && hotel.reviewCount > 0 ? hotel.reviewCount : null;
 
   return (
@@ -123,6 +140,16 @@ export default function HotelHero({
             <div className="text-[17px] font-semibold leading-snug truncate" style={{ color: accent.text }}>
               {hotel.name}
             </div>
+            {(hotel.neighbourhood || hotel.address) && (
+              <div className="mt-0.5 flex items-center gap-1 text-[12px] text-[#5a6070] min-w-0" data-testid="hotel-area">
+                <MapPin size={11} className="flex-shrink-0" style={{ color: accent.text }} />
+                <span className="truncate">
+                  {hotel.neighbourhood && <span className="font-medium" style={{ color: accent.text }}>{hotel.neighbourhood}</span>}
+                  {hotel.neighbourhood && hotel.address ? ' · ' : ''}
+                  {hotel.address}
+                </span>
+              </div>
+            )}
             <div className="mt-1 flex items-center gap-1.5 text-[12px] text-[#5a6070]">
               <span className="flex items-center gap-0.5 text-[#d97706] font-medium">
                 <Star size={11} fill="currentColor" />

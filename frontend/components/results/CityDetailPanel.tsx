@@ -37,6 +37,7 @@ import { hotelFromResult } from '@/lib/hotelShape';
 import { hotelWindow, newHotelsOnly, HOTELS_PER_SET, type HotelEntry } from '@/lib/hotelMap';
 import { prefetchLandmarks } from '@/lib/landmarks';
 import HotelHero, { preloadPhotos } from './HotelHero';
+import { areaForPoint } from '@/lib/hotelArea';
 
 // MapLibre needs `window`.
 const HotelMapPanel = dynamic(() => import('./HotelMapPanel'), { ssr: false });
@@ -137,6 +138,49 @@ export default function CityDetailPanel({
   // The hotels on the map: the set listed, taken afresh for a new set or a
   // new city but not when the pick changes — picking a hotel can move the
   // pinned row, and that should not rebuild the map under the traveller.
+  /**
+   * Write facts looked up about a hotel (its neighbourhood, its photo
+   * gallery) onto the trip, so they are saved with it and not asked for
+   * again. Found by stay and name, not slot: the trip can be re-ordered or the
+   * list extended while a lookup runs.
+   */
+  const patchHotel = (name: string, patch: Partial<Hotel>) => {
+    const cities = useTripStore.getState().currentTrip?.cities ?? [];
+    const idx = cities.findIndex(
+      (c) => c.name === city.name && c.dates.arrival === city.dates.arrival && c.dates.departure === city.dates.departure,
+    );
+    if (idx < 0) return;
+    const cur = cities[idx];
+    if (!cur.hotels.some((h) => h.name === name)) return;
+    updateCity(idx, {
+      hotels: cur.hotels.map((h) => (h.name === name ? { ...h, ...patch } : h)),
+      ...(cur.hotel?.name === name ? { hotel: { ...cur.hotel, ...patch } } : {}),
+    });
+  };
+
+  // The listed hotels' neighbourhoods, looked up from where each one is and
+  // kept on the trip. Only hotels with coordinates and no name yet are asked
+  // about, one at a time (the lookup allows one request a second).
+  const areaKey = listed
+    .map((e) => (typeof e.hotel.lat === 'number' && e.hotel.neighbourhood === undefined ? e.hotel.name : ''))
+    .join('|');
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      for (const { hotel: h } of listed) {
+        if (!live) return;
+        if (typeof h.lat !== 'number' || typeof h.lng !== 'number' || h.neighbourhood !== undefined) continue;
+        const area = await areaForPoint(h.lat, h.lng, city.name, h.area || null);
+        // '' marks "looked up, nothing trustworthy", so it is not asked again.
+        if (live) patchHotel(h.name, { neighbourhood: area ?? '' });
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areaKey]);
+
   // The listed hotels' photos start loading now, so choosing one shows its
   // photo straight away instead of an empty frame.
   const listedPhotoKey = listed.map((e) => e.hotel.photos?.[0] ?? '').join('|');
@@ -434,6 +478,7 @@ export default function CityDetailPanel({
       <div className="px-7 pt-4 pb-3.5 flex-shrink-0" style={{ borderBottom: `1px solid ${color.border}` }}>
         <HotelHero
           hotel={selectedHotel ?? null}
+          onGallery={(name, photos) => patchHotel(name, { photos })}
           customName={city.customHotel?.name}
           total={stayTotal}
           perNight={stayPerNight}
@@ -745,12 +790,16 @@ function HotelRow({
               )}
             </div>
             <div className="text-[12px] mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: `${accent}88` }}>
-              <span>{hotel.area}</span>
-              <span style={{ color: `${accent}50` }}>·</span>
               <span className="flex items-center gap-0.5 text-[#fbbf24]">
                 <Star size={10} fill="currentColor" />
                 {hotel.rating}
               </span>
+              {hotel.neighbourhood && (
+                <>
+                  <span style={{ color: `${accent}50` }}>·</span>
+                  <span>{hotel.neighbourhood}</span>
+                </>
+              )}
               {hotel.score != null && (
                 <>
                   <span style={{ color: `${accent}50` }}>·</span>

@@ -43,7 +43,8 @@ export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Ho
     name: r.name,
     rating: r.rating,
     pricePerNight: r.pricePerNight,
-    area: '',
+    // Booking's district — the borough. The card prefers `neighbourhood`.
+    area: r.district ?? '',
     bookingUrl: r.bookingUrl,
     reviewCount: r.reviewCount,
     priceSuspect: r.priceSuspect,
@@ -53,6 +54,7 @@ export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Ho
     ...(located ? { lat: r.lat, lng: r.lng } : {}),
     ...(r.thumbnail ? { photos: [largePhoto(r.thumbnail)] } : {}),
     ...(r.id && /^\d+$/.test(r.id) ? { providerId: r.id } : {}),
+    ...(r.address ? { address: r.address } : {}),
   };
 }
 

@@ -56,7 +56,9 @@ const listedHotelNames = () => {
   return screen
     .getAllByRole('button')
     .filter((b) => /\/night/.test(b.textContent ?? ''))
-    .map((b) => /Hotel \d+/.exec(b.textContent ?? '')?.[0]);
+    // The name has its own element; the rating follows it with no space in
+    // textContent ("Hotel 2" + "8" would read as "Hotel 28").
+    .map((b) => b.querySelector('.font-medium')?.textContent ?? undefined);
 };
 
 beforeEach(() => {
