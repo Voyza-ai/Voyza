@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import { getHub, type Hub } from './api';
 import type { Trip } from './types';
+import { arrivesNextDay, nextIsoDay } from './cityLegs';
 
 type HubQuery = { city: string; country?: string; mode: 'flight' | 'train'; code?: string };
 
@@ -33,6 +34,14 @@ export function legsForDay(
   let inbound: DayLeg | null = null;
   let outbound: DayLeg | null = null;
 
+  // An inter-city leg past midnight (see dayScheduleDefaults' overnightIn):
+  // the travel day has the departure, the next day the "Arrive at".
+  const overnightIn =
+    cityIndex > 0 && !!city.transportIn && !city.transportIn.unavailable && arrivesNextDay(city.transportIn);
+  if (overnightIn && date === nextIsoDay(city.dates.arrival)) {
+    inbound = { departTime: undefined, from: null, to: { city: city.name, country: city.country, mode: city.transportIn.mode } };
+  }
+
   if (city.dates.arrival === date) {
     const homeLeg = cityIndex === 0 ? home?.outboundLeg : null;
     if (homeLeg?.arriveTime) {
@@ -46,7 +55,7 @@ export function legsForDay(
       inbound = {
         departTime: city.transportIn.departTime,
         from: prev ? { city: prev.name, country: prev.country, mode } : null,
-        to: { city: city.name, country: city.country, mode },
+        to: overnightIn ? null : { city: city.name, country: city.country, mode },
       };
     }
   }

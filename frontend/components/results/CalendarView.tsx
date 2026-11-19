@@ -7,7 +7,7 @@ import { Trip, City, TransportMode } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
 import { homeDepartureDay } from '@/lib/tripSpan';
-import { effectiveTransportIn, effectiveTransportOut } from '@/lib/cityLegs';
+import { effectiveTransportIn, effectiveTransportOut, arrivesNextDay } from '@/lib/cityLegs';
 import DayPlanner from './DayPlanner';
 import WeatherChip from './WeatherChip';
 import { useTripWeather } from '@/lib/tripWeather';
@@ -320,6 +320,10 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                                 {inLeg.departTime && inLeg.arriveTime
                                   ? `${inLeg.departTime}→${inLeg.arriveTime}`
                                   : inLeg.arriveTime || 'arrive'}
+                                {/* Arrives after midnight — the day after this one.
+                                    The first city's way in is the home flight, whose
+                                    landing day this cell already is. */}
+                                {cell.cityIndex! > 0 && arrivesNextDay(inLeg) ? ' +1' : ''}
                               </span>
                             </div>
                             );
