@@ -32,7 +32,7 @@ import { nightsBetween } from '@/lib/hotelScore';
 import { getCityColor, CITY_COLORS } from '@/lib/cityColors';
 import { hasStay } from './CityCard';
 import { VIBE_LABEL } from '@/lib/cityTheme';
-import { effectiveTransportIn, effectiveTransportOut } from '@/lib/cityLegs';
+import { effectiveTransportIn, effectiveTransportOut, legArrivalDate } from '@/lib/cityLegs';
 import { searchHotels } from '@/lib/api';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { hotelWindow, newHotelsOnly, HOTELS_PER_SET, type HotelEntry } from '@/lib/hotelMap';
@@ -309,7 +309,11 @@ export default function CityDetailPanel({
           <TravelSummary
             arrive={effectiveTransportIn(trip, cityIndex)}
             depart={effectiveTransportOut(trip, cityIndex)}
-            arriveDate={city.dates.arrival}
+            // The first city's way in is the home flight, which lands on
+            // the stay's first date by construction (firstStayArrival). An
+            // inter-city leg past midnight lands the day after its city's
+            // first date.
+            arriveDate={cityIndex === 0 ? city.dates.arrival : legArrivalDate(effectiveTransportIn(trip, cityIndex), city.dates.arrival)}
             departDate={city.dates.departure}
             color={color}
           />
