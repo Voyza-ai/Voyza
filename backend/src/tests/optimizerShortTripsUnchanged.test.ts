@@ -124,7 +124,11 @@ async function run(trip: (typeof TRIPS)[keyof typeof TRIPS]) {
     totalNights: trip.totalNights,
   });
   return {
-    flights: mockedFlights.mock.calls.map(([p]: any[]) => `${p.origin}>${p.destination}@${p.date}#${p.travelers}`).sort(),
+    // DISTINCT searches: a repeat of one is served by flights.ts' 10-minute
+    // cache and never reaches Duffel. (The winner's legs are re-priced on
+    // their real train days after ranking, which asks for flights ranking
+    // already searched.)
+    flights: [...new Set(mockedFlights.mock.calls.map(([p]: any[]) => `${p.origin}>${p.destination}@${p.date}#${p.travelers}`))].sort(),
     hotels: mockedHotels.mock.calls.map(([p]: any[]) => `${p.city}@${p.checkin}..${p.checkout}#${p.adults}`).sort(),
     result: JSON.parse(JSON.stringify(result)),
   };
