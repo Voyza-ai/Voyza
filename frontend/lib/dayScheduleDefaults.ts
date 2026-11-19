@@ -2,7 +2,7 @@ import { City, Trip, ScheduledEvent, Transport, UnscheduledItem } from './types'
 import { parseLocal, toIso } from './dateHelpers';
 import { homeDepartureDay } from './tripSpan';
 import { cityFlightCodeLocally } from './locationResolver';
-import { homeLegToTransport } from './cityLegs';
+import { homeLegToTransport, durationMinutes, arrivesNextDay, nextIsoDay } from './cityLegs';
 // `import type` only — keeps the fetch layer in lib/api out of this
 // module's runtime graph while still typing the AI's suggestion shapes.
 import type { ActivitySuggestion, RestaurantSuggestion } from './api';
@@ -81,14 +81,7 @@ const legEnd = (
 
 const travelWord = (mode: Transport['mode']) => (mode === 'flight' ? 'Flight' : mode === 'train' ? 'Train' : 'Bus');
 
-/** "58m", "1h 5m", "9h30m" → minutes; null when it says neither. */
-export const durationMinutes = (d: string | undefined): number | null => {
-  if (!d) return null;
-  const h = /(\d+)\s*h/i.exec(d);
-  const m = /(\d+)\s*m(?!o)/i.exec(d);
-  if (!h && !m) return null;
-  return (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0);
-};
+export { durationMinutes } from './cityLegs';
 
 const timeToMinutes = (t: string): number => {
   const [h, m] = t.split(':').map(Number);
@@ -240,6 +233,30 @@ export function buildDayTransportContext(
   // day. For an overnight home flight (departDate one day before arrival)
   // those two blocks belong on the home card day (Phase 2) — only the
   // "Arrive at" marker renders here.
+  // An inter-city leg that arrives after midnight (Prague 16:36 → Budapest
+  // 00:29). Its travel day is still the city's first date — the traveller
+  // heads to the station and boards then — but they reach the city the next
+  // day: the "Arrive at" marker belongs on that day, and nothing in the
+  // city can be planned on the travel day itself. Before, the marker sat at
+  // 00:29 at the TOP of the travel day and activities in the new city opened
+  // from ~01:30 that morning, while the traveller was still in the old one.
+  const overnightIn = cityIndex > 0 && !inFromHome && arrivesNextDay(effectiveIn);
+  if (overnightIn && effectiveIn?.arriveTime && date === nextIsoDay(city.dates.arrival)) {
+    const t = effectiveIn;
+    const arrMins = timeToMinutes(t.arriveTime!);
+    const toShort = legEnd(t.toStation, t.mode, trip, cityIndex, city.name);
+    push({
+      id: newId(),
+      title: `Arrive at ${toShort}`,
+      startTime: t.arriveTime!,
+      endTime: minutesToTime(Math.min(arrMins + 15, 24 * 60)),
+      category: 'transport',
+      auto: true,
+      autoRole: 'in-arrive',
+    });
+    windowStart = Math.min(arrMins + POST_ARRIVAL_CUSHION, 24 * 60);
+  }
+
   if (isArrival && effectiveIn?.arriveTime) {
     const t = effectiveIn;
     const arrMins = timeToMinutes(t.arriveTime!);
@@ -294,19 +311,25 @@ export function buildDayTransportContext(
       );
     }
 
-    push({
-      id: newId(),
-      title: `Arrive at ${toShort}`,
-      startTime: t.arriveTime!,
-      endTime: minutesToTime(Math.min(arrMins + 15, 24 * 60)),
-      category: 'transport',
-      auto: true,
-      autoRole: 'in-arrive',
-    });
+    if (overnightIn) {
+      // Arrives tomorrow (see overnightIn): the marker is on that day, and
+      // this one has no time left in the new city.
+      windowStart = 24 * 60;
+    } else {
+      push({
+        id: newId(),
+        title: `Arrive at ${toShort}`,
+        startTime: t.arriveTime!,
+        endTime: minutesToTime(Math.min(arrMins + 15, 24 * 60)),
+        category: 'transport',
+        auto: true,
+        autoRole: 'in-arrive',
+      });
 
-    // No activities/restaurants until the user has actually landed and
-    // cleared the airport.
-    windowStart = Math.min(Math.max(arrMins + POST_ARRIVAL_CUSHION, travelEnd + SLOT_BUFFER_MIN), 24 * 60);
+      // No activities/restaurants until the user has actually landed and
+      // cleared the airport.
+      windowStart = Math.min(Math.max(arrMins + POST_ARRIVAL_CUSHION, travelEnd + SLOT_BUFFER_MIN), 24 * 60);
+    }
   }
 
   // Outbound — two blocks ("Head to" + actual travel). Symmetric to the

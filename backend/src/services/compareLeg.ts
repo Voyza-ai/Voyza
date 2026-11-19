@@ -78,6 +78,18 @@ export type CompareLegParams = {
 export type CompareLegDeps = {
   getIataCode?: (cityName: string, context?: IataLookupContext) => Promise<string>;
   searchFlights?: typeof searchFlights;
+  /**
+   * Search the leg's TRAINS on this day instead of `params.date`. The
+   * optimizer's ranking passes one day for every leg: a rail timetable search
+   * costs ~11 of All Aboard's 500 hourly quota units per new route-and-day
+   * (measured 2026-11-19; repeats and city lookups are free), and pricing each
+   * city pair on every day an ordering could put it spent ~95 units on one
+   * 3-city trip. Rail fares barely move from one day to the next, and the
+   * ranking only needs a price — the winning route is re-priced on its real
+   * days before anything is shown. A train found this way carries the other
+   * day's times, so it is NOT written to leg_price_cache under `params.date`.
+   */
+  trainDate?: string;
 };
 
 export async function compareLeg(
@@ -87,6 +99,9 @@ export async function compareLeg(
   const { origin, destination, date, travelers, originCountry, destinationCountry } = params;
   const resolveIata = deps.getIataCode ?? getIataCode;
   const findFlights = deps.searchFlights ?? searchFlights;
+  const trainDate = deps.trainDate ?? date;
+  // Only a train searched on the leg's own day may be cached as that day's.
+  const trainOnOwnDay = trainDate === date;
   const tripNames = params.tripCityNames ?? [];
   const dependsOnTrip = (name: string): boolean =>
     tripNames.length > 0 &&
@@ -190,7 +205,7 @@ export async function compareLeg(
         })(),
     cachedTrain
       ? Promise.resolve(null)
-      : searchTrains({ origin, destination, date, travelers, originCountry, destinationCountry }).catch(() => []),
+      : searchTrains({ origin, destination, date: trainDate, travelers, originCountry, destinationCountry }).catch(() => []),
   ]);
 
   // Pick the cheapest flight that isn't a long journey (longJourney.ts).
@@ -358,7 +373,7 @@ export async function compareLeg(
       expires_at: expiresAt,
     });
   }
-  if (bestTrain && !cachedTrain) {
+  if (bestTrain && !cachedTrain && trainOnOwnDay) {
     cacheRows.push({
       origin: origin.toLowerCase(),
       destination: destination.toLowerCase(),

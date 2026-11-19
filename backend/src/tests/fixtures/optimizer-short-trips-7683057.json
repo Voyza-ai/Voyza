@@ -2,24 +2,16 @@
   "one": {
     "flights": [
       "HMA>LIS@2030-01-10#2",
-      "HMA>LIS@2030-01-10#2",
-      "HMA>LIS@2030-01-10#2",
       "HMB>LIS@2030-01-08#2",
       "HMB>LIS@2030-01-09#2",
-      "HMB>LIS@2030-01-10#2",
-      "HMB>LIS@2030-01-10#2",
       "HMB>LIS@2030-01-10#2",
       "HMB>LIS@2030-01-11#2",
       "HMB>LIS@2030-01-12#2",
       "LIS>HMA@2030-01-13#2",
       "LIS>HMA@2030-01-14#2",
       "LIS>HMA@2030-01-15#2",
-      "LIS>HMA@2030-01-15#2",
-      "LIS>HMA@2030-01-15#2",
       "LIS>HMA@2030-01-16#2",
       "LIS>HMA@2030-01-17#2",
-      "LIS>HMB@2030-01-15#2",
-      "LIS>HMB@2030-01-15#2",
       "LIS>HMB@2030-01-15#2"
     ],
     "hotels": [
@@ -195,7 +187,7 @@
           },
           {
             "placeId": "gn:2365267",
-            "label": "Lomé, Maritime, Togo",
+            "label": "Lom\u00e9, Maritime, Togo",
             "airports": [
               "LFW"
             ]
@@ -219,7 +211,7 @@
           },
           {
             "placeId": "gn:1862627",
-            "label": "Himeji, Hyōgo, Japan",
+            "label": "Himeji, Hy\u014dgo, Japan",
             "airports": [
               "UKB",
               "KIX",
@@ -235,29 +227,20 @@
       "AMS>HMA@2030-01-14#2",
       "AMS>HMA@2030-01-15#2",
       "AMS>HMA@2030-01-16#2",
-      "AMS>HMA@2030-01-16#2",
-      "AMS>HMA@2030-01-16#2",
       "AMS>HMA@2030-01-17#2",
       "AMS>HMA@2030-01-18#2",
       "AMS>HMB@2030-01-16#2",
-      "AMS>HMB@2030-01-16#2",
-      "AMS>HMB@2030-01-16#2",
       "AMS>PAR@2030-01-13#2",
       "HMA>AMS@2030-01-10#2",
-      "HMA>PAR@2030-01-10#2",
-      "HMA>PAR@2030-01-10#2",
       "HMA>PAR@2030-01-10#2",
       "HMB>AMS@2030-01-10#2",
       "HMB>PAR@2030-01-08#2",
       "HMB>PAR@2030-01-09#2",
       "HMB>PAR@2030-01-10#2",
-      "HMB>PAR@2030-01-10#2",
-      "HMB>PAR@2030-01-10#2",
       "HMB>PAR@2030-01-11#2",
       "HMB>PAR@2030-01-12#2",
       "PAR>AMS@2030-01-11#2",
       "PAR>AMS@2030-01-12#2",
-      "PAR>AMS@2030-01-13#2",
       "PAR>AMS@2030-01-13#2",
       "PAR>AMS@2030-01-14#2",
       "PAR>AMS@2030-01-15#2",
@@ -596,7 +579,7 @@
           },
           {
             "placeId": "gn:2365267",
-            "label": "Lomé, Maritime, Togo",
+            "label": "Lom\u00e9, Maritime, Togo",
             "airports": [
               "LFW"
             ]
@@ -620,7 +603,7 @@
           },
           {
             "placeId": "gn:1862627",
-            "label": "Himeji, Hyōgo, Japan",
+            "label": "Himeji, Hy\u014dgo, Japan",
             "airports": [
               "UKB",
               "KIX",
@@ -634,34 +617,18 @@
   "three": {
     "flights": [
       "HMA>LON@2030-01-10#6",
-      "HMA>LON@2030-01-10#6",
-      "HMA>PAR@2030-01-10#6",
-      "HMA>PAR@2030-01-10#6",
-      "HMA>PAR@2030-01-10#6",
       "HMA>PAR@2030-01-10#6",
       "HMA>ZUR@2030-01-10#6",
-      "HMA>ZUR@2030-01-10#6",
-      "HMB>LON@2030-01-10#6",
       "HMB>LON@2030-01-10#6",
       "HMB>PAR@2030-01-08#6",
       "HMB>PAR@2030-01-09#6",
       "HMB>PAR@2030-01-10#6",
-      "HMB>PAR@2030-01-10#6",
-      "HMB>PAR@2030-01-10#6",
-      "HMB>PAR@2030-01-10#6",
       "HMB>PAR@2030-01-11#6",
       "HMB>PAR@2030-01-12#6",
       "HMB>ZUR@2030-01-10#6",
-      "HMB>ZUR@2030-01-10#6",
-      "LON>HMA@2030-01-17#6",
-      "LON>HMA@2030-01-17#6",
-      "LON>HMA@2030-01-17#6",
       "LON>HMA@2030-01-17#6",
       "LON>HMB@2030-01-15#6",
       "LON>HMB@2030-01-16#6",
-      "LON>HMB@2030-01-17#6",
-      "LON>HMB@2030-01-17#6",
-      "LON>HMB@2030-01-17#6",
       "LON>HMB@2030-01-17#6",
       "LON>HMB@2030-01-18#6",
       "LON>HMB@2030-01-19#6",
@@ -670,24 +637,18 @@
       "LON>ZUR@2030-01-13#6",
       "LON>ZUR@2030-01-15#6",
       "PAR>HMA@2030-01-17#6",
-      "PAR>HMA@2030-01-17#6",
-      "PAR>HMB@2030-01-17#6",
       "PAR>HMB@2030-01-17#6",
       "PAR>LON@2030-01-13#6",
       "PAR>LON@2030-01-15#6",
       "PAR>ZUR@2030-01-11#6",
       "PAR>ZUR@2030-01-12#6",
       "PAR>ZUR@2030-01-13#6",
-      "PAR>ZUR@2030-01-13#6",
       "PAR>ZUR@2030-01-14#6",
       "PAR>ZUR@2030-01-15#6",
       "ZUR>HMA@2030-01-17#6",
-      "ZUR>HMA@2030-01-17#6",
-      "ZUR>HMB@2030-01-17#6",
       "ZUR>HMB@2030-01-17#6",
       "ZUR>LON@2030-01-13#6",
       "ZUR>LON@2030-01-14#6",
-      "ZUR>LON@2030-01-15#6",
       "ZUR>LON@2030-01-15#6",
       "ZUR>LON@2030-01-16#6",
       "ZUR>LON@2030-01-17#6",
@@ -1251,7 +1212,7 @@
           },
           {
             "placeId": "gn:2365267",
-            "label": "Lomé, Maritime, Togo",
+            "label": "Lom\u00e9, Maritime, Togo",
             "airports": [
               "LFW"
             ]
@@ -1275,7 +1236,7 @@
           },
           {
             "placeId": "gn:1862627",
-            "label": "Himeji, Hyōgo, Japan",
+            "label": "Himeji, Hy\u014dgo, Japan",
             "airports": [
               "UKB",
               "KIX",
