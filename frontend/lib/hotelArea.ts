@@ -36,7 +36,7 @@ const ADMIN_LABEL =
   /arrondissement|municipio|borough|historic (zone|centre|center)|conjunto urbano|uni[aã]o de freguesias|freguesia|\bcounty\b|\bdistrict\b|^\d+(st|nd|rd|th|e|er|ème)\b/i;
 
 /** Prefixes that wrap a real name: "Quartier des Épinettes" → "Épinettes". */
-const PREFIXES = [/^quartier (de la |de l'|du |des |de |d')/i, /^četrtna skupnost /i];
+const PREFIXES = [/^quartier (de la |de l'|du |des |de |d')/i, /^četrtna skupnost /i, /^katastralgemeinde /i];
 
 /**
  * A raw area name made fit to show, or null when it should not be shown: the
@@ -140,14 +140,19 @@ async function photonProperties(lat: number, lng: number): Promise<Record<string
   }
 }
 
-const inFlight = new Map<string, Promise<string | null>>();
+const inFlight = new Map<string, Promise<string | null | undefined>>();
 
 /**
- * The neighbourhood at a hotel's coordinates, or null. Photon is asked only
- * when Nominatim has nothing usable. A lookup that failed outright (both
- * sources down) is not kept, so it is tried again next time.
+ * The neighbourhood at a hotel's coordinates; null when the sources answered
+ * but had no usable name; undefined when the lookup failed outright (both
+ * sources down or refusing) — that is not kept, so it is tried again later.
  */
-export function areaForPoint(lat: number, lng: number, cityName: string, bookingDistrict?: string | null): Promise<string | null> {
+export function areaForPoint(
+  lat: number,
+  lng: number,
+  cityName: string,
+  bookingDistrict?: string | null,
+): Promise<string | null | undefined> {
   const key = keyFor(lat, lng);
   const hit = readStore()[key];
   if (hit && Date.now() - hit.at < TTL_MS) return Promise.resolve(hit.area);
@@ -162,7 +167,10 @@ export function areaForPoint(lat: number, lng: number, cityName: string, booking
       photon = await photonProperties(lat, lng);
       area = pickArea({ nominatim, photon, bookingDistrict }, cityName);
     }
-    if (nominatim || photon) writeStore(key, area);
+    // Neither source answered: say so, rather than "no area", so the caller
+    // does not record it as looked up.
+    if (!nominatim && !photon) return undefined;
+    writeStore(key, area);
     return area;
   })().finally(() => inFlight.delete(key));
   inFlight.set(key, p);
