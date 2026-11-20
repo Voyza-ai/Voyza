@@ -28,6 +28,16 @@ Supabase service-role client.
 - Production is a long way off. Keep advice scoped to dev/testing; don't raise
   deploys, prod keys, or launch readiness unasked.
 
+## Testing in the browser
+
+- **Don't build test trips through the planning chat** — every run spends
+  API credits (Booking, flights, AI). Load a saved trip or a Browse preset
+  into the results page instead (sessionStorage key `bluemurr-current-trip`),
+  which gives the same flowchart. Use the planning chat only when testing
+  planning-chat changes.
+- Block writes while testing: route-intercept non-GET calls to `*.supabase.co`
+  and to `/api/(trips|canvas|users|bookings|email|notifications)`.
+
 ## Database migrations
 
 - SQL files live in `backend/supabase/migrations/`. House style is
