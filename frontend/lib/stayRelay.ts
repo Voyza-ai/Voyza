@@ -76,7 +76,9 @@ export function relayMovedStay(
       if (seen.has(key)) continue;
       seen.add(key);
       const start = toMin(e.startTime);
-      const length = e.plannedDurationMin ?? Math.max(30, toMin(e.endTime) - start);
+      // The length it has now: a stop the traveller resized keeps their length.
+      const span = toMin(e.endTime) - start;
+      const length = span > 0 ? Math.max(30, span) : (e.plannedDurationMin ?? 30);
       if (stop.meal) {
         restaurants.push({
           name: stop.name,
