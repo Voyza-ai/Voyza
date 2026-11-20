@@ -75,6 +75,14 @@ export type Hotel = {
   maxGuests?: number;
   /** Set when the backend does not trust this row's price — see hotelScore.ts */
   priceSuspect?: boolean;
+  /** Why `priceSuspect` was set (backend `PriceSuspectReason`), for the words shown. */
+  priceSuspectReason?: string;
+  /**
+   * Set when the search this row came from was too thin to compare prices
+   * against (backend: fewer rows than its price check needs). Not a verdict —
+   * the price may well be right; we could not check it. See lib/hotelPriceTrust.ts.
+   */
+  priceUnverified?: boolean;
   /**
    * Reviews behind `rating`. Carried through from the provider so a re-rank
    * applies the same confidence discount the first ranking did — without it,

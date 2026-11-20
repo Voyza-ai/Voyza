@@ -106,6 +106,8 @@ export type HotelResult = {
    */
   priceSuspect?: boolean;
   priceSuspectReason?: string;
+  /** The search was too thin to price-check this row — see `Hotel.priceUnverified`. */
+  priceUnverified?: boolean;
 };
 
 

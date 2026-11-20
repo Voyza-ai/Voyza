@@ -23,6 +23,7 @@ import TripNameEditor from '@/components/shared/TripNameEditor';
 import { updateTrip } from '@/lib/api';
 import { useLeaveGuardSave } from '@/lib/leaveGuard';
 import CollaboratorAvatars from './CollaboratorAvatars';
+import { tripPriceCaveats } from '@/lib/hotelPriceTrust';
 import type { TripCollaboration } from '@/hooks/useTripCollaboration';
 
 type ResultsHeaderProps = {
@@ -174,6 +175,19 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
   const { start: startDate, end: endDate, nights: totalNights } = tripSpan(shown);
 
   const liveTotal = liveTripTotal(shown);
+  // Hotel prices in that total we can't stand behind (lib/hotelPriceTrust.ts).
+  // They stay IN the total — an unchecked price is most likely real, and a
+  // total without the stay would be wrong for certain — and are named here.
+  const caveats = tripPriceCaveats(shown);
+  const caveatCount = caveats.suspect.length + caveats.unverified.length;
+  const caveatText =
+    caveats.suspect.length > 0
+      ? `incl. ${caveats.suspect.length === 1 ? 'a hotel price that looks off' : `${caveats.suspect.length} hotel prices that look off`}`
+      : `incl. ${caveats.unverified.length === 1 ? '1 unchecked hotel price' : `${caveats.unverified.length} unchecked hotel prices`}`;
+  const caveatTitle = [
+    caveats.suspect.length > 0 ? `Looks off: ${caveats.suspect.join(', ')}` : '',
+    caveats.unverified.length > 0 ? `Couldn't be checked against other hotels: ${caveats.unverified.join(', ')}` : '',
+  ].filter(Boolean).join('. ') + '. Open the city to see why.';
   const travelers = Math.max(1, trip.travelers);
   // Savings tracks the delta vs the original baseline (totalCost - savings was the
   // pre-optimized baseline). When the user picks a more expensive hotel the
@@ -425,6 +439,15 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               {showToggle && (
                 <div className="text-[#4f8ef7]/55 text-[9px]">
                   ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
+                </div>
+              )}
+              {caveatCount > 0 && (
+                <div
+                  data-testid="total-price-caveat"
+                  title={caveatTitle}
+                  className="text-[#4f8ef7]/70 text-[9px] mt-0.5 underline decoration-dashed underline-offset-2 cursor-help whitespace-nowrap"
+                >
+                  {caveatText}
                 </div>
               )}
             </div>
