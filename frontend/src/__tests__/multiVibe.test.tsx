@@ -386,7 +386,7 @@ describe('an old saved trip with a single vibe', () => {
       },
     } as any);
     render(<ResultsHeader trip={trip} />);
-    fireEvent.click(screen.getByText(/You can save/i));
+    fireEvent.click(screen.getByText(/You (can save|saved)/i));
     fireEvent.click(screen.getByText('2 days earlier'));
 
     const staged = JSON.parse(sessionStorage.getItem('bluemurr-autorun')!);
@@ -413,7 +413,7 @@ describe('an old saved trip with a single vibe', () => {
       },
     } as any);
     render(<ResultsHeader trip={trip} />);
-    fireEvent.click(screen.getByText(/You can save/i));
+    fireEvent.click(screen.getByText(/You (can save|saved)/i));
     fireEvent.click(screen.getByText('1 day later'));
     const staged = JSON.parse(sessionStorage.getItem('bluemurr-autorun')!);
     expect(staged.vibes).toEqual(['Culture', 'Food']);

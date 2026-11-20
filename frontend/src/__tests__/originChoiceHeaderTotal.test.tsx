@@ -103,7 +103,7 @@ describe('the header while home legs are re-priced for another origin', () => {
     // ...but the header still prices a whole trip, and invents no saving.
     expect(perPersonLine()).toBe(perPerson(trip));
     expect(screen.queryByText('Best price')).not.toBeInTheDocument();
-    expect(screen.queryByText('You can save')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^You (can save|saved)$/)).not.toBeInTheDocument();
 
     // One direction lands: the header still holds the last settled total. It
     // moves once, when every search has landed — a total half Maine, half
@@ -112,7 +112,7 @@ describe('the header while home legs are re-priced for another origin', () => {
       out.resolve({ outboundLeg: MAINE_OUT });
     });
     expect(perPersonLine()).toBe(perPerson(trip));
-    expect(screen.queryByText('You can save')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^You (can save|saved)$/)).not.toBeInTheDocument();
 
     await act(async () => {
       back.resolve({ returnLeg: MAINE_BACK });
@@ -155,7 +155,7 @@ describe('the header while home legs are re-priced for another origin', () => {
     const settled = useTripStore.getState().currentTrip!;
     await waitFor(() => expect(perPersonLine()).toBe(perPerson(settled)));
     expect(liveTripTotal(settled)).toBeLessThan(liveTripTotal(trip));
-    expect(screen.queryByText('You can save')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^You (can save|saved)$/)).not.toBeInTheDocument();
     expect(screen.queryByText('Best price')).not.toBeInTheDocument();
     // The stored total follows the live one, so the baseline moved with it.
     expect(settled.totalCost).toBe(liveTripTotal(settled));
