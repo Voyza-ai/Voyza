@@ -8,7 +8,7 @@ import { X, Star, ExternalLink, Check, Map as MapIcon, Loader2 } from 'lucide-re
 import type { City } from '@/lib/types';
 import { useTripStore } from '@/store/tripStore';
 import { displayAmount } from '@/lib/tripTotals';
-import { locateHotels, activitySpots, type ActivitySpot, type HotelEntry, type HotelPin } from '@/lib/hotelMap';
+import { locateHotels, activitySpots, mealName, type ActivitySpot, type HotelEntry, type HotelPin } from '@/lib/hotelMap';
 import { fetchLandmarks, type Landmark } from '@/lib/landmarks';
 import type { GeoPoint } from '@/lib/geocode';
 import { loadMapStyle, readStoredStyle, SPOT_STYLE, SPOT_LABEL_MAX, BLUE } from './MapView';
@@ -198,14 +198,80 @@ function makeLandmarkEl(l: Landmark): HTMLDivElement {
  */
 function makeActivityEl(a: ActivitySpot): HTMLDivElement {
   const el = document.createElement('div');
-  el.style.cssText = 'width:9px;height:9px;z-index:0;';
+  el.style.cssText = 'width:9px;height:9px;z-index:0;cursor:default;';
   el.dataset.activitySpot = a.name;
-  el.title = a.name;
+  el.setAttribute('aria-label', a.name);
   const dot = document.createElement('div');
   const c = SPOT_STYLE[a.kind].color;
-  dot.style.cssText = `width:9px;height:9px;border-radius:9999px;background:${c};opacity:0.5;border:1.5px solid #fff;`;
+  dot.style.cssText = `width:9px;height:9px;border-radius:9999px;background:${c};opacity:0.5;border:1.5px solid #fff;transition:opacity .12s;`;
   el.appendChild(dot);
+
+  // On hover: what it is and when it is on the trip's days.
+  const tip = document.createElement('div');
+  tip.dataset.spotTip = '';
+  tip.style.cssText = `
+    position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:none;
+    width:max-content;max-width:240px;padding:8px 10px;border-radius:10px;background:#fff;
+    border:1px solid #dfe3ea;box-shadow:0 4px 16px rgba(23,43,77,0.16);
+    font:12px/1.35 system-ui,sans-serif;color:#26324b;pointer-events:none;white-space:normal;
+  `;
+  const kindLabel = a.kind === 'activity' ? 'Activity' : mealName(a.visits[0]?.start ?? '');
+  const head = document.createElement('div');
+  head.style.cssText = `font:600 10px/1.2 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:${c};`;
+  head.textContent = kindLabel;
+  const name = document.createElement('div');
+  name.style.cssText = 'font-weight:600;font-size:13px;margin-top:2px;';
+  name.textContent = a.name;
+  tip.append(head, name);
+  for (const v of a.visits) {
+    const when = document.createElement('div');
+    when.style.cssText = 'color:#5a6070;margin-top:2px;';
+    when.textContent = `${visitDay(v.day)} · ${v.start}–${v.end}`;
+    tip.appendChild(when);
+  }
+  if (a.notes) {
+    const notes = document.createElement('div');
+    notes.style.cssText = 'color:#5a6070;margin-top:4px;';
+    notes.textContent = a.notes.length > 120 ? `${a.notes.slice(0, 117)}…` : a.notes;
+    tip.appendChild(notes);
+  }
+  el.appendChild(tip);
+
+  el.addEventListener('mouseenter', () => {
+    el.style.zIndex = '50';
+    dot.style.opacity = '1';
+    tip.style.display = 'block';
+    tip.style.bottom = '16px';
+    tip.style.top = 'auto';
+    tip.style.transform = 'translateX(-50%)';
+    // Keep the card inside the map: below the dot near the top, slid in at the sides.
+    const frame = el.closest('.maplibregl-map');
+    if (!frame) return;
+    const f = frame.getBoundingClientRect();
+    let b = tip.getBoundingClientRect();
+    if (b.top < f.top + 6) {
+      tip.style.bottom = 'auto';
+      tip.style.top = '16px';
+      b = tip.getBoundingClientRect();
+    }
+    const shift = b.left < f.left + 6 ? f.left + 6 - b.left : b.right > f.right - 6 ? f.right - 6 - b.right : 0;
+    if (shift) tip.style.transform = `translateX(calc(-50% + ${Math.round(shift)}px))`;
+  });
+  el.addEventListener('mouseleave', () => {
+    el.style.zIndex = '0';
+    dot.style.opacity = '0.5';
+    tip.style.display = 'none';
+  });
   return el;
+}
+
+/** "2027-01-15" → "Fri, Jan 15". */
+function visitDay(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  return Number.isNaN(dt.getTime())
+    ? iso
+    : dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 /**

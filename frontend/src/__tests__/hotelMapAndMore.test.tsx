@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import CityDetailPanel from '@/components/results/CityDetailPanel';
 import { useTripStore } from '@/store/tripStore';
 import { searchHotels } from '@/lib/api';
-import { hotelWindow, newHotelsOnly, locateHotels, activitySpots, type HotelEntry } from '@/lib/hotelMap';
+import { hotelWindow, newHotelsOnly, locateHotels, activitySpots, mealName, type HotelEntry } from '@/lib/hotelMap';
 import { buildTrip, buildCity } from './fixtures';
 import type { Hotel, ScheduledEvent, Trip } from '@/lib/types';
 
@@ -310,6 +310,30 @@ describe('CityDetailPanel — the map beside it', () => {
     expect(onClose).not.toHaveBeenCalled();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: 3000 });
     expect(onCloseStart).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('mealName', () => {
+  it('names a meal by when it starts', () => {
+    expect(mealName('08:30')).toBe('Breakfast');
+    expect(mealName('13:15')).toBe('Lunch');
+    expect(mealName('19:00')).toBe('Dinner');
+    expect(mealName('')).toBe('Meal');
+  });
+});
+
+describe('activitySpots visits', () => {
+  const at = (title: string, startTime: string, endTime: string) =>
+    ({ id: title + startTime, title, startTime, endTime, category: 'activity', lat: 51.5, lng: -0.1 }) as ScheduledEvent;
+  it('keeps every time a place is on the days, in day order, for the hover card', () => {
+    const [spot] = activitySpots({
+      '2027-01-16': [at('British Museum', '14:00', '16:00')],
+      '2027-01-15': [at('British Museum', '10:00', '13:00')],
+    });
+    expect(spot.visits).toEqual([
+      { day: '2027-01-15', start: '10:00', end: '13:00' },
+      { day: '2027-01-16', start: '14:00', end: '16:00' },
+    ]);
   });
 });
 

@@ -365,7 +365,7 @@ export default function CityDetailPanel({
         style={{ borderBottom: `1px solid ${color.border}` }}
       >
         {/* Room on the right for the arrows and the stacked dates under them. */}
-        <div className="min-w-0 pr-[120px]">
+        <div className="min-w-0 pr-[170px]">
           <div
             className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] mb-2"
             style={{ color: `${color.text}aa` }}
@@ -649,7 +649,7 @@ function TravelDates({
   departDate: string;
   color: { bg: string; text: string; border: string; name: string };
 }) {
-  const row = (label: string, Icon: LucideIcon, date: string) => (
+  const row = (label: string, Icon: LucideIcon, date: string, time: string | undefined) => (
     <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
       <Icon size={12} style={{ color: `${color.text}88` }} />
       <span className="text-[11px] uppercase tracking-[0.12em]" style={{ color: `${color.text}88` }}>
@@ -658,12 +658,18 @@ function TravelDates({
       <span className="text-[13px] font-semibold tabular-nums" style={{ color: color.text }}>
         {formatDateShort(date)}
       </span>
+      {time && (
+        <>
+          <span style={{ color: `${color.text}50` }}>·</span>
+          <span className="text-[13px] tabular-nums" style={{ color: color.text }}>{time}</span>
+        </>
+      )}
     </div>
   );
   return (
     <div className="absolute top-[84px] right-5 flex flex-col gap-1" data-testid="travel-dates">
-      {row('Arr', arrive.mode === 'flight' ? PlaneLanding : TrainFront, arriveDate)}
-      {row('Dep', depart.mode === 'flight' ? PlaneTakeoff : TrainFront, departDate)}
+      {row('Arr', arrive.mode === 'flight' ? PlaneLanding : TrainFront, arriveDate, arrive.arriveTime)}
+      {row('Dep', depart.mode === 'flight' ? PlaneTakeoff : TrainFront, departDate, depart.departTime)}
     </div>
   );
 }

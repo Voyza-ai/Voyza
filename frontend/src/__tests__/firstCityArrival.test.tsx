@@ -147,6 +147,22 @@ describe('CityDetailPanel arrive/depart dates', () => {
     expect(dates).toContain(`Arr${short(t.cities[i].dates.arrival)}`);
     expect(dates).toContain(`Dep${short(t.cities[i].dates.departure)}`);
   });
+
+  // Each date carries the time of the transport the trip actually uses: the
+  // home flights at either end, the trains in between.
+  it("the first city's Arr time is the outbound flight's landing, its Dep the train", () => {
+    render(<CityDetailPanel trip={homeTrip()} cityIndex={0} {...nav} />);
+    const dates = screen.getByTestId('travel-dates').textContent ?? '';
+    expect(dates).toMatch(/Arr.*·21:20/);
+    expect(dates).toMatch(/Dep.*·10:13/);
+  });
+
+  it("the last city's Dep time is the return flight's take-off", () => {
+    render(<CityDetailPanel trip={homeTrip()} cityIndex={2} {...nav} />);
+    const dates = screen.getByTestId('travel-dates').textContent ?? '';
+    expect(dates).toMatch(/Arr.*·14:41/);
+    expect(dates).toMatch(/Dep.*·13:45/);
+  });
 });
 
 describe('CalendarView first and last travel days', () => {

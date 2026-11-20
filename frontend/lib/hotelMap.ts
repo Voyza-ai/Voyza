@@ -323,7 +323,29 @@ export async function locateHotels(
 }
 
 /** An activity or meal on the city's days that has real coordinates. */
-export type ActivitySpot = { name: string; lat: number; lng: number; kind: 'activity' | 'restaurant' };
+/** When an activity or meal is on the trip's days ("2027-01-15", "10:00", "13:00"). */
+export type SpotVisit = { day: string; start: string; end: string };
+
+export type ActivitySpot = {
+  name: string;
+  lat: number;
+  lng: number;
+  kind: 'activity' | 'restaurant';
+  /** Every time it is on the days, in order — the same place can be on two. */
+  visits: SpotVisit[];
+  notes?: string;
+};
+
+/**
+ * What to call a meal by when it starts: "Breakfast" before 11, "Lunch"
+ * before 16, "Dinner" from then — the dot is the same colour for all three.
+ */
+export function mealName(start: string): string {
+  const m = /^(\d{1,2}):\d{2}/.exec(start);
+  if (!m) return 'Meal';
+  const h = Number(m[1]);
+  return h < 11 ? 'Breakfast' : h < 16 ? 'Lunch' : 'Dinner';
+}
 
 /**
  * The located activities and meals in a city's schedule, once each — the day
@@ -331,7 +353,7 @@ export type ActivitySpot = { name: string; lat: number; lng: number; kind: 'acti
  * hand-added blocks without coordinates are left out.
  */
 export function activitySpots(schedule: Record<string, ScheduledEvent[]> | undefined): ActivitySpot[] {
-  const seen = new Set<string>();
+  const seen = new Map<string, ActivitySpot>();
   const out: ActivitySpot[] = [];
   for (const day of Object.keys(schedule ?? {}).sort()) {
     for (const e of schedule![day] ?? []) {
@@ -339,9 +361,22 @@ export function activitySpots(schedule: Record<string, ScheduledEvent[]> | undef
       if (typeof e.lat !== 'number' || typeof e.lng !== 'number') continue;
       // By name: a hand-added block and a planner-placed one can both be "British Museum".
       const key = e.title.trim().toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ name: e.title, lat: e.lat, lng: e.lng, kind: e.category });
+      const visit = { day, start: e.startTime, end: e.endTime };
+      const known = seen.get(key);
+      if (known) {
+        known.visits.push(visit);
+        continue;
+      }
+      const spot: ActivitySpot = {
+        name: e.title,
+        lat: e.lat,
+        lng: e.lng,
+        kind: e.category,
+        visits: [visit],
+        ...(e.notes ? { notes: e.notes } : {}),
+      };
+      seen.set(key, spot);
+      out.push(spot);
     }
   }
   return out;
