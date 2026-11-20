@@ -443,39 +443,6 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
         <div className="flex items-center gap-2.5 flex-shrink-0 pt-1">
           {/* Prices, then Share — together on the right, under the account
               corner, so the left keeps the trip's name and facts. */}
-            {showToggle && (
-              <div
-                className="flex items-center p-0.5 rounded-full border bg-white/80"
-                style={{ borderColor: 'rgba(79,142,247,0.25)' }}
-                role="tablist"
-                aria-label="Price view"
-              >
-                <button
-                  role="tab"
-                  aria-selected={priceMode === 'total'}
-                  onClick={() => setPriceMode('total')}
-                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
-                  style={{
-                    background: priceMode === 'total' ? '#4f8ef7' : 'transparent',
-                    color: priceMode === 'total' ? '#ffffff' : '#4f8ef7',
-                  }}
-                >
-                  Total
-                </button>
-                <button
-                  role="tab"
-                  aria-selected={priceMode === 'perPerson'}
-                  onClick={() => setPriceMode('perPerson')}
-                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
-                  style={{
-                    background: priceMode === 'perPerson' ? '#4f8ef7' : 'transparent',
-                    color: priceMode === 'perPerson' ? '#ffffff' : '#4f8ef7',
-                  }}
-                >
-                  Per person
-                </button>
-              </div>
-            )}
             {/* Savings — clickable when date-shift options exist: opens a
                 menu of alternative start dates with their real, re-priced
                 savings (the optimizer scored each shifted date already). */}
@@ -638,6 +605,39 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                 </div>
               )}
             </div>
+            {showToggle && (
+              <div
+                className="flex items-center p-0.5 rounded-full border bg-white/80"
+                style={{ borderColor: 'rgba(79,142,247,0.25)' }}
+                role="tablist"
+                aria-label="Price view"
+              >
+                <button
+                  role="tab"
+                  aria-selected={priceMode === 'total'}
+                  onClick={() => setPriceMode('total')}
+                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                  style={{
+                    background: priceMode === 'total' ? '#4f8ef7' : 'transparent',
+                    color: priceMode === 'total' ? '#ffffff' : '#4f8ef7',
+                  }}
+                >
+                  Total
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={priceMode === 'perPerson'}
+                  onClick={() => setPriceMode('perPerson')}
+                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                  style={{
+                    background: priceMode === 'perPerson' ? '#4f8ef7' : 'transparent',
+                    color: priceMode === 'perPerson' ? '#ffffff' : '#4f8ef7',
+                  }}
+                >
+                  Per person
+                </button>
+              </div>
+            )}
 
           {/* The actions, a step apart from the prices: secondary ones
               first, the main one last — where Share sits for the owner. */}
