@@ -671,7 +671,8 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                   onClick={collab.discard}
                   disabled={collab.busy}
                   title="Throw away your changes"
-                  className="px-2.5 py-2 rounded-xl text-[12px] font-medium text-gray-500 transition-colors hover:text-gray-800 hover:bg-gray-100 disabled:opacity-40"
+                  className="flex items-center px-3.5 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-red-50 disabled:opacity-40"
+                  style={{ color: '#dc2626', borderColor: '#dc2626', background: '#ffffff' }}
                 >
                   Discard
                 </button>
