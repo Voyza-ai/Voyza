@@ -80,7 +80,12 @@ describe('PlanningChat autorun (one-click date-shift replan)', () => {
     mockedOptimize.mockReturnValue(new Promise(() => {}) as any);
 
     const { findByText, queryByText } = render(<PlanningChat />);
-    expect(await findByText(/Searching flights, trains, and hotels|Finding the best routes/)).toBeInTheDocument();
+    // The live step list (SearchProgress), with the cities it searches.
+    expect(await findByText('Searching live prices')).toBeInTheDocument();
+    expect(await findByText(/Comparing trains and flights between your cities/)).toBeInTheDocument();
+    expect(await findByText(/Rome, Florence and New York/)).toBeInTheDocument();
+    // The search asks the backend to report its progress under an id.
+    expect(mockedOptimize.mock.calls[0][0].progressId).toMatch(/^[A-Za-z0-9-]{8,64}$/);
     // Wait past the 500ms delayed greeting timer — the picker must stay away.
     await new Promise((r) => setTimeout(r, 600));
     expect(queryByText('I know where I want to go')).not.toBeInTheDocument();

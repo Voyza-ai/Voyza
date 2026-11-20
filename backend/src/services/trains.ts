@@ -2,6 +2,7 @@ import { env } from '../config/env';
 import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
 import { searchAllAboardDetailed } from './allaboard';
+import type { Co2Figure, DoorToDoor } from './legFacts';
 
 /**
  * fetch() with a hard timeout. The Deutsche Bahn REST API is community-run and
@@ -152,6 +153,35 @@ export type TrainOffer = {
    * without can't, so the optimizer should lean on the priced option.
    */
   limitedCoverage: boolean;
+  /**
+   * Where `price` came from, so the UI can say "live fare" only when it is
+   * one. Absent when there is no price.
+   */
+  priceSource?: RailPriceSource;
+  /** Door-to-door time — set by compareLeg / legOptions, which know the cities. */
+  doorToDoor?: DoorToDoor | null;
+  /** Party CO₂ estimate — set by compareLeg / legOptions. */
+  co2?: Co2Figure | null;
+};
+
+/**
+ * Provenance of a rail fare.
+ *
+ *   live       a fare a provider's fare API returned for this search.
+ *              `testApi` is set when that provider is its TEST gateway
+ *              (All Aboard's key is test-scoped today), so the UI can say
+ *              so rather than pass it off as bookable inventory.
+ *   cached     a fare from leg_price_cache — a live fare from an earlier
+ *              search (≤ 2 h old); the row does not record which provider.
+ *   estimated  not from a provider at all. Nothing produces this today
+ *              (there are no static fare tables — see the provider
+ *              registry below); the UI handles it so one can never be
+ *              shown as live by accident.
+ */
+export type RailPriceSource = {
+  kind: 'live' | 'cached' | 'estimated';
+  provider?: string;
+  testApi?: boolean;
 };
 
 /**
@@ -368,6 +398,9 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
           bookingUrl: null,
           // Honest, data-derived: a journey with no fare can't be price-compared.
           limitedCoverage: pricePerPerson == null,
+          ...(pricePerPerson != null
+            ? { priceSource: { kind: 'live' as const, provider: 'Deutsche Bahn' } }
+            : {}),
         };
       },
     );
@@ -392,7 +425,7 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
             origin,
             destination,
           });
-          return { ...t, pricePerPerson: null, limitedCoverage: true };
+          return { ...t, pricePerPerson: null, limitedCoverage: true, priceSource: undefined };
         }
 
         // Conversion rounds to cents, so a small amount in a weak currency can
@@ -406,7 +439,7 @@ async function searchDeutscheBahn(params: SearchTrainsParams): Promise<ProviderT
             origin,
             destination,
           });
-          return { ...t, pricePerPerson: null, limitedCoverage: true };
+          return { ...t, pricePerPerson: null, limitedCoverage: true, priceSource: undefined };
         }
 
         return { ...t, pricePerPerson: usd, currency: 'USD' };
@@ -472,10 +505,12 @@ const trainProviders: TrainProvider[] = [
  * a data gap (the same trap the price-0 sort in legOptions.ts avoids).
  */
 function toPartyTotal(offer: ProviderTrainOffer, travelers: number): TrainOffer {
-  const { pricePerPerson, ...rest } = offer;
+  const { pricePerPerson, priceSource, ...rest } = offer;
   const party = Math.max(1, Math.floor(travelers) || 1);
   return {
     ...rest,
+    // A source only travels with a fare: an unpriced row has nothing to label.
+    ...(pricePerPerson != null && priceSource ? { priceSource } : {}),
     price:
       pricePerPerson == null ? null : Math.round(pricePerPerson * party * 100) / 100,
   };

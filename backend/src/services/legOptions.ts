@@ -14,7 +14,8 @@
 import { searchFlights, getIataCode, FlightOffer } from './flights';
 import { sameAirportArea } from './location/sameAirportArea';
 import { formatDurationMinutes } from '../utils/duration';
-import { searchTrains, TrainOffer } from './trains';
+import { searchTrains, TrainOffer, type RailPriceSource } from './trains';
+import { flightDoorToDoor, trainCo2, trainDoorToDoor, type Co2Figure, type DoorToDoor } from './legFacts';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { longJourneyLimit, isLongMinutes } from './longJourney';
@@ -43,7 +44,23 @@ export type LegOption = {
   bookingUrl?: string | null;
   /** Delta vs the user's current transport price for this leg ($). */
   priceDelta: number;
+  /** City centre to city centre (legFacts). Absent when it can't be built. */
+  doorToDoor?: DoorToDoor | null;
+  /** Party CO₂ — Duffel's for a flight, our estimate for a train. */
+  co2?: Co2Figure | null;
+  /** Trains only: where the fare came from. */
+  priceSource?: RailPriceSource;
 };
+
+/** Only the facts that could be built — no `null` keys on the wire. */
+function withFacts(f: { doorToDoor?: DoorToDoor | null; co2?: Co2Figure | null }): Partial<LegOption> {
+  return {
+    ...(f.doorToDoor ? { doorToDoor: f.doorToDoor } : {}),
+    ...(f.co2 ? { co2: f.co2 } : {}),
+  };
+}
+
+type LegEnds = { from: { city: string; country?: string }; to: { city: string; country?: string }; travelers: number };
 
 type SearchParams = {
   from: string;
@@ -202,7 +219,7 @@ function matchesWindow(
 }
 
 /** Map a FlightOffer into the unified LegOption shape. */
-function flightToOption(offer: FlightOffer, currentPrice: number): LegOption {
+function flightToOption(offer: FlightOffer, currentPrice: number, ends?: LegEnds): LegOption {
   const departTime = formatHHMM(offer.departure);
   const arriveTime = formatHHMM(offer.arrival);
   // Duffel offer ids look like "off_..." — we don't expose them, but we
@@ -223,11 +240,23 @@ function flightToOption(offer: FlightOffer, currentPrice: number): LegOption {
     stops: offer.stops,
     bookingUrl: offer.bookingUrl,
     priceDelta: Math.round((offer.price - currentPrice) * 100) / 100,
+    ...(offer.co2 ? { co2: offer.co2 } : {}),
+    ...withFacts({
+      doorToDoor: ends
+        ? flightDoorToDoor({
+            from: ends.from,
+            to: ends.to,
+            originAirport: offer.originAirport,
+            destinationAirport: offer.destinationAirport,
+            flightMinutes: offer.durationMinutes,
+          })
+        : null,
+    }),
   };
 }
 
 /** Map a TrainOffer into the unified LegOption shape. */
-function trainToOption(offer: TrainOffer, currentPrice: number): LegOption {
+function trainToOption(offer: TrainOffer, currentPrice: number, ends?: LegEnds): LegOption {
   const departTime = formatHHMM(offer.departure);
   const arriveTime = formatHHMM(offer.arrival);
   return {
@@ -245,6 +274,11 @@ function trainToOption(offer: TrainOffer, currentPrice: number): LegOption {
       typeof offer.price === 'number'
         ? Math.round((offer.price - currentPrice) * 100) / 100
         : 0,
+    ...(offer.priceSource ? { priceSource: offer.priceSource } : {}),
+    ...withFacts({
+      doorToDoor: ends ? trainDoorToDoor(offer.durationMinutes) : null,
+      co2: ends ? trainCo2(ends.from, ends.to, ends.travelers) : null,
+    }),
   };
 }
 
@@ -353,9 +387,14 @@ export async function searchLegOptions(
 
   // Unified list — both shapes mapped to LegOption so the frontend
   // renders them identically (only the `mode` field distinguishes).
+  const ends: LegEnds = {
+    from: { city: from, country: fromCountry ?? getCityCountry(from) },
+    to: { city: to, country: toCountry ?? getCityCountry(to) },
+    travelers,
+  };
   const allOptions: LegOption[] = [
-    ...flights.map((f) => flightToOption(f, currentPrice)),
-    ...trains.map((t) => trainToOption(t, currentPrice)),
+    ...flights.map((f) => flightToOption(f, currentPrice, ends)),
+    ...trains.map((t) => trainToOption(t, currentPrice, ends)),
   ];
 
   const windowActive = !!(
