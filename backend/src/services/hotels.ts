@@ -5,6 +5,10 @@ import { logger } from '../utils/logger';
 export type HotelResult = {
   id: string;
   name: string;
+  /** Booking's district for the property — usually the borough ("Camden"). */
+  district?: string;
+  /** Street address as Booking gives it ("86 Brick Lane"). */
+  address?: string;
   price: number;
   pricePerNight: number;
   currency: string;
@@ -44,7 +48,26 @@ export type HotelResult = {
    * same as 0: 0 means Booking said nothing is excluded.
    */
   taxesPerNight?: number;
+  /**
+   * Where the property is, as Booking reports it. Lets the city guide's hotel
+   * map pin it without a name lookup. Unset when the row has no usable pair.
+   */
+  lat?: number;
+  lng?: number;
 };
+
+/**
+ * Booking's `latitude`/`longitude` as a usable pair, or nothing. Booking sends
+ * numbers, but a string or a missing half must not become a pin at 0,0.
+ */
+export function coordsFromRow(row: any): { lat: number; lng: number } | undefined {
+  const lat = typeof row?.latitude === 'string' ? parseFloat(row.latitude) : row?.latitude;
+  const lng = typeof row?.longitude === 'string' ? parseFloat(row.longitude) : row?.longitude;
+  if (typeof lat !== 'number' || typeof lng !== 'number') return undefined;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) return undefined;
+  return { lat, lng };
+}
 
 /**
  * How long `booking_locations` is allowed to hold up a hotel search.
@@ -392,6 +415,12 @@ type SearchHotelsParams = {
   /** Rooms to price. Omitted → `roomsFor(adults)`. See there for why. */
   rooms?: number;
   maxPrice?: number;
+  /**
+   * Which page of Booking's results, from 0 (the default, and what every
+   * planner search asks for). A later page is a different set of hotels: the
+   * city guide's "Find more hotels" asks for one once the first is used up.
+   */
+  page?: number;
 };
 
 /**
@@ -1260,6 +1289,7 @@ function cachedHotelSearch(
 export async function searchHotels(params: SearchHotelsParams): Promise<HotelResult[]> {
   const { city, hotelName, checkin, checkout, adults, maxPrice } = params;
   const rooms = params.rooms ?? roomsFor(adults);
+  const page = params.page ?? 0;
 
   if (!env.RAPIDAPI_KEY) {
     logger.warn('RAPIDAPI_KEY not set — returning empty hotel results');
@@ -1274,9 +1304,12 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
     adults,
     rooms,
     maxPrice ?? null,
+    // Only a later page joins the key, so page 0 shares its cache entry with
+    // searches made before paging existed.
+    ...(page > 0 ? [page] : []),
   ]);
   const vetted = await cachedHotelSearch(key, () =>
-    searchVettedHotels({ city, hotelName, checkin, checkout, adults, rooms }),
+    searchVettedHotels({ city, hotelName, checkin, checkout, adults, rooms, page }),
   );
   // Copies, so no caller can edit the rows the next caller will be served.
   let hotels = vetted.map((h) => ({ ...h }));
@@ -1336,8 +1369,9 @@ async function searchVettedHotels(params: {
   checkout: string;
   adults: number;
   rooms: number;
+  page: number;
 }): Promise<HotelResult[]> {
-  const { city, hotelName, checkin, checkout, adults, rooms } = params;
+  const { city, hotelName, checkin, checkout, adults, rooms, page } = params;
   // Checked by the caller; captured again so the narrowing reaches the fetch.
   const apiKey = env.RAPIDAPI_KEY;
   if (!apiKey) return [];
@@ -1359,6 +1393,9 @@ async function searchVettedHotels(params: {
       locale: 'en-gb',
       units: 'metric',
     });
+    // Page 0 is Booking's default, so it is left off and the planner's
+    // request stays exactly what it was.
+    if (page > 0) searchParams.set('page_number', String(page));
 
     const url = `https://booking-com.p.rapidapi.com/v1/hotels/search?${searchParams}`;
 
@@ -1420,6 +1457,9 @@ async function searchVettedHotels(params: {
           { checkin, checkout, adults, rooms },
         ),
         amenities: [] as string[],
+        ...(coordsFromRow(h) ?? {}),
+        ...(typeof h.district === 'string' && h.district.trim() ? { district: h.district.trim() } : {}),
+        ...(typeof h.address === 'string' && h.address.trim() ? { address: h.address.trim() } : {}),
         ...(occupancyShortfall(h, adults) ? { priceSuspect: true, priceSuspectReason: 'occupancy-short' as const } : {}),
       };
     };

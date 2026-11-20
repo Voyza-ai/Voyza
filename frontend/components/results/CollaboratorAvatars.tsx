@@ -14,7 +14,8 @@ type Props = {
   onClick?: () => void;
 };
 
-const MAX_SHOWN = 4;
+/** Faces shown before the "+N" circle. */
+const MAX_SHOWN = 3;
 
 function hueFor(id: string): number {
   let hash = 0;
@@ -41,6 +42,7 @@ function initialsOf(name: string): string {
  */
 export default function CollaboratorAvatars({ tripId, presence, selfId, refreshKey, onClick }: Props) {
   const [members, setMembers] = useState<TripMember[]>([]);
+  const [listOpen, setListOpen] = useState(false);
 
   // Someone new opening the trip (e.g. through a share link) is a member we
   // may not have listed yet.
@@ -67,7 +69,7 @@ export default function CollaboratorAvatars({ tripId, presence, selfId, refreshK
 
   const people = useMemo(() => {
     const joined = members.filter((m) => !m.pending && m.userId);
-    const list = joined.map((m) => ({
+    const list: Array<{ id: string; name: string; avatarUrl: string | null | undefined; role: string | null }> = joined.map((m) => ({
       id: m.userId as string,
       name: m.fullName || m.displayName || 'Member',
       avatarUrl: m.avatarUrl,
@@ -76,7 +78,8 @@ export default function CollaboratorAvatars({ tripId, presence, selfId, refreshK
     // Present but not listed yet (joined seconds ago).
     for (const p of presence) {
       if (!list.some((x) => x.id === p.id)) {
-        list.push({ id: p.id, name: p.name || 'Someone', avatarUrl: null, role: 'viewer' });
+        // Role unknown until the member list catches up.
+        list.push({ id: p.id, name: p.name || 'Someone', avatarUrl: null, role: null });
       }
     }
     // Online first, then the owner, then everyone else.
@@ -95,53 +98,88 @@ export default function CollaboratorAvatars({ tripId, presence, selfId, refreshK
   const shown = people.slice(0, MAX_SHOWN);
   const rest = people.length - shown.length;
 
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex items-center -space-x-2 rounded-full pr-0.5"
-      aria-label={`${people.length} people on this trip`}
-      data-testid="collaborator-avatars"
-    >
-      {shown.map((p) => {
-        const isSelf = p.id === selfId;
-        const isOnline = online.has(p.id);
-        const label = `${isSelf ? 'You' : p.name}${isOnline ? ' · here now' : ''}`;
-        return (
+  const face = (p: (typeof people)[number], size: 'lg' | 'sm') => {
+    const isSelf = p.id === selfId;
+    const isOnline = online.has(p.id);
+    const dim = size === 'lg' ? 'w-8 h-8 text-[11px] ring-2' : 'w-6 h-6 text-[9.5px] ring-1';
+    return (
+      <span
+        className={`relative ${dim} rounded-full ring-white flex items-center justify-center font-semibold text-white overflow-visible flex-shrink-0`}
+        style={{
+          background: p.avatarUrl ? '#e5e7eb' : isSelf ? '#2563eb' : `hsl(${hueFor(p.id)}, 55%, 48%)`,
+          opacity: size === 'lg' && !isOnline ? 0.55 : 1,
+        }}
+      >
+        {p.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={p.avatarUrl} alt="" className="w-full h-full rounded-full object-cover" />
+        ) : (
+          initialsOf(p.name)
+        )}
+        {isOnline && (
           <span
-            key={p.id}
-            title={label}
-            className="relative w-8 h-8 rounded-full ring-2 ring-white flex items-center justify-center text-[11px] font-semibold text-white overflow-visible"
-            style={{
-              background: p.avatarUrl ? '#e5e7eb' : isSelf ? '#2563eb' : `hsl(${hueFor(p.id)}, 55%, 48%)`,
-              opacity: isOnline ? 1 : 0.55,
-            }}
-          >
-            {p.avatarUrl ? (
-              <img src={p.avatarUrl} alt="" className="w-full h-full rounded-full object-cover" />
-            ) : (
-              initialsOf(p.name)
-            )}
-            {isOnline && (
-              <span
-                className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white"
-                style={{ background: '#22c55e' }}
-              />
-            )}
+            className={`absolute -bottom-0.5 -right-0.5 ${size === 'lg' ? 'w-2.5 h-2.5 ring-2' : 'w-2 h-2 ring-1'} rounded-full ring-white`}
+            style={{ background: '#22c55e' }}
+          />
+        )}
+      </span>
+    );
+  };
+
+  return (
+    <div className="relative flex items-center" onMouseLeave={() => setListOpen(false)}>
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex items-center -space-x-1 rounded-full pr-0.5"
+        aria-label={`${people.length} people on this trip`}
+        data-testid="collaborator-avatars"
+      >
+        {shown.map((p) => (
+          <span key={p.id} title={`${p.id === selfId ? 'You' : p.name}${online.has(p.id) ? ' · here now' : ''}`}>
+            {face(p, 'lg')}
           </span>
-        );
-      })}
-      {rest > 0 && (
-        <span
-          title={people
-            .slice(MAX_SHOWN)
-            .map((p) => p.name)
-            .join(', ')}
-          className="relative w-8 h-8 rounded-full ring-2 ring-white flex items-center justify-center text-[11px] font-medium text-gray-600 bg-gray-100"
+        ))}
+        {rest > 0 && (
+          <span
+            onMouseEnter={() => setListOpen(true)}
+            onFocus={() => setListOpen(true)}
+            className="relative w-8 h-8 rounded-full ring-2 ring-white flex items-center justify-center text-[11px] font-medium text-gray-600 bg-gray-100"
+            data-testid="collaborators-more"
+          >
+            +{rest}
+          </span>
+        )}
+      </button>
+
+      {/* Hovering "+N": everyone on the trip, online first. */}
+      {listOpen && rest > 0 && (
+        <div
+          role="list"
+          aria-label="People on this trip"
+          data-testid="collaborators-list"
+          className="absolute left-0 top-full mt-2 z-50 w-[240px] max-h-[320px] overflow-y-auto rounded-xl border bg-white py-1.5 shadow-lg"
+          style={{ borderColor: '#e5e7eb' }}
         >
-          +{rest}
-        </span>
+          <div className="px-3 pb-1 pt-0.5 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
+            {people.length} people on this trip
+          </div>
+          {people.map((p) => (
+            <div role="listitem" key={p.id} className="flex items-center gap-2.5 px-3 py-1.5">
+              {face(p, 'sm')}
+              <div className="min-w-0 flex-1">
+                <div className="text-[12.5px] text-gray-800 truncate">
+                  {p.name}
+                  {p.id === selfId && <span className="text-gray-400"> (you)</span>}
+                </div>
+                <div className="text-[10.5px] text-gray-500 first-letter:uppercase">
+                  {[p.role, online.has(p.id) ? 'here now' : null].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
-    </button>
+    </div>
   );
 }

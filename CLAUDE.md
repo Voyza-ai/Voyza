@@ -14,8 +14,11 @@ Supabase service-role client.
 
 ## Working agreements
 
-- **Manually test every change before asking to push**, and ask before
-  committing and pushing. Do not commit unprompted.
+- **Manually test every change before pushing.** Commit freely on feature
+  branches, no need to ask. Push a feature branch without asking too —
+  except when the unpushed work spans 3 or more of the owner's requests;
+  then ask first. Never push to or merge into `dev` or `voyza_main` without
+  asking.
 - **Test the actual functionality**, not just that it compiles or that the
   structure looks right, before saying something works. Drive the real
   interaction in the state a user would hit, and measure it.
@@ -24,6 +27,16 @@ Supabase service-role client.
 - **Do not work on mobile.** Narrow-screen layout is deferred by the owner.
 - Production is a long way off. Keep advice scoped to dev/testing; don't raise
   deploys, prod keys, or launch readiness unasked.
+
+## Testing in the browser
+
+- **Don't build test trips through the planning chat** — every run spends
+  API credits (Booking, flights, AI). Load a saved trip or a Browse preset
+  into the results page instead (sessionStorage key `bluemurr-current-trip`),
+  which gives the same flowchart. Use the planning chat only when testing
+  planning-chat changes.
+- Block writes while testing: route-intercept non-GET calls to `*.supabase.co`
+  and to `/api/(trips|canvas|users|bookings|email|notifications)`.
 
 ## Database migrations
 
@@ -42,7 +55,13 @@ Supabase service-role client.
 - No "AI slop" — no glass morphism, no glows, no generic gradient-purple AI
   look. Derive from the existing product's own DNA: dark `#0f0f1a` AI
   surfaces, pastel city cards, the dashed-route motif, blue brand.
-- Get design changes approved before committing them.
+- Get design changes approved before merging them into `dev`; show screenshots or a video while they are on the feature branch.
+- **Look at it as a user first, then build it as an engineer.** Before
+  showing or pushing any visual change, screenshot it in the real app at the
+  owner's size (1440×900) and check it the way a traveller would: overlapping
+  labels or markers, text cut off or truncated, things clipped at an edge,
+  lists squeezed to a sliver. Fix what you find, then send the screenshots
+  without being asked.
 
 ## Reporting
 
