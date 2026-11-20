@@ -128,6 +128,8 @@ export type Hotel = {
    * `effectiveRating` takes a 9.5-from-3-reviews at face value.
    */
   reviewCount?: number;
+  /** Booking's kind of property ("Hotels", "Campsites", …), when the search row carries one. */
+  accommodationType?: string;
   /** Where the hotel is, from the provider — pins it on the city guide's hotel map. */
   lat?: number;
   lng?: number;

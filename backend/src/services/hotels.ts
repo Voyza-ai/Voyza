@@ -52,6 +52,8 @@ export type HotelResult = {
    * Where the property is, as Booking reports it. Lets the city guide's hotel
    * map pin it without a name lookup. Unset when the row has no usable pair.
    */
+  /** Booking's kind of property ("Hotels", "Campsites", …), when the row carries one. */
+  accommodationType?: string;
   lat?: number;
   lng?: number;
 };
@@ -1225,16 +1227,32 @@ export function plannerHotelPick(rows: HotelResult[]): HotelResult | undefined {
   };
   const scored = rows.map((h) => ({ h, s: score(h) }));
   const demoted = (x: { h: HotelResult; s: number }) =>
-    x.h.priceSuspect === true || !Number.isFinite(x.s) || x.s <= 0 ? 1 : 0;
+    x.h.priceSuspect === true || !Number.isFinite(x.s) || x.s <= 0 ? 2 : isCampsite(x.h) ? 1 : 0;
   scored.sort((a, b) => demoted(a) - demoted(b) || (a.s === b.s ? 0 : b.s > a.s ? 1 : -1));
   return scored[0]?.h;
 }
 
 export function trustedFirst(hotels: HotelResult[]): HotelResult[] {
   const trusted: HotelResult[] = [];
+  const camps: HotelResult[] = [];
   const suspect: HotelResult[] = [];
-  for (const h of hotels) (h.priceSuspect ? suspect : trusted).push(h);
-  return [...trusted, ...suspect];
+  for (const h of hotels) (h.priceSuspect ? suspect : isCampsite(h) ? camps : trusted).push(h);
+  return [...trusted, ...camps, ...suspect];
+}
+
+/**
+ * A campsite, caravan or holiday park rather than a hotel — by Booking's
+ * accommodation type when the row carries one, else by the name.
+ *
+ * Website audit (m8): "hu Roma Camping In Town" was the planner's hotel for a
+ * 2-person Culture trip to Rome — cheap and well reviewed, so it scored best.
+ * Such rows stay in the list and stay choosable; they are never the default.
+ * Same rule as the frontend's `isCampsite` (lib/hotelScore.ts).
+ */
+const CAMPSITE_NAME = /\b(camping|campsite|campground|camp\s+site|glamping|caravan|holiday\s+park|mobile\s+homes?)\b/i;
+const CAMPSITE_TYPE = /camp|caravan|holiday\s*park|glamping/i;
+export function isCampsite(h: { name?: string; accommodationType?: string }): boolean {
+  return CAMPSITE_TYPE.test(h.accommodationType ?? '') || CAMPSITE_NAME.test(h.name ?? '');
 }
 
 /**
@@ -1458,6 +1476,9 @@ async function searchVettedHotels(params: {
         ),
         amenities: [] as string[],
         ...(coordsFromRow(h) ?? {}),
+        ...(typeof h.accommodation_type_name === 'string' && h.accommodation_type_name.trim()
+          ? { accommodationType: h.accommodation_type_name.trim() }
+          : {}),
         ...(typeof h.district === 'string' && h.district.trim() ? { district: h.district.trim() } : {}),
         ...(typeof h.address === 'string' && h.address.trim() ? { address: h.address.trim() } : {}),
         ...(occupancyShortfall(h, adults) ? { priceSuspect: true, priceSuspectReason: 'occupancy-short' as const } : {}),

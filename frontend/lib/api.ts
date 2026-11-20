@@ -111,6 +111,8 @@ export type HotelResult = {
   priceSuspect?: boolean;
   priceSuspectReason?: string;
   /** Where Booking says the property is. Absent on a row without a usable pair. */
+  /** Booking's kind of property ("Hotels", "Campsites", …), when the row carries one. */
+  accommodationType?: string;
   lat?: number;
   lng?: number;
   /** Booking's district, usually the borough ("Camden"). */

@@ -55,6 +55,7 @@ export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Ho
       ? { taxesPerNight: taxes }
       : {}),
     ...(located ? { lat: r.lat, lng: r.lng } : {}),
+    ...(r.accommodationType ? { accommodationType: r.accommodationType } : {}),
     ...(r.thumbnail ? { photos: [largePhoto(r.thumbnail)] } : {}),
     ...(r.id && /^\d+$/.test(r.id) ? { providerId: r.id } : {}),
     ...(r.address ? { address: r.address } : {}),

@@ -77,6 +77,21 @@ function isDemoted(h: { priceSuspect?: boolean; score: number }): boolean {
 }
 
 /**
+ * A campsite, caravan or holiday park rather than a hotel — by Booking's
+ * accommodation type when the row carries one, else by the name.
+ *
+ * Website audit (m8): "hu Roma Camping In Town" was picked as the hotel for a
+ * 2-person Culture trip to Rome. It scored well — cheap and well reviewed —
+ * but a pitch at a campground is not what "where you'll stay" promises. Such a
+ * row is kept and stays choosable; it just never becomes the default.
+ */
+const CAMPSITE_NAME = /\b(camping|campsite|campground|camp\s+site|glamping|caravan|holiday\s+park|mobile\s+homes?)\b/i;
+const CAMPSITE_TYPE = /camp|caravan|holiday\s*park|glamping/i;
+export function isCampsite(h: { name?: string; accommodationType?: string }): boolean {
+  return CAMPSITE_TYPE.test(h.accommodationType ?? '') || CAMPSITE_NAME.test(h.name ?? '');
+}
+
+/**
  * Reviews needed before a hotel's own rating is taken at close to face value.
  *
  * Against a real Florence search, counts ran 8 to 20,721 with a median of 640 —
@@ -127,6 +142,8 @@ export function rankHotels<
     pricePerNight: number;
     reviewCount?: number;
     priceSuspect?: boolean;
+    name?: string;
+    accommodationType?: string;
   },
 >(hotels: T[]): (T & { score: number })[] {
   // The prior comes from the set itself rather than a constant, so it travels
@@ -145,8 +162,10 @@ export function rankHotels<
       // deleting safe: a suspect row stays browsable and bookable, but it can
       // never be `hotels[0]`, so it can never be the auto-selected hotel or
       // reach the trip total.
-      const aDemoted = isDemoted(a) ? 1 : 0;
-      const bDemoted = isDemoted(b) ? 1 : 0;
+      // A campsite comes after every trusted hotel and before the
+      // distrusted rows: shown, choosable, never the default.
+      const aDemoted = isDemoted(a) ? 2 : isCampsite(a) ? 1 : 0;
+      const bDemoted = isDemoted(b) ? 2 : isCampsite(b) ? 1 : 0;
       if (aDemoted !== bDemoted) return aDemoted - bDemoted;
 
       // Explicit comparison, not `b.score - a.score`. Subtraction returns NaN
