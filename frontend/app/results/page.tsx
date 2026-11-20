@@ -1209,9 +1209,11 @@ function ResultsPageInner() {
           cards start at the left edge and the chat ends at the right edge. */}
       {/* When the trip is editable the left edge holds the "Suggested Cities"
           pull-out tab, so the content starts just clear of it. */}
-      <div className={`flex-1 min-h-0 flex flex-col md:flex-row gap-3 pb-2 pt-[3rem] w-full ${editable ? 'pl-9' : 'pl-2'} ${chatAllowed && !chatOpen ? 'pr-9' : 'pr-2'}`}>
-        {/* Main column — header pinned, cards fill the rest */}
-        <div className="flex-1 min-w-0 flex flex-col min-h-0">
+      <div className={`flex-1 min-h-0 flex flex-col pb-2 pt-[3rem] w-full ${editable ? 'pl-9' : 'pl-2'} ${chatAllowed && !chatOpen ? 'pr-9' : 'pr-2'}`}>
+        {/* Header and notices across the full width, so the cards and the
+            BlueMurr AI panel below start on the same line and are the same
+            height. */}
+        <div className="flex-shrink-0">
           <ResultsHeader
             trip={currentTrip}
             pricedTrip={frozenTrip ?? undefined}
@@ -1253,7 +1255,11 @@ function ResultsPageInner() {
               onChoose={chooseOrigin}
             />
           )}
+        </div>
 
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 mt-3">
+        {/* Main column — the cards fill it */}
+        <div className="flex-1 min-w-0 flex flex-col min-h-0">
           {/* Full-height cards area */}
           <div
             ref={cardsAreaRef}
@@ -1379,11 +1385,12 @@ function ResultsPageInner() {
             take the width; a tab on the right edge brings it back. */}
         {chatAllowed && (
           <aside
-            className={`max-h-[45vh] md:max-h-none md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 md:mt-3 ${chatOpen ? 'flex' : 'hidden'}`}
+            className={`max-h-[45vh] md:max-h-none md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 ${chatOpen ? 'flex' : 'hidden'}`}
           >
             <AIChatPanel trip={currentTrip} onHide={() => setChatOpen(false)} />
           </aside>
         )}
+        </div>
       </div>
 
       {/* BlueMurr AI pull-out tab — the right-edge twin of "Suggested Cities". */}

@@ -355,8 +355,8 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
 
   return (
     <div className="px-4 pt-3 pb-0">
-      {/* Left: meta, title, then the trip's price boxes under the title.
-          Right: who's on the trip + Share. The left column shrinks
+      {/* Left: meta and title. Right: the price view switch, the trip's
+          price boxes, who's on the trip, and Share. The left column shrinks
           (flex-1 + min-w-0) so a long route title truncates instead of
           pushing the right cluster onto a second row. */}
       <div className="flex items-start justify-between gap-4">
@@ -406,8 +406,47 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
             </p>
           )}
 
-          {/* Total trip + savings boxes, under the title */}
-          <div className="flex items-center gap-2 mt-2">
+        </div>
+
+        {/* Right: collaborators + Share (and, for collaborators, their own
+            actions). Share replaces "Edit in Canvas": the results page is
+            the canvas now. */}
+        <div className="flex items-center gap-2.5 flex-shrink-0 pt-1">
+          {/* Prices, then Share — together on the right, under the account
+              corner, so the left keeps the trip's name and facts. */}
+            {showToggle && (
+              <div
+                className="flex items-center p-0.5 rounded-full border bg-white/80"
+                style={{ borderColor: 'rgba(79,142,247,0.25)' }}
+                role="tablist"
+                aria-label="Price view"
+              >
+                <button
+                  role="tab"
+                  aria-selected={priceMode === 'total'}
+                  onClick={() => setPriceMode('total')}
+                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                  style={{
+                    background: priceMode === 'total' ? '#4f8ef7' : 'transparent',
+                    color: priceMode === 'total' ? '#ffffff' : '#4f8ef7',
+                  }}
+                >
+                  Total
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={priceMode === 'perPerson'}
+                  onClick={() => setPriceMode('perPerson')}
+                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                  style={{
+                    background: priceMode === 'perPerson' ? '#4f8ef7' : 'transparent',
+                    color: priceMode === 'perPerson' ? '#ffffff' : '#4f8ef7',
+                  }}
+                >
+                  Per person
+                </button>
+              </div>
+            )}
             {/* Total cost */}
             <div
               className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
@@ -428,7 +467,6 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                 </div>
               )}
             </div>
-
             {/* Savings — clickable when date-shift options exist: opens a
                 menu of alternative start dates with their real, re-priced
                 savings (the optimizer scored each shifted date already). */}
@@ -474,7 +512,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                 <div
                   role="dialog"
                   aria-label="Ways to save"
-                  className="absolute left-0 top-full mt-2 w-[300px] max-h-[70vh] overflow-y-auto bg-white border rounded-xl shadow-lg z-50"
+                  className="absolute right-0 top-full mt-2 w-[300px] max-h-[70vh] overflow-y-auto bg-white border rounded-xl shadow-lg z-50"
                   style={{ borderColor: 'rgba(52,211,153,0.35)' }}
                 >
                   <div className="px-3 pt-2.5 pb-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
@@ -571,48 +609,6 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               )}
             </div>
             )}
-
-            {showToggle && (
-              <div
-                className="flex items-center p-0.5 rounded-full border bg-white/80"
-                style={{ borderColor: 'rgba(79,142,247,0.25)' }}
-                role="tablist"
-                aria-label="Price view"
-              >
-                <button
-                  role="tab"
-                  aria-selected={priceMode === 'total'}
-                  onClick={() => setPriceMode('total')}
-                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
-                  style={{
-                    background: priceMode === 'total' ? '#4f8ef7' : 'transparent',
-                    color: priceMode === 'total' ? '#ffffff' : '#4f8ef7',
-                  }}
-                >
-                  Total
-                </button>
-                <button
-                  role="tab"
-                  aria-selected={priceMode === 'perPerson'}
-                  onClick={() => setPriceMode('perPerson')}
-                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
-                  style={{
-                    background: priceMode === 'perPerson' ? '#4f8ef7' : 'transparent',
-                    color: priceMode === 'perPerson' ? '#ffffff' : '#4f8ef7',
-                  }}
-                >
-                  Per person
-                </button>
-              </div>
-            )}
-
-          </div>
-        </div>
-
-        {/* Right: collaborators + Share (and, for collaborators, their own
-            actions). Share replaces "Edit in Canvas": the results page is
-            the canvas now. */}
-        <div className="flex items-center gap-2.5 flex-shrink-0 pt-1">
           {collab?.active && trip.id && (
             <CollaboratorAvatars
               tripId={trip.id}
