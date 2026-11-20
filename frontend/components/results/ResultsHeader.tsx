@@ -445,7 +445,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               corner, so the left keeps the trip's name and facts. */}
             {showToggle && (
               <div
-                className="flex items-center p-0.5 rounded-full border bg-white/80"
+                className="flex items-center h-10 p-1 rounded-xl border bg-white/80"
                 style={{ borderColor: 'rgba(79,142,247,0.25)' }}
                 role="tablist"
                 aria-label="Price view"
@@ -454,7 +454,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                   role="tab"
                   aria-selected={priceMode === 'total'}
                   onClick={() => setPriceMode('total')}
-                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                  className="h-full px-3 text-[11px] font-medium rounded-lg transition-colors"
                   style={{
                     background: priceMode === 'total' ? '#4f8ef7' : 'transparent',
                     color: priceMode === 'total' ? '#ffffff' : '#4f8ef7',
@@ -466,7 +466,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                   role="tab"
                   aria-selected={priceMode === 'perPerson'}
                   onClick={() => setPriceMode('perPerson')}
-                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                  className="h-full px-3 text-[11px] font-medium rounded-lg transition-colors"
                   style={{
                     background: priceMode === 'perPerson' ? '#4f8ef7' : 'transparent',
                     color: priceMode === 'perPerson' ? '#ffffff' : '#4f8ef7',
@@ -478,23 +478,30 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
             )}
             {/* Total cost */}
             <div
-              className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
+              className="flex flex-col justify-center h-10 px-3 rounded-xl border min-w-[110px]"
               style={{
                 background: 'linear-gradient(180deg, rgba(79,142,247,0.12) 0%, rgba(79,142,247,0.04) 100%)',
                 borderColor: 'rgba(79,142,247,0.30)',
               }}
             >
-              <div className="text-[#4f8ef7]/70 text-[9px] uppercase tracking-wider">
-                {priceMode === 'total' ? 'Total trip' : 'Per person'}
+              {/* Two lines, to match the buttons' height: the label with its
+                  context beside it, then the amount. */}
+              <div className="flex items-center gap-1 whitespace-nowrap text-[9px] leading-none">
+                <span className="text-[#4f8ef7]/70 uppercase tracking-wider">
+                  {priceMode === 'total' ? 'Total trip' : 'Per person'}
+                </span>
+                {showToggle && (
+                  <>
+                    <span className="text-[#4f8ef7]/55">·</span>
+                    <span className="text-[#4f8ef7]/55">
+                      ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
+                    </span>
+                  </>
+                )}
               </div>
-              <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
+              <div className="text-[#4f8ef7] text-[16px] font-semibold leading-tight tabular-nums mt-0.5">
                 ${animatedTotal.toLocaleString()}
               </div>
-              {showToggle && (
-                <div className="text-[#4f8ef7]/55 text-[9px]">
-                  ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
-                </div>
-              )}
             </div>
             {/* Savings — clickable when date-shift options exist: opens a
                 menu of alternative start dates with their real, re-priced
@@ -507,33 +514,29 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                 aria-expanded={shiftMenuOpen}
                 aria-haspopup="dialog"
                 title="See ways to save on this trip"
-                className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px] text-left transition-all cursor-pointer hover:brightness-95"
+                className="flex flex-col justify-center h-10 px-3 rounded-xl border min-w-[110px] text-left transition-all cursor-pointer hover:brightness-95"
                 style={{
                   background: 'linear-gradient(180deg, rgba(52,211,153,0.08) 0%, rgba(52,211,153,0.02) 100%)',
                   borderColor: 'rgba(52,211,153,0.25)',
                 }}
               >
-                <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
+                <div className="flex items-center gap-1 whitespace-nowrap text-[9px] leading-none text-[#22c088]/70">
                   {nothingToSave ? <CheckCircle2 size={9} /> : <TrendingDown size={9} />}
-                  <span>{nothingToSave ? 'Price check' : 'You can save'}</span>
-                  {(
-                    <ChevronDown
-                      size={9}
-                      className={`transition-transform ${shiftMenuOpen ? 'rotate-180' : ''}`}
-                    />
-                  )}
+                  <span className="uppercase tracking-wider">{nothingToSave ? 'Price check' : 'You can save'}</span>
+                  <span className="text-[#22c088]/55">·</span>
+                  <span className="text-[#22c088]/55">
+                    {nothingToSave
+                      ? 'for these dates'
+                      : shiftIsBest
+                        ? `by starting ${shiftDateNice}`
+                        : // The optimizer's baseline (savingsVsNaive) is the
+                          // order the traveller typed — as the AI chat says it.
+                          'vs your original city order'}
+                  </span>
+                  <ChevronDown size={9} className={`transition-transform ${shiftMenuOpen ? 'rotate-180' : ''}`} />
                 </div>
-                <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
+                <div className="text-[#22c088] text-[16px] font-semibold leading-tight tabular-nums mt-0.5">
                   {nothingToSave ? 'Best price' : `$${animatedSavings.toLocaleString()}`}
-                </div>
-                <div className="text-[#22c088]/50 text-[9px]">
-                  {nothingToSave
-                    ? 'for these dates'
-                    : shiftIsBest
-                      ? `by starting ${shiftDateNice}`
-                      : // The optimizer's baseline (savingsVsNaive) is the
-                        // order the traveller typed — as the AI chat says it.
-                        'vs your original city order'}
                 </div>
               </button>
 
@@ -641,10 +644,10 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
 
           {/* The actions, a step apart from the prices: secondary ones
               first, the main one last — where Share sits for the owner. */}
-          <div className="flex items-center gap-2 ml-3 pl-4 border-l border-gray-200 self-stretch">
+          <div className="flex items-center gap-2 ml-2 pl-4 border-l border-gray-200 h-7">
             {role === 'viewer' && (
               <span
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] text-gray-500 bg-white/80 border border-gray-200"
+                className="flex items-center gap-1.5 h-10 px-3.5 rounded-xl text-[12px] text-gray-500 bg-white/80 border border-gray-200"
                 title="The owner shared this trip with you to view"
               >
                 <Eye size={11} />
@@ -657,7 +660,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                 onClick={collab?.saveCopy}
                 disabled={collab?.busy}
                 title="Save the trip as it is now to your own trips — the shared trip is untouched"
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-blue-50 disabled:opacity-40"
+                className="flex items-center gap-1.5 h-10 px-3.5 rounded-xl border text-[12px] font-medium transition-all hover:bg-blue-50 disabled:opacity-40"
                 style={{ color: '#2563eb', borderColor: '#2563eb', background: '#ffffff' }}
               >
                 <Copy size={13} />
@@ -671,7 +674,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                   onClick={collab.discard}
                   disabled={collab.busy}
                   title="Throw away your changes"
-                  className="px-2.5 py-2 rounded-xl text-[12px] font-medium text-gray-500 transition-colors hover:text-gray-800 hover:bg-gray-100 disabled:opacity-40"
+                  className="h-10 px-2.5 rounded-xl text-[12px] font-medium text-gray-500 transition-colors hover:text-gray-800 hover:bg-gray-100 disabled:opacity-40"
                 >
                   Discard
                 </button>
@@ -679,7 +682,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                   onClick={collab.propose}
                   disabled={collab.busy}
                   title="Your changes go to the owner for approval"
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
+                  className="flex items-center gap-1.5 h-10 px-4 rounded-xl text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
                   style={{ background: '#2563eb' }}
                 >
                   <Send size={13} />
@@ -693,7 +696,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                 onClick={handleShare}
                 disabled={saving}
                 data-testid="share-button"
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
+                className="flex items-center gap-1.5 h-10 px-4 rounded-xl border text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
                 style={{ background: '#2563eb', borderColor: '#2563eb' }}
               >
                 <Share2 size={13} />
