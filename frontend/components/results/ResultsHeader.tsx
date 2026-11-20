@@ -476,26 +476,6 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                 </button>
               </div>
             )}
-            {/* Total cost */}
-            <div
-              className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
-              style={{
-                background: 'linear-gradient(180deg, rgba(79,142,247,0.12) 0%, rgba(79,142,247,0.04) 100%)',
-                borderColor: 'rgba(79,142,247,0.30)',
-              }}
-            >
-              <div className="text-[#4f8ef7]/70 text-[9px] uppercase tracking-wider">
-                {priceMode === 'total' ? 'Total trip' : 'Per person'}
-              </div>
-              <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
-                ${animatedTotal.toLocaleString()}
-              </div>
-              {showToggle && (
-                <div className="text-[#4f8ef7]/55 text-[9px]">
-                  ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
-                </div>
-              )}
-            </div>
             {/* Savings — clickable when date-shift options exist: opens a
                 menu of alternative start dates with their real, re-priced
                 savings (the optimizer scored each shifted date already). */}
@@ -638,6 +618,26 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               )}
             </div>
             )}
+            {/* Total cost */}
+            <div
+              className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
+              style={{
+                background: 'linear-gradient(180deg, rgba(79,142,247,0.12) 0%, rgba(79,142,247,0.04) 100%)',
+                borderColor: 'rgba(79,142,247,0.30)',
+              }}
+            >
+              <div className="text-[#4f8ef7]/70 text-[9px] uppercase tracking-wider">
+                {priceMode === 'total' ? 'Total trip' : 'Per person'}
+              </div>
+              <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
+                ${animatedTotal.toLocaleString()}
+              </div>
+              {showToggle && (
+                <div className="text-[#4f8ef7]/55 text-[9px]">
+                  ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
+                </div>
+              )}
+            </div>
 
           {/* The actions, a step apart from the prices: secondary ones
               first, the main one last — where Share sits for the owner. */}
