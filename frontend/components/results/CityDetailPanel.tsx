@@ -622,7 +622,6 @@ export default function CityDetailPanel({
           <HotelMapPanel
             city={city}
             travelers={trip.travelers}
-            nights={nights}
             entries={mapEntries}
             selectedIndex={city.customHotel ? null : city.selectedHotelIndex}
             onSelect={(i) => setSelectedHotel(cityIndex, i)}

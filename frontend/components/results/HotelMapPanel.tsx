@@ -2,12 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
-import { motion } from 'framer-motion';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { X, Star, ExternalLink, Check, Map as MapIcon, Loader2 } from 'lucide-react';
+import { Map as MapIcon, Loader2 } from 'lucide-react';
 import type { City } from '@/lib/types';
-import { useTripStore } from '@/store/tripStore';
-import { displayAmount } from '@/lib/tripTotals';
 import { locateHotels, activitySpots, mealName, type ActivitySpot, type HotelEntry, type HotelPin } from '@/lib/hotelMap';
 import { fetchLandmarks, type Landmark } from '@/lib/landmarks';
 import type { GeoPoint } from '@/lib/geocode';
@@ -26,7 +23,6 @@ import { loadMapStyle, readStoredStyle, SPOT_STYLE, SPOT_LABEL_MAX, BLUE } from 
 type Props = {
   city: City;
   travelers: number;
-  nights: number;
   entries: HotelEntry[];
   selectedIndex: number | null;
   onSelect: (index: number) => void;
@@ -43,10 +39,6 @@ const FRAMES = {
   light: { bg: 'rgb(242,243,240)', border: '#dcddd8', text: '#2b2f36', muted: '#5f6670' },
 } as const;
 
-/** Left padding that keeps pins out from under the hotel card (320px wide, 16px in). */
-const CARD_CLEARANCE = 370;
-/** Bottom padding that does the same when the panel is too narrow to keep them beside it. */
-const CARD_CLEARANCE_BELOW = 230;
 /**
  * Room at the sides and top of the frame. A plate that would still run off
  * an edge slides back in, or goes below its pin (see declutterLandmarks), so
@@ -421,7 +413,6 @@ const CITY_LABEL_OFFSETS: Array<[number, number]> = [
 export default function HotelMapPanel({
   city,
   travelers,
-  nights,
   entries,
   selectedIndex,
   onSelect,
@@ -459,14 +450,9 @@ export default function HotelMapPanel({
       .then(([found, style]) => {
         if (cancelled || !containerRef.current) return;
         setLocated({ centre: found.centre, pins: found.pins, unplaced: found.unplaced });
-        // Open on a hotel's card — the pick's when it is on the map — so the
-        // card is there the moment the map is.
-        // The pick's card even when its pin is missing, so the map opens on
-        // the hotel the guide shows.
+        // The pick's pin is the highlighted one; none when it has no pin.
         const pick = selectedRef.current;
-        setActiveIndex(
-          pick !== null && entries.some((e) => e.index === pick) ? pick : found.pins[0]?.index ?? null,
-        );
+        setActiveIndex(pick !== null && entries.some((e) => e.index === pick) ? pick : null);
         if (!found.centre) {
           setFailed(true);
           return;
@@ -485,8 +471,6 @@ export default function HotelMapPanel({
         ];
         // Framed on the hotels, clear of the card (bottom left, open from the
         // start) and with room above each pin for its name plate.
-        // Too narrow to keep the pins beside the card: keep them above it.
-        const narrow = containerRef.current.clientWidth < 760;
         framePtsRef.current = pts;
         const camera: Partial<maplibregl.MapOptions> =
           pts.length >= 1
@@ -497,9 +481,7 @@ export default function HotelMapPanel({
                 ),
                 fitBoundsOptions: {
                   // Bottom: clear of the map credits line.
-                  padding: narrow
-                    ? { top: LABEL_CLEARANCE_TOP, bottom: CARD_CLEARANCE_BELOW, left: LABEL_CLEARANCE_SIDE, right: LABEL_CLEARANCE_SIDE }
-                    : { top: LABEL_CLEARANCE_TOP, bottom: 75, left: CARD_CLEARANCE, right: LABEL_CLEARANCE_SIDE },
+                  padding: { top: LABEL_CLEARANCE_TOP, bottom: 60, left: LABEL_CLEARANCE_SIDE, right: LABEL_CLEARANCE_SIDE },
                   // One hotel alone: out far enough to see the landmarks
                   // around it (at 14 London's one pin had none in view).
                   maxZoom: pts.length >= 2 ? 15 : 13,
@@ -520,7 +502,6 @@ export default function HotelMapPanel({
           containerRef.current?.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
         map.once('idle', fold);
         map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-        map.on('click', () => setActiveIndex(null));
         let readied = false;
         const ready = () => {
           if (readied) return;
@@ -620,7 +601,7 @@ export default function HotelMapPanel({
       markersRef.current,
       landmarkMarkersRef.current,
       containerRef.current,
-      containerRef.current?.parentElement?.querySelector('[data-testid=hotel-map-card]') ?? null,
+      null,
       cityLabelRef.current,
       spotMarkersRef.current,
     );
@@ -632,7 +613,7 @@ export default function HotelMapPanel({
         markersRef.current,
         landmarkMarkersRef.current,
         containerRef.current,
-        containerRef.current?.parentElement?.querySelector('[data-testid=hotel-map-card]') ?? null,
+        null,
         cityLabelRef.current,
         spotMarkersRef.current,
       );
@@ -651,32 +632,26 @@ export default function HotelMapPanel({
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = located.pins.map((pin) =>
       new maplibregl.Marker({
-        element: makeHotelPinEl(pin, pin.index === selectedIndex, pin.index === activeIndex, () =>
-          setActiveIndex(pin.index),
-        ),
+        // A pin chooses its hotel, as a row in the guide's list does; the
+        // guide on the left then shows it.
+        element: makeHotelPinEl(pin, pin.index === selectedIndex, pin.index === activeIndex, () => onSelect(pin.index)),
         anchor: 'center',
       })
         .setLngLat([pin.point.lon, pin.point.lat])
         .addTo(map),
     );
-    // Every pin and its name in view and clear of the open card. If one is
-    // cut off at an edge or covered, frame the map again with room for the
-    // card, rather than nudge it and push another pin under.
+    // Every pin in view. If one is off an edge, frame the map again rather
+    // than nudge it and push another pin out.
     const raf = requestAnimationFrame(() => {
       runDeclutter();
       const frame = containerRef.current;
       if (!frame || framePtsRef.current.length === 0) return;
       const view = boxOf([frame]);
-      const card = frame.parentElement?.querySelector('[data-testid=hotel-map-card]');
-      const c = card ? boxOf([card]) : null;
       const margin = 8;
       const bad = markersRef.current.some((m) => {
         const el = m.getElement();
         const disc = boxOf([el.lastElementChild ?? el]);
-        const cut = disc.left < view.left + margin || disc.right > view.right - margin || disc.top < view.top + margin || disc.bottom > view.bottom - margin;
-        const label = el.firstElementChild as HTMLElement | null;
-        const openPlate = el.dataset.rank === '0' && label ? boxOf([label]) : null;
-        return cut || (!!c && (overlaps(disc, c, margin) || (!!openPlate && overlaps(openPlate, c, 4))));
+        return disc.left < view.left + margin || disc.right > view.right - margin || disc.top < view.top + margin || disc.bottom > view.bottom - margin;
       });
       if (!bad) return;
       const pts = framePtsRef.current;
@@ -687,7 +662,7 @@ export default function HotelMapPanel({
       map.fitBounds(bounds, {
         padding: {
           top: LABEL_CLEARANCE_TOP,
-          bottom: c ? view.bottom - c.top + 24 : 75,
+          bottom: 60,
           left: LABEL_CLEARANCE_SIDE,
           right: LABEL_CLEARANCE_SIDE,
         },
@@ -698,20 +673,12 @@ export default function HotelMapPanel({
     return () => cancelAnimationFrame(raf);
   }, [mapReady, located, selectedIndex, activeIndex]);
 
-  const active: CardHotel | null = useMemo(
-    () =>
-      located?.pins.find((p) => p.index === activeIndex) ??
-      located?.unplaced.find((e) => e.index === activeIndex) ??
-      null,
-    [located, activeIndex],
-  );
-
   const placedCount = located?.pins.length ?? 0;
   const subline = !located
     ? 'Finding where they are…'
     : placedCount === entries.length
-      ? `${entries.length} ${entries.length === 1 ? 'hotel' : 'hotels'} · click a pin for details`
-      : `${placedCount} of ${entries.length} hotels on the map · click a pin for details`;
+      ? `${entries.length} ${entries.length === 1 ? 'hotel' : 'hotels'} · click a pin to choose it`
+      : `${placedCount} of ${entries.length} hotels on the map · click a pin to choose it`;
 
   return (
     <div
@@ -763,19 +730,6 @@ export default function HotelMapPanel({
             </div>
           )}
 
-          {active && (
-            <HotelCard
-              key={active.index}
-              // The trip's copy of the hotel, so a neighbourhood looked up
-              // after the map was built shows on the card.
-              pin={city.hotels[active.index]?.name === active.hotel.name ? { ...active, hotel: city.hotels[active.index] } : active}
-              picked={active.index === selectedIndex}
-              nights={nights}
-              travelers={travelers}
-              onChoose={() => onSelect(active.index)}
-              onClose={() => setActiveIndex(null)}
-            />
-          )}
         </div>
 
         {located && located.unplaced.length > 0 && (
@@ -788,122 +742,5 @@ export default function HotelMapPanel({
           </div>
         )}
     </div>
-  );
-}
-
-/** The hotel a card is about: a pin, or a listed hotel we could not place. */
-type CardHotel = HotelEntry & { point?: GeoPoint };
-
-/** A hotel's card over the map — its price for this stay, and the way to pick or book it. */
-function HotelCard({
-  pin,
-  picked,
-  nights,
-  travelers,
-  onChoose,
-  onClose,
-}: {
-  pin: CardHotel;
-  picked: boolean;
-  nights: number;
-  travelers: number;
-  onChoose: () => void;
-  onClose: () => void;
-}) {
-  const priceMode = useTripStore((s) => s.priceMode);
-  const h = pin.hotel;
-  // Same figures as the guide's hotel row: room plus listed taxes, for the stay.
-  const totalGroup = (h.pricePerNight + (h.taxesPerNight ?? 0)) * nights;
-  const total = displayAmount(totalGroup, priceMode, travelers);
-  const perNight = displayAmount(h.pricePerNight, priceMode, travelers);
-  const reviews = typeof h.reviewCount === 'number' && h.reviewCount > 0 ? h.reviewCount : null;
-
-  return (
-    // Keyed by hotel, so switching hotels settles the new card in gently.
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: [0.22, 0.61, 0.36, 1] }}
-      className="absolute left-4 bottom-4 w-[320px] max-w-[calc(100%-32px)] rounded-2xl border bg-white p-4 z-10"
-      style={{ borderColor: '#d3ddec', boxShadow: '0 6px 24px rgba(23,43,77,0.18)' }}
-      data-testid="hotel-map-card"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] font-semibold" style={{ color: HOTEL.color }}>
-          <span
-            className="w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] tracking-normal"
-            style={{ background: picked ? HOTEL.color : '#fff', color: picked ? '#fff' : HOTEL.color, border: `1.5px solid ${HOTEL.color}` }}
-          >
-            {pin.index + 1}
-          </span>
-          {picked ? 'Your pick' : 'Hotel'}
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="-mt-1 -mr-1 w-6 h-6 rounded-full flex items-center justify-center text-[#5a6b8a] hover:bg-[#eef3fb]"
-          aria-label="Close hotel card"
-        >
-          <X size={13} />
-        </button>
-      </div>
-      <div className="mt-1.5 text-[15px] font-semibold leading-snug text-[#26324b]">{h.name}</div>
-      <div className="mt-1 flex items-center gap-1.5 text-[12px] text-[#5a6b8a]">
-        <span className="flex items-center gap-0.5 text-[#d97706] font-medium">
-          <Star size={11} fill="currentColor" />
-          {h.rating}
-        </span>
-        {reviews && (
-          <>
-            <span className="text-[#9fb8dc]">·</span>
-            <span>{reviews.toLocaleString()} reviews</span>
-          </>
-        )}
-        {h.neighbourhood && (
-          <>
-            <span className="text-[#9fb8dc]">·</span>
-            <span className="truncate">{h.neighbourhood}</span>
-          </>
-        )}
-      </div>
-      {!pin.point && (
-        <div className="mt-1.5 text-[11.5px] text-[#8a90a0]">Not on the map — we couldn&apos;t find its address.</div>
-      )}
-      <div className="mt-3 flex items-baseline gap-2 tabular-nums">
-        <span className="text-[18px] font-semibold text-[#26324b]">${total.toLocaleString()}</span>
-        <span className="text-[12px] text-[#5a6b8a]">
-          for {nights} {nights === 1 ? 'night' : 'nights'} · ${perNight.toLocaleString()}/night
-        </span>
-      </div>
-      <div className="mt-3 flex items-center gap-2">
-        {picked ? (
-          <div className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-[12.5px] font-medium bg-[#eef3fb] text-[#26324b]">
-            <Check size={13} strokeWidth={3} />
-            Your hotel for this stay
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={onChoose}
-            className="flex-1 h-9 rounded-full text-[12.5px] font-medium text-white transition-colors"
-            style={{ background: HOTEL.color }}
-          >
-            Choose this hotel
-          </button>
-        )}
-        {h.bookingUrl && (
-          <a
-            href={h.bookingUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="h-9 px-3.5 rounded-full border text-[12.5px] font-medium flex items-center gap-1 text-[#26324b] hover:bg-[#f4f7fc]"
-            style={{ borderColor: '#d3ddec' }}
-          >
-            Booking.com
-            <ExternalLink size={12} />
-          </a>
-        )}
-      </div>
-    </motion.div>
   );
 }
