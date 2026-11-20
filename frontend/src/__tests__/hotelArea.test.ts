@@ -87,12 +87,14 @@ describe('hotelFromResult carries Booking’s district and address', () => {
   const r: any = { id: '1', name: 'hub', rating: 8, pricePerNight: 90, price: 270, currency: 'USD', reviewCount: 1, stars: 3, thumbnail: '', bookingUrl: '', amenities: [] };
   it('when Booking has them', () => {
     const h = hotelFromResult({ ...r, district: 'Tower Hamlets', address: '86 Brick Lane' });
-    expect(h.area).toBe('Tower Hamlets');
+    expect(h.district).toBe('Tower Hamlets');
     expect(h.address).toBe('86 Brick Lane');
+    // Not in `area`, which the flowchart card and the Map tab show.
+    expect(h.area).toBe('');
   });
   it('and leaves them off when it does not', () => {
     const h = hotelFromResult(r);
-    expect(h.area).toBe('');
+    expect(h.district).toBeUndefined();
     expect(h.address).toBeUndefined();
   });
 });

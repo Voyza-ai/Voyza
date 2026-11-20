@@ -130,29 +130,22 @@ describe('effectiveTransportIn / effectiveTransportOut', () => {
   });
 });
 
-describe('CityDetailPanel travel summary', () => {
+// The guide shows only the arrive and depart DATES (stacked under its
+// arrows); the times and airports are on the flowchart. Which transport
+// each date comes from is pinned by the effectiveTransportIn/Out tests above.
+describe('CityDetailPanel arrive/depart dates', () => {
   beforeEach(() => useTripStore.setState({ currentTrip: homeTrip(), priceMode: 'total' }));
+  const short = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
 
-  it("shows the first city's arrival time and airport from the outbound flight", () => {
-    render(<CityDetailPanel trip={homeTrip()} cityIndex={0} {...nav} />);
-    expect(screen.getByText('21:20')).toBeInTheDocument();
-    expect(screen.getByText('CDG')).toBeInTheDocument();
-    // DEPART stays the Paris → Brussels train.
-    expect(screen.getByText('10:13')).toBeInTheDocument();
-  });
-
-  it("shows the last city's departure time and airport from the return flight", () => {
-    render(<CityDetailPanel trip={homeTrip()} cityIndex={2} {...nav} />);
-    expect(screen.getByText('13:45')).toBeInTheDocument();
-    expect(screen.getByText('AMS')).toBeInTheDocument();
-    expect(screen.getByText('14:41')).toBeInTheDocument();
-  });
-
-  it('a middle city is unchanged', () => {
-    render(<CityDetailPanel trip={homeTrip()} cityIndex={1} {...nav} />);
-    expect(screen.getByText('11:35')).toBeInTheDocument();
-    expect(screen.getAllByText('Brussels station')).toHaveLength(2);
-    expect(screen.getByText('12:52')).toBeInTheDocument();
+  it.each([0, 1, 2])('city %i: Arr is its first day, Dep its last', (i) => {
+    const t = homeTrip();
+    render(<CityDetailPanel trip={t} cityIndex={i} {...nav} />);
+    const dates = screen.getByTestId('travel-dates').textContent ?? '';
+    expect(dates).toContain(`Arr${short(t.cities[i].dates.arrival)}`);
+    expect(dates).toContain(`Dep${short(t.cities[i].dates.departure)}`);
   });
 });
 

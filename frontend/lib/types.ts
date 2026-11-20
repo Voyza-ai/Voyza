@@ -90,6 +90,8 @@ export type Hotel = {
   providerId?: string;
   /** Street address from Booking ("86 Brick Lane"). */
   address?: string;
+  /** Booking's district, usually the borough ("Camden"). Not shown; see `neighbourhood`. */
+  district?: string;
   /**
    * The neighbourhood a traveller would know it by ("Spitalfields"), from the
    * hotel's coordinates — see lib/hotelArea.ts. Absent until looked up, and

@@ -68,11 +68,11 @@ describe('CityCard', () => {
     expect(screen.getByText('BLUEMURR BOOK')).toBeInTheDocument();
   });
 
-  it('renders vibe tags from city vibes', () => {
+  it('shows no vibe tags — they belong to planning, not the results cards', () => {
     const city = buildCity({ vibes: ['history', 'food'] });
     render(<CityCard city={city} index={0} {...defaultProps} />);
-    expect(screen.getByText(/History/i)).toBeInTheDocument();
-    expect(screen.getByText(/Food/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^History$/i)).toBeNull();
+    expect(screen.queryByText(/^Food$/i)).toBeNull();
   });
 
   it('handles city with no vibes gracefully', () => {

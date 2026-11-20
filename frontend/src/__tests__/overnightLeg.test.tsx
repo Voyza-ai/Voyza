@@ -175,16 +175,14 @@ describe('what the traveller reads', () => {
     const tr = trip();
     useTripStore.setState({ currentTrip: tr, priceMode: 'total' });
     render(<CityDetailPanel trip={tr} cityIndex={2} {...nav} />);
-    expect(screen.getByText('00:29')).toBeInTheDocument();
-    expect(screen.getByText('Jan 28')).toBeInTheDocument();
+    expect(screen.getByTestId('travel-dates').textContent).toContain('ArrJan 28');
   });
 
   it('a same-day arrival keeps its travel day', () => {
     const tr = trip();
     useTripStore.setState({ currentTrip: tr, priceMode: 'total' });
     render(<CityDetailPanel trip={tr} cityIndex={1} {...nav} />);
-    expect(screen.getByText('09:23')).toBeInTheDocument();
-    expect(screen.getByText('Jan 25')).toBeInTheDocument();
+    expect(screen.getByTestId('travel-dates').textContent).toContain('ArrJan 25');
   });
 
   it('the Calendar marks the overnight leg +1 and leaves the same-day one alone', () => {

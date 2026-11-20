@@ -43,8 +43,7 @@ export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Ho
     name: r.name,
     rating: r.rating,
     pricePerNight: r.pricePerNight,
-    // Booking's district — the borough. The card prefers `neighbourhood`.
-    area: r.district ?? '',
+    area: '',
     bookingUrl: r.bookingUrl,
     reviewCount: r.reviewCount,
     priceSuspect: r.priceSuspect,
@@ -55,6 +54,10 @@ export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Ho
     ...(r.thumbnail ? { photos: [largePhoto(r.thumbnail)] } : {}),
     ...(r.id && /^\d+$/.test(r.id) ? { providerId: r.id } : {}),
     ...(r.address ? { address: r.address } : {}),
+    // Booking's district (the borough): kept only as the last fallback for
+    // `neighbourhood`, never shown — in `area` it surfaced on the flowchart
+    // card as "Hammersmith and Fulha…".
+    ...(r.district ? { district: r.district } : {}),
   };
 }
 

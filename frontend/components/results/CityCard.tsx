@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 import { City } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
-import { getVibeColor, VIBE_LABEL } from '@/lib/cityTheme';
 import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
 import { useTripStore } from '@/store/tripStore';
 
@@ -165,27 +164,6 @@ export default function CityCard({
           )}
         </div>
 
-        {/* Vibe chips */}
-        {city.vibes && city.vibes.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-3">
-            {city.vibes.map((v) => {
-              const c = getVibeColor(v);
-              return (
-                <span
-                  key={v}
-                  className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border"
-                  style={{
-                    background: `rgba(255,255,255,0.7)`,
-                    borderColor: `${c}60`,
-                    color: c,
-                  }}
-                >
-                  {VIBE_LABEL[v]}
-                </span>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       {/* Hotel pill — darker shade of card bg. my-auto centers it in

@@ -30,7 +30,6 @@ import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
 import { nightsBetween } from '@/lib/hotelScore';
 import { getCityColor, CITY_COLORS } from '@/lib/cityColors';
 import { hasStay } from './CityCard';
-import { VIBE_LABEL } from '@/lib/cityTheme';
 import { effectiveTransportIn, effectiveTransportOut, legArrivalDate } from '@/lib/cityLegs';
 import { searchHotels } from '@/lib/api';
 import { hotelFromResult } from '@/lib/hotelShape';
@@ -73,15 +72,6 @@ type CityDetailPanelProps = {
 export function roomsFor(adults: number): number {
   return Number.isFinite(adults) && adults > 2 ? Math.ceil(adults / 2) : 1;
 }
-
-const formatDate = (iso: string) => {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
-};
 
 const formatDateShort = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
@@ -170,7 +160,7 @@ export default function CityDetailPanel({
       for (const { hotel: h } of listed) {
         if (!live) return;
         if (typeof h.lat !== 'number' || typeof h.lng !== 'number' || h.neighbourhood !== undefined) continue;
-        const area = await areaForPoint(h.lat, h.lng, city.name, h.area || null);
+        const area = await areaForPoint(h.lat, h.lng, city.name, h.district ?? null);
         // '' marks "looked up, nothing trustworthy", so it is not asked again.
         if (live) patchHotel(h.name, { neighbourhood: area ?? '' });
       }
@@ -374,46 +364,28 @@ export default function CityDetailPanel({
         className="px-7 pt-12 pb-4 flex-shrink-0 relative"
         style={{ borderBottom: `1px solid ${color.border}` }}
       >
-        <div className="min-w-0">
+        {/* Room on the right for the arrows and the stacked dates under them. */}
+        <div className="min-w-0 pr-[120px]">
           <div
             className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] mb-2"
             style={{ color: `${color.text}aa` }}
           >
             <span>City {String(cityIndex + 1).padStart(2, '0')} of {String(trip.cities.length).padStart(2, '0')}</span>
           </div>
-          <h2 className="text-3xl font-semibold leading-tight" style={{ color: color.text }}>
+          <h2 className="text-3xl font-semibold leading-tight truncate" style={{ color: color.text }}>
             {city.name}
-            <span className="text-xl font-normal ml-3" style={{ color: `${color.text}88` }}>{city.country}</span>
           </h2>
-          <div className="flex items-center gap-3 mt-2 text-sm" style={{ color: `${color.text}99` }}>
-            <span>{formatDate(city.dates.arrival)}</span>
-            <span style={{ color: `${color.text}50` }}>→</span>
-            <span>{formatDate(city.dates.departure)}</span>
-            <span style={{ color: `${color.text}50` }}>·</span>
-            <span>{nights} {nights === 1 ? 'night' : 'nights'}</span>
+          {/* Country and nights under the name; the dates are on the right. */}
+          <div className="mt-1 text-sm truncate" style={{ color: `${color.text}99` }}>
+            {city.country}
+            {city.country ? ' · ' : ''}
+            {nights} {nights === 1 ? 'night' : 'nights'}
           </div>
 
-          {/* Vibe chips — solid dark bg, light text */}
-          {city.vibes && city.vibes.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-3">
-              {city.vibes.map((v) => (
-                <span
-                  key={v}
-                  className="text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full font-semibold"
-                  style={{
-                    background: color.text,
-                    color: color.bg,
-                  }}
-                >
-                  {VIBE_LABEL[v]}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
 
-        {/* Nav controls, top right; travel in/out below the title */}
-        <div className="flex flex-col gap-3 mt-4">
+        {/* Nav controls, top right, with the arrive and depart dates under them */}
+        <div>
           <div className="absolute top-[42px] right-5 flex items-center gap-1.5">
             <button
               type="button"
@@ -458,9 +430,9 @@ export default function CityDetailPanel({
             </button>
           </div>
 
-          {/* Arrive / leave — one quiet line: it matters for check-in and
-              check-out, but the flights themselves live on the flowchart. */}
-          <TravelLine
+          {/* Arrive and depart dates, stacked in the free corner under the
+              arrows. The flights themselves are on the flowchart. */}
+          <TravelDates
             arrive={effectiveTransportIn(trip, cityIndex)}
             depart={effectiveTransportOut(trip, cityIndex)}
             // The first city's way in is the home flight, which lands on
@@ -664,7 +636,7 @@ export default function CityDetailPanel({
 
 /* --------------------------- Travel summary -------------------------- */
 
-function TravelLine({
+function TravelDates({
   arrive,
   depart,
   arriveDate,
@@ -677,25 +649,21 @@ function TravelLine({
   departDate: string;
   color: { bg: string; text: string; border: string; name: string };
 }) {
-  const muted = { color: `${color.text}99` };
-  const part = (label: string, Icon: LucideIcon, time: string | undefined, date: string, place: string | undefined) => (
-    <span className="flex items-center gap-1.5 whitespace-nowrap">
-      <Icon size={13} style={muted} />
-      <span style={muted}>{label}</span>
-      <span className="font-semibold tabular-nums" style={{ color: color.text }}>{formatDateShort(date)}</span>
-      {time && (
-        <>
-          <span style={muted}>·</span>
-          <span className="font-semibold tabular-nums" style={{ color: color.text }}>{time}</span>
-        </>
-      )}
-      {place && <span style={muted}>{place}</span>}
-    </span>
+  const row = (label: string, Icon: LucideIcon, date: string) => (
+    <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+      <Icon size={12} style={{ color: `${color.text}88` }} />
+      <span className="text-[11px] uppercase tracking-[0.12em]" style={{ color: `${color.text}88` }}>
+        {label}
+      </span>
+      <span className="text-[13px] font-semibold tabular-nums" style={{ color: color.text }}>
+        {formatDateShort(date)}
+      </span>
+    </div>
   );
   return (
-    <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[12.5px]" data-testid="travel-line">
-      {part('Arrive', arrive.mode === 'flight' ? PlaneLanding : TrainFront, arrive.arriveTime, arriveDate, arrive.toStation || arrive.to)}
-      {part('Leave', depart.mode === 'flight' ? PlaneTakeoff : TrainFront, depart.departTime, departDate, depart.fromStation || depart.from)}
+    <div className="absolute top-[84px] right-5 flex flex-col gap-1" data-testid="travel-dates">
+      {row('Arr', arrive.mode === 'flight' ? PlaneLanding : TrainFront, arriveDate)}
+      {row('Dep', depart.mode === 'flight' ? PlaneTakeoff : TrainFront, departDate)}
     </div>
   );
 }
