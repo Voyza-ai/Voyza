@@ -99,6 +99,32 @@ describe('locateHotels', () => {
   const city = { name: 'Paris', country: 'France', dates: { arrival: '2027-01-12', departure: '2027-01-15' } };
   const centre = { lat: 48.8566, lon: 2.3522 };
   const entry = (h: Hotel, index: number): HotelEntry => ({ hotel: h, index });
+  beforeEach(() => localStorage.clear());
+
+  it('the stay is searched once per browser: opening it again reuses what was found', async () => {
+    const search = jest.fn().mockResolvedValue([{ name: 'HOTEL 1', lat: 48.86, lng: 2.34 }]);
+    const lookup = jest.fn().mockResolvedValue(null);
+    const deps = { search, lookup, cityCentre: async () => centre };
+    const first = await locateHotels(city, 2, [entry(hotel(1), 0)], deps);
+    const again = await locateHotels(city, 2, [entry(hotel(1), 0)], deps);
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(again.pins.map((p) => p.point)).toEqual(first.pins.map((p) => p.point));
+    expect(again.pins.map((p) => p.point)).toEqual([{ lat: 48.86, lon: 2.34 }]);
+    // Another stay (other dates, or another party size) is its own search.
+    await locateHotels({ ...city, dates: { arrival: '2027-02-01', departure: '2027-02-03' } }, 2, [entry(hotel(1), 0)], deps);
+    await locateHotels(city, 4, [entry(hotel(1), 0)], deps);
+    expect(search).toHaveBeenCalledTimes(3);
+  });
+
+  it('a search that failed is not kept: the next opening tries again', async () => {
+    const search = jest.fn().mockRejectedValueOnce(new Error('503')).mockResolvedValue([{ name: 'HOTEL 1', lat: 48.86, lng: 2.34 }]);
+    const deps = { search, lookup: jest.fn().mockResolvedValue(null), cityCentre: async () => centre };
+    const first = await locateHotels(city, 2, [entry(hotel(1), 0)], deps);
+    expect(first.pins).toHaveLength(0);
+    const again = await locateHotels(city, 2, [entry(hotel(1), 0)], deps);
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(again.pins.map((p) => p.point)).toEqual([{ lat: 48.86, lon: 2.34 }]);
+  });
 
   it('pins hotels that carry coordinates without asking anyone', async () => {
     const search = jest.fn();
