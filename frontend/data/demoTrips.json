@@ -209,7 +209,14 @@
             "area": "",
             "bookingUrl": "https://www.booking.com/hotel/cz/fortunarhea.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
             "reviewCount": 23061,
-            "taxesPerNight": 0
+            "taxesPerNight": 0,
+            "lat": 50.0798471180563,
+            "lng": 14.4997268915176,
+            "photos": [
+              "https://cf.bstatic.com/xdata/images/hotel/max1024x768/137903830.jpg?k=ea4ed60906fc57c5fc03ed0c7ef08a293ca184b31354bfae878a7b2306584bc2&o="
+            ],
+            "providerId": "77134",
+            "address": "V Úžlabině 19"
           },
           "hotels": [
             {
@@ -219,7 +226,14 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/fortunarhea.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 23061,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.0798471180563,
+              "lng": 14.4997268915176,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/137903830.jpg?k=ea4ed60906fc57c5fc03ed0c7ef08a293ca184b31354bfae878a7b2306584bc2&o="
+              ],
+              "providerId": "77134",
+              "address": "V Úžlabině 19"
             },
             {
               "name": "TOP HOTEL Praha",
@@ -228,7 +242,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/praha.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 5831,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.041431193439,
+              "lng": 14.496012032032,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/115664289.jpg?k=40da4507d675c66adb473b3a47e2eb0409bb63677355ea0380da56d6b88e0270&o="
+              ],
+              "providerId": "77000",
+              "address": "Blazimska 1781/4",
+              "district": "Prague 11"
             },
             {
               "name": "STAGES HOTEL Prague, a Tribute Portfolio Hotel",
@@ -237,7 +259,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/stages-prague-a-portfolio.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 18040,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.104384958882,
+              "lng": 14.4953591788171,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/430825435.jpg?k=3e8a521794862527b7c7ab2316a108088ddb3c23e39d861aa63322e7d0534c7d&o="
+              ],
+              "providerId": "7696424",
+              "address": "Ceskomoravska 19a",
+              "district": "Prague 9"
             },
             {
               "name": "Expo Hotel",
@@ -246,7 +276,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/expo.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 4193,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.1074762031202,
+              "lng": 14.4343799352146,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/915876495.jpg?k=a1272357257efede9d750e017d6268be9a3f50da3c637191457e1ec8d09e9110&o="
+              ],
+              "providerId": "77024",
+              "address": "Za Elektrárnou 3",
+              "district": "Prague 7"
             },
             {
               "name": "Congress & Wellness Hotel Olsanka",
@@ -255,7 +293,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/olsanka.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 8387,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.0827077097216,
+              "lng": 14.4575464725494,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/22301233.jpg?k=6606569c9f76a358800bc8972f3dde2cdc2d66a5e66ab1ee6dd178997a763e3b&o="
+              ],
+              "providerId": "77633",
+              "address": "Táboritská 23",
+              "district": "Prague 3"
             },
             {
               "name": "Hotel Krystal",
@@ -264,7 +310,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/krystal-praha-6.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 4337,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.0938747754445,
+              "lng": 14.3413129448891,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/253290420.jpg?k=4508af577c36b7d9df3b31b98330caec915daea755570a1b26bcd7bb786c8f8f&o="
+              ],
+              "providerId": "379485",
+              "address": "José Martího 2/407",
+              "district": "Prague 6"
             },
             {
               "name": "Ibis Praha Mala Strana",
@@ -273,7 +327,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/ibis-praha-mala-strana.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 3995,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.0722782915248,
+              "lng": 14.4004784524441,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/749877251.jpg?k=8350a68668125029764181a5ac9c81b09d2891939c31b2e3738e309e6f1f2809&o="
+              ],
+              "providerId": "273460",
+              "address": "Plzenska 14",
+              "district": "Prague 5"
             },
             {
               "name": "Hotel Legie",
@@ -291,7 +353,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/magic-centre-prague-accommodation.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 6322,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.0781335874096,
+              "lng": 14.4267627596855,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/33134026.jpg?k=15757a5cd326776a9ae448a880191176aa77b4d2a654d48fd184ccd7aec38e97&o="
+              ],
+              "providerId": "693398",
+              "address": "Ve Smečkách 12",
+              "district": "Prague 1"
             },
             {
               "name": "Louren - The Bridge Inn",
@@ -300,7 +370,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/mostecka-apartments.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 1158,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.0875360769229,
+              "lng": 14.4048980623484,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/565611028.jpg?k=9218ab65efe9dc5867fb9562b1edf677c1c9903c0c036090b6b4a8b3fda2ebb9&o="
+              ],
+              "providerId": "842391",
+              "address": "Mostecká 21",
+              "district": "Prague 1"
             },
             {
               "name": "Hotel Melantrich Old Town",
@@ -318,7 +396,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/motel-one-prague.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 4276,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.0897575330436,
+              "lng": 14.434366571164,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/819453704.jpg?k=d756e1c7914070f9413d666e11c920ead2f3266b9368c6abbdb2736837a2886f&o="
+              ],
+              "providerId": "1189764",
+              "address": "Na Poříčí 1048/30",
+              "district": "Prague 1"
             },
             {
               "name": "EVURI Apartments Prague",
@@ -345,7 +431,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/the-cloud-one-prague.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 6947,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.0874679534635,
+              "lng": 14.4353579323547,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/935605861.jpg?k=dc59376eeca95a79f8b571620169e371c4e3f9c5b7c11cbea2b291b19adb8c6f&o="
+              ],
+              "providerId": "11498741",
+              "address": "Hybernská 2140/17",
+              "district": "Prague 1"
             },
             {
               "name": "The Benedict Boutique Hotel Old Town Prague",
@@ -354,7 +448,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/the-benedict-boutique-hotel-old-town-prague.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 269,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.089652,
+              "lng": 14.426029,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/926639525.jpg?k=fed644f67aba18adadceb5d7a500d5b74ecf0baf81e24af1582b05f76abe11bd&o="
+              ],
+              "providerId": "8389729",
+              "address": "Rybná 685/16",
+              "district": "Prague 1"
             },
             {
               "name": "Hilton Prague Atrium",
@@ -381,7 +483,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/cz/royal-hlavni-mesto-praha.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 4772,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 50.0781068,
+              "lng": 14.4321315,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/668047259.jpg?k=23e821a97aed588a55e1ae3f63cbf489a09847772c16ff9ce0819018c5da27b5&o="
+              ],
+              "providerId": "11040352",
+              "address": "Římská 71/4",
+              "district": "Prague 1"
             }
           ],
           "selectedHotelIndex": 0,
@@ -766,7 +876,14 @@
             "area": "",
             "bookingUrl": "https://www.booking.com/hotel/de/ibis-styles-muenchen-airport.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
             "reviewCount": 2526,
-            "taxesPerNight": 0
+            "taxesPerNight": 0,
+            "lat": 48.354,
+            "lng": 11.759083,
+            "photos": [
+              "https://cf.bstatic.com/xdata/images/hotel/max1024x768/874526317.jpg?k=f4101658a9e0a27387e7f8d22fa538be9475bd4e41829d324ed49fced99ad9ea&o="
+            ],
+            "providerId": "15822332",
+            "address": "Nordallee 31"
           },
           "hotels": [
             {
@@ -776,7 +893,14 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/ibis-styles-muenchen-airport.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 2526,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.354,
+              "lng": 11.759083,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/874526317.jpg?k=f4101658a9e0a27387e7f8d22fa538be9475bd4e41829d324ed49fced99ad9ea&o="
+              ],
+              "providerId": "15822332",
+              "address": "Nordallee 31"
             },
             {
               "name": "ibis Hotel Muenchen City West",
@@ -785,7 +909,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/muenchen-city-west.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 2753,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1348003434699,
+              "lng": 11.5236926078796,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/750358867.jpg?k=2f293283ef3157977eb88a616cbbcc8f207e97cddf2ffd380206d2ab3cc545fc&o="
+              ],
+              "providerId": "181314",
+              "address": "Westendstr. 181",
+              "district": "Sendling-Westpark"
             },
             {
               "name": "Wombat's City Hostel Munich Werksviertel",
@@ -794,7 +926,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/wombats-the-city-hostel-munich-werksviertel.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 5085,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.124895,
+              "lng": 11.605819,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/895484854.jpg?k=f8c3925fd8e49f6c90a8a0045625f75bb8feffa42f28111710f1354efdaf1b5d&o="
+              ],
+              "providerId": "7049815",
+              "address": "Atelierstraße 20",
+              "district": "Berg am Laim"
             },
             {
               "name": "Motel One München-Haidhausen",
@@ -803,7 +943,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/motel-one-munchen-haidhausen.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 3661,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.125286,
+              "lng": 11.599373,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/818975814.jpg?k=41f8c7804615ce6f54e4f864624af5f8df50913bfc4d9c1dabd7b75972680513&o="
+              ],
+              "providerId": "4712869",
+              "address": "110 Rosenheimer Straße",
+              "district": "Au-Haidhausen"
             },
             {
               "name": "Motel One München-Westend",
@@ -812,7 +960,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/motel-one-munchen-city-west.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 1096,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1397630272168,
+              "lng": 11.5371130406857,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/818975822.jpg?k=fb79231ab554ba679aaadaab96ca3d2fdebb3901aa26495064efe3fd0179e018&o="
+              ],
+              "providerId": "72313",
+              "address": "Landsberger Str. 79",
+              "district": "Schwanthalerhöhe"
             },
             {
               "name": "Holiday Inn Express Munich City West by IHG",
@@ -821,7 +977,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/holiday-inn-express-munich-city-west.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 6198,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1448902314026,
+              "lng": 11.5197258353043,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/230587478.jpg?k=0ec047131bbe22b5f325b76a269c30914e5e160c138ecc74d77ba68c16d7e262&o="
+              ],
+              "providerId": "1737756",
+              "address": "Friedenheimer Brücke 15",
+              "district": "Neuhausen - Nymphenburg"
             },
             {
               "name": "Goethe Hotel Munich",
@@ -839,7 +1003,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/holiday-inn-express-munich-city-east.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 6681,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.131592,
+              "lng": 11.628213,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/242171819.jpg?k=9956d7e36e1caf72ec53211f16980ffeaa9a8fc5ab9a6a942ff763ff35214181&o="
+              ],
+              "providerId": "2785156",
+              "address": "Neumarkter Strasse 85B",
+              "district": "Berg am Laim"
             },
             {
               "name": "Pullman Munich",
@@ -848,7 +1020,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/event-ma1-4nchen.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 4428,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.17267553,
+              "lng": 11.59400135,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/914543281.jpg?k=9170ce2c2d65f72f2d423f6d72aae7b4a847fec288d14cd46cb332fb5cee8f82&o="
+              ],
+              "providerId": "349014",
+              "address": "Theodor-Dombart-Straße 4",
+              "district": "Schwabing-Freimann"
             },
             {
               "name": "a&o München Hackerbrücke",
@@ -857,7 +1037,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/a-o-hostel-munchen.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 11477,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1454187382668,
+              "lng": 11.5408574044704,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/457991251.jpg?k=08a228cc1c73bc3842c55db085559025797442b818d63ff256ec430b6941032d&o="
+              ],
+              "providerId": "64216",
+              "address": "Arnulfstr. 102",
+              "district": "Neuhausen - Nymphenburg"
             },
             {
               "name": "THE 4YOU Hostel & Hotel Munich",
@@ -866,7 +1054,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/4-you.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 7979,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1422849070043,
+              "lng": 11.5580235421658,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/408733504.jpg?k=e8fa439da0320ad1504816f48b29e76834c5729e2ae74b777e8f462984cab88a&o="
+              ],
+              "providerId": "69831",
+              "address": "Hirtenstraße 18",
+              "district": "Maxvorstadt"
             },
             {
               "name": "Motel One München-Deutsches Museum",
@@ -875,7 +1071,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/motel-one-munchen-deutsches-museum.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 7354,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1277855373031,
+              "lng": 11.5899051018524,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/818964802.jpg?k=c3e614876eb3f1d55fa3632353b57fb71016f52db5fb14e0d14cd2fe5177195b&o="
+              ],
+              "providerId": "266752",
+              "address": "Rablstrasse 2",
+              "district": "Au-Haidhausen"
             },
             {
               "name": "Novotel München City",
@@ -884,7 +1088,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/novotel-munchen.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 6218,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1293486210151,
+              "lng": 11.5886235237122,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/914465182.jpg?k=b2c8ae0e0df4d7763834fd367481e9ee04825bf9124a2196c40733af403897ba&o="
+              ],
+              "providerId": "61358",
+              "address": "Hochstraße 11",
+              "district": "Au-Haidhausen"
             },
             {
               "name": "Motel One München-Hauptbahnhof",
@@ -893,7 +1105,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/motel-one-munchen-hauptbahnhof.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 1948,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1388547,
+              "lng": 11.5613612,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/818981913.jpg?k=f30b2b39c760d45c60397394a1698ec8c1c2cc3f1efbf209ce6067bc750bc86e&o="
+              ],
+              "providerId": "13106274",
+              "address": "Schillerstraße 3-3a",
+              "district": "Ludwigsvorstadt"
             },
             {
               "name": "Motel One München-Sendlinger Tor",
@@ -902,7 +1122,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/motel-one-munchen-sendlinger-tor.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 1269,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1348560141174,
+              "lng": 11.5670196712017,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/818960900.jpg?k=b7cfd3c65bb81bb8cebe6011e576f1d60b7908a504fb236ba6a165957a9d748d&o="
+              ],
+              "providerId": "28158",
+              "address": "Herzog-Wilhelm-Str. 28",
+              "district": "Altstadt-Lehel"
             },
             {
               "name": "25hours Hotel The Royal Bavarian",
@@ -911,7 +1139,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/25hours-the-royal-bavarian.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 2787,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1397089570115,
+              "lng": 11.5613088018274,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/914612173.jpg?k=a568629f32a1b69692dda3b66dcce0fa0d16c46e0c0a01a4429c50dc0a97713c&o="
+              ],
+              "providerId": "2342432",
+              "address": "Bahnhofplatz 1",
+              "district": "Ludwigsvorstadt"
             },
             {
               "name": "Jugend- und Familienhotel Augustin",
@@ -920,7 +1156,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/augustin.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 2005,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1322658260989,
+              "lng": 11.5457578429222,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/270667881.jpg?k=225529ecf284328ca659cee2ea9f1cf1501cbdbadae26fe097a88ff0c105003f&o="
+              ],
+              "providerId": "4245725",
+              "address": "Am Bavariapark 16",
+              "district": "Schwanthalerhöhe"
             },
             {
               "name": "Hotel Isartor",
@@ -929,7 +1173,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/isartormunich.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 1058,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1334121381403,
+              "lng": 11.5814191102982,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/932159110.jpg?k=c7c852b1b5816ed9253cbd42a0c76562b26e82a21e3fb88965fdfe5a88b4ced9&o="
+              ],
+              "providerId": "61694",
+              "address": "Baaderstrasse 2-4",
+              "district": "Ludwigsvorstadt"
             },
             {
               "name": "Platzl Hotel - Superior",
@@ -938,7 +1190,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/de/platzlmunich.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 3231,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1379928048063,
+              "lng": 11.5787905454636,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/675950630.jpg?k=0a61d59af05c9876cf514c02d1f79fa92ed6a200347d052a370e3e2a57c81310&o="
+              ],
+              "providerId": "61498",
+              "address": "Sparkassenstr. 10",
+              "district": "Altstadt-Lehel"
             }
           ],
           "selectedHotelIndex": 0,
@@ -1154,7 +1414,15 @@
             "area": "",
             "bookingUrl": "https://www.booking.com/hotel/at/motel-one-wien-westbahnhof.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
             "reviewCount": 13733,
-            "taxesPerNight": 0
+            "taxesPerNight": 0,
+            "lat": 48.1973362262688,
+            "lng": 16.3379546999931,
+            "photos": [
+              "https://cf.bstatic.com/xdata/images/hotel/max1024x768/819517719.jpg?k=44b5227cf2731715ee4d1befb4f6b4c87b319362be179209c434490ba38c6ba3&o="
+            ],
+            "providerId": "333323",
+            "address": "Europaplatz 3",
+            "district": "15. Rudolfsheim-Fünfhaus"
           },
           "hotels": [
             {
@@ -1164,7 +1432,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/motel-one-wien-westbahnhof.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 13733,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1973362262688,
+              "lng": 16.3379546999931,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/819517719.jpg?k=44b5227cf2731715ee4d1befb4f6b4c87b319362be179209c434490ba38c6ba3&o="
+              ],
+              "providerId": "333323",
+              "address": "Europaplatz 3",
+              "district": "15. Rudolfsheim-Fünfhaus"
             },
             {
               "name": "Motel One Wien-Hauptbahnhof",
@@ -1173,7 +1449,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/motel-one-wien-hauptbahnhof-wien17.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 16775,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.183836,
+              "lng": 16.378794,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/818982986.jpg?k=cf376eda3e61f5ea917731b2f5f5587f0688fefd3b512274fff6bf9c06b64d0f&o="
+              ],
+              "providerId": "1368099",
+              "address": "Gerhard-Bronner-Str. 11",
+              "district": "10. Favoriten"
             },
             {
               "name": "Sophienne Apartments",
@@ -1182,7 +1466,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/sophienne-apartments.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 2057,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.23082485431,
+              "lng": 16.352312037434,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/335734268.jpg?k=bc3891072c3543bee90c9be82f675bb94ee5c6be6512309f3acef419f6facd42&o="
+              ],
+              "providerId": "7881703",
+              "address": "160 Währinger Gürtel",
+              "district": "09. Alsergrund"
             },
             {
               "name": "Habyt Vienna",
@@ -1191,7 +1483,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/habyt-vienna-green-cube.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 1543,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.22442665078,
+              "lng": 16.3928320732788,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/905754464.jpg?k=d77ae7f16496423ba9c5b511cc6a655a9c6b784386d4ecff6248d1e3ee75e31a&o="
+              ],
+              "providerId": "16514142",
+              "address": "Bruno-Marek-Allee 26",
+              "district": "02. Leopoldstadt"
             },
             {
               "name": "Hotel Schani Wien Hauptbahnhof",
@@ -1200,7 +1500,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/schani-wien.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 2985,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.182569,
+              "lng": 16.380862,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/183625118.jpg?k=1af80cb186c966d8d96b1e29e924cc6dffcf62ec775f9d5c5b0e86905512bfb8&o="
+              ],
+              "providerId": "1287597",
+              "address": "Karl-Popper-Straße 22",
+              "district": "10. Favoriten"
             },
             {
               "name": "Wombat's City Hostel Vienna Naschmarkt",
@@ -1209,7 +1517,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/wombats-hostels-vienna-naschmarkt.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 6348,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1969348473518,
+              "lng": 16.360714584589,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/895501250.jpg?k=a27f343088c614dcabd364a7b4993f400670c3ae89bf7534f9f33687295112ec&o="
+              ],
+              "providerId": "274237",
+              "address": "Rechte Wienzeile 35",
+              "district": "04. Wieden"
             },
             {
               "name": "Premier Inn Wien City Hauptbahnhof",
@@ -1227,7 +1543,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/arcotel-kaiserwasser.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 2612,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.2318126766297,
+              "lng": 16.4171040058136,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/576770904.jpg?k=68e0f1b54b2ce70f2eb8fe8ac985980705f1e1cb4b6807db6e2fa090a8b7c49c&o="
+              ],
+              "providerId": "70615",
+              "address": "Wagramer Straße 8",
+              "district": "22. Donaustadt"
             },
             {
               "name": "Deluxe Living",
@@ -1236,7 +1560,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/my-living.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 41,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.2201593,
+              "lng": 16.3830149,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/774946059.jpg?k=dfe3fdff477488b2da0bc87d6fd2df263e1bf48741c5f57cd737ac6efe2688e0&o="
+              ],
+              "providerId": "14594166",
+              "address": "Große Stadtgutgasse",
+              "district": "02. Leopoldstadt"
             },
             {
               "name": "Hotel George Vienna",
@@ -1245,7 +1577,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/george.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 5101,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1862694187157,
+              "lng": 16.3251765006638,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/928587565.jpg?k=273b56a7cd4f168428035ae73920b8ae8aec4de9a1664d8302bba3fb2d09079d&o="
+              ],
+              "providerId": "8892149",
+              "address": "Sechshauser Straße 83, 1150 Wien",
+              "district": "15. Rudolfsheim-Fünfhaus"
             },
             {
               "name": "Leonardo Hotel Vienna Schönbrunn",
@@ -1254,7 +1594,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/star-inn-wien-schapnbrunn.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 12220,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1847981314333,
+              "lng": 16.3337597250938,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/500139673.jpg?k=d4fe53dd55567b3e965f1aac358d69b251c83d7631f37f4db0ffc221d39ac253&o="
+              ],
+              "providerId": "472057",
+              "address": "Linke Wienzeile 224",
+              "district": "15. Rudolfsheim-Fünfhaus"
             },
             {
               "name": "The Cloud One Wien-Staatsoper, part of the Motel One Group",
@@ -1272,7 +1620,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/novotel-wien-hauptbahnhof.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 5824,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1859068,
+              "lng": 16.3786679,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/270288763.jpg?k=e313af2687bb9eded40574aa1041115150b7764af3b0bfd0a612e4d30bb53069&o="
+              ],
+              "providerId": "2254249",
+              "address": "Canettistrasse 6",
+              "district": "10. Favoriten"
             },
             {
               "name": "MEININGER Hotel Wien Downtown Sissi",
@@ -1308,7 +1664,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/kolpingwienzentral.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 6055,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.1985546467933,
+              "lng": 16.3575428724289,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/901275185.jpg?k=d3b981f9e6ecaa8ae2f3326a80c0037ab8b11f490d9b0e5e66844396d1555654&o="
+              ],
+              "providerId": "70398",
+              "address": "Gumpendorfer Straße 39",
+              "district": "06. Mariahilf"
             },
             {
               "name": "Radisson RED Hotel, Vienna",
@@ -1317,7 +1681,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/radisson-red-vienna.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 6495,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.2175905486622,
+              "lng": 16.3735165912628,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/362535390.jpg?k=8725c63c55bea8952463baadfe14712aa73af82f990900e2c80f006e7f6d59f8&o="
+              ],
+              "providerId": "7915891",
+              "address": "OBERE DONAUSTRASSE 61",
+              "district": "02. Leopoldstadt"
             },
             {
               "name": "Hilton Vienna Waterfront",
@@ -1326,7 +1698,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/at/hilton-vienna-waterfront.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 6695,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.213946442832,
+              "lng": 16.4214786887169,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/927329248.jpg?k=647eb879107f2025642fa5b4f1c9409734017a8d7064f4ad1fda28458501478d&o="
+              ],
+              "providerId": "70940",
+              "address": "Handelskai 269",
+              "district": "02. Leopoldstadt"
             }
           ],
           "selectedHotelIndex": 0,
@@ -1705,7 +2085,15 @@
             "area": "",
             "bookingUrl": "https://www.booking.com/hotel/nl/lowell.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
             "reviewCount": 14674,
-            "taxesPerNight": 0
+            "taxesPerNight": 0,
+            "lat": 52.3043624730413,
+            "lng": 4.95098888346706,
+            "photos": [
+              "https://cf.bstatic.com/xdata/images/hotel/max1024x768/535896632.jpg?k=aae2889e9b31413053f4f0c0d244d3a278802e4cab6be9cf457730ee7d31e68f&o="
+            ],
+            "providerId": "2374707",
+            "address": "353 Hullenbergweg",
+            "district": "Zuidoost"
           },
           "hotels": [
             {
@@ -1715,7 +2103,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/lowell.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 14674,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3043624730413,
+              "lng": 4.95098888346706,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/535896632.jpg?k=aae2889e9b31413053f4f0c0d244d3a278802e4cab6be9cf457730ee7d31e68f&o="
+              ],
+              "providerId": "2374707",
+              "address": "353 Hullenbergweg",
+              "district": "Zuidoost"
             },
             {
               "name": "XO Hotels Couture",
@@ -1724,7 +2120,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/best-western-premier-couture.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 8194,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3511038699022,
+              "lng": 4.84125409510648,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/274394085.jpg?k=e0e27484d50bf8f8f685081ef5be125374c8f1c8512068b1a6a363fdcede412e&o="
+              ],
+              "providerId": "1092100",
+              "address": "Delflandlaan 15",
+              "district": "Slotervaart"
             },
             {
               "name": "MEININGER Hotel Amsterdam City West",
@@ -1733,7 +2137,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/meininger-amsterdam-city-west.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 8589,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.390589,
+              "lng": 4.837452,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/613032106.jpg?k=153bed5af9fad459ec4dab17e5cbacb69656b61ffae772d0729ef02c8279cde7&o="
+              ],
+              "providerId": "379553",
+              "address": "Orlyplein 1-67",
+              "district": "Westpoort"
             },
             {
               "name": "Hotel Hortus",
@@ -1742,7 +2154,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/hortus.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 3399,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3667708460243,
+              "lng": 4.90905001759529,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/924119632.jpg?k=168a2e000faf683d2f868c0563cf9de96e14e94d5d7ad13c654402d1334e9b80&o="
+              ],
+              "providerId": "235613",
+              "address": "Plantageparklaan 8",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Olympic Hotel",
@@ -1751,7 +2171,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/olympic-amsterdam123.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 7525,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.341453,
+              "lng": 4.853175,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/300092717.jpg?k=fd920a1af43c54d86b651ccfdfd634b6925645686e4dd5cef9098b4d9785f8e2&o="
+              ],
+              "providerId": "4609378",
+              "address": "12 IJsbaanpad",
+              "district": "Oud Zuid"
             },
             {
               "name": "Holiday Inn Express Amsterdam - North Riverside by IHG",
@@ -1760,7 +2188,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/holiday-inn-express-amsterdam-motorkade.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 12858,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3841044464671,
+              "lng": 4.91952350926207,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/266109475.jpg?k=b93985b024ad6c28ec7618de891c91c50fb1f527b2b4a60a098dfb6925c92761&o="
+              ],
+              "providerId": "6331862",
+              "address": "Motorkade 1",
+              "district": "Amsterdam Noord"
             },
             {
               "name": "Ruby Emma Hotel Amsterdam by IHG",
@@ -1769,7 +2205,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/ruby-emma.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 7354,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3384776987981,
+              "lng": 4.92110521358283,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/863190693.jpg?k=128b9fe3d8421ae4d2c35b15f525f4378c172711dfaa629b427bf55b82586021&o="
+              ],
+              "providerId": "1926560",
+              "address": "Amstelvlietstraat 4",
+              "district": "Oost"
             },
             {
               "name": "Mövenpick Hotel Amsterdam City Centre",
@@ -1778,7 +2222,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/moevenpick-amsterdam-city-centre.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 6413,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3778244039078,
+              "lng": 4.91414219141006,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/914933910.jpg?k=28dab7e76bee5de94452dd7a2592f65f7030d5a64c6642e63161f20587b15580&o="
+              ],
+              "providerId": "11524",
+              "address": "Piet Heinkade 11",
+              "district": "Zeeburg"
             },
             {
               "name": "Hotel Zeedijk City Centre",
@@ -1787,7 +2239,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/zeedijk.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 421,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3759964,
+              "lng": 4.9002052,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/751577382.jpg?k=7128cc0ffcb0ecc3040ea5ab6f61bf71bb7f3b18eb37c64cebc72a66f29e0263&o="
+              ],
+              "providerId": "14179489",
+              "address": "Zeedijk 6",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Motel One Amsterdam-Waterlooplein",
@@ -1796,7 +2256,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/motel-one-amsterdam-waterlooplein.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 6755,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3699794423125,
+              "lng": 4.90738492868036,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/818929953.jpg?k=729bf1d8ad51194c4eafa3ccbf242f357180bd389b8e4f9c86b40d2d8c9e602b&o="
+              ],
+              "providerId": "2686120",
+              "address": "Valkenburgerstraat 72-106",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "ibis Amsterdam Centre Stopera",
@@ -1814,7 +2282,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/ibiscentre.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 8864,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3795419603305,
+              "lng": 4.89696532487869,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/933208066.jpg?k=3276779b5cd2371a8a4cd328d8a033046e2a4393e9a2cdd31b1b6da033de6d4b&o="
+              ],
+              "providerId": "10422",
+              "address": "Stationsplein 49",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Nova Hotel",
@@ -1823,7 +2299,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/nova.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 2431,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3712343600445,
+              "lng": 4.89013105630875,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/476651211.jpg?k=6f80e3ee7b54d08c72ae60228a0a2fde60782f1cb7cc6ca56b5af0964aecd6a2&o="
+              ],
+              "providerId": "10064",
+              "address": "Nieuwezijds Voorburgwal 276",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "'t Hotel",
@@ -1832,7 +2316,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/t.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 711,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3751611588238,
+              "lng": 4.88714978098869,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/20648041.jpg?k=6d651ffbae1ffcb87d73262d7ccb08f592654f8c207864abaeb1a0f6a4c82420&o="
+              ],
+              "providerId": "256547",
+              "address": "Leliegracht 18",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "XO Hotels City Centre",
@@ -1841,7 +2333,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/terminus.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 4987,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3750440804237,
+              "lng": 4.89700824022293,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/274398396.jpg?k=73f45d13d14df75f2c18dc657f6f9e1a5995b78bfc05ff7947259a2098163960&o="
+              ],
+              "providerId": "10893",
+              "address": "Beursstraat 11-19",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "B&B The Posthoorn Amsterdam",
@@ -1868,7 +2368,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/anantara-ghkrasnapolsky.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 5629,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3726958970434,
+              "lng": 4.89426165819168,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/470251896.jpg?k=12857ab654f16b15c165f5b427e450a4b230dd2aaffbde425606c7eb55e78030&o="
+              ],
+              "providerId": "10340",
+              "address": "Dam 9",
+              "district": "Amsterdam City Centre"
             }
           ],
           "selectedHotelIndex": 0,
@@ -2094,7 +2602,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/mirific.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 3221,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8898525712938,
+              "lng": 2.32120871538427,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/753148428.jpg?k=f66edc329a17da900502ecfe7770775c7840ab8a9faf90c1635227c3f5fe4bbf&o="
+              ],
+              "providerId": "59015",
+              "address": "119 Avenue De Clichy",
+              "district": "17th arr."
             },
             {
               "name": "Hilton Garden Inn Paris La Villette",
@@ -2103,7 +2619,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/hilton-garden-inn-paris-la-villette.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 870,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8963,
+              "lng": 2.383245,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/929340073.jpg?k=71019e390c0168046e8f23981c10fac6c743f75d7043ed6852a77ed1b72daf96&o="
+              ],
+              "providerId": "9225954",
+              "address": "27 Quai de le Gironde",
+              "district": "19th arr."
             },
             {
               "name": "Hotel Parc Eiffel",
@@ -2112,7 +2636,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/parc-eiffel.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 73,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8374015,
+              "lng": 2.2594643,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/888211115.jpg?k=ddedc891819eef7a5f693ba1b64645324b34ce63ca119a5fd9c8d507085ffcaf&o="
+              ],
+              "providerId": "16662379",
+              "address": "21 bis rue Gudin",
+              "district": "16th arr."
             },
             {
               "name": "Hotel Monterosa - Astotel",
@@ -2121,7 +2653,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/hotel-monterosa.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 742,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8794868643492,
+              "lng": 2.33417227864265,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/85242272.jpg?k=a40ffaaf535297747e842788e7cf914fe5807142d1ab94cd3e1d17b5af236110&o="
+              ],
+              "providerId": "228249",
+              "address": "30, rue la Bruyère",
+              "district": "9th arr."
             },
             {
               "name": "Novotel Paris 14 Porte d'Orléans",
@@ -2130,7 +2670,14 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/paris-porte-d-orleans.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 3992,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.819596550148,
+              "lng": 2.32613772153854,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/908373993.jpg?k=e9c61a23572311dbd6bf36a7d284073227b591d697337202eca0f04af986f9f7&o="
+              ],
+              "providerId": "57218",
+              "address": "15, Boulevard Romain Rolland"
             },
             {
               "name": "Ibis Paris Gare Montparnasse Catalogne",
@@ -2139,7 +2686,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/ibis-paris-gare-montparnasse-catalogne.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 5426,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8368205,
+              "lng": 2.3178964,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/753051844.jpg?k=5f0b085c0ac1c07088d631618dd20787bc939826c5bff831753abbbb8c12760a&o="
+              ],
+              "providerId": "8473698",
+              "address": "11 Rue Du Texel",
+              "district": "14th arr."
             },
             {
               "name": "Studio sur les Quais de Seine",
@@ -2148,7 +2703,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/studio-sur-les-quais-de-seine-paris1.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 107,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8489045,
+              "lng": 2.2759062,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/524044456.jpg?k=dc2899bb7b4f2a6934f863e0c67609940df375053f042f77ed3bb43f018d896a&o="
+              ],
+              "providerId": "11455039",
+              "address": "38 Quai Louis Blériot",
+              "district": "16th arr."
             },
             {
               "name": "Mercure Paris Montparnasse Raspail",
@@ -2157,7 +2720,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/raspail.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 629,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8411818918108,
+              "lng": 2.33015835285187,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/914367290.jpg?k=eef63be6238e671bc241f341d0b45c9d67f4d3c57024192f0236efa5de8841e4&o="
+              ],
+              "providerId": "57198",
+              "address": "207 Boulevard Raspail",
+              "district": "14th arr."
             },
             {
               "name": "Hotel Mercure La Sorbonne Saint-Germain-des-Prés",
@@ -2166,7 +2737,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/paris-la-sorbonne.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 371,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8494127710537,
+              "lng": 2.34322875738144,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/749361245.jpg?k=c1acdcc1c5c6c145664d7ea549374007c7d9a97b443a35f2fe403858381c4b52&o="
+              ],
+              "providerId": "57103",
+              "address": "14 Rue de la Sorbonne",
+              "district": "5th arr."
             },
             {
               "name": "Bradford Elysées - Astotel",
@@ -2175,7 +2754,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/bradfordelysees.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 1083,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8729132030409,
+              "lng": 2.30819128448275,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/346706084.jpg?k=935f9e0a1ec0c71409f45afb9854053ae39cb613d811e7e469b1e3080434a358&o="
+              ],
+              "providerId": "50908",
+              "address": "10 rue Saint-Philippe-du-Roule",
+              "district": "8th arr."
             },
             {
               "name": "Hyatt Regency Paris Etoile",
@@ -2184,7 +2771,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/hyatt-regency-paris-etoile.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 2271,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8804098381377,
+              "lng": 2.28472741799624,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/821971706.jpg?k=72e9613a747f905ffc5a4e1688cb4a9e52ba4b87fe3b7239aebcf5e79c55d027&o="
+              ],
+              "providerId": "224399",
+              "address": "3 Place du Général Koenig",
+              "district": "17th arr."
             },
             {
               "name": "Vestay Montaigne",
@@ -2193,7 +2788,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/vestay-montaigne.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 771,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8676077,
+              "lng": 2.302478296295,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/495747057.jpg?k=a048c6ce510d510efb4b38a822136fa7ddad17b25b8b16d33d373d7dedfe3ca9&o="
+              ],
+              "providerId": "10840608",
+              "address": "10 Rue Marbeuf",
+              "district": "8th arr."
             },
             {
               "name": "Mercure Tour Eiffel Grenelle",
@@ -2202,7 +2805,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/toureiffelparis.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 1033,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8505123550271,
+              "lng": 2.2926490008831,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/934464701.jpg?k=29c4c9735528fc727bba29fa88c4694517cb147226d0045313c52c3468e26b5f&o="
+              ],
+              "providerId": "51086",
+              "address": "64, Boulevard de Grenelle",
+              "district": "15th arr."
             },
             {
               "name": "Courtyard by Marriott Paris Gare de Lyon",
@@ -2211,7 +2822,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/courtyard-by-marriott-paris-gare-de-lyon.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 1000,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.845083,
+              "lng": 2.371372,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/643416510.jpg?k=9f9d7bf2f112fe8d77f95cba3297a80ee3e072adbdea240ec3971c3100261dcb&o="
+              ],
+              "providerId": "3643749",
+              "address": "209-211 Rue de Bercy",
+              "district": "12th arr."
             },
             {
               "name": "Pullman Paris Tour Eiffel",
@@ -2220,7 +2839,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/tour-eiffel.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 4934,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.855604014139,
+              "lng": 2.29256182909012,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/914523289.jpg?k=aada368f24b79c1c10c07700f0a49b3f00b1b0a1d3266e72506eb7d2cc01e297&o="
+              ],
+              "providerId": "26730",
+              "address": "18 Avenue De Suffren, Entrée au 22 rue Jean Rey",
+              "district": "15th arr."
             },
             {
               "name": "336 Saint-Honore Hotel By Chapitre Collection",
@@ -2229,7 +2856,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/336-saint-honore-by-chapitre-collection.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 23,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8658442396337,
+              "lng": 2.33032888902993,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/904261004.jpg?k=7f7b1fe30d3224fc6c36136e2e1de59cb3852c55bf5b6194436ff579fff64cf1&o="
+              ],
+              "providerId": "17034368",
+              "address": "336 Rue Saint-Honore",
+              "district": "1st arr."
             },
             {
               "name": "Hilton Paris Opera",
@@ -2238,7 +2873,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/hilton-paris-opera.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 665,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8755659100731,
+              "lng": 2.32552349567413,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/825228771.jpg?k=d04b9b5abc7958ff266906c0272c7cc90863e26b1a3afde4158aec78130f41f6&o="
+              ],
+              "providerId": "54642",
+              "address": "108 Rue Saint-Lazare",
+              "district": "8th arr."
             }
           ],
           "selectedHotelIndex": 0,
@@ -2649,7 +3292,15 @@
             "area": "",
             "bookingUrl": "https://www.booking.com/hotel/gb/lse-passfield-hall.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
             "reviewCount": 3546,
-            "taxesPerNight": 0
+            "taxesPerNight": 0,
+            "lat": 51.5252088893158,
+            "lng": -0.130781829357147,
+            "photos": [
+              "https://cf.bstatic.com/xdata/images/hotel/max1024x768/62265078.jpg?k=ff06504817c58bbc042055cc2203d9659fa79df8fbc383881fca80df335f3513&o="
+            ],
+            "providerId": "420536",
+            "address": "1-7 Endsleigh Place",
+            "district": "Camden"
           },
           "hotels": [
             {
@@ -2659,7 +3310,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/lse-passfield-hall.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 3546,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.5252088893158,
+              "lng": -0.130781829357147,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/62265078.jpg?k=ff06504817c58bbc042055cc2203d9659fa79df8fbc383881fca80df335f3513&o="
+              ],
+              "providerId": "420536",
+              "address": "1-7 Endsleigh Place",
+              "district": "Camden"
             },
             {
               "name": "Brit Hotels Earls Court",
@@ -2668,7 +3327,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/brit-hotels-earls-court.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 811,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.4930693,
+              "lng": -0.1972753,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/745703613.jpg?k=5b087a5acf827245c7ebb1059d2b469b0ef9a325e1949df653108bbd497cec29&o="
+              ],
+              "providerId": "13715884",
+              "address": "43-45 Longridge Road",
+              "district": "Kensington and Chelsea"
             },
             {
               "name": "Sunborn London Yacht Hotel",
@@ -2677,7 +3344,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/sunborn-london.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 6081,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.5073854486485,
+              "lng": 0.0253758313920116,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/36080036.jpg?k=5dcf9b8ac30b089ac28b6e29c257c1c5ec0ae2a434a0e33c1709167488001a51&o="
+              ],
+              "providerId": "1055259",
+              "address": "Royal Victoria Dock",
+              "district": "Newham"
             },
             {
               "name": "Cromwell Hotel",
@@ -2704,7 +3379,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/ibis-london-blackfriars.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 6461,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.5051831716537,
+              "lng": -0.104850232601166,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/889077857.jpg?k=a2b895c41f025e91a44fc8eac89a95290f2c38dee3e73ec9e486d2ae1169e1a2&o="
+              ],
+              "providerId": "426368",
+              "address": "49 Blackfriars Road",
+              "district": "Southwark"
             },
             {
               "name": "Royal National Hotel",
@@ -2722,7 +3405,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/citadines-islington.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 1537,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.5391031493763,
+              "lng": -0.104397731292693,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/293301783.jpg?k=219c6403a879330e57f5090efefaa80a8fc265e461bc40bd4e1319a5fcb39797&o="
+              ],
+              "providerId": "4860725",
+              "address": "3 Shelley Place",
+              "district": "Islington"
             },
             {
               "name": "The Belgrave London Victoria",
@@ -2731,7 +3422,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/the-belgrave.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 3639,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.4900981913524,
+              "lng": -0.137988924980164,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/93888413.jpg?k=c0757b91fa2f71f4358611ea626034f614859bc39848953c9f4e33f3266843e0&o="
+              ],
+              "providerId": "463652",
+              "address": "80-86 Belgrave Road",
+              "district": "Westminster Borough"
             },
             {
               "name": "The Cloud One London-Hyde Park",
@@ -2740,7 +3439,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/lancaster-gate.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 8865,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.5113274421657,
+              "lng": -0.182048231363297,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/935941451.jpg?k=ef532c6df4e684900e36141f02dd23af0c6e02ab79242f340908e0930eb57a75&o="
+              ],
+              "providerId": "258964",
+              "address": "66-71, Lancaster Gate",
+              "district": "Westminster Borough"
             },
             {
               "name": "Novotel London Bridge",
@@ -2749,7 +3456,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/novotellondonctiysouth.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 3510,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.5054436167267,
+              "lng": -0.0951647758483887,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/870370120.jpg?k=2df3401e9bbac5a6c00ea9228676beaccec1fbfe9bbab639110ccc6c460d0089&o="
+              ],
+              "providerId": "221483",
+              "address": "53 - 61 Southwark Bridge Road",
+              "district": "Southwark"
             },
             {
               "name": "Aparthotel Adagio London City East",
@@ -2758,7 +3473,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/aparthotel-adagio-london-city-east.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 714,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.517457,
+              "lng": -0.064789,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/781509439.jpg?k=81d3f2e92aa1f1c0aeb4dd8c3ef8f0c13dec9b231a78376a11c05859f5cc5dc3&o="
+              ],
+              "providerId": "13161392",
+              "address": "100 WHITECHAPEL ROAD",
+              "district": "Tower Hamlets"
             },
             {
               "name": "ibis London City - Shoreditch",
@@ -2767,7 +3490,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/ibis-london-city.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 6470,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.515629858034,
+              "lng": -0.0723016262054443,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/927943247.jpg?k=20c230a03a6674e6c0a6e70ea9067512be2c3d7bb63d2406946ce294e58e1392&o="
+              ],
+              "providerId": "46183",
+              "address": "5 Commercial Street",
+              "district": "Tower Hamlets"
             },
             {
               "name": "hub London - Paddington",
@@ -2776,7 +3507,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/hub-london-paddington.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 142,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.51585,
+              "lng": -0.177764,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/848927955.jpg?k=88add8f7ac028c9052dc8c698e013e6d47b20236f30170c1c1391931cab9fbf7&o="
+              ],
+              "providerId": "15247894",
+              "address": "40 Eastbourne Terrace",
+              "district": "Westminster Borough"
             },
             {
               "name": "Riu Plaza London The Westminster",
@@ -2785,7 +3524,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/cityinnwestminster.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 8838,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.4932511879084,
+              "lng": -0.127136707305908,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/825869563.jpg?k=c9c0e169ffc1d1c057b6effbc81185fb8ef6f3601e2247c78f408f716efd5bed&o="
+              ],
+              "providerId": "217898",
+              "address": "30 John Islip St",
+              "district": "Westminster Borough"
             },
             {
               "name": "GuestReady - The Crescent",
@@ -2812,7 +3559,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/riu-plaza-london-victoria.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 14614,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.494702,
+              "lng": -0.142,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/479153069.jpg?k=37d544360128e9a61772a10064c5c2491ebf5066b5402744c61861e1111afe2a&o="
+              ],
+              "providerId": "8634573",
+              "address": "1 Neathouse Place",
+              "district": "Westminster Borough"
             },
             {
               "name": "Radisson Blu Hotel, London Bloomsbury",
@@ -2821,7 +3576,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/gb/radissonblubloomsbury.html?checkin=2026-12-21&checkout=2026-12-23&group_adults=2&no_rooms=1",
               "reviewCount": 4217,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 51.5176127551929,
+              "lng": -0.127610117197037,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/825877231.jpg?k=a2521f49d59033d9bf4d9045776d4a124dfe2ead1b7442ce9fbd26c7c50ab618&o="
+              ],
+              "providerId": "217618",
+              "address": "9-13 Bloomsbury Street, Nr Covent Garden",
+              "district": "Camden"
             }
           ],
           "selectedHotelIndex": 0,
@@ -3171,7 +3934,15 @@
             "area": "",
             "bookingUrl": "https://www.booking.com/hotel/nl/lowell.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
             "reviewCount": 14674,
-            "taxesPerNight": 0
+            "taxesPerNight": 0,
+            "lat": 52.3043624730413,
+            "lng": 4.95098888346706,
+            "photos": [
+              "https://cf.bstatic.com/xdata/images/hotel/max1024x768/535896632.jpg?k=aae2889e9b31413053f4f0c0d244d3a278802e4cab6be9cf457730ee7d31e68f&o="
+            ],
+            "providerId": "2374707",
+            "address": "353 Hullenbergweg",
+            "district": "Zuidoost"
           },
           "hotels": [
             {
@@ -3181,7 +3952,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/lowell.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 14674,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3043624730413,
+              "lng": 4.95098888346706,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/535896632.jpg?k=aae2889e9b31413053f4f0c0d244d3a278802e4cab6be9cf457730ee7d31e68f&o="
+              ],
+              "providerId": "2374707",
+              "address": "353 Hullenbergweg",
+              "district": "Zuidoost"
             },
             {
               "name": "XO Hotels Couture",
@@ -3190,7 +3969,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/best-western-premier-couture.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 8194,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3511038699022,
+              "lng": 4.84125409510648,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/274394085.jpg?k=e0e27484d50bf8f8f685081ef5be125374c8f1c8512068b1a6a363fdcede412e&o="
+              ],
+              "providerId": "1092100",
+              "address": "Delflandlaan 15",
+              "district": "Slotervaart"
             },
             {
               "name": "MEININGER Hotel Amsterdam City West",
@@ -3199,7 +3986,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/meininger-amsterdam-city-west.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 8589,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.390589,
+              "lng": 4.837452,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/613032106.jpg?k=153bed5af9fad459ec4dab17e5cbacb69656b61ffae772d0729ef02c8279cde7&o="
+              ],
+              "providerId": "379553",
+              "address": "Orlyplein 1-67",
+              "district": "Westpoort"
             },
             {
               "name": "Hotel Hortus",
@@ -3208,7 +4003,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/hortus.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 3399,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3667708460243,
+              "lng": 4.90905001759529,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/924119632.jpg?k=168a2e000faf683d2f868c0563cf9de96e14e94d5d7ad13c654402d1334e9b80&o="
+              ],
+              "providerId": "235613",
+              "address": "Plantageparklaan 8",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Olympic Hotel",
@@ -3217,7 +4020,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/olympic-amsterdam123.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 7525,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.341453,
+              "lng": 4.853175,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/300092717.jpg?k=fd920a1af43c54d86b651ccfdfd634b6925645686e4dd5cef9098b4d9785f8e2&o="
+              ],
+              "providerId": "4609378",
+              "address": "12 IJsbaanpad",
+              "district": "Oud Zuid"
             },
             {
               "name": "Holiday Inn Express Amsterdam - North Riverside by IHG",
@@ -3226,7 +4037,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/holiday-inn-express-amsterdam-motorkade.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 12858,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3841044464671,
+              "lng": 4.91952350926207,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/266109475.jpg?k=b93985b024ad6c28ec7618de891c91c50fb1f527b2b4a60a098dfb6925c92761&o="
+              ],
+              "providerId": "6331862",
+              "address": "Motorkade 1",
+              "district": "Amsterdam Noord"
             },
             {
               "name": "Ruby Emma Hotel Amsterdam by IHG",
@@ -3235,7 +4054,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/ruby-emma.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 7354,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3384776987981,
+              "lng": 4.92110521358283,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/863190693.jpg?k=128b9fe3d8421ae4d2c35b15f525f4378c172711dfaa629b427bf55b82586021&o="
+              ],
+              "providerId": "1926560",
+              "address": "Amstelvlietstraat 4",
+              "district": "Oost"
             },
             {
               "name": "ibis Amsterdam Centre Stopera",
@@ -3253,7 +4080,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/moevenpick-amsterdam-city-centre.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 6413,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3778244039078,
+              "lng": 4.91414219141006,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/914933910.jpg?k=28dab7e76bee5de94452dd7a2592f65f7030d5a64c6642e63161f20587b15580&o="
+              ],
+              "providerId": "11524",
+              "address": "Piet Heinkade 11",
+              "district": "Zeeburg"
             },
             {
               "name": "Motel One Amsterdam-Waterlooplein",
@@ -3262,7 +4097,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/motel-one-amsterdam-waterlooplein.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 6755,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3699794423125,
+              "lng": 4.90738492868036,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/818929953.jpg?k=729bf1d8ad51194c4eafa3ccbf242f357180bd389b8e4f9c86b40d2d8c9e602b&o="
+              ],
+              "providerId": "2686120",
+              "address": "Valkenburgerstraat 72-106",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "ibis Amsterdam Centre",
@@ -3271,7 +4114,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/ibiscentre.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 8864,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3795419603305,
+              "lng": 4.89696532487869,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/933208066.jpg?k=3276779b5cd2371a8a4cd328d8a033046e2a4393e9a2cdd31b1b6da033de6d4b&o="
+              ],
+              "providerId": "10422",
+              "address": "Stationsplein 49",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Hotel Zeedijk City Centre",
@@ -3280,7 +4131,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/zeedijk.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 421,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3759964,
+              "lng": 4.9002052,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/751577382.jpg?k=7128cc0ffcb0ecc3040ea5ab6f61bf71bb7f3b18eb37c64cebc72a66f29e0263&o="
+              ],
+              "providerId": "14179489",
+              "address": "Zeedijk 6",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "'t Hotel",
@@ -3289,7 +4148,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/t.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 711,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3751611588238,
+              "lng": 4.88714978098869,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/20648041.jpg?k=6d651ffbae1ffcb87d73262d7ccb08f592654f8c207864abaeb1a0f6a4c82420&o="
+              ],
+              "providerId": "256547",
+              "address": "Leliegracht 18",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Nova Hotel",
@@ -3298,7 +4165,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/nova.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 2431,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3712343600445,
+              "lng": 4.89013105630875,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/476651211.jpg?k=6f80e3ee7b54d08c72ae60228a0a2fde60782f1cb7cc6ca56b5af0964aecd6a2&o="
+              ],
+              "providerId": "10064",
+              "address": "Nieuwezijds Voorburgwal 276",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "XO Hotels City Centre",
@@ -3307,7 +4182,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/terminus.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 4987,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3750440804237,
+              "lng": 4.89700824022293,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/274398396.jpg?k=73f45d13d14df75f2c18dc657f6f9e1a5995b78bfc05ff7947259a2098163960&o="
+              ],
+              "providerId": "10893",
+              "address": "Beursstraat 11-19",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Empire suites roof terras",
@@ -3316,7 +4199,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/canal-apartment-16th-century-roof-terrace.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 159,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.363197,
+              "lng": 4.8953126,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/242121435.jpg?k=6d5a9e96f99eee1dff65659d88a2af8f0d64935e7df84ee36e0b766a99dec5ee&o="
+              ],
+              "providerId": "6187561",
+              "address": "706 A Keizersgracht a",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Anantara Grand Hotel Krasnapolsky Amsterdam",
@@ -3325,7 +4216,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/anantara-ghkrasnapolsky.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 5629,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.3726958970434,
+              "lng": 4.89426165819168,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/470251896.jpg?k=12857ab654f16b15c165f5b427e450a4b230dd2aaffbde425606c7eb55e78030&o="
+              ],
+              "providerId": "10340",
+              "address": "Dam 9",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Hotel Bet van Beeren",
@@ -3334,7 +4233,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/nl/bet-van-beeren.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
               "reviewCount": 26,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 52.374831,
+              "lng": 4.9009614,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/901220608.jpg?k=8a63147f6ffb45f02544334dd7ab52d705d916103de3700ca9062eba536a1186&o="
+              ],
+              "providerId": "16974028",
+              "address": "Zeedijk 63 2",
+              "district": "Amsterdam City Centre"
             },
             {
               "name": "Hotel Restaurant Old Bridge",
@@ -3523,7 +4430,15 @@
             "area": "",
             "bookingUrl": "https://www.booking.com/hotel/fr/parc-eiffel.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
             "reviewCount": 73,
-            "taxesPerNight": 0
+            "taxesPerNight": 0,
+            "lat": 48.8374015,
+            "lng": 2.2594643,
+            "photos": [
+              "https://cf.bstatic.com/xdata/images/hotel/max1024x768/888211115.jpg?k=ddedc891819eef7a5f693ba1b64645324b34ce63ca119a5fd9c8d507085ffcaf&o="
+            ],
+            "providerId": "16662379",
+            "address": "21 bis rue Gudin",
+            "district": "16th arr."
           },
           "hotels": [
             {
@@ -3533,7 +4448,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/parc-eiffel.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 73,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8374015,
+              "lng": 2.2594643,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/888211115.jpg?k=ddedc891819eef7a5f693ba1b64645324b34ce63ca119a5fd9c8d507085ffcaf&o="
+              ],
+              "providerId": "16662379",
+              "address": "21 bis rue Gudin",
+              "district": "16th arr."
             },
             {
               "name": "Hilton Garden Inn Paris La Villette",
@@ -3542,7 +4465,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/hilton-garden-inn-paris-la-villette.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 870,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8963,
+              "lng": 2.383245,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/929340073.jpg?k=71019e390c0168046e8f23981c10fac6c743f75d7043ed6852a77ed1b72daf96&o="
+              ],
+              "providerId": "9225954",
+              "address": "27 Quai de le Gironde",
+              "district": "19th arr."
             },
             {
               "name": "Ibis Styles Paris Batignolles",
@@ -3551,7 +4482,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/mirific.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 3221,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8898525712938,
+              "lng": 2.32120871538427,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/753148428.jpg?k=f66edc329a17da900502ecfe7770775c7840ab8a9faf90c1635227c3f5fe4bbf&o="
+              ],
+              "providerId": "59015",
+              "address": "119 Avenue De Clichy",
+              "district": "17th arr."
             },
             {
               "name": "Ibis Paris Gare Montparnasse Catalogne",
@@ -3560,7 +4499,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/ibis-paris-gare-montparnasse-catalogne.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 5426,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8368205,
+              "lng": 2.3178964,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/753051844.jpg?k=5f0b085c0ac1c07088d631618dd20787bc939826c5bff831753abbbb8c12760a&o="
+              ],
+              "providerId": "8473698",
+              "address": "11 Rue Du Texel",
+              "district": "14th arr."
             },
             {
               "name": "Novotel Paris 14 Porte d'Orléans",
@@ -3569,7 +4516,14 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/paris-porte-d-orleans.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 3992,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.819596550148,
+              "lng": 2.32613772153854,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/908373993.jpg?k=e9c61a23572311dbd6bf36a7d284073227b591d697337202eca0f04af986f9f7&o="
+              ],
+              "providerId": "57218",
+              "address": "15, Boulevard Romain Rolland"
             },
             {
               "name": "Hotel Monterosa - Astotel",
@@ -3578,7 +4532,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/hotel-monterosa.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 742,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8794868643492,
+              "lng": 2.33417227864265,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/85242272.jpg?k=a40ffaaf535297747e842788e7cf914fe5807142d1ab94cd3e1d17b5af236110&o="
+              ],
+              "providerId": "228249",
+              "address": "30, rue la Bruyère",
+              "district": "9th arr."
             },
             {
               "name": "Hyatt Regency Paris Etoile",
@@ -3587,7 +4549,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/hyatt-regency-paris-etoile.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 2271,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8804098381377,
+              "lng": 2.28472741799624,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/821971706.jpg?k=72e9613a747f905ffc5a4e1688cb4a9e52ba4b87fe3b7239aebcf5e79c55d027&o="
+              ],
+              "providerId": "224399",
+              "address": "3 Place du Général Koenig",
+              "district": "17th arr."
             },
             {
               "name": "Mercure Tour Eiffel Grenelle",
@@ -3596,7 +4566,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/toureiffelparis.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 1033,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8505123550271,
+              "lng": 2.2926490008831,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/934464701.jpg?k=29c4c9735528fc727bba29fa88c4694517cb147226d0045313c52c3468e26b5f&o="
+              ],
+              "providerId": "51086",
+              "address": "64, Boulevard de Grenelle",
+              "district": "15th arr."
             },
             {
               "name": "Bradford Elysées - Astotel",
@@ -3605,7 +4583,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/bradfordelysees.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 1083,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8729132030409,
+              "lng": 2.30819128448275,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/346706084.jpg?k=935f9e0a1ec0c71409f45afb9854053ae39cb613d811e7e469b1e3080434a358&o="
+              ],
+              "providerId": "50908",
+              "address": "10 rue Saint-Philippe-du-Roule",
+              "district": "8th arr."
             },
             {
               "name": "Holiday Inn Paris - Gare de Lyon Bastille by IHG",
@@ -3614,7 +4600,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/holiday-inn-paris-bastille.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 1559,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8467802018446,
+              "lng": 2.37179562449455,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/246674725.jpg?k=79d749d9adf5b432a53d9c490fb8feb90f7d1ab848b93d5899c027d07dc02f52&o="
+              ],
+              "providerId": "58221",
+              "address": "11-15 Rue De Lyon",
+              "district": "12th arr."
             },
             {
               "name": "Mercure Paris Montparnasse Raspail",
@@ -3623,7 +4617,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/raspail.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 629,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8411818918108,
+              "lng": 2.33015835285187,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/914367290.jpg?k=eef63be6238e671bc241f341d0b45c9d67f4d3c57024192f0236efa5de8841e4&o="
+              ],
+              "providerId": "57198",
+              "address": "207 Boulevard Raspail",
+              "district": "14th arr."
             },
             {
               "name": "Hotel Mercure La Sorbonne Saint-Germain-des-Prés",
@@ -3632,7 +4634,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/paris-la-sorbonne.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 371,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8494127710537,
+              "lng": 2.34322875738144,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/749361245.jpg?k=c1acdcc1c5c6c145664d7ea549374007c7d9a97b443a35f2fe403858381c4b52&o="
+              ],
+              "providerId": "57103",
+              "address": "14 Rue de la Sorbonne",
+              "district": "5th arr."
             },
             {
               "name": "The People - Paris Marais",
@@ -3641,7 +4651,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/the-people-paris-marais.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 9209,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.849738,
+              "lng": 2.362843,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/516307486.jpg?k=550b58ad83de2656f40b6a01ca8e9a4a562da2440837676d97b463607a7004b0&o="
+              ],
+              "providerId": "8313580",
+              "address": "17 Boulevard Morland",
+              "district": "4th arr."
             },
             {
               "name": "Courtyard by Marriott Paris Gare de Lyon",
@@ -3650,7 +4668,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/courtyard-by-marriott-paris-gare-de-lyon.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 1000,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.845083,
+              "lng": 2.371372,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/643416510.jpg?k=9f9d7bf2f112fe8d77f95cba3297a80ee3e072adbdea240ec3971c3100261dcb&o="
+              ],
+              "providerId": "3643749",
+              "address": "209-211 Rue de Bercy",
+              "district": "12th arr."
             },
             {
               "name": "336 Saint-Honore Hotel By Chapitre Collection",
@@ -3659,7 +4685,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/336-saint-honore-by-chapitre-collection.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 23,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8658442396337,
+              "lng": 2.33032888902993,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/904261004.jpg?k=7f7b1fe30d3224fc6c36136e2e1de59cb3852c55bf5b6194436ff579fff64cf1&o="
+              ],
+              "providerId": "17034368",
+              "address": "336 Rue Saint-Honore",
+              "district": "1st arr."
             },
             {
               "name": "Pullman Paris Tour Eiffel",
@@ -3668,7 +4702,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/tour-eiffel.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 4934,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.855604014139,
+              "lng": 2.29256182909012,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/914523289.jpg?k=aada368f24b79c1c10c07700f0a49b3f00b1b0a1d3266e72506eb7d2cc01e297&o="
+              ],
+              "providerId": "26730",
+              "address": "18 Avenue De Suffren, Entrée au 22 rue Jean Rey",
+              "district": "15th arr."
             },
             {
               "name": "Hilton Paris Opera",
@@ -3677,7 +4719,15 @@
               "area": "",
               "bookingUrl": "https://www.booking.com/hotel/fr/hilton-paris-opera.html?checkin=2026-12-25&checkout=2026-12-27&group_adults=2&no_rooms=1",
               "reviewCount": 665,
-              "taxesPerNight": 0
+              "taxesPerNight": 0,
+              "lat": 48.8755659100731,
+              "lng": 2.32552349567413,
+              "photos": [
+                "https://cf.bstatic.com/xdata/images/hotel/max1024x768/825228771.jpg?k=d04b9b5abc7958ff266906c0272c7cc90863e26b1a3afde4158aec78130f41f6&o="
+              ],
+              "providerId": "54642",
+              "address": "108 Rue Saint-Lazare",
+              "district": "8th arr."
             }
           ],
           "selectedHotelIndex": 0,

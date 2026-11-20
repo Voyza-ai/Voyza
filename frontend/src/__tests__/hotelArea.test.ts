@@ -34,6 +34,8 @@ describe('cleanAreaName', () => {
     expect(cleanAreaName('Quartier des Épinettes', 'Paris')).toBe('Épinettes');
     expect(cleanAreaName('Quartier de la Sorbonne', 'Paris')).toBe('Sorbonne');
     expect(cleanAreaName('Četrtna skupnost Trnovo', 'Ljubljana')).toBe('Trnovo');
+    // Vienna, measured 2026-11-20 for Motel One Wien-Westbahnhof.
+    expect(cleanAreaName('Katastralgemeinde Fünfhaus', 'Vienna')).toBe('Fünfhaus');
   });
 
   it('refuses the city’s own name, whatever its accents or case', () => {
@@ -97,4 +99,41 @@ describe('hotelFromResult carries Booking’s district and address', () => {
     expect(h.district).toBeUndefined();
     expect(h.address).toBeUndefined();
   });
+});
+
+describe('areaForPoint when the lookup itself fails', () => {
+  const realFetch = global.fetch;
+  const realTimeout = (AbortSignal as any).timeout;
+  beforeAll(() => {
+    // jsdom lacks AbortSignal.timeout; the lookup only passes it through.
+    if (!realTimeout) (AbortSignal as any).timeout = () => undefined;
+  });
+  afterEach(() => {
+    global.fetch = realFetch;
+    localStorage.clear();
+  });
+  afterAll(() => {
+    if (!realTimeout) delete (AbortSignal as any).timeout;
+  });
+  const json = (body: unknown) => Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
+
+  it('both sources refusing: undefined, and nothing kept — asked again next time', async () => {
+    const { areaForPoint } = await import('@/lib/hotelArea');
+    global.fetch = jest.fn(() => Promise.reject(new TypeError('Failed to fetch'))) as any;
+    await expect(areaForPoint(51.1, -0.1, 'London')).resolves.toBeUndefined();
+    expect(localStorage.length).toBe(0);
+    global.fetch = jest.fn((url: string) =>
+      url.includes('nominatim') ? json({ address: { quarter: 'Spitalfields' } }) : json({ features: [] }),
+    ) as any;
+    await expect(areaForPoint(51.1, -0.1, 'London')).resolves.toBe('Spitalfields');
+  }, 10000);
+
+  it('sources answered with nothing usable: null, kept as "no area"', async () => {
+    const { areaForPoint } = await import('@/lib/hotelArea');
+    global.fetch = jest.fn((url: string) =>
+      url.includes('nominatim') ? json({ address: { suburb: 'London' } }) : json({ features: [{ properties: { district: 'London' } }] }),
+    ) as any;
+    await expect(areaForPoint(51.2, -0.2, 'London')).resolves.toBeNull();
+    expect(localStorage.length).toBe(1);
+  }, 10000);
 });
