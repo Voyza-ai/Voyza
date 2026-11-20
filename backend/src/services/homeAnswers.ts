@@ -148,6 +148,7 @@ export function guardHomeAnswers(params: {
       updates,
       action: 'ask',
       quickReplies: [`Yes, from ${originToConfirm}`, 'Flying in from somewhere else'],
+      asking: 'origin',
     };
   }
 
@@ -161,16 +162,16 @@ export function guardHomeAnswers(params: {
     (action === 'show_vibe_picker' && vibeKnown) ||
     (action === 'show_budget_slider' && budgetKnown);
   if (finishing && !origin) {
-    return { reply: withAck(reply, 'Where are you flying from?'), updates, action: 'ask', quickReplies: undefined };
+    return { reply: withAck(reply, 'Where are you flying from?'), updates, action: 'ask', quickReplies: undefined, asking: 'origin' };
   }
   if (finishing && typeof roundTrip !== 'boolean') {
-    return { reply: withAck(reply, roundTripQuestion(origin)), updates, action: 'ask', quickReplies: ['Round-trip', 'One-way'] };
+    return { reply: withAck(reply, roundTripQuestion(origin)), updates, action: 'ask', quickReplies: ['Round-trip', 'One-way'], asking: 'returnToHome' };
   }
   // Nor is it stated as if it were known. Production, after "Paris is
   // home": "Perfect! So you'll be flying round-trip from Paris. How many
   // people are traveling?" — nobody had said round-trip.
   if (typeof roundTrip !== 'boolean') reply = withoutRoundTripClaims(reply);
-  return { reply, updates, action, quickReplies };
+  return { reply, updates, action, quickReplies, ...(params.result.asking ? { asking: params.result.asking } : {}) };
 }
 
 /** The reply without statements (not questions) about round-trip / one-way / flying back. */

@@ -240,3 +240,33 @@ describe('the prompt says so too', () => {
     expect(system).toMatch(/"back to Paris" mid-trip is a stop, not a return home/);
   });
 });
+
+describe('the reply says which fact its question asks for (asking)', () => {
+  it('passes the model\'s asking through: dates', async () => {
+    model({ reply: 'London and Madrid — great combo! When are you thinking of going?', updates: { destinations: ['London', 'Madrid'] }, action: 'ask', asking: 'dates' });
+    const res = await turn('tryna go london and madrid');
+    expect(res.body.asking).toBe('dates');
+  });
+
+  it('drops a value that is not a field', async () => {
+    model({ reply: 'When are you going?', updates: {}, action: 'ask', asking: 'calendar' });
+    const res = await turn('hi');
+    expect(res.body.asking).toBeUndefined();
+  });
+
+  it('the forced "Where are you flying from?" says origin, the round-trip question says returnToHome', async () => {
+    model({ reply: "That's everything I need.", updates: {}, action: 'ready', asking: 'other' });
+    const a = await turn('2 of us', { destinations: ['London'], dates: { start: '2027-03-01', end: '2027-03-10' }, travelers: 2, returnToHome: true });
+    expect(a.body.reply).toBe('Where are you flying from?');
+    expect(a.body.asking).toBe('origin');
+    model({ reply: "That's everything I need.", updates: {}, action: 'ready' });
+    const b = await turn('2 of us', { destinations: ['London'], origin: 'Boston', dates: { start: '2027-03-01', end: '2027-03-10' }, travelers: 2, vibe: 'food' });
+    expect(b.body.asking).toBe('returnToHome');
+  });
+
+  it('confirming a route city as home says origin', async () => {
+    model({ reply: 'Fun route!', updates: { destinations: ['London', 'Paris', 'Munich'], origin: 'Paris' }, action: 'ask' });
+    const res = await turn(OWNER);
+    expect(res.body.asking).toBe('origin');
+  });
+});

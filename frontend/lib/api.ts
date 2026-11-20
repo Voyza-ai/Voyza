@@ -447,7 +447,11 @@ export type ConverseResponse = {
   updates: ConverseUpdates;
   action: ConverseAction;
   quickReplies?: string[];
+  /** The one trip fact the reply's question asks for (see lib/planAsking.ts). */
+  asking?: AskingField;
 };
+
+export type AskingField = 'destinations' | 'dates' | 'origin' | 'travelers' | 'returnToHome' | 'budget' | 'vibe' | 'other';
 
 /** One turn of the AI trip-planning conversation. Throws on failure —
  *  callers show an honest error + Retry (503 = assistant unavailable). */

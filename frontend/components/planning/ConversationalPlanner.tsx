@@ -25,6 +25,8 @@ import { useTripStore } from '@/store/tripStore';
 import { humanDay, humanDayRange } from '@/lib/dateHelpers';
 import VibePills from './VibePills';
 import BudgetPicker from './BudgetPicker';
+import DateRangeCalendar from './DateRangeCalendar';
+import { askingFrom } from '@/lib/planAsking';
 import TripSummaryCard from './TripSummaryCard';
 import { CHAT_EDIT_PREFILL } from '@/lib/tripSummary';
 import { dedupeVibes, joinVibes, splitVibeText, vibeBubbleText, vibeList, vibePhrase } from '@/lib/vibes';
@@ -37,7 +39,7 @@ type ChatMsg = {
   failed?: 'network' | 'assistant';
 };
 
-type Widget = 'city_picker' | 'vibe' | 'budget' | null;
+type Widget = 'city_picker' | 'vibe' | 'budget' | 'dates' | 'origin' | null;
 
 type ConversationalPlannerProps = {
   /** First message to send automatically (landing-page hero seed). */
@@ -266,6 +268,12 @@ export default function ConversationalPlanner({
           setWidget('vibe');
         } else if (result.action === 'show_budget_slider' && a.budget == null) {
           setWidget('budget');
+        } else if (result.action === 'ask' && askingFrom(result.reply, result.asking) === 'dates' && !a.dateRange?.start) {
+          // "When are you thinking of going?" → a calendar to answer it with.
+          setWidget('dates');
+        } else if (result.action === 'ask' && askingFrom(result.reply, result.asking) === 'origin' && !a.origin) {
+          // "Where are you flying from?" → "Use my location".
+          setWidget('origin');
         } else if (meetsMinimums() && (result.action === 'ready' || result.action === 'show_vibe_picker' || result.action === 'show_budget_slider')) {
           // Suppressed a redundant widget (or genuine ready) with a complete
           // plan on the table → recap.
@@ -686,8 +694,24 @@ export default function ConversationalPlanner({
               editable={() => !isTyping}
             />
           )}
-          {/* Location offer — visible until an origin is known */}
-          {!answers.origin && !isTyping && (
+          {/* ── Dates calendar: when the question is about dates ── */}
+          {widget === 'dates' && !isTyping && (
+            <DateRangeCalendar
+              onSelect={(start, end) => {
+                // Stored as picked, whatever the AI makes of the sentence.
+                setAnswer('dateRange', { start, end });
+                setWidget(null);
+                send(humanDayRange(start, end));
+              }}
+              onFlexible={() => {
+                setWidget(null);
+                send("I'm flexible on dates");
+              }}
+            />
+          )}
+
+          {/* Location offer — only while the question is where they fly from */}
+          {widget === 'origin' && !answers.origin && !isTyping && (
             <div className="flex">
               <button
                 onClick={handleUseMyLocation}
