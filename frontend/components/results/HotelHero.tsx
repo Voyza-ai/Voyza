@@ -100,7 +100,9 @@ export default function HotelHero({
   return (
     <div className="flex flex-col gap-2.5" data-testid="hotel-hero">
       {/* Choosing another hotel cross-fades to its photos: the new strip
-          fades in over the old one, so there is never an empty frame. */}
+          fades in over the old one, so there is never an empty frame. The
+          traveller's own stay has no photos to show, so no frame at all. */}
+      {!customName && (
       <div className="relative w-full h-[clamp(110px,16vh,170px)] rounded-2xl overflow-hidden" style={{ background: '#eef0f4' }}>
         <AnimatePresence initial={false}>
           <motion.div
@@ -115,6 +117,7 @@ export default function HotelHero({
           </motion.div>
         </AnimatePresence>
       </div>
+      )}
       {customName && (
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">

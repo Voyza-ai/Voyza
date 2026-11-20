@@ -574,7 +574,12 @@ export default function HotelMapPanel({
   // when it has a pin. One we could not place still gets its card, saying so,
   // so the card always shows the hotel just chosen.
   useEffect(() => {
-    if (!located || selectedIndex === null) return;
+    if (!located) return;
+    // The traveller's own stay (no listed hotel chosen): no pin is theirs.
+    if (selectedIndex === null) {
+      setActiveIndex(null);
+      return;
+    }
     if (!entries.some((e) => e.index === selectedIndex)) return;
     // The pin rebuild below checks the frame and re-fits if anything is cut off.
     setActiveIndex(selectedIndex);
