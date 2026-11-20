@@ -355,8 +355,8 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
 
   return (
     <div className="px-4 pt-3 pb-0">
-      {/* Left: meta and title. Right: the price view switch, the trip's
-          price boxes, who's on the trip, and Share. The left column shrinks
+      {/* Left: meta, then the title with who's on the trip. Right: the
+          price view switch, the trip's price boxes, and Share. The left column shrinks
           (flex-1 + min-w-0) so a long route title truncates instead of
           pushing the right cluster onto a second row. */}
       <div className="flex items-start justify-between gap-4">
@@ -391,15 +391,31 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               {trip.cities.length} {trip.cities.length === 1 ? 'stop' : 'stops'}
             </div>
           </div>
-          <TripNameEditor
-            value={trip.title ?? ''}
-            canRename={canRename}
-            onRename={handleRename}
-            onDenied={() => collab?.showToast('Only the trip owner can rename this trip', 'info')}
-            placeholder="Name this trip"
-            className="text-[22px] leading-tight font-semibold text-gray-900"
-            inputClassName="text-[22px] leading-tight font-semibold text-gray-900 w-[380px] max-w-full"
-          />
+          {/* The trip's name, then who is on it. */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="min-w-0">
+            <TripNameEditor
+              value={trip.title ?? ''}
+              canRename={canRename}
+              onRename={handleRename}
+              onDenied={() => collab?.showToast('Only the trip owner can rename this trip', 'info')}
+              placeholder="Name this trip"
+              className="text-[22px] leading-tight font-semibold text-gray-900"
+              inputClassName="text-[22px] leading-tight font-semibold text-gray-900 w-[380px] max-w-full"
+            />
+            </div>
+            {collab?.active && trip.id && (
+              <div className="flex-shrink-0">
+              <CollaboratorAvatars
+                tripId={trip.id}
+                presence={collab.presence}
+                selfId={collab.self?.id ?? null}
+                refreshKey={membersKey}
+                onClick={canShare ? handleShare : undefined}
+              />
+              </div>
+            )}
+          </div>
           {renameError && (
             <p className="text-[11px] mt-0.5" style={{ color: '#dc2626' }}>
               {renameError}
@@ -609,15 +625,6 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               )}
             </div>
             )}
-          {collab?.active && trip.id && (
-            <CollaboratorAvatars
-              tripId={trip.id}
-              presence={collab.presence}
-              selfId={collab.self?.id ?? null}
-              refreshKey={membersKey}
-              onClick={canShare ? handleShare : undefined}
-            />
-          )}
 
           {role === 'viewer' && (
             <span
