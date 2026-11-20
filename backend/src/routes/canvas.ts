@@ -369,7 +369,8 @@ router.post(
             })
               .then((results) => {
                 if (results.length > 0) {
-                  // `priceSuspect` and `reviewCount` are carried deliberately.
+                  // `priceSuspect`, `priceUnverified` and `reviewCount` are
+                  // carried deliberately.
                   // Dropping them made the verdict die at this boundary: the
                   // flag could not survive the JSONB round trip, so nothing
                   // downstream could warn, and a re-rank would read every thin
@@ -383,6 +384,8 @@ router.post(
                     bookingUrl: r.bookingUrl,
                     reviewCount: r.reviewCount,
                     priceSuspect: r.priceSuspect,
+                    ...(r.priceSuspect && r.priceSuspectReason ? { priceSuspectReason: r.priceSuspectReason } : {}),
+                    priceUnverified: r.priceUnverified,
                     taxesPerNight: r.taxesPerNight,
                   }));
                   city.hotel = city.hotels[0];

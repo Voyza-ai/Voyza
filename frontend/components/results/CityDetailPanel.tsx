@@ -31,6 +31,8 @@ import { getCityColor, CITY_COLORS } from '@/lib/cityColors';
 import { hasStay } from './CityCard';
 import { VIBE_LABEL } from '@/lib/cityTheme';
 import { effectiveTransportIn, effectiveTransportOut, legArrivalDate } from '@/lib/cityLegs';
+import { hotelPriceTrust } from '@/lib/hotelPriceTrust';
+import { PriceTrustChip, PriceTrustNote } from './PriceTrust';
 
 type CityDetailPanelProps = {
   trip: Trip;
@@ -345,6 +347,7 @@ export default function CityDetailPanel({
                 rank={i}
                 isSelected={!city.customHotel && city.selectedHotelIndex === i}
                 nights={nights}
+                hotelsInSearch={city.hotels.length}
                 color={color}
                 onSelect={() => setSelectedHotel(cityIndex, i)}
               />
@@ -376,6 +379,7 @@ export default function CityDetailPanel({
             isCustom={!!city.customHotel}
             nights={nights}
             travelers={trip.travelers}
+            hotelsInSearch={city.hotels.length}
             color={color}
           />
         </div>
@@ -494,6 +498,7 @@ function HotelRow({
   rank,
   isSelected,
   nights,
+  hotelsInSearch,
   color,
   onSelect,
 }: {
@@ -501,11 +506,13 @@ function HotelRow({
   rank: number;
   isSelected: boolean;
   nights: number;
+  hotelsInSearch: number;
   color: { bg: string; text: string; border: string; name: string };
   onSelect: () => void;
 }) {
   const priceMode = useTripStore((s) => s.priceMode);
   const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
+  const trust = hotelPriceTrust(hotel, { travelers, hotelsInSearch });
   const taxesGroup = (hotel.taxesPerNight ?? 0) * nights;
   const roomGroup = hotel.pricePerNight * nights;
   const totalGroup = roomGroup + taxesGroup;
@@ -569,6 +576,7 @@ function HotelRow({
                   BlueMurr book
                 </span>
               )}
+              {trust && <PriceTrustChip trust={trust} accent={accent} />}
             </div>
             <div className="text-[12px] mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: `${accent}88` }}>
               <span>{hotel.area}</span>
@@ -803,6 +811,7 @@ function HotelDetail({
   isCustom,
   nights,
   travelers,
+  hotelsInSearch,
   color,
 }: {
   hotel: Hotel | null;
@@ -810,9 +819,12 @@ function HotelDetail({
   isCustom: boolean;
   nights: number;
   travelers: number;
+  hotelsInSearch: number;
   color: { bg: string; text: string; border: string; name: string };
 }) {
   const priceMode = useTripStore((s) => s.priceMode);
+  // A traveller's own hotel is their number: never flagged.
+  const trust = isCustom ? null : hotelPriceTrust(hotel, { travelers, hotelsInSearch });
   if (!hotel) {
     return (
       <div className="flex items-center justify-center h-full" style={{ color: `${color.text}70` }}>
@@ -867,6 +879,7 @@ function HotelDetail({
                 <Award size={8} /> Top pick
               </span>
             )}
+            {trust && <PriceTrustChip trust={trust} accent={accent} size="xs" />}
           </div>
         </div>
 
@@ -954,6 +967,8 @@ function HotelDetail({
           )}
         </div>
       </div>
+
+      {trust && <PriceTrustNote trust={trust} accent={accent} />}
 
       {/* Booking link */}
       {hotel.bookingUrl && (

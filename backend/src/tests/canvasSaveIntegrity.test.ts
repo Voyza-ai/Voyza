@@ -285,6 +285,26 @@ describe('a city saved without hotels is searched with the party in enough rooms
     });
   });
 
+  it('carries priceSuspect and priceUnverified from the search into the saved hotels', async () => {
+    const row = (name: string, extra: Record<string, any> = {}) => ({
+      id: name, name, price: 300, pricePerNight: 100, currency: 'USD', rating: 8, reviewCount: 40,
+      stars: 3, thumbnail: '', bookingUrl: `https://b/${name}`, amenities: [], ...extra,
+    });
+    mockSearchHotels.mockResolvedValue([
+      row('Thin A', { priceUnverified: true }),
+      row('Thin B', { priceUnverified: true, priceSuspect: true }),
+    ]);
+    const res = await save(hotellessState(2));
+    expect(res.status).toBe(200);
+    const [, args] = mockRpc.mock.calls[0];
+    const florence = args.p_cities.find((c: any) => c.name === 'Florence');
+    expect(florence.hotels.map((h: any) => [h.priceUnverified, h.priceSuspect])).toEqual([
+      [true, undefined],
+      [true, true],
+    ]);
+    expect(florence.hotel).toMatchObject({ name: 'Thin A', priceUnverified: true, pricePerNight: 100 });
+  });
+
   it('never sends Booking an undefined room count', async () => {
     await save(hotellessState(4));
     expect(Number.isInteger(mockSearchHotels.mock.calls[0][0].rooms)).toBe(true);

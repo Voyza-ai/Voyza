@@ -99,14 +99,16 @@ it('starts every activities and restaurants call while the first hotel batch is 
   expect(mockedActivities.mock.calls.find((c) => c[0].city === 'Paris')![0].nights).toBe(3);
 });
 
-it('keeps "Finding hotels..." until the hotels are in, even when the AI answers first', async () => {
+it('keeps the hotels step running until the hotels are in, even when the AI answers first', async () => {
   start();
   await waitFor(() => expect(Object.keys(activityCalls)).toHaveLength(3));
-  expect(screen.getByText('Finding hotels...')).toBeInTheDocument();
+  // The search screen's hotel step (SearchProgress), still running.
+  expect(screen.getByText(/^Pricing hotels in .+…$/)).toBeInTheDocument();
 
   await resolveAll(activityCalls, (c) => [{ name: `${c} museum` }]);
   await resolveAll(restaurantCalls, (c) => [{ name: `${c} bistro`, cuisine: 'French', priceRange: '$$' }]);
-  expect(screen.getByText('Finding hotels...')).toBeInTheDocument();
+  // The search screen's hotel step (SearchProgress), still running.
+  expect(screen.getByText(/^Pricing hotels in .+…$/)).toBeInTheDocument();
   expect(mockPush).not.toHaveBeenCalled();
 
   await resolveAll(hotelCalls, (c) => [hotel(`${c} hotel`)]); // Paris, Zurich

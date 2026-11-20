@@ -53,8 +53,47 @@ export type Transport = {
    * flight is the only sensible option.
    */
   noTrainData?: boolean;
+  /**
+   * City centre to city centre, with what the time is made of (backend
+   * services/legFacts.ts). Absent on legs priced before it existed, and
+   * when an airport's position is unknown.
+   */
+  doorToDoor?: DoorToDoor | null;
+  /** Party CO₂: Duffel's estimate for a flight, ours for a train. */
+  co2?: Co2Figure | null;
+  /** Trains only: where `price` came from. Absent on older trips. */
+  priceSource?: RailPriceSource;
   /** The user's choice for this leg, kept through date / city edits. */
   userChoice?: LegPreference;
+};
+
+export type DoorToDoorPart = {
+  kind: 'transfer' | 'airport' | 'flight' | 'train';
+  label: string;
+  minutes: number;
+};
+
+export type DoorToDoor = {
+  totalMinutes: number;
+  basis: string;
+  parts: DoorToDoorPart[];
+};
+
+export type Co2Figure = {
+  /** Kilograms for the whole party, like every price. */
+  kg: number;
+  /** 'duffel' = the airline-itinerary estimate on the Duffel offer; 'estimate' = ours from distance. */
+  source: 'duffel' | 'estimate';
+  distanceKm?: number;
+  gramsPerPassengerKm?: number;
+};
+
+/** Mirrors backend `RailPriceSource` in services/trains.ts. */
+export type RailPriceSource = {
+  kind: 'live' | 'cached' | 'estimated';
+  provider?: string;
+  /** The fare came from the provider's TEST gateway. */
+  testApi?: boolean;
 };
 
 export type Hotel = {
@@ -75,6 +114,14 @@ export type Hotel = {
   maxGuests?: number;
   /** Set when the backend does not trust this row's price — see hotelScore.ts */
   priceSuspect?: boolean;
+  /** Why `priceSuspect` was set (backend `PriceSuspectReason`), for the words shown. */
+  priceSuspectReason?: string;
+  /**
+   * Set when the search this row came from was too thin to compare prices
+   * against (backend: fewer rows than its price check needs). Not a verdict —
+   * the price may well be right; we could not check it. See lib/hotelPriceTrust.ts.
+   */
+  priceUnverified?: boolean;
   /**
    * Reviews behind `rating`. Carried through from the provider so a re-rank
    * applies the same confidence discount the first ranking did — without it,

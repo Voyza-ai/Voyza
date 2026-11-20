@@ -320,3 +320,49 @@ describe('an unpriced train is not compared on price', () => {
     expect(result.priceDifference).toBe(0);
   });
 });
+
+describe('door-to-door facts on the compared options', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const flight = (min: number, extra: object = {}) => ({
+    id: 'f1', price: 120, durationMinutes: min, carrier: 'Lufthansa', carrierCode: 'LH',
+    departure: '', arrival: '', currency: 'USD', stops: 0, bookingUrl: '', raw: {}, ...extra,
+  });
+  const train = (min: number) => ({
+    id: 't1', price: 60, durationMinutes: min, operator: 'DB', trainType: 'ICE',
+    departure: '', arrival: '', currency: 'USD', bookingUrl: null, limitedCoverage: false,
+    priceSource: { kind: 'live', provider: 'Deutsche Bahn' },
+  });
+
+  it('builds the flight total from its real airports and ranks speed on it', async () => {
+    // 70 min in the air + 180 would be 250 < 260 by train, so the old flat
+    // allowance called the flight faster. MUC alone is ~75 min from the
+    // centre, so door to door the train wins.
+    searchFlights.mockResolvedValue([flight(70, { originAirport: 'MUC', destinationAirport: 'BER' })]);
+    searchTrains.mockResolvedValue([train(260)]);
+
+    const r = await compareLeg({ origin: 'Munich', destination: 'Berlin', date: '2026-06-01', travelers: 2, display: true });
+
+    const d = r.flightOption!.doorToDoor!;
+    expect(d.parts.map((p) => p.kind)).toEqual(['transfer', 'airport', 'flight', 'transfer']);
+    expect(d.totalMinutes).toBeGreaterThan(260);
+    expect(r.fastest).toBe('train');
+    expect(r.timeDifference).toBe(d.totalMinutes - 260);
+    expect(r.trainOption!.doorToDoor!.totalMinutes).toBe(260);
+    expect(r.trainOption!.co2).toMatchObject({ source: 'estimate' });
+    expect(r.trainOption!.co2!.kg).toBeGreaterThan(0);
+    // The provider's price source passes through untouched.
+    expect(r.trainOption!.priceSource).toEqual({ kind: 'live', provider: 'Deutsche Bahn' });
+  });
+
+  it('falls back to the flat allowance when an airport position is unknown', async () => {
+    searchFlights.mockResolvedValue([flight(70)]); // no airports of its own; "QXZ" (the mock code) is no real airport
+    searchTrains.mockResolvedValue([train(245)]);
+
+    const r = await compareLeg({ origin: 'Qxzzy', destination: 'Berlin', date: '2026-06-01', travelers: 1 });
+
+    expect(r.flightOption!.doorToDoor).toBeUndefined();
+    expect(r.fastest).toBe('train'); // 70 + 180 = 250 > 245
+    expect(r.timeDifference).toBe(5);
+  });
+});

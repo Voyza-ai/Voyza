@@ -41,6 +41,19 @@ const OFFER_CANDIDATES = 3;
 /** Cap on unpriced schedule rows returned when pricing fails. */
 const MAX_UNPRICED = 3;
 
+/**
+ * True while we talk to All Aboard's TEST gateway (the default URL — our
+ * key is test-scoped). Its fares come from getJourneyOffer like production
+ * ones, but they are not bookable inventory, and the UI says so.
+ */
+export function allAboardIsTestGateway(url: string = env.ALLABOARD_API_URL): boolean {
+  try {
+    return /(^|\.)test\./i.test(new URL(url).hostname);
+  } catch {
+    return true; // unreadable URL: don't claim production
+  }
+}
+
 type GqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
 async function gql<T>(
@@ -392,6 +405,9 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
         trainType: 'train',
         bookingUrl: null,
         limitedCoverage: pricePerPerson == null,
+        ...(pricePerPerson != null
+          ? { priceSource: { kind: 'live' as const, provider: 'All Aboard', ...(allAboardIsTestGateway() ? { testApi: true } : {}) } }
+          : {}),
       };
     };
 

@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, type ComponentProps } from 'react';
+import SearchProgress from './SearchProgress';
+import type { SearchProgressState } from '@/lib/searchProgress';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
@@ -44,6 +46,9 @@ type ConversationalPlannerProps = {
   onFindTrip: () => void;
   findTripLoading: boolean;
   findTripStatus: string;
+  /** The running search, step by step; the plain status line when absent. */
+  searchProgress?: SearchProgressState | null;
+  searchFallback?: ComponentProps<typeof SearchProgress>['fallback'];
   findTripError: string | null;
   /** Escape hatch when the AI is repeatedly down. */
   onSwitchToGuided: () => void;
@@ -66,6 +71,8 @@ export default function ConversationalPlanner({
   onFindTrip,
   findTripLoading,
   findTripStatus,
+  searchProgress,
+  searchFallback,
   findTripError,
   onSwitchToGuided,
 }: ConversationalPlannerProps) {
@@ -637,7 +644,10 @@ export default function ConversationalPlanner({
           )}
 
           {/* Find-trip progress / error (same pipeline as before) */}
-          {findTripLoading && (
+          {findTripLoading && searchProgress && (
+            <SearchProgress progress={searchProgress} fallback={searchFallback} />
+          )}
+          {findTripLoading && !searchProgress && (
             <div className="flex items-center gap-3 text-gray-600 text-[15px]">
               <motion.div
                 className="w-4 h-4 border-2 border-[#2563eb] border-t-transparent rounded-full"

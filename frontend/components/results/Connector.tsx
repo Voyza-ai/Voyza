@@ -19,6 +19,15 @@ import {
 import { Transport } from '@/lib/types';
 import { useTripStore } from '@/store/tripStore';
 import { displayAmount } from '@/lib/tripTotals';
+import { formatMinutes } from '@/lib/dateHelpers';
+import {
+  co2Basis,
+  formatCo2,
+  legModes,
+  railPriceLabel,
+  railPriceShort,
+  trainCo2SavingPct,
+} from '@/lib/legFacts';
 import { arrivesNextDay } from '@/lib/cityLegs';
 
 type ConnectorProps = {
@@ -219,7 +228,9 @@ export default function Connector({
             </div>
 
             <div className="text-[9px] uppercase tracking-wider text-gray-500">
-              {noRailRegion ? 'No train data' : 'Click for details'}
+              {noRailRegion
+                ? 'No train data'
+                : (isTrain && railPriceShort(transport.priceSource)) || 'Click for details'}
             </div>
           </button>
 
@@ -385,8 +396,11 @@ export default function Connector({
               </div>
             )}
             <div className="flex items-center gap-3 flex-shrink-0">
-              <div className="text-gray-900 text-[17px] font-semibold tabular-nums">
-                ${displayAmount(transport.price, priceMode, travelers).toLocaleString()}
+              <div className="flex flex-col items-end">
+                <div className="text-gray-900 text-[17px] font-semibold tabular-nums leading-tight">
+                  ${displayAmount(transport.price, priceMode, travelers).toLocaleString()}
+                </div>
+                {isTrain && <RailPriceTag transport={transport} />}
               </div>
               {canBookInApp ? (
                 <>
@@ -426,11 +440,15 @@ export default function Connector({
                   Book
                   <ExternalLink size={11} />
                 </a>
+              ) : isTrain ? (
+                <RailBookingSlot />
               ) : (
                 <div className="text-gray-300 text-[11px]">Soon</div>
               )}
             </div>
           </div>
+
+          <DoorToDoorSection transport={transport} travelers={travelers} />
 
           {/* Honest note: we searched for a train on this (short) route and
               found none, so we say so instead of silently showing only flights. */}
@@ -500,6 +518,11 @@ export default function Connector({
                       <div className="flex items-center gap-1 text-gray-600 text-[10px]">
                         <Clock size={9} className="text-gray-400 flex-shrink-0" />
                         <span className="font-medium">{alt.duration}</span>
+                        {alt.mode === 'train' && railPriceShort(alt.priceSource) && (
+                          <span className="ml-auto text-gray-500" title={railPriceLabel(alt.priceSource).title}>
+                            {railPriceShort(alt.priceSource)}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center justify-between gap-1 pt-0.5 border-t border-gray-200">
                         <span className="text-gray-600 text-[10px] truncate">
@@ -538,6 +561,127 @@ export default function Connector({
           </div>,
           document.body,
         )}
+    </div>
+  );
+}
+
+const TRAIN_INK = '#15805a';
+
+/** Where a rail fare came from — "live" only for a fare a provider returned for this search. */
+function RailPriceTag({ transport }: { transport: Transport }) {
+  const label = railPriceLabel(transport.priceSource);
+  const live = label.tone === 'live';
+  return (
+    <div
+      data-testid="rail-price-source"
+      title={label.title}
+      className="flex items-center gap-1 text-[10px] leading-tight mt-0.5"
+      style={{ color: live ? TRAIN_INK : '#9ca3af' }}
+    >
+      <span
+        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+        style={live ? { background: TRAIN_INK } : { border: '1px solid #9ca3af' }}
+      />
+      <span>{label.text}</span>
+    </div>
+  );
+}
+
+/**
+ * Where a train's Book button will go. Not a button: rail booking runs
+ * through a partner's booking flow we haven't connected, so this says so
+ * plainly. Dashed like the route lines — a slot waiting to be filled.
+ */
+function RailBookingSlot() {
+  return (
+    <div
+      data-testid="rail-booking-slot"
+      role="note"
+      title="Train booking through a rail partner is on the way. For now, book this train with the operator."
+      className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-dashed cursor-default select-none"
+      style={{ borderColor: `${MODE_COLORS.train}99`, color: TRAIN_INK }}
+    >
+      <TrainFront size={11} className="flex-shrink-0" />
+      <div className="flex flex-col leading-none">
+        <span className="text-[10.5px] font-medium">Rail partner booking</span>
+        <span className="text-[9px] mt-0.5 opacity-80">coming soon</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Door-to-door time and CO₂ for the leg's train and flight, side by side
+ * when both exist. Renders nothing when the leg carries neither fact
+ * (legs priced before they existed).
+ */
+function DoorToDoorSection({ transport, travelers }: { transport: Transport; travelers: number }) {
+  const { train, flight } = legModes(transport);
+  const rows = [train, flight].filter(
+    (t): t is Transport => !!t && (!!t.doorToDoor || !!t.co2),
+  );
+  if (rows.length === 0) return null;
+  const saving = trainCo2SavingPct(train?.co2, flight?.co2);
+  const party = travelers > 1 ? ` for ${travelers} travellers` : '';
+  return (
+    <div
+      data-testid="door-to-door"
+      className="px-4 py-2.5 border-t"
+      style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+    >
+      <div className="text-gray-600 text-[10px] uppercase tracking-wider mb-1.5 font-medium">
+        Door to door
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {rows.map((t) => {
+          const isT = t.mode === 'train';
+          const RowIcon = isT ? TrainFront : Plane;
+          const color = MODE_COLORS[t.mode];
+          const extras = (t.doorToDoor?.parts ?? []).filter((p) => p.kind !== 'flight' && p.kind !== 'train');
+          return (
+            <div key={t.mode} data-testid={`d2d-${t.mode}`} className="flex items-start gap-2">
+              <RowIcon size={12} className="mt-[3px] flex-shrink-0" style={{ color }} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="text-[12px] text-gray-800 min-w-0">
+                    <span className="font-semibold">{isT ? 'Train' : 'Flight'}</span>
+                    {t.doorToDoor ? (
+                      <>
+                        {' '}
+                        <span className="font-semibold tabular-nums">{formatMinutes(t.doorToDoor.totalMinutes)}</span>
+                        <span className="text-gray-500">
+                          {isT
+                            ? ' city centre to city centre'
+                            : ' incl. airport transfers, security & boarding'}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-gray-400"> door-to-door time unknown</span>
+                    )}
+                  </div>
+                  {t.co2 && (
+                    <div className="text-[11px] text-gray-700 tabular-nums flex-shrink-0" title={co2Basis(t.co2)}>
+                      ≈ {formatCo2(t.co2.kg)} CO₂
+                    </div>
+                  )}
+                </div>
+                {(extras.length > 0 || t.co2) && (
+                  <div className="text-[10px] text-gray-400 leading-snug mt-0.5">
+                    {extras.map((p) => `${formatMinutes(p.minutes)} ${p.label}`).join(' · ')}
+                    {extras.length > 0 && t.co2 ? ' · ' : ''}
+                    {t.co2 ? `CO₂ ${co2Basis(t.co2)}${party}` : ''}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {saving != null && (
+        <div data-testid="co2-saving" className="mt-2 text-[11px] font-medium" style={{ color: TRAIN_INK }}>
+          Train saves ~{saving}% CO₂ on this leg (estimate)
+        </div>
+      )}
     </div>
   );
 }

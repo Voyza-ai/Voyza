@@ -1,4 +1,5 @@
 import { getDuffel } from './duffel';
+import { flightCo2FromOffer, type Co2Figure, type DoorToDoor } from './legFacts';
 import { currentDuffelRetryBudget } from './duffelBudget';
 import { getSupabase } from './supabase';
 import { AppError } from '../middleware/error';
@@ -55,6 +56,13 @@ export type FlightOffer = {
    */
   originAirport?: string;
   destinationAirport?: string;
+  /**
+   * Duffel's CO₂ estimate for this itinerary and the whole party
+   * (`total_emissions_kg`). Absent when the offer carries none.
+   */
+  co2?: Co2Figure | null;
+  /** Door-to-door time — set by compareLeg / legOptions, which know the cities. */
+  doorToDoor?: DoorToDoor | null;
 };
 
 type SearchFlightsParams = {
@@ -408,6 +416,7 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
 
       const airportCode = (place: any): string | undefined =>
         typeof place?.iata_code === 'string' && place.iata_code ? place.iata_code.toUpperCase() : undefined;
+      const co2 = flightCo2FromOffer(offer);
       const originAirport = airportCode(firstSegment?.origin);
       const destinationAirport = airportCode(lastSegment?.destination);
 
@@ -425,6 +434,7 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
         raw: offer,
         ...(originAirport ? { originAirport } : {}),
         ...(destinationAirport ? { destinationAirport } : {}),
+        ...(co2 ? { co2 } : {}),
       };
     });
 
