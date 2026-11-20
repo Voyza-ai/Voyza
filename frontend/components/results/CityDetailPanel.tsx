@@ -163,6 +163,9 @@ export default function CityDetailPanel({
         if (!live) return;
         if (typeof h.lat !== 'number' || typeof h.lng !== 'number' || h.neighbourhood !== undefined) continue;
         const area = await areaForPoint(h.lat, h.lng, city.name, h.district ?? null);
+        // The lookup failed outright (refused or offline): leave it unset, so
+        // it is asked again next time instead of saved as "no area".
+        if (area === undefined) continue;
         // '' marks "looked up, nothing trustworthy", so it is not asked again.
         if (live) patchHotel(h.name, { neighbourhood: area ?? '' });
       }
@@ -747,7 +750,13 @@ function HotelRow({
             {/* One line for the name, one for the rest: the badges used to
                 wrap onto a line of their own and made every row three tall. */}
             <div className="text-sm font-medium line-clamp-2" style={{ color: color.text }}>{hotel.name}</div>
-            <div className="text-[12px] mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: `${accent}88` }}>
+            {/* One row whatever the names: an area too long for it is cut
+                short (full name on hover) — wrapping left a stray "·" at the
+                end of the line and the name alone below it. */}
+            <div
+              className="text-[12px] mt-0.5 flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap [&>*]:flex-shrink-0"
+              style={{ color: `${accent}88` }}
+            >
               {isTop && (
                 <span
                   className="flex items-center gap-0.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold"
@@ -780,7 +789,7 @@ function HotelRow({
               {hotel.neighbourhood && (
                 <>
                   <span style={{ color: `${accent}50` }}>·</span>
-                  <span>{hotel.neighbourhood}</span>
+                  <span className="truncate min-w-0 !flex-shrink" title={hotel.neighbourhood}>{hotel.neighbourhood}</span>
                 </>
               )}
               {hotel.score != null && (
