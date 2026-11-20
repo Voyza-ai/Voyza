@@ -58,6 +58,19 @@ function plannedTrip(): Trip {
   return { ...base, cities: [florence, { ...rome0, schedule }] };
 }
 
+/**
+ * Rome as the planner left it before a stay's picks were spread over its
+ * days (website audit m6), the way trips saved then still are: every stop on
+ * Dec 11–12 and nothing on Dec 13.
+ */
+function plannedBeforeSpread(): Trip {
+  const t = plannedTrip();
+  const rome = t.cities[1];
+  const { '2026-12-13': last, ...rest } = rome.schedule!;
+  const schedule = { ...rest, '2026-12-12': [...rest['2026-12-12'], ...(last ?? [])] };
+  return { ...t, cities: [t.cities[0], { ...rome, schedule }] };
+}
+
 /** The Canvas swap: Rome first on Dec 8–11, Florence after; schedules travel with the city. */
 function swapped(t: Trip): Trip {
   const [florence, rome] = t.cities;
@@ -106,7 +119,7 @@ describe('relayMovedStay', () => {
     expect(relayMovedStay(after, 0)).toBeNull();
     // A city that never moved: only the day its planner left empty (Dec 13)
     // is added, and then nothing more.
-    const t = plannedTrip();
+    const t = plannedBeforeSpread();
     const once = relayMovedStay(t, 1)!;
     // (and the fly-home day, Dec 14, which this transport-less fixture never built)
     expect(Object.keys(once.schedule).sort()).toEqual(
@@ -150,10 +163,9 @@ describe('relayMovedStay', () => {
   });
 
   it("fills a day the planner left empty with only what isn't placed yet, leaving planned days alone", () => {
-    const t = plannedTrip();
+    const t = plannedBeforeSpread();
     const rome = t.cities[1];
     const gap = { ...rome.schedule! };
-    delete gap['2026-12-13'];
     const extra = { ...rome, schedule: gap, activities: [...rome.activities, 'Borghese Gallery'] };
     const trip = { ...t, cities: [t.cities[0], extra] };
     const out = relayMovedStay(trip, 1)!;
@@ -169,10 +181,9 @@ describe('relayMovedStay', () => {
   });
 
   it('an empty day with nothing left over stays empty instead of repeating stops', () => {
-    const t = plannedTrip();
+    const t = plannedBeforeSpread();
     const rome = t.cities[1];
     const gap = { ...rome.schedule! };
-    delete gap['2026-12-13'];
     const out = relayMovedStay({ ...t, cities: [t.cities[0], { ...rome, schedule: gap }] }, 1)!;
     expect(out.schedule['2026-12-13'].filter((e) => e.category !== 'transport')).toEqual([]);
   });

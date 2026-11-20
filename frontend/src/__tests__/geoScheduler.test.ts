@@ -174,8 +174,9 @@ describe('geo-aware day scheduling', () => {
   });
 
   it('falls back to EXACTLY the pre-geo schedule when nothing has coordinates', () => {
-    // Golden output captured from the scheduler on origin/dev before this
-    // change, for the same picks over a three-night stay.
+    // Golden output of the queue-order scheduler for these picks over a
+    // three-night stay, re-captured when a stay's picks started being spread
+    // over its days instead of spent in the first ones (website audit m6).
     const acts = [act('A', 'morning', undefined, 3), act('B', 'afternoon', undefined, 4), act('C', 'afternoon', undefined, 2), act('D', 'evening', undefined, 2), act('E', 'morning', undefined, 4), act('F', 'evening', undefined, 1)];
     // X is a café: an "any" pick fills breakfast only when it suits one
     // (scheduleMealQuirks.test.ts), and this golden has X at breakfast.
@@ -184,8 +185,9 @@ describe('geo-aware day scheduling', () => {
     const res = buildCityScheduleFromSuggestions(acts, rests, city, 0, tripOf(city));
     const shape = Object.entries(res.schedule).map(([d, es]) => [d, es.map((e) => [titles([e])[0], e.startTime, e.endTime])]);
     expect(shape).toEqual([
-      ['2026-06-15', [['B1', '08:00', '08:45'], ['A', '09:00', '12:00'], ['L1', '12:15', '13:45'], ['B', '14:00', '18:00'], ['D1', '18:15', '20:15'], ['D', '20:30', '22:30']]],
-      ['2026-06-16', [['X', '08:00', '08:45'], ['L2', '11:30', '13:00'], ['E', '13:15', '17:15'], ['C', '17:30', '19:30'], ['F', '19:45', '20:45']]],
+      ['2026-06-15', [['A', '09:00', '12:00'], ['L1', '12:15', '13:45'], ['B', '14:00', '18:00'], ['D1', '19:00', '21:00']]],
+      ['2026-06-16', [['B1', '08:00', '08:45'], ['L2', '11:30', '13:00'], ['E', '13:15', '17:15'], ['D', '17:30', '19:30']]],
+      ['2026-06-17', [['X', '08:00', '08:45'], ['C', '12:00', '14:00'], ['F', '17:00', '18:00']]],
     ]);
     const all = Object.values(res.schedule).flat();
     expect(all.every((e) => e.lat === undefined && e.travelFromPrev === undefined)).toBe(true);
