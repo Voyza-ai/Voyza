@@ -44,6 +44,18 @@ type ResultsHeaderProps = {
   canEdit?: boolean;
 };
 
+/**
+ * A route name shortened for the header: past three cities, the first three
+ * and "+N more" ("Lisbon → Porto → Madrid + 4 more"). Only route-style names
+ * (cities joined by arrows) are shortened; a name someone typed is shown as
+ * typed. Display only — the saved name is untouched.
+ */
+export function shortRouteTitle(title: string): string {
+  const parts = title.split(' → ').map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 3) return title;
+  return `${parts.slice(0, 3).join(' → ')} + ${parts.length - 3} more`;
+}
+
 const formatDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   const date = new Date(y, (m || 1) - 1, d || 1);
@@ -400,6 +412,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               onRename={handleRename}
               onDenied={() => collab?.showToast('Only the trip owner can rename this trip', 'info')}
               placeholder="Name this trip"
+              displayValue={shortRouteTitle(trip.title ?? '')}
               className="text-[22px] leading-tight font-semibold text-gray-900"
               inputClassName="text-[22px] leading-tight font-semibold text-gray-900 w-[380px] max-w-full"
             />
