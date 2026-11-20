@@ -1,3 +1,13 @@
+// legFacts pulls in services/allaboard, which loads the env config; without
+// these the config refuses to load and the whole suite fails to start.
+jest.mock('../config/env', () => ({
+  env: {
+    ALLABOARD_API_URL: 'https://test.api-gateway.allaboard.eu',
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'test_key',
+  },
+}));
+
 import {
   airportTransferMinutes,
   DEPARTURE_AIRPORT_MINUTES,
