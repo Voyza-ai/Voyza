@@ -1917,7 +1917,7 @@
     "trip": {
       "title": "Amsterdam → Paris",
       "status": "planning",
-      "totalCost": 1340,
+      "totalCost": 1376,
       "savings": 12,
       "travelers": 2,
       "cities": [
@@ -2577,24 +2577,23 @@
             "price": 0
           },
           "hotel": {
-            "name": "Cozy 3-room apartment, central, terrace",
-            "rating": 9.3,
-            "pricePerNight": 110.82,
+            "name": "Ibis Styles Paris Batignolles",
+            "rating": 8.3,
+            "pricePerNight": 128.83,
             "area": "",
-            "bookingUrl": "https://www.booking.com/hotel/fr/cozy-3-room-apartment-central-terrace.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
-            "reviewCount": 3,
-            "taxesPerNight": 0
+            "bookingUrl": "https://www.booking.com/hotel/fr/mirific.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
+            "reviewCount": 3221,
+            "taxesPerNight": 0,
+            "lat": 48.8898525712938,
+            "lng": 2.32120871538427,
+            "photos": [
+              "https://cf.bstatic.com/xdata/images/hotel/max1024x768/753148428.jpg?k=f66edc329a17da900502ecfe7770775c7840ab8a9faf90c1635227c3f5fe4bbf&o="
+            ],
+            "providerId": "59015",
+            "address": "119 Avenue De Clichy",
+            "district": "17th arr."
           },
           "hotels": [
-            {
-              "name": "Cozy 3-room apartment, central, terrace",
-              "rating": 9.3,
-              "pricePerNight": 110.82,
-              "area": "",
-              "bookingUrl": "https://www.booking.com/hotel/fr/cozy-3-room-apartment-central-terrace.html?checkin=2026-12-23&checkout=2026-12-25&group_adults=2&no_rooms=1",
-              "reviewCount": 3,
-              "taxesPerNight": 0
-            },
             {
               "name": "Ibis Styles Paris Batignolles",
               "rating": 8.3,
