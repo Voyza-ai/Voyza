@@ -1,6 +1,23 @@
 import type { TravelInfo } from './geoSchedule';
 export type TransportMode = 'flight' | 'train';
 
+/**
+ * What the user chose for a leg — a flight they accepted from the chat or
+ * picked on the card — so a later date or city edit that re-searches the leg
+ * keeps it: an evening departure stays evening, "after 15:00" stays after
+ * 15:00, a hand-picked time stays close (backend services/legPreference.ts).
+ */
+export type LegPreference = {
+  source: 'chat' | 'card';
+  departTime: string | null;
+  operator: string | null;
+  timeOfDay?: 'morning' | 'afternoon' | 'evening' | null;
+  earliestDepart?: string | null;
+  latestDepart?: string | null;
+  earliestArrive?: string | null;
+  latestArrive?: string | null;
+};
+
 export type Transport = {
   mode: TransportMode;
   operator: string;
@@ -46,6 +63,8 @@ export type Transport = {
   co2?: Co2Figure | null;
   /** Trains only: where `price` came from. Absent on older trips. */
   priceSource?: RailPriceSource;
+  /** The user's choice for this leg, kept through date / city edits. */
+  userChoice?: LegPreference;
 };
 
 export type DoorToDoorPart = {
@@ -95,6 +114,14 @@ export type Hotel = {
   maxGuests?: number;
   /** Set when the backend does not trust this row's price — see hotelScore.ts */
   priceSuspect?: boolean;
+  /** Why `priceSuspect` was set (backend `PriceSuspectReason`), for the words shown. */
+  priceSuspectReason?: string;
+  /**
+   * Set when the search this row came from was too thin to compare prices
+   * against (backend: fewer rows than its price check needs). Not a verdict —
+   * the price may well be right; we could not check it. See lib/hotelPriceTrust.ts.
+   */
+  priceUnverified?: boolean;
   /**
    * Reviews behind `rating`. Carried through from the provider so a re-rank
    * applies the same confidence discount the first ranking did — without it,
@@ -277,6 +304,10 @@ export type Trip = {
   /** The user's stated total-trip budget in USD, if they gave one. Lets the
    *  results page show a "you're over budget" warning when totalCost > budget. */
   budget?: number;
+  /** The planner's vibe answer, as saved in `trips.vibe`: one string, the
+   *  picked vibes joined with ", " ("Culture, Food"). Older trips carry a
+   *  single vibe ("Culture") or nothing. Read it as a list with `vibeList`. */
+  vibe?: string;
   /** Optional suggestion from the optimizer when shifting dates saves money. */
   dateShiftSuggestion?: {
     dayOffset: number;
@@ -408,11 +439,27 @@ export type HomeLeg = {
   stops: number;
   bookingUrl: string | null;
   alternatives?: Omit<HomeLeg, 'alternatives'>[];
+  /** The user's choice for this leg, kept through date / city edits. */
+  userChoice?: LegPreference;
 };
 
 export type PlanningAnswers = {
   destinations?: string[];
+  /**
+   * The vibes as ONE string — the picked vibes joined with ", " ("Culture,
+   * Food"), or free text. This is what every backend call takes (vibe
+   * suggestions, activity and restaurant picks, the AI chat) and what a
+   * saved trip stores in `trips.vibe`.
+   */
   vibe?: string;
+  /**
+   * The same vibes as a list (["Culture", "Food"]), up to three picked pills
+   * plus any typed text. Kept beside `vibe` for the planner's own UI: the
+   * "Trip so far" line and re-opening the vibe pills to edit. Absent on
+   * older answers — read them through `vibeList` (lib/vibes), which falls
+   * back to `vibe`.
+   */
+  vibes?: string[];
   dateRange?: { start: string; end: string };
   flexible?: boolean;
   travelers?: number;

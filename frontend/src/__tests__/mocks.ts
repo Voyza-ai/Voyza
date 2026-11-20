@@ -144,6 +144,7 @@ jest.mock('@/lib/api', () => ({
   reviseDestinations: jest.fn().mockResolvedValue({ type: 'answer', reply: '', aboutDestinations: false }),
   editPlan: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
   planChat: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
+  fetchTripWeather: jest.fn().mockResolvedValue(null),
   planChatSuggestions: jest.fn().mockResolvedValue({
     suggestions: ['Why this order of cities?', 'Make Barcelona cheaper', 'Pin Rome to dates', 'Add a day'],
   }),

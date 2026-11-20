@@ -16,6 +16,7 @@ import { parseDateInput, parseDateRangeInput } from '@/lib/parseDate';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { vibesFromAnswer } from '@/lib/vibeMap';
+import { dedupeVibes, joinVibes, pillsAndText, splitVibeText, vibeBubbleText, vibeList } from '@/lib/vibes';
 // `originAirportsForCity` is a VALUE import, so the 60 KB hot set lands in
 // this chunk. That is deliberate and it is what a hot set is for: the planner
 // is exactly the screen that has to answer an origin while someone types, and
@@ -32,11 +33,13 @@ import ConversationalPlanner from './ConversationalPlanner';
 import SearchProgress from './SearchProgress';
 import { startSearchProgress, type SearchProgressState } from '@/lib/searchProgress';
 import { capturedLabel, demoTripFor, openDemoTrip } from '@/lib/demoTrips';
+import { usePlannerLeaveGuard } from '@/hooks/usePlannerLeaveGuard';
 import { formatMinutes, humanDay, humanDayRange } from '@/lib/dateHelpers';
 import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
 import NightsPicker from './NightsPicker';
+import { moneyBucket, track } from '@/lib/track';
 
 /**
  * The three `LocationAnswer` branches collapsed to the `string[]` that
@@ -272,8 +275,12 @@ export default function PlanningChat() {
   const [isComplete, setIsComplete] = useState(false);
   const [showIntent, setShowIntent] = useState(false);
   const [vibe, setVibe] = useState<string | null>(null);
+  // The vibe step's picked pills, before Continue.
+  const [vibeDraft, setVibeDraft] = useState<string[]>([]);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editingMsgValue, setEditingMsgValue] = useState('');
+  // Editing the vibe answer re-opens the pills: these are its picks.
+  const [editingVibePills, setEditingVibePills] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const initialized = useRef(false);
@@ -471,6 +478,7 @@ export default function PlanningChat() {
       budget: 'budget',
     };
     setAnswer('planningMode', modeMap[selectedIntent]);
+    track('plan_started', { mode: modeMap[selectedIntent] });
 
     const labels: Record<string, string> = {
       place: 'I have a place in mind',
@@ -722,7 +730,7 @@ export default function PlanningChat() {
         warnIfMock(parsed);
 
         // Store anything else the AI extracted from the destination text
-        if (parsed.vibe && !answers.vibe) setAnswer('vibe', parsed.vibe);
+        if (parsed.vibe && !answers.vibe) commitVibes(splitVibeText(parsed.vibe));
         if (parsed.travelers && !answers.travelers) setAnswer('travelers', parsed.travelers);
         if (parsed.budget && !answers.budget) setAnswer('budget', parsed.budget);
         if (typeof parsed.budgetPerPerson === 'boolean' && answers.budgetPerPerson === undefined) {
@@ -839,12 +847,33 @@ export default function PlanningChat() {
   // Open chat submit — user types everything at once. Calls AI interpret
   // immediately, then asks only for whatever's missing (budget, vibe, etc.)
   // before going to Find my trip.
-  const handleVibeSelect = (selectedVibe: string) => {
-    setVibe(selectedVibe);
-    setAnswer('vibe', selectedVibe);
+  /**
+   * Store the vibes: the list for the planner's own UI and, joined, the one
+   * string the backend and the saved trip take ("Culture, Food").
+   */
+  const commitVibes = (list: string[]) => {
+    const vibes = dedupeVibes(list);
+    if (vibes.length === 0) return;
+    setVibe(vibes[0]);
+    setAnswer('vibes', vibes);
+    setAnswer('vibe', joinVibes(vibes));
+  };
+
+  /**
+   * Confirm the vibe step: the picked pills plus anything typed in the bar
+   * ("Culture" + "food" → Culture, food). Typed text alone still works, as
+   * it always has; "beach and food" counts as two vibes.
+   */
+  const handleVibeConfirm = (typed?: string) => {
+    const text = (typed ?? '').trim();
+    const vibes = dedupeVibes([...vibeDraft, ...splitVibeText(text)]);
+    if (vibes.length === 0) return;
+    commitVibes(vibes);
+    setVibeDraft([]);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: selectedVibe, stepId: 'vibe' },
+      // The bubble keeps the traveller's own words for what they typed.
+      { id: nextId(), role: 'user', content: vibeBubbleText(text ? [...vibeDraft, text] : vibes), stepId: 'vibe' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -990,8 +1019,7 @@ export default function PlanningChat() {
     // these bubbles when a fact is clicked: an edit that changed only the
     // bubble would leave the summary (and the search) on the old answer.
     if (stepId === 'vibe') {
-      setVibe(text.trim());
-      setAnswer('vibe', text.trim());
+      commitVibes(splitVibeText(text));
       return true;
     }
 
@@ -1228,7 +1256,7 @@ export default function PlanningChat() {
         selectedHotelIndex: 0,
         activities: [],
         restaurants: [],
-        vibes: vibesFromAnswer(answers.vibe),
+        vibes: vibesFromAnswer(vibeList(answers)),
       };
     });
 
@@ -1293,6 +1321,8 @@ export default function PlanningChat() {
       }
     : null;
   const [findTripError, setFindTripError] = useState<string | null>(null);
+  // Ask before leaving once something is answered, until Find my trip runs.
+  usePlannerLeaveGuard(findTripLoading);
 
   // City selection state — shown when user mentions countries
   const [citySelectionData, setCitySelectionData] = useState<{
@@ -1355,10 +1385,13 @@ export default function PlanningChat() {
     const hasDates = answers.dateRange?.start || parsed?.dates?.start;
     const hasTravelers = typeof answers.travelers === 'number' || typeof parsed?.travelers === 'number';
     const hasBudget = typeof answers.budget === 'number' || typeof parsed?.budget === 'number';
-    const hasOrigin = !!(answers.origin || parsed?.origin);
-    const hasRoundTrip =
-      typeof answers.returnToHome === 'boolean' ||
-      typeof parsed?.returnToHome === 'boolean';
+    // Where they fly from and round-trip vs one-way are ASKED unless the
+    // traveller already answered them here. The interpret guess was used to
+    // skip both questions but never stored, so "flying out of Paris to
+    // London…" lost its home city, and a mid-route "back to Paris" read as
+    // round-trip.
+    const hasOrigin = !!answers.origin;
+    const hasRoundTrip = typeof answers.returnToHome === 'boolean';
     const travelersAmbiguous = parsed?.travelersAmbiguous === true && hasTravelers;
     const budgetPerPersonKnown =
       typeof answers.budgetPerPerson === 'boolean' ||
@@ -1523,6 +1556,15 @@ export default function PlanningChat() {
     const travelers = parsed.travelers ?? answers.travelers ?? 1;
     setFindTripLoading(true);
     setFindTripError(null);
+    const searchStarted = Date.now();
+    track('trip_search_started', {
+      mode: answers.planningMode ?? 'destination',
+      cities: Array.isArray(parsed.destinations) ? parsed.destinations.length : null,
+      travelers,
+      nights: typeof answers.nights === 'number' ? answers.nights : null,
+      round_trip: answers.returnToHome !== false,
+      has_budget: typeof (parsed.budget ?? answers.budget) === 'number',
+    });
 
     try {
       // Normalize whatever the user / AI produced into YYYY-MM-DD. The
@@ -1788,6 +1830,13 @@ export default function PlanningChat() {
         trip.budget = totalBudget;
       }
 
+      // The vibes the picks were asked for, as the one string a saved trip
+      // keeps in `trips.vibe` ("Culture, Food").
+      const tripVibe = parsed.vibe ?? answers.vibe;
+      if (typeof tripVibe === 'string' && tripVibe.trim()) {
+        trip.vibe = tripVibe.trim();
+      }
+
       // Vibe-first only: attach Claude's "bump your budget by $X" hint
       // when present so the results page can render a banner. Caller
       // passes this in via parsed.vibeTierUp; absent for non-vibe flows.
@@ -1807,9 +1856,16 @@ export default function PlanningChat() {
       // AI picks fill in when they answer (startTripPicks).
       startTripPicks(trip, picksRequests, picksInFlight);
       setSearchProgress((s) => (s ? { ...s, phase: 'opening' } : s));
+      track('trip_search_succeeded', {
+        cities: trip.cities.length,
+        travelers: trip.travelers,
+        seconds: Math.round((Date.now() - searchStarted) / 1000),
+        total: moneyBucket(trip.totalCost),
+      });
       router.push('/results');
     } catch (err: unknown) {
       const friendly = plannerErrorMessage(err);
+      track('trip_search_failed', { seconds: Math.round((Date.now() - searchStarted) / 1000), error: String(friendly).slice(0, 80) });
       setFindTripError(friendly);
       setMessages((prev) => {
         // Avoid stacking identical error bubbles if the user spams the button.
@@ -2066,6 +2122,26 @@ export default function PlanningChat() {
   const canReviseDestinations =
     !!intent && intent !== 'chat' && (answers.destinations?.length ?? 0) > 0 && !citySelectionData;
 
+  // Editing the vibe answer re-opens the pills with the current picks; any
+  // vibe that isn't a pill comes back as text beside them.
+  const openVibeEditor = () => {
+    const { pills, text } = pillsAndText(vibeList(useTripStore.getState().answers));
+    setEditingVibePills(pills);
+    setEditingMsgValue(text);
+  };
+  const saveVibeEdit = (msgId: string) => {
+    const text = editingMsgValue.trim();
+    const vibes = dedupeVibes([...editingVibePills, ...splitVibeText(text)]);
+    if (vibes.length === 0) return; // a vibe answer can't be saved empty
+    commitVibes(vibes);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId ? { ...m, content: vibeBubbleText(text ? [...editingVibePills, text] : vibes) } : m,
+      ),
+    );
+    setEditingMsgId(null);
+  };
+
   // ── Running trip summary: clicking a fact revises that answer ─────────
   //
   // Guided mode opens the answer's own bubble in its inline editor (the
@@ -2101,6 +2177,7 @@ export default function PlanningChat() {
     if (!bubble) return;
     setEditingMsgId(bubble.id);
     setEditingMsgValue(bubble.content.replace(/^📍\s*/, ''));
+    if (bubble.stepId === 'vibe') openVibeEditor();
     requestAnimationFrame(() => {
       document
         .querySelector(`[data-msg-id="${bubble.id}"]`)
@@ -2156,6 +2233,11 @@ export default function PlanningChat() {
 
   const handleBarSubmit = () => {
     const value = textInput.trim();
+    // The vibe step: Enter in an empty bar confirms the picked pills.
+    if (!value && !revising && !isComplete && currentStep?.type === 'vibes' && vibeDraft.length > 0) {
+      handleVibeConfirm();
+      return;
+    }
     if (!value || revising) return;
     // After "Perfect — I've got everything" the bar stays only for
     // destination corrections; any other text gets a pointer to the
@@ -2223,7 +2305,7 @@ export default function PlanningChat() {
         return;
       }
       case 'vibes':
-        handleVibeSelect(value);
+        handleVibeConfirm(value);
         setTextInput('');
         return;
       case 'dates': {
@@ -2442,7 +2524,52 @@ export default function PlanningChat() {
                 transition={{ duration: 0.35, ease: 'easeOut' }}
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                {msg.role === 'user' && editingMsgId === msg.id ? (
+                {msg.role === 'user' && editingMsgId === msg.id && msg.stepId === 'vibe' ? (
+                  /* Editing the vibe answer: the pills again, with the
+                     current picks, and any typed vibe beside them. */
+                  <div className="w-full flex flex-col gap-3" data-testid="vibe-editor">
+                    <VibePills
+                      selected={editingVibePills}
+                      onChange={setEditingVibePills}
+                      onContinue={() => saveVibeEdit(msg.id)}
+                      hideContinue
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={editingMsgValue}
+                        onChange={(e) => setEditingMsgValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            saveVibeEdit(msg.id);
+                          }
+                          if (e.key === 'Escape') setEditingMsgId(null);
+                        }}
+                        placeholder="Or describe your vibe..."
+                        aria-label="Describe your vibe"
+                        className="flex-1 min-w-0 bg-white border border-gray-200 rounded-full px-4 py-2 text-[15px] text-gray-900 placeholder-gray-500 outline-none focus:border-[#2563eb]/60"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditingMsgId(null)}
+                        className="flex items-center gap-1 text-[12px] text-gray-500 hover:text-gray-800 transition-colors px-2 py-1"
+                      >
+                        <X size={12} />
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveVibeEdit(msg.id)}
+                        disabled={editingVibePills.length === 0 && !editingMsgValue.trim()}
+                        className="flex items-center gap-1 text-[12px] text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-1 transition-all disabled:opacity-40"
+                      >
+                        <Check size={12} />
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : msg.role === 'user' && editingMsgId === msg.id ? (
                   /* Inline edit mode for user messages */
                   <div className="max-w-[80%] flex flex-col gap-2">
                     <textarea
@@ -2518,6 +2645,7 @@ export default function PlanningChat() {
                         onClick={() => {
                           setEditingMsgId(msg.id);
                           setEditingMsgValue(msg.content);
+                          if (msg.stepId === 'vibe') openVibeEditor();
                         }}
                         className="absolute -left-8 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                         style={{ background: '#ffffff', boxShadow: 'inset 0 0 0 1px #e5e7eb' }}
@@ -2576,7 +2704,16 @@ export default function PlanningChat() {
               className="mt-1"
             >
               {currentStep.type === 'vibes' && (
-                <VibePills onSelect={handleVibeSelect} />
+                <VibePills
+                  selected={vibeDraft}
+                  onChange={setVibeDraft}
+                  onContinue={() => {
+                    const typed = textInput;
+                    setTextInput('');
+                    handleVibeConfirm(typed);
+                  }}
+                  canContinue={vibeDraft.length > 0 || textInput.trim().length > 0}
+                />
               )}
               {currentStep.type === 'dates' && (
                 <DatePicker onSelect={handleDatesSelect} onSkip={handleSkip} />

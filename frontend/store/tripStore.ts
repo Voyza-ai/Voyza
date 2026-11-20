@@ -12,6 +12,8 @@ import {
 } from '@/lib/api';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { applyUserEdit, reconcileTripTransport } from '@/lib/transportReconcile';
+import { syncTripSchedules } from '@/lib/scheduleSync';
+import { isApplyingRemote } from '@/lib/tripCollab';
 import { liveTripTotal } from '@/lib/tripTotals';
 import type { CanvasIntent } from '@/lib/canvasHandoff';
 import { coordsOf, hasCoords, type TravelLegs } from '@/lib/geoSchedule';
@@ -250,11 +252,13 @@ export const useTripStore = create<TripStore>((set) => ({
       if (!chosen) return state;
       // Move the currently picked option into alternatives (without its own
       // nested alternatives) and pull the chosen one out.
-      const { alternatives: _chosenAlts, ...chosenFlat } = chosen;
-      const { alternatives: _curAlts, ...currentFlat } = currentOut;
+      const { alternatives: _chosenAlts, userChoice: _chosenPref, ...chosenFlat } = chosen;
+      const { alternatives: _curAlts, userChoice: _curPref, ...currentFlat } = currentOut;
       const newAlts: Transport[] = alts.filter((_, i) => i !== alternativeIndex);
       newAlts.unshift(currentFlat);
-      const newOut: Transport = { ...chosenFlat, alternatives: newAlts };
+      // A hand pick is the user's choice: a later date edit keeps its time.
+      const userChoice = { source: 'card' as const, departTime: chosenFlat.departTime ?? null, operator: chosenFlat.operator || null };
+      const newOut: Transport = { ...chosenFlat, alternatives: newAlts, userChoice };
       cities[cityIndex] = { ...c, transportOut: newOut };
       // Keep the next city's transportIn in sync (strip alternatives).
       if (cityIndex + 1 < cities.length) {
@@ -278,10 +282,12 @@ export const useTripStore = create<TripStore>((set) => ({
       if (!chosen) return state;
       // Move current pick into alternatives, pull the chosen one to main.
       // alternatives entries are Omit<HomeLeg, 'alternatives'> by design.
-      const { alternatives: _curAlts, ...currentFlat } = current;
+      const { alternatives: _curAlts, userChoice: _curPref, ...currentFlat } = current;
       const newAlts = alts.filter((_, i) => i !== alternativeIndex);
       newAlts.unshift(currentFlat);
-      const newLeg = { ...chosen, alternatives: newAlts };
+      // A hand pick is the user's choice: a later date edit keeps its time.
+      const userChoice = { source: 'card' as const, departTime: chosen.departTime ?? null, operator: chosen.operator || null };
+      const newLeg = { ...chosen, alternatives: newAlts, userChoice };
       // The first stay starts the day the outbound LANDS. Swapping an
       // overnight flight for a same-day one (or back) moves that day, and the
       // stay with it — a night gained or lost in the first city. The search
@@ -477,7 +483,7 @@ export async function requestCityPicks(req: CityPicksRequest): Promise<CityPicks
     searchActivities({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, nights: req.nights, otherCities: req.otherCities }).catch(
       () => [] as ActivitySuggestion[],
     ),
-    searchRestaurants({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, budget: req.budget, otherCities: req.otherCities }).catch(
+    searchRestaurants({ city: req.city, country: req.country, vibe: req.vibe, travelers: req.travelers, budget: req.budget, nights: req.nights, otherCities: req.otherCities }).catch(
       () => [] as RestaurantSuggestion[],
     ),
   ]);
@@ -972,8 +978,32 @@ export function restoreTripSession(): boolean {
   return true;
 }
 
+/**
+ * The same trip before and after an update — as against another trip put in
+ * its place (a new planner search, another saved trip opened).
+ */
+function sameTrip(a: Trip, b: Trip): boolean {
+  if (a.id || b.id) return a.id === b.id;
+  return (a.picksRun ?? null) === (b.picksRun ?? null);
+}
+
 // Browser only: on the server this module is shared by every request.
 if (typeof window !== 'undefined') {
+  // Date and transport edits reach the day plans as they happen, whichever
+  // view is open: an AI chat edit accepted, the − / + nights on a city card,
+  // a flight swapped, a flight home searched again for a new last day. With
+  // the trip as it was, the sync knows which days a stay gained (they take
+  // its unused picks, then its defaults) and which it lost (lib/scheduleSync).
+  // A collaborator's change arrives already synced on their screen.
+  useTripStore.subscribe((state, prev) => {
+    const next = state.currentTrip;
+    const before = prev.currentTrip;
+    if (!next || !before || next === before || !sameTrip(before, next)) return;
+    if (isApplyingRemote()) return;
+    const synced = syncTripSchedules(before, next);
+    if (synced !== next) useTripStore.setState({ currentTrip: synced });
+  });
+
   useTripStore.subscribe((state, prev) => {
     if (
       state.currentTrip === prev.currentTrip &&

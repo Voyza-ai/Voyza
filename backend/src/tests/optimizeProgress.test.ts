@@ -135,9 +135,13 @@ describe('optimize progress reporting', () => {
     expect(seen.find((p) => p.stage === 'finishing')?.bestOrder).toEqual(withProgress.bestRoute.ordering);
 
     const final = readProgress('test-run-1')!;
-    // A comparison is a pair ON a day: each of the 6 directed pairs can be the
-    // first or the second leg of an order, on different days — 12 in all.
-    expect(final.legsAsked).toBe(12);
+    // A comparison is a pair ON a train day. Ranking prices each of the 6
+    // directed pairs once, with its trains on the trip's first travel day
+    // (the rail-quota rule in optimizer.ts) — but a pair's flights are still
+    // searched on each day an order puts it, so 12 comparisons — and the
+    // winner's second leg is then re-priced with its trains on its real day:
+    // 13 in all.
+    expect(final.legsAsked).toBe(13);
     expect(final.legsPriced).toBe(final.legsAsked);
     // Counted where the run dedupes its searches: never more than were sent.
     expect(final.flightSearches).toBeGreaterThan(0);

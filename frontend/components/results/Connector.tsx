@@ -28,6 +28,7 @@ import {
   railPriceShort,
   trainCo2SavingPct,
 } from '@/lib/legFacts';
+import { arrivesNextDay } from '@/lib/cityLegs';
 
 type ConnectorProps = {
   transport: Transport;
@@ -222,7 +223,7 @@ export default function Connector({
               <div className="text-gray-700 text-[10px] mt-1.5 flex items-center gap-1 font-mono leading-none">
                 <span>{transport.departTime || '—:—'}</span>
                 <ArrowRight size={8} className="text-gray-500" />
-                <span>{transport.arriveTime || '—:—'}</span>
+                <span>{transport.arriveTime || '—:—'}{arrivesNextDay(transport) ? ' +1' : ''}</span>
               </div>
             </div>
 
@@ -370,6 +371,7 @@ export default function Connector({
             <div className="flex-1 min-w-0 text-right">
               <div className="text-gray-900 text-[18px] font-mono font-semibold tabular-nums leading-none">
                 {transport.arriveTime || '—'}
+                {arrivesNextDay(transport) && <span className="text-[11px] text-gray-500 align-super ml-0.5">+1</span>}
               </div>
               <div className="text-gray-700 text-[12px] mt-1 leading-tight truncate">
                 {transport.to || '—'}

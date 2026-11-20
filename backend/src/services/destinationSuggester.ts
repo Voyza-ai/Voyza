@@ -33,6 +33,7 @@ import {
   buildDestinationSuggestionsUserMessage,
   SuggestDestinationsInput,
 } from '../prompts/destinationSuggestions';
+import { createMessage } from './aiUsage';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -391,8 +392,13 @@ const FALLBACK_BY_VIBE: Record<string, DestinationSuggestion[]> = {
 };
 
 function resolveFallback(vibe: string): DestinationSuggestion[] {
-  const key = vibe.trim().toLowerCase();
-  return FALLBACK_BY_VIBE[key] ?? [];
+  // Several picked vibes arrive joined ("Culture, Adventure"): the first one
+  // with a curated list answers for the trip.
+  for (const part of vibe.split(',')) {
+    const hit = FALLBACK_BY_VIBE[part.trim().toLowerCase()];
+    if (hit) return hit;
+  }
+  return [];
 }
 
 // ─── Main entry point ────────────────────────────────────────
@@ -441,7 +447,7 @@ export async function suggestDestinationsForVibe(
   if (anthropic) {
     for (attempts = 1; attempts <= MAX_ATTEMPTS; attempts++) {
       try {
-        const response = await anthropic.messages.create({
+        const response = await createMessage(anthropic, 'destination_suggester', {
           model: DEFAULT_MODEL,
           max_tokens: 2048,
           temperature: TEMPERATURE,

@@ -8,7 +8,9 @@ import { X, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 import { isUnconfirmedEmailError, safeReturnPath } from '@/lib/authEmail';
+import { allowUnload } from '@/lib/leaveGuard';
 import UnconfirmedEmailNotice from './UnconfirmedEmailNotice';
+import { track } from '@/lib/track';
 
 /** The page the modal is open on, if it's one worth coming back to. */
 const here = (): string | null =>
@@ -60,6 +62,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess, subtitle = 'Sig
     });
 
     setLoading(false);
+    if (!authError) track('logged_in', { method: 'password' });
 
     if (authError) {
       setError(authError.message);
@@ -109,6 +112,9 @@ export default function LoginModal({ isOpen, onClose, onSuccess, subtitle = 'Sig
       sessionStorage.setItem('voyza.oauth_return_to', window.location.pathname + window.location.search);
     }
 
+    // The redirect is the app's own: a page that asks before it is left (an
+    // unsaved trip, whose save this sign-in carries) must not stop it.
+    const undoAllowUnload = allowUnload();
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -119,6 +125,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess, subtitle = 'Sig
     // navigating to Google. We won't reach the code after this except on
     // error.
     if (authError) {
+      undoAllowUnload();
       setLoading(false);
       setError(authError.message);
     }

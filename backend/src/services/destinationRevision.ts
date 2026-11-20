@@ -2,6 +2,7 @@ import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
 import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
 import { checkCityName } from './cityEdit';
+import { createMessage } from './aiUsage';
 
 /**
  * Planning-phase destination revision: POST /api/plan/revise-destinations.
@@ -220,7 +221,7 @@ export async function reviseDestinations(params: {
   const { message, destinations, history = [], currentQuestion } = params;
   let response: any;
   try {
-    response = await anthropic.messages.create({
+    response = await createMessage(anthropic, 'destination_revision', {
       model: DEFAULT_MODEL,
       max_tokens: 500,
       system: systemPrompt(destinations, currentQuestion),

@@ -3,7 +3,10 @@ import { logger } from '../utils/logger';
 import { MAX_STAY_NIGHTS } from './constraints';
 import { searchHotels, roomsFor, type HotelResult } from './hotels';
 import { searchLegOptions, type LegOption } from './legOptions';
-import { buildHomeLeg, firstStayArrival, type HomeLeg } from './optimizer';
+import { firstStayArrival, searchHomeLegOptions, type HomeLeg } from './optimizer';
+import { pickByPreference, readPreference, type LegPreference } from './legPreference';
+import { cityGeo, groundEstimateHours, km, noSensibleFlight, rankInsertions, type CityGeo, type Insertion } from './routeGeo';
+import { formatMinutes } from './tripLegs';
 import { getCityCountry } from '../data/cityCountries';
 import { resolve } from './location/resolve';
 import { originIndex } from './location/originAirports';
@@ -36,9 +39,21 @@ import { originIndex } from './location/originAirports';
  */
 
 export type CityEditOp =
-  | { kind: 'add'; city: string; afterCity?: string | null; beforeCity?: string | null; nights?: number | null }
+  | {
+      kind: 'add';
+      city: string;
+      afterCity?: string | null;
+      beforeCity?: string | null;
+      nights?: number | null;
+      /** True only when the USER said where; otherwise the server places it (least detour). */
+      userSaidWhere?: boolean;
+    }
   | { kind: 'remove'; city: string }
-  | { kind: 'replace'; oldCity: string; newCity: string };
+  | { kind: 'replace'; oldCity: string; newCity: string }
+  /** pin_city_dates / set_min_days: the same cities on new dates. */
+  | { kind: 'dates'; city: string }
+  /** reorder_cities: the same cities, each keeping its nights, in a new order. */
+  | { kind: 'reorder'; order: string[] };
 
 export type Stop = { name: string; arrival: string; departure: string };
 
@@ -80,6 +95,8 @@ export function planCityEdit(
   op: CityEditOp,
 ): { ok: true; plan: CityEditPlan } | { ok: false; reason: string } {
   if (stops.length === 0) return { ok: false, reason: 'this trip has no cities yet' };
+  if (op.kind === 'dates') return { ok: false, reason: 'that is a date change, not a city edit' };
+  if (op.kind === 'reorder') return planReorder(stops, op.order);
   const names = stops.map((s) => s.name).join(', ');
   const indexOf = (city: string) => stops.findIndex((s) => sameName(s.name, city));
   const kept = (s: Stop, i: number): PlannedStop => ({ ...s, status: 'kept', fromIndex: i });
@@ -272,14 +289,20 @@ export type CityEditLeg = {
   from: string;
   to: string;
   date: string;
-  /** Cheapest first, flights and trains mixed (searchLegOptions). Empty = nothing found. */
+  /** options[0] is the pick: the user's choice kept, else the cheapest sensible one. Empty = nothing found. */
   options: LegOption[];
+  /** The user's choice for this pair, carried to the new leg. */
+  userChoice?: LegPreference;
+  /** No sensible flight exists (the fastest is far beyond the distance): shown on the card. */
+  flag?: { fastestMinutes: number; stops: number; groundHours: [number, number] | null };
 };
 
 export type CityEditProposal = {
   kind: 'city_edit';
-  toolName: 'add_city' | 'remove_city' | 'replace_city';
+  toolName: 'add_city' | 'remove_city' | 'replace_city' | 'pin_city_dates' | 'set_min_days' | 'reorder_cities';
   op: CityEditOp;
+  /** pin_city_dates / set_min_days: the trip's constraints once accepted. */
+  constraints?: unknown;
   before: Stop[];
   after: Array<PlannedStop & { hotels?: HotelResult[] }>;
   removed: string[];
@@ -288,6 +311,10 @@ export type CityEditProposal = {
   outboundLeg?: HomeLeg | null;
   returnLeg?: HomeLeg | null;
   note: string;
+  /** What a re-search did with a leg the user had chosen (kept, or not possible), and legs with no sensible flight. */
+  choiceNotes?: string[];
+  /** Where an added city went and why, or a warning about the position the user named. */
+  placementNote?: string;
 };
 
 function stopsOf(trip: any): Stop[] {
@@ -316,8 +343,25 @@ export async function buildCityEditProposal(
   if (before.some((s) => !s.arrival || !s.departure)) {
     return { type: 'answer', reply: "I couldn't change the cities: some of them have no dates yet." };
   }
+  if (op.kind === 'dates') return { type: 'answer', reply: "I couldn't change the dates." };
   const attempt =
-    op.kind === 'add' ? `add ${op.city}` : op.kind === 'remove' ? `remove ${op.city}` : `replace ${op.oldCity} with ${op.newCity}`;
+    op.kind === 'add'
+      ? `add ${op.city}`
+      : op.kind === 'remove'
+        ? `remove ${op.city}`
+        : op.kind === 'reorder'
+          ? 'reorder the cities'
+          : `replace ${op.oldCity} with ${op.newCity}`;
+
+  // Where an added city goes: the user's slot when they named one (with a
+  // warning if it leaves a country and comes back), else the least detour.
+  let placementNote: string | undefined;
+  if (op.kind === 'add') {
+    const addOp = op;
+    const placed = before.some((s) => sameName(s.name, addOp.city)) ? { op: addOp, note: undefined } : placeAddedCity(currentTrip, before, addOp);
+    op = placed.op;
+    placementNote = placed.note;
+  }
 
   const planned = planCityEdit(before, op);
   if (!planned.ok) return { type: 'answer', reply: `I couldn't ${attempt}: ${planned.reason}.` };
@@ -329,6 +373,166 @@ export async function buildCityEditProposal(
     const check = checkCityName(newCity, others);
     if (!check.ok) return { type: 'answer', reply: check.reply };
   }
+  const priced = await priceCityEditPlan(currentTrip, toolName, op, before, plan, attempt);
+  if (priced.type === 'proposal' && placementNote) priced.proposal.placementNote = placementNote;
+  return priced;
+}
+
+/**
+ * Put an added city where it adds the least detour (no country left and
+ * re-entered when that can be avoided), unless the user said where — then
+ * obey, and warn in one line when their slot backtracks.
+ */
+function placeAddedCity(
+  currentTrip: any,
+  stops: Stop[],
+  op: Extract<CityEditOp, { kind: 'add' }>,
+): { op: Extract<CityEditOp, { kind: 'add' }>; note?: string } {
+  const names = stops.map((s) => s.name);
+  const geos = names.map((n) => cityGeo(n, names));
+  const added = cityGeo(op.city, names);
+  if (!added || geos.some((g) => !g)) return { op };
+  const homeName = currentTrip?.origin?.city;
+  const home = homeName ? cityGeo(String(homeName)) : null;
+  const returnsHome = (currentTrip?.returnToHome ?? true) !== false;
+  const ranked = rankInsertions(geos as CityGeo[], added, home, returnsHome);
+  const best = ranked[0];
+  const slotOf = (index: number) => (index === 0 ? { beforeCity: names[0], afterCity: null } : { afterCity: names[index - 1], beforeCity: null });
+  const where = (index: number) =>
+    index === 0 ? `before ${names[0]}` : index === names.length ? `after ${names[names.length - 1]}` : `between ${names[index - 1]} and ${names[index]}`;
+  const countryName = (code: string) => {
+    try {
+      return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) ?? code;
+    } catch {
+      return code;
+    }
+  };
+  const sameCountry = (geos as CityGeo[]).some((g) => g.country === added.country);
+  const why = (ins: Insertion) =>
+    sameCountry && ins.splits === 0
+      ? `so you stay in ${countryName(added.country)} without leaving and coming back`
+      : `where it adds the least travel (about ${Math.max(0, Math.round(ins.extraKm))} km)`;
+
+  if (op.userSaidWhere && (op.afterCity || op.beforeCity)) {
+    const idx = op.beforeCity
+      ? names.findIndex((n) => sameName(n, op.beforeCity!))
+      : names.findIndex((n) => sameName(n, op.afterCity!)) + 1;
+    const mine = ranked.find((x) => x.index === idx);
+    if (mine && mine.splits > best.splits) {
+      return {
+        op,
+        note: `Heads-up: there it leaves ${countryName(added.country)} and comes back; ${where(best.index)} would avoid that.`,
+      };
+    }
+    return { op };
+  }
+  return {
+    op: { ...op, ...slotOf(best.index) },
+    note: `I put ${op.city} ${where(best.index)}, ${why(best)}.`,
+  };
+}
+
+/** The same cities in a new order, each keeping its nights, chained from the trip's first day. */
+function planReorder(stops: Stop[], order: string[]): { ok: true; plan: CityEditPlan } | { ok: false; reason: string } {
+  const names = stops.map((s) => s.name);
+  if (order.length !== stops.length) {
+    return { ok: false, reason: `the new order has to name each of ${names.join(', ')} once` };
+  }
+  const picked = order.map((n) => stops.findIndex((s) => sameName(s.name, n)));
+  if (picked.some((i) => i < 0) || new Set(picked).size !== picked.length) {
+    return { ok: false, reason: `the new order has to name each of ${names.join(', ')} once` };
+  }
+  if (picked.every((i, k) => i === k)) return { ok: false, reason: 'that is the order the trip already has' };
+  let day = stops[0].arrival;
+  const after: PlannedStop[] = picked.map((i) => {
+    const s = stops[i];
+    const nights = nightsBetween(s.arrival, s.departure);
+    const arrival = day;
+    const departure = addDays(arrival, nights);
+    day = departure;
+    const moved = arrival !== s.arrival || departure !== s.departure;
+    return { name: s.name, arrival, departure, status: moved ? 'moved' : 'kept', fromIndex: i };
+  });
+  const hotels = after.map((s, i) => (s.status === 'moved' ? i : -1)).filter((i) => i >= 0);
+  // Every pair that is new, or whose travel day moved.
+  const oldPair = (a: string, b: string) => stops.findIndex((s, k) => sameName(s.name, a) && stops[k + 1] && sameName(stops[k + 1].name, b));
+  const legs: number[] = [];
+  for (let i = 0; i < after.length - 1; i++) {
+    const k = oldPair(after[i].name, after[i + 1].name);
+    if (k < 0 || stops[k].departure !== after[i].departure) legs.push(i);
+  }
+  const lastOld = stops[stops.length - 1];
+  const lastNew = after[after.length - 1];
+  return {
+    ok: true,
+    plan: {
+      after,
+      removed: [],
+      hotels,
+      legs,
+      outbound: !sameName(after[0].name, stops[0].name),
+      ret: !sameName(lastNew.name, lastOld.name) || lastNew.departure !== lastOld.departure,
+      note: `New order: ${after.map((s) => `${s.name} (${plural(nightsBetween(s.arrival, s.departure), 'night')})`).join(' → ')}.`,
+    },
+  };
+}
+
+/**
+ * The same cities on new dates (an accepted pin or minimum stay), as a plan
+ * to price: every stay whose dates moved has its hotels searched, every leg
+ * whose day moved is re-priced, and a home flight whose day moved is
+ * re-searched — so the card states the exact total Accept gives, instead of
+ * the page re-searching after Accept and the header moving by an amount the
+ * user was never shown (live: "6 nights in Paris" swapped the flight home to
+ * another airline, +$4, with no price on the card).
+ */
+export function planDateEdit(before: Stop[], newDates: Stop[]): CityEditPlan {
+  const fmt = (iso: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}` : iso;
+  };
+  const after: PlannedStop[] = newDates.map((s, i) => ({
+    ...s,
+    status: s.arrival !== before[i].arrival || s.departure !== before[i].departure ? 'moved' : 'kept',
+    fromIndex: i,
+  }));
+  const hotels = after.map((s, i) => (s.status === 'moved' ? i : -1)).filter((i) => i >= 0);
+  const legs: number[] = [];
+  for (let i = 0; i < after.length - 1; i++) if (after[i].departure !== before[i].departure) legs.push(i);
+  const last = after.length - 1;
+  const moved = after
+    .filter((s) => s.status === 'moved')
+    .map((s) => `${s.name} ${fmt(s.arrival)}–${fmt(s.departure)} (${plural(nightsBetween(s.arrival, s.departure), 'night')})`);
+  const bits = [moved.length ? `New dates: ${moved.join(', ')}.` : ''];
+  if (after[0] && after[0].arrival !== before[0].arrival) bits.push(`Your flight out moves to ${fmt(after[0].arrival)}.`);
+  if (after[last] && after[last].departure !== before[last].departure) bits.push(`Your flight home moves to ${fmt(after[last].departure)}.`);
+  return {
+    after,
+    removed: [],
+    hotels,
+    legs,
+    outbound: !!after[0] && after[0].arrival !== before[0].arrival,
+    ret: !!after[last] && after[last].departure !== before[last].departure,
+    note: bits.filter(Boolean).join(' '),
+  };
+}
+
+/**
+ * Price a planned edit: hotels, legs and home flights the plan names. `start`
+ * overrides the day the outbound leaves (a date edit that moves the first
+ * stay moves it by the same number of days).
+ */
+export async function priceCityEditPlan(
+  currentTrip: any,
+  toolName: CityEditProposal['toolName'],
+  op: CityEditOp,
+  before: Stop[],
+  plan: CityEditPlan,
+  attempt: string,
+  startOverride?: string,
+): Promise<{ type: 'proposal'; proposal: CityEditProposal } | { type: 'answer'; reply: string }> {
+  const newCity = op.kind === 'add' ? op.city : op.kind === 'replace' ? op.newCity : null;
 
   const travelers = Number.isInteger(currentTrip?.travelers) && currentTrip.travelers > 0 ? currentTrip.travelers : 1;
   const tripCityNames = plan.after.map((s) => s.name);
@@ -347,10 +551,27 @@ export async function buildCityEditProposal(
     }
   });
 
+  const choiceNotes: string[] = [];
+  const fmtDate = (iso: string) => {
+    const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(iso);
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return m ? `${MONTHS[Number(m[1]) - 1]} ${Number(m[2])}` : iso;
+  };
+  // The trip's own leg for this pair, if it had one (a city edit can make new pairs).
+  const oldLegFor = (fromName: string, toName: string) => {
+    const cities: any[] = currentTrip?.cities ?? [];
+    const k = cities.findIndex((c, j) => sameName(String(c?.name ?? ''), fromName) && cities[j + 1] && sameName(String(cities[j + 1].name ?? ''), toName));
+    return k >= 0 ? cities[k].transportOut : null;
+  };
+
   const legJobs = plan.legs.map(async (i): Promise<CityEditLeg> => {
     const from = plan.after[i];
     const to = plan.after[i + 1];
     const date = from.departure;
+    const pref = readPreference(oldLegFor(from.name, to.name));
+    const fromGeo = cityGeo(from.name, tripCityNames);
+    const toGeo = cityGeo(to.name, tripCityNames);
+    const distance = fromGeo && toGeo ? km(fromGeo, toGeo) : null;
     try {
       const r = await searchLegOptions({
         from: from.name,
@@ -359,10 +580,26 @@ export async function buildCityEditProposal(
         travelers,
         fromCountry: countryOf(from.name),
         toCountry: countryOf(to.name),
-        limit: 4,
+        // Enough to keep a time preference and skip long journeys; the card keeps 4.
+        limit: 20,
         tripCityNames,
       });
-      return { index: i, from: from.name, to: to.name, date, options: r.options };
+      const picked = pickByPreference(r.options, pref, `${from.name} → ${to.name}`, fmtDate(date));
+      if (picked.note) choiceNotes.push(picked.note);
+      // No sensible flight at all (the fastest is far beyond the distance):
+      // still priced, but flagged, with a ground estimate — never a price.
+      let flag: CityEditLeg['flag'];
+      const fastest = r.options.filter((o) => o.durationMinutes > 0).sort((a, b) => a.durationMinutes - b.durationMinutes)[0];
+      if (fastest && distance != null && noSensibleFlight(fastest.durationMinutes, distance) && !r.options.some((o) => o.mode === 'train')) {
+        const ground = distance <= 1200 ? groundEstimateHours(distance) : null;
+        flag = { fastestMinutes: fastest.durationMinutes, stops: fastest.stops ?? 0, groundHours: ground };
+        choiceNotes.push(
+          `No sensible flight ${from.name} → ${to.name} (the fastest takes ${formatMinutes(fastest.durationMinutes)}${(fastest.stops ?? 0) > 0 ? ` with ${plural(fastest.stops ?? 0, 'stop')}` : ''})` +
+            (ground ? `; this trip is usually made by train or bus — about ${ground[0]}–${ground[1]}h by ground (an estimate from the distance; no fare shown).` : '.') +
+            ' The total includes that flight — swap it on the card if you go by ground.',
+        );
+      }
+      return { index: i, from: from.name, to: to.name, date, options: picked.ordered.slice(0, 4), ...(pref ? { userChoice: pref } : {}), ...(flag ? { flag } : {}) };
     } catch (err: any) {
       logger.warn('cityEdit: leg search failed', { from: from.name, to: to.name, message: err?.message });
       return { index: i, from: from.name, to: to.name, date, options: [] };
@@ -376,30 +613,60 @@ export async function buildCityEditProposal(
   const returnsHome = (currentTrip?.returnToHome ?? true) !== false;
   const wantOutbound = plan.outbound && !!origin?.city && airports.length > 0;
   const wantReturn = plan.ret && returnsHome && !!origin?.city && returnAirports.length > 0;
-  const start = tripStart(currentTrip, before);
+  const start = startOverride ?? tripStart(currentTrip, before);
   const first = plan.after[0];
   const lastStop = plan.after[plan.after.length - 1];
 
+  // A home flight re-searched for a new date or city: the user's choice for it
+  // kept (an evening flight home stays evening), else the cheapest sensible
+  // journey. Every option is read, not the cheapest few: a preference or the
+  // long-journey rule can rule out all of the cheapest.
+  const homeLegFor = async (
+    params: Parameters<typeof searchHomeLegOptions>[0],
+    old: any,
+    label: string,
+  ): Promise<HomeLeg | null> => {
+    const pref = readPreference(old);
+    const rows = await searchHomeLegOptions(params, Infinity);
+    if (rows.length === 0) return null;
+    const picked = pickByPreference(rows, pref, label, fmtDate(params.date));
+    if (picked.note) choiceNotes.push(picked.note);
+    const [main, ...rest] = picked.ordered;
+    return {
+      ...main,
+      ...(rest.length > 0 ? { alternatives: rest.slice(0, 3) } : {}),
+      ...(pref ? { userChoice: pref } : {}),
+    } as HomeLeg;
+  };
   const outboundJob = wantOutbound
-    ? buildHomeLeg({
-        originAirports: airports,
-        destinationCity: first.name,
-        date: clampToFuture(start),
-        travelers,
-        originCity: origin.city,
-        tripCityNames,
-      }).catch(() => null)
+    ? homeLegFor(
+        {
+          originAirports: airports,
+          destinationCity: first.name,
+          date: clampToFuture(start),
+          travelers,
+          originCity: origin.city,
+          tripCityNames,
+        },
+        // The same flight out only if it still goes to the same first city.
+        before[0] && sameName(before[0].name, first.name) ? origin?.outboundLeg : null,
+        'your flight out',
+      ).catch(() => null)
     : Promise.resolve(undefined);
   const returnJob = wantReturn
-    ? buildHomeLeg({
-        originAirports: returnAirports,
-        destinationCity: lastStop.name,
-        date: clampToFuture(lastStop.departure),
-        travelers,
-        reverse: true,
-        originCity: origin.returnCity ?? origin.city,
-        tripCityNames,
-      }).catch(() => null)
+    ? homeLegFor(
+        {
+          originAirports: returnAirports,
+          destinationCity: lastStop.name,
+          date: clampToFuture(lastStop.departure),
+          travelers,
+          reverse: true,
+          originCity: origin.returnCity ?? origin.city,
+          tripCityNames,
+        },
+        before[before.length - 1] && sameName(before[before.length - 1].name, lastStop.name) ? origin?.returnLeg : null,
+        'your flight home',
+      ).catch(() => null)
     : Promise.resolve(undefined);
 
   const [hotelResults, legs, outboundLeg, returnLeg] = await Promise.all([
@@ -460,10 +727,13 @@ export async function buildCityEditProposal(
   };
   if (outboundLeg !== undefined) proposal.outboundLeg = outboundLeg;
   if (returnLeg !== undefined) proposal.returnLeg = returnLeg;
+  if (choiceNotes.length > 0) proposal.choiceNotes = choiceNotes;
   return { type: 'proposal', proposal };
 }
 
 /** The chat's tool input → an op, or null when a required field is missing. */
+export { stopsOf, tripStart };
+
 export function cityEditOpFromTool(toolName: string, input: any): CityEditOp | null {
   const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
   if (toolName === 'add_city') {
@@ -476,6 +746,7 @@ export function cityEditOpFromTool(toolName: string, input: any): CityEditOp | n
       afterCity: str(input?.afterCity),
       beforeCity: str(input?.beforeCity),
       nights: nights == null ? null : nights,
+      userSaidWhere: input?.userSaidWhere === true,
     };
   }
   if (toolName === 'remove_city') {
@@ -486,6 +757,10 @@ export function cityEditOpFromTool(toolName: string, input: any): CityEditOp | n
     const oldCity = str(input?.old ?? input?.oldCity);
     const newCity = str(input?.new ?? input?.newCity);
     return oldCity && newCity ? { kind: 'replace', oldCity, newCity } : null;
+  }
+  if (toolName === 'reorder_cities') {
+    const order = Array.isArray(input?.order) ? input.order.map(str).filter((x: string | null): x is string => !!x) : [];
+    return order.length > 0 ? { kind: 'reorder', order } : null;
   }
   return null;
 }

@@ -32,7 +32,8 @@ import { tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
 import { formatMinutes } from '@/lib/dateHelpers';
 import { pickLegFacts } from '@/lib/legFacts';
 import { useAuthStore } from '@/store/authStore';
-import { useSavedTripAutosave } from '@/lib/useSavedTripAutosave';
+import { useSavedTripAutosave, useSavedTripUnsaved } from '@/lib/useSavedTripAutosave';
+import { useLeaveGuard, type LeaveGuardCopy } from '@/lib/leaveGuard';
 import { requestPicksForAddedCity } from '@/store/tripStore';
 import { useTripCollaboration } from '@/hooks/useTripCollaboration';
 import { isApplyingRemote, remoteAppliedWithin, rechainDates, staleLegIndices } from '@/lib/tripCollab';
@@ -44,6 +45,7 @@ import SuggestedCitiesPanel from '@/components/canvas/SuggestedCitiesPanel';
 import SuggestionsPanel from '@/components/canvas/SuggestionsPanel';
 import LoginModal from '@/components/shared/LoginModal';
 import { useNotificationsStore } from '@/store/notificationsStore';
+import { track as trackEvent } from '@/lib/track';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
 // during the static build pass. We split the page into an outer wrapper that
@@ -58,6 +60,16 @@ export default function ResultsPage() {
 
 /** Longest stay the nights stepper allows (the backend's MAX_STAY_NIGHTS). */
 const MAX_CITY_NIGHTS = 60;
+
+/** The leave dialog's words (lib/leaveGuard). */
+const UNSAVED_TRIP: LeaveGuardCopy = {
+  title: 'Leave this trip?',
+  body: "You haven't saved it yet, so it will be lost.",
+};
+const UNSENT_SUGGESTIONS: LeaveGuardCopy = {
+  title: 'Leave this trip?',
+  body: "You haven't sent your changes to the owner yet, so they will be lost.",
+};
 
 function ResultsPageInner() {
   const { currentTrip, setTrip } = useTripStore();
@@ -80,6 +92,28 @@ function ResultsPageInner() {
   // The trip as a shared, live document (what the canvas page used to be):
   // roles, share-link joins, presence, live edits, suggestions.
   const collab = useTripCollaboration(tripId, searchParams.get('share'));
+
+  // ── Ask before the trip is left with work that would be lost ──
+  // A trip never saved lives only in this tab: Back (a trackpad swipe) went to
+  // /plan, which wipes it. A saved trip is asked about only for a close or
+  // reload while a change is still being written — leaving inside the app
+  // writes it on the way out (useSavedTripAutosave) — and never when it is
+  // opened read-only. A suggester's changes live here until proposed.
+  const savedTripUnsaved = useSavedTripUnsaved((s) => s.unsaved);
+  const tripOnScreen =
+    !!currentTrip && (!tripId || currentTrip.id === tripId) && !loading && !error && !collab.accessGate;
+  const neverSaved = tripOnScreen && (!currentTrip!.id || currentTrip!.id.startsWith('mock'));
+  const unsentSuggestions = tripOnScreen && collab.hasLocalChanges;
+  const changeBeingWritten =
+    tripOnScreen && !neverSaved && savedTripUnsaved && (!collab.active || collab.role === 'owner');
+  useLeaveGuard({
+    inApp: neverSaved || unsentSuggestions,
+    unload: neverSaved || unsentSuggestions || changeBeingWritten,
+    // A reload of a bare /results puts an unsaved trip back from the tab's
+    // session snapshot (restoreTripSession); a close doesn't.
+    reloadRestores: neverSaved && !tripId,
+    copy: unsentSuggestions ? UNSENT_SUGGESTIONS : UNSAVED_TRIP,
+  });
 
   // BlueMurr AI shown or hidden by the person; remembered on this browser
   // (read after mount, so the server's first render matches).
@@ -1188,7 +1222,17 @@ function ResultsPageInner() {
       {/* View tabs live in the navbar (next to the auth corner) so the cards
           below get the full viewport height. The date-shift savings tip now
           arrives as a BlueMurr AI chat message instead of a page banner. */}
-      <Navbar tabs={<ViewTabs value={view} onChange={setView} />} />
+      <Navbar
+        tabs={
+          <ViewTabs
+            value={view}
+            onChange={(v) => {
+              if (v !== view) trackEvent('results_tab_viewed', { tab: v });
+              setView(v);
+            }}
+          />
+        }
+      />
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
           except the cards area (left↔right) and the AI chat panel. */}
@@ -1514,6 +1558,8 @@ function sameLeg(a: HomeLeg | null | undefined, b: HomeLeg | null | undefined): 
   );
 }
 
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 function datedWork(prev: Trip, next: Trip): DatedWork | null {
   // Only the same itinerary moving in time. Another trip, or stops added,
   // removed or reordered, is a different trip, priced where it was built.
@@ -1526,10 +1572,18 @@ function datedWork(prev: Trip, next: Trip): DatedWork | null {
   next.cities.forEach((c, i) => {
     const p = prev.cities[i];
     if (!p.dates || !c.dates) return;
-    if (p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) hotels.push(i);
-    if (i < next.cities.length - 1 && p.dates.departure !== c.dates.departure) legs.push(i);
+    // A stay or leg the same update already re-priced (an accepted AI date
+    // edit carries hotels and legs searched for the new dates, so its card
+    // states the exact total) is not searched again: a second search would
+    // move the header by an amount the card never showed.
+    // Compared by content: a copy of the same leg or hotels is not a re-price.
+    if ((p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) && sameJson(c.hotels, p.hotels)) hotels.push(i);
+    if (i < next.cities.length - 1 && p.dates.departure !== c.dates.departure && sameJson(c.transportOut, p.transportOut)) legs.push(i);
   });
-  if (hotels.length === 0) return null;
+  const moved = next.cities.some(
+    (c, i) => !!prev.cities[i].dates && !!c.dates && (prev.cities[i].dates.arrival !== c.dates.arrival || prev.cities[i].dates.departure !== c.dates.departure),
+  );
+  if (!moved) return null;
 
   const origin = next.origin;
   const last = next.cities.length - 1;

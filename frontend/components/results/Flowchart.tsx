@@ -290,10 +290,13 @@ export default function Flowchart({
       {/* layoutScroll: the cards' positions are measured net of this
           container's scroll, so scrolling it during a drag isn't taken for
           the dragged card having moved (see startAutoScroll). */}
+      {/* overscroll-x-contain: a two-finger swipe that runs past the first
+          city stops here instead of reaching the page, where Chrome and Edge
+          on macOS turn it into the browser's Back (the trip was lost). */}
       <motion.div
         layoutScroll
         ref={scrollRef}
-        className="flex-1 min-h-0 overflow-x-auto overflow-y-auto scrollbar-hide"
+        className="flex-1 min-h-0 overflow-x-auto overflow-y-auto overscroll-x-contain scrollbar-hide"
         style={{
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',

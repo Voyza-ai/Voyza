@@ -1,7 +1,7 @@
 import { env } from '../config/env';
 import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
-import { searchAllAboard } from './allaboard';
+import { searchAllAboardDetailed } from './allaboard';
 import type { Co2Figure, DoorToDoor } from './legFacts';
 
 /**
@@ -305,8 +305,15 @@ interface TrainProvider {
   id: string;
   /** 'none' skips this provider for the route; anything else queries it. */
   coverage(params: SearchTrainsParams): Coverage;
-  search(params: SearchTrainsParams): Promise<ProviderTrainOffer[]>;
+  search(params: SearchTrainsParams): Promise<ProviderResult>;
 }
+
+/**
+ * A provider's offers, and whether they are the whole answer for the route.
+ * `complete: false` (a timeout, an error, pricing that didn't come back)
+ * keeps the result out of the train-search cache — see cachedTrainSearch.
+ */
+type ProviderResult = { offers: ProviderTrainOffer[]; complete: boolean };
 
 /**
  * Deutsche Bahn REST provider. Always attempts (returns 'partial') and lets
@@ -466,14 +473,16 @@ const trainProviders: TrainProvider[] = [
     // when a key is configured; its own location matching decides real
     // coverage per route.
     coverage: () => (env.ALLABOARD_API_KEY ? 'partial' : 'none'),
-    search: (p) => searchAllAboard(p),
+    search: (p) => searchAllAboardDetailed(p),
   },
   {
     id: 'deutsche-bahn',
     // Always attempt — real results (+ the station-match filter) decide
     // whether there's a journey, instead of guessing from a country list.
     coverage: () => 'partial',
-    search: searchDeutscheBahn,
+    // Its own circuit breaker decides when it's down; results are taken as
+    // they always were.
+    search: async (p) => ({ offers: await searchDeutscheBahn(p), complete: true }),
   },
   // Future real providers plug in here (no code changes elsewhere):
   //   { id: 'trainline', coverage: euOnly, search: searchTrainline },
@@ -555,17 +564,22 @@ const trainSearchCache = new Map<string, { at: number; promise: Promise<TrainOff
 
 function cachedTrainSearch(
   key: string,
-  run: () => Promise<TrainOffer[]>,
+  run: () => Promise<{ offers: TrainOffer[]; complete: boolean }>,
 ): Promise<TrainOffer[]> {
   const hit = trainSearchCache.get(key);
   if (hit && Date.now() - hit.at < TRAIN_SEARCH_CACHE_TTL_MS) return hit.promise;
 
-  const promise = run();
+  const run$ = run();
+  const promise = run$.then((r) => r.offers);
   trainSearchCache.set(key, { at: Date.now(), promise });
-  promise.catch(() => {
-    // Don't cache failures — the next caller should get a fresh attempt.
+  const evict = () => {
     if (trainSearchCache.get(key)?.promise === promise) trainSearchCache.delete(key);
-  });
+  };
+  // Don't cache failures — the next caller should get a fresh attempt. Same
+  // for an incomplete answer (a provider timed out or errored): callers
+  // already waiting share it, but it is not "this route's trains" for the
+  // next 10 minutes.
+  run$.then((r) => { if (!r.complete) evict(); }, evict);
 
   // Opportunistic sweep so long-running processes don't accumulate entries.
   if (trainSearchCache.size > 500) {
@@ -612,18 +626,23 @@ export async function searchTrains(params: SearchTrainsParams): Promise<TrainOff
   );
 }
 
-async function searchTrainsUncached(params: SearchTrainsParams): Promise<TrainOffer[]> {
+async function searchTrainsUncached(
+  params: SearchTrainsParams,
+): Promise<{ offers: TrainOffer[]; complete: boolean }> {
   const active = trainProviders.filter((p) => p.coverage(params) !== 'none');
   const results = await Promise.all(
     active.map((p) =>
-      p.search(params).catch((err: any) => {
+      p.search(params).catch((err: any): ProviderResult => {
         logger.warn('Train provider failed (non-fatal)', {
           provider: p.id,
           message: err?.message,
         });
-        return [] as ProviderTrainOffer[];
+        return { offers: [], complete: false };
       }),
     ),
   );
-  return results.flat().map((offer) => toPartyTotal(offer, params.travelers));
+  return {
+    offers: results.flatMap((r) => r.offers).map((offer) => toPartyTotal(offer, params.travelers)),
+    complete: results.every((r) => r.complete),
+  };
 }

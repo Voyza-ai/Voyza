@@ -8,6 +8,9 @@ import { getCityColor } from '@/lib/cityColors';
 import { parseLocal } from '@/lib/dateHelpers';
 import TravelConnectors from './TravelConnectors';
 import { useDayHubs } from '@/lib/tripHubs';
+import { blockLayout } from '@/lib/blockLayout';
+import WeatherChip from './WeatherChip';
+import type { DayWeather } from '@/lib/api';
 
 /**
  * Read-only single-day column rendered side-by-side with peers in
@@ -41,6 +44,10 @@ type DayCardProps = {
    * the header. Null on stationary days.
    */
   travelMode?: TransportMode | null;
+  /** The day's weather in its city, when it has come in. */
+  weather?: DayWeather | null;
+  fahrenheit?: boolean;
+  typicalYears?: string | null;
   onOpenEditor: () => void;
 };
 
@@ -82,9 +89,13 @@ export default function DayCard({
   trip = null,
   events,
   travelMode = null,
+  weather = null,
+  fahrenheit = false,
+  typicalYears = null,
   onOpenEditor,
 }: DayCardProps) {
   const hubs = useDayHubs(trip, cityIndex, date);
+  const layout = blockLayout(events, (m) => (m / 60) * HOUR_HEIGHT, 18);
   const theme =
     city && cityIndex != null ? getCityColor(city.colorIndex ?? cityIndex) : null;
   const accent = theme?.text ?? '#9ca3af';
@@ -138,8 +149,11 @@ export default function DayCard({
           >
             {weekday}
           </div>
-          <div className="text-[18px] font-semibold leading-tight" style={{ color: accent }}>
-            {label}
+          <div className="flex items-center gap-2">
+            <div className="text-[18px] font-semibold leading-tight" style={{ color: accent }}>
+              {label}
+            </div>
+            {weather && <WeatherChip day={weather} fahrenheit={fahrenheit} typicalYears={typicalYears} accent={accent} />}
           </div>
         </div>
         <div className="text-right min-w-0">
@@ -192,10 +206,7 @@ export default function DayCard({
               click bubbles up to the card-level onClick so we don't
               need a separate handler here. */}
           {events.map((evt) => {
-            const startMins = timeToMinutes(evt.startTime);
-            const endMins = timeToMinutes(evt.endTime);
-            const top = (startMins / 60) * HOUR_HEIGHT;
-            const height = Math.max(((endMins - startMins) / 60) * HOUR_HEIGHT, 18);
+            const { top, height } = layout.get(evt.id) ?? { top: 0, height: 18 };
             const CatIcon = CATEGORY_ICONS[evt.category ?? 'custom'] ?? Clock;
             return (
               <div

@@ -7,7 +7,7 @@
  * applied and present real alternatives in the proposal card, instead
  * of just silently storing a constraint to honor "later".
  *
- * Returns sorted-by-price options with priceDelta against the user's
+ * Returns options cheapest first (long journeys last) with priceDelta against the user's
  * current transport so the UI can render the savings at a glance.
  */
 
@@ -18,6 +18,7 @@ import { searchTrains, TrainOffer, type RailPriceSource } from './trains';
 import { flightDoorToDoor, trainCo2, trainDoorToDoor, type Co2Figure, type DoorToDoor } from './legFacts';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
+import { longJourneyLimit, isLongMinutes } from './longJourney';
 
 export type TimeWindow = {
   earliestDepart?: string | null; // HH:MM
@@ -408,20 +409,57 @@ export async function searchLegOptions(
     ? allOptions.filter((o) => matchesWindow(o.departTime, o.arriveTime, window))
     : allOptions;
 
-  // Sort cheapest-first so the default-selected option in the UI
-  // maximizes savings. Options with price=0 (data gap) go to the end
-  // rather than misleading the user into thinking the train is free.
-  matched.sort((a, b) => {
-    const pa = a.price || Infinity;
-    const pb = b.price || Infinity;
-    return pa - pb;
-  });
-
-  const options = matched.slice(0, limit);
+  const options = orderLegOptions(matched, limit);
 
   return {
     options,
     hasMatches: options.length > 0,
     windowFilteredAll: windowActive && allOptions.length > 0 && options.length === 0,
   };
+}
+
+/**
+ * The order a leg card shows its options in, cut to `limit`. options[0] is
+ * what a new plan's card shows, so it has to be what compareLeg scored the
+ * leg with, or the card and the trip total disagree.
+ *
+ * Cheapest first, long journeys (longJourney.ts) after every sensible one,
+ * unpriced options (null / 0) last within their group. Two rules on top:
+ *
+ * 1. A FLIGHT is long against the fastest FLIGHT; a train is never long.
+ *    That is compareLeg's own rule (cheapestSensible over flights, plain
+ *    cheapest train). Judging both modes together made Vienna → Munich's
+ *    4h03m ÖBB train ($56) "long" next to a 1h flight (limit 4h00m): it
+ *    sorted behind four $364 flights, fell off the top 4, and the card
+ *    showed the flight while the optimizer had picked the route on the train.
+ *    The rule exists to bury 22h 50m connecting itineraries, which are
+ *    flights; a 4h train against a 1h flight is the comparison the product
+ *    is for.
+ * 2. Both modes stay on the card. When the cut would drop every option of a
+ *    mode that has a priced one, that mode's best takes the last slot, so a
+ *    leg never shows "no train" (or no flight) for a train it actually found.
+ */
+export function orderLegOptions(options: LegOption[], limit: number): LegOption[] {
+  const flightLimit = longJourneyLimit(
+    options.filter((o) => o.mode === 'flight').map((o) => o.durationMinutes),
+  );
+  const rank = (o: LegOption) =>
+    o.mode === 'flight' && isLongMinutes(o.durationMinutes, flightLimit) ? 1 : 0;
+  const price = (o: LegOption) =>
+    typeof o.price === 'number' && o.price > 0 ? o.price : Infinity;
+  const sorted = options
+    .map((o, i) => ({ o, i }))
+    .sort((a, b) => rank(a.o) - rank(b.o) || price(a.o) - price(b.o) || a.i - b.i)
+    .map((x) => x.o);
+
+  const top = sorted.slice(0, Math.max(0, limit));
+  if (limit < 2) return top;
+  for (const mode of ['train', 'flight'] as const) {
+    if (top.some((o) => o.mode === mode)) continue;
+    const best = sorted.find((o) => o.mode === mode && price(o) < Infinity);
+    if (!best) continue;
+    if (top.length < limit) top.push(best);
+    else top[top.length - 1] = best;
+  }
+  return top;
 }

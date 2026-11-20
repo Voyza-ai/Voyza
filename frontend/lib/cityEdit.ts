@@ -4,6 +4,7 @@ import { pickLegFacts } from './legFacts';
 import { hotelFromResult } from './hotelShape';
 import { liveTripTotal } from './tripTotals';
 import { buildCityScheduleFromSuggestions } from './dayScheduleDefaults';
+import { isTravellersOwn } from './scheduleSync';
 import { countryForCity } from '@/data/worldCities';
 import { nextColorIndex, withColorIndices } from './cityColors';
 
@@ -80,6 +81,8 @@ export function applyCityEdit(input: Trip, proposal: CityEditProposal): Trip {
     let out: Transport;
     if (leg) {
       out = legToTransport(leg.options, from.name, to.name, leg.date);
+      // The user's choice for this pair, kept (the backend re-searched by it).
+      if (leg.userChoice) out = { ...out, userChoice: leg.userChoice };
     } else if (to.transportIn?.from?.toLowerCase() === from.name.toLowerCase() && from.transportOut?.to?.toLowerCase() !== to.name.toLowerCase()) {
       out = { ...to.transportIn };
     } else {
@@ -115,6 +118,8 @@ export function applyCityEdit(input: Trip, proposal: CityEditProposal): Trip {
     // The date-shift check priced the old trip; its suggestion no longer applies.
     dateShiftSuggestion: undefined,
     dateShiftChecked: false,
+    // A date edit (pin / minimum stay) keeps its constraint for the next turns.
+    ...(proposal.constraints ? { constraints: proposal.constraints } : {}),
   };
 
   // New cities: a transport-only schedule, as the planner gives a city
@@ -126,8 +131,34 @@ export function applyCityEdit(input: Trip, proposal: CityEditProposal): Trip {
     const built = buildCityScheduleFromSuggestions([], [], c, idx, next);
     return { ...c, schedule: built.schedule, unscheduled: built.unscheduled };
   });
+  next.cities = withOwnEventsOf(trip.cities, next.cities);
   next.totalCost = liveTripTotal(next);
   return next;
+}
+
+/**
+ * The traveller's own events (added by hand, or stops they reshaped) on a city
+ * the edit removed or replaced are not dropped with it: each goes to the city
+ * that now holds its day — a replacement takes the replaced city's days —
+ * or, for a day the trip no longer has, the nearest city. The schedule sync
+ * (lib/scheduleSync) then moves any that sit on a travel block, or outside the
+ * stay, onto a free time of its days.
+ */
+function withOwnEventsOf(before: City[], after: City[]): City[] {
+  const names = new Set(after.map((c) => c.name.toLowerCase()));
+  const out = [...after];
+  for (const gone of before) {
+    if (names.has(gone.name.toLowerCase())) continue;
+    for (const [date, events] of Object.entries(gone.schedule ?? {})) {
+      const own = events.filter(isTravellersOwn);
+      if (own.length === 0 || out.length === 0) continue;
+      let i = out.findIndex((c) => c.dates.arrival <= date && date < c.dates.departure);
+      if (i < 0) i = date < out[0].dates.arrival ? 0 : out.length - 1;
+      const c = out[i];
+      out[i] = { ...c, schedule: { ...(c.schedule ?? {}), [date]: [...(c.schedule?.[date] ?? []), ...own] } };
+    }
+  }
+  return out;
 }
 
 /** A leg's searched options as the flowchart's Transport: cheapest first, the rest as alternatives. */

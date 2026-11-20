@@ -15,6 +15,8 @@ import { City } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { getVibeColor, VIBE_LABEL } from '@/lib/cityTheme';
 import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
+import { cityHotelTrust } from '@/lib/hotelPriceTrust';
+import { PriceTrustChip } from './PriceTrust';
 import { useTripStore } from '@/store/tripStore';
 
 type CityCardProps = {
@@ -220,6 +222,7 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
   const eff = effectiveHotel(city);
   const perNight = displayAmount(eff.pricePerNight, priceMode, travelers);
   const isCustom = eff.isCustom;
+  const trust = cityHotelTrust(city, travelers);
   const ranked = !isCustom && city.hotels.length > 1;
   const [slideDir, setSlideDir] = useState<1 | -1>(1);
 
@@ -261,6 +264,7 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
               <span>BLUEMURR BOOK</span>
             </span>
           )}
+          {trust && <span className="ml-1"><PriceTrustChip trust={trust} accent={color.text} /></span>}
         </div>
         {ranked && (
           <div className="flex items-center gap-1 text-gray-400 text-[10px]">

@@ -1,0 +1,1224 @@
+/**
+ * BlueMurr AI chat — the core behind POST /api/plan/chat.
+ *
+ * ── Service seam (stable; for other callers, e.g. a future iMessage bot) ─
+ *
+ *   runTripChat({ message, currentTrip, history? }) → Promise<TripChatResult>
+ *
+ *   in   message      the user's new message (string, non-empty)
+ *        currentTrip  the trip as the results page holds it (frontend `Trip`:
+ *                     cities[], origin { city, airports, outboundLeg,
+ *                     returnLeg, … }, travelers, totalCost = the header total)
+ *        history      prior turns, oldest first, [{ role: 'user'|'assistant',
+ *                     content }]; NOT including `message`
+ *   out  one of (every variant has `reply`, plain text for the user):
+ *        { type: 'answer' }                                  nothing to apply
+ *        { type: 'proposal', proposal }                      Accept / Reject;
+ *              proposal.kind: 'date_shift' | 'city_edit' | 'transport_change'
+ *              transport_change = { leg { id, kind, index, from, to, date },
+ *              before, after (LegChoice), priceDelta, firstStay, totals
+ *              { before, after, delta } | null } — tripLegs.ts
+ *              TransportChangeProposal; checked before it is returned
+ *        { type: 'leg_refresh', refresh }                    inter-city card
+ *              options replaced (applied without Accept, as before)
+ *        { type: 'leg_options', legOptions }                 options added to a
+ *              leg's card; the selection and total do not change
+ *        { type: 'mode_comparison', comparison }             informational
+ *
+ *   An unreachable AI comes back as an 'answer' saying so; any other
+ *   unexpected error is thrown (the route answers it with a 500, as before).
+ *   Nothing here writes anywhere; applying a proposal is the caller's job
+ *   (frontend lib/transportChange.ts, lib/cityEdit.ts).
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ *
+ * Claude gets the trip (home, cities, every leg with its id and the options
+ * on its card) plus the constraints and history, and picks ONE tool. Every
+ * change is proposed from searched, checked data, and the reply describing it
+ * is written from that data — never from the model's own text, which is
+ * written before anything was searched (D-07).
+ */
+import { logger } from '../utils/logger';
+import { addDays, todayIso } from '../utils/dates';
+import {
+  applyDateConstraints,
+  isIsoDate,
+  MAX_STAY_NIGHTS,
+  mergeConstraints,
+  minDaysProblem,
+  parseMinNights,
+  pinProblem,
+  scheduleProblem,
+  TripConstraints,
+} from './constraints';
+import { searchLegOptions, LegOption, normalizeTimeWindow, NormalizedTimeWindow } from './legOptions';
+import { compareLeg } from './compareLeg';
+import { bestOrder, cityGeo, countrySplits, routeKm, type CityGeo } from './routeGeo';
+import {
+  buildCityEditProposal,
+  cityEditOpFromTool,
+  planDateEdit,
+  priceCityEditPlan,
+  stopsOf,
+  tripStart,
+  type CityEditProposal,
+} from './cityEdit';
+import { getCityCountry } from '../data/cityCountries';
+import { parseDurationMinutes } from '../utils/duration';
+import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
+import { runPackingTool, runWeatherTool, WEATHER_PROMPT_LINE, WEATHER_TOOLS } from './weatherChat';
+import {
+  buildTransportProposal,
+  describeChoice,
+  describeRequest,
+  describeTransportProposal,
+  legLabel,
+  legPhrase,
+  type LegChoice,
+  type LegLookup,
+  listLegs,
+  matchingChoices,
+  money,
+  moneyDiff,
+  formatMinutes,
+  isLongJourney,
+  journeyLimit,
+  journeyWords,
+  notALegReply,
+  perPersonWord,
+  withPriceUnits,
+  readRequest,
+  requestProblem,
+  resolveLeg,
+  sameService,
+  searchLeg,
+  shortDate,
+  signedMoney,
+  tripContextForChat,
+  tripLegs,
+  type ChoiceRequest,
+  type TransportChangeProposal,
+  type TripLeg,
+  verifyTransportProposal,
+  whichLegReply,
+} from './tripLegs';
+import { createMessage } from './aiUsage';
+
+export type ChatTurn = { role: 'user' | 'assistant'; content: string };
+
+export type TripChatInput = {
+  message: string;
+  currentTrip: any;
+  history?: ChatTurn[];
+  /** The header's price mode; the reply's amounts use the same units. Default 'total'. */
+  priceMode?: 'total' | 'perPerson';
+};
+
+/** Options found for a leg, added to its card (selection unchanged). */
+export type LegOptionsPayload = {
+  leg: TransportChangeProposal['leg'];
+  /** Matches, cheapest first. */
+  options: LegChoice[];
+  /** Matches found in all (options may be the first few). */
+  totalFound: number;
+};
+
+export type TripChatResult =
+  | { type: 'answer'; reply: string }
+  | { type: 'proposal'; reply: string; proposal: any }
+  | { type: 'leg_refresh'; reply: string; refresh: any }
+  | { type: 'leg_options'; reply: string; legOptions: LegOptionsPayload }
+  | { type: 'mode_comparison'; reply: string; comparison: any };
+
+const legParam = {
+  type: 'string',
+  description:
+    'The leg\'s id exactly as in TRIP CONTEXT legs[].id, e.g. "home→Paris", "Paris→London", "London→home". Home legs are legs too.',
+};
+const fromParam = { type: 'string', description: 'Origin (a trip city, or "home"). Optional when `leg` is given.' };
+const toParam = { type: 'string', description: 'Destination (a trip city, or "home"). Optional when `leg` is given.' };
+const timeParam = (what: string) => ({
+  type: ['string', 'null'],
+  description: `HH:MM 24-hour ${what}, or null.`,
+});
+
+/**
+ * Claude tool definitions. Tool names are snake_case to match Anthropic's
+ * naming convention in examples.
+ */
+export const CHAT_TOOLS = [
+  {
+    name: 'answer_only',
+    description:
+      'Use when the user is asking a question, seeking an explanation, or making small talk — NOT requesting a change to the trip. Examples: "Why is this trip cheaper?", "Why this order of cities?". Never for weather or packing — those have their own tools, and you must never state temperatures or rain yourself.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        answer: {
+          type: 'string',
+          description:
+            'The direct answer to the user, written in the voice of a helpful travel planner. 2-4 sentences, concrete, references specific cities/prices/legs from the trip when relevant.',
+        },
+      },
+      required: ['answer'],
+    },
+  },
+  {
+    name: 'ask_which_leg',
+    description:
+      'Use when the user wants to change or see a flight/train but did not say which leg, and the trip has more than one leg (counting the flights to and from home). Example: "change my flight", "find me a later flight". The reply lists every leg for them to choose.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'select_transport_option',
+    description:
+      'Switch a leg to ONE specific option already listed in that leg\'s cardOptions — "switch to the British Airways one", "take the 19:25", "the second option", "the cheapest one on the card". Pass the leg id and that option\'s optionId — or, for an airline the user named that is NOT on the card, just the leg and operator (the server searches for it). The user sees the change with its exact price difference and must Accept it. Never ask whether to search.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        leg: legParam,
+        optionId: { type: 'string', description: 'The optionId from that leg\'s cardOptions, e.g. "London→home#2". Omit when the user named only an airline.' },
+        operator: {
+          type: 'string',
+          description: 'The airline / operator the user named ("the British Airways one") when you have no optionId for it. The server takes that airline\'s option from the card, or searches the leg for it when the card has none.',
+        },
+      },
+      required: ['leg'],
+    },
+  },
+  {
+    name: 'find_transport_option',
+    description:
+      'Find a different option for a leg described by what it should be — later or earlier than the current one, a time of day ("in the evening"), a time bound, cheaper, a mode, an airline — when it is not already in cardOptions. Searches the leg (home legs search every home airport) and proposes the cheapest option that satisfies everything asked, for the user to Accept. Set list=true when the user asked to SEE options ("show me evening flights home") rather than to change; matching options are then added to the leg\'s card without changing it. If nothing matches, the user is told and nothing changes.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        leg: legParam,
+        relative: {
+          type: ['string', 'null'],
+          enum: ['later', 'earlier', null],
+          description: '"later" / "earlier" than the leg\'s current departure, or null.',
+        },
+        timeOfDay: {
+          type: ['string', 'null'],
+          enum: ['morning', 'afternoon', 'evening', null],
+          description: 'Departure part of day: morning 05:00–11:59, afternoon 12:00–16:59, evening 17:00–23:59. Null if not asked.',
+        },
+        departAfter: timeParam('earliest departure'),
+        departBefore: timeParam('latest departure'),
+        arriveAfter: timeParam('earliest arrival'),
+        arriveBefore: timeParam('latest arrival'),
+        cheaper: { type: ['boolean', 'null'], description: 'True if it must cost less than the current option.' },
+        mode: { type: ['string', 'null'], enum: ['flight', 'train', null], description: 'Only this mode, or null.' },
+        operator: { type: ['string', 'null'], description: 'Airline / rail operator the user named, or null.' },
+        list: { type: ['boolean', 'null'], description: 'True when the user asked to see options rather than to change.' },
+      },
+      required: ['leg'],
+    },
+  },
+  {
+    name: 'pin_city_dates',
+    description:
+      'Lock a city to specific dates. Use when the user says things like "I need to be in Rome March 5-10", "keep me in Tokyo for April 2-7", "schedule Paris for the 15th to 18th". Other cities will be shifted around the pin.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        city: { type: 'string', description: 'Exact city name as it appears in the trip.' },
+        arrival: { type: 'string', description: 'YYYY-MM-DD arrival date.' },
+        departure: { type: 'string', description: 'YYYY-MM-DD departure date.' },
+        explanation: {
+          type: 'string',
+          description: 'One-sentence explanation for the user about what you\'re pinning and why.',
+        },
+      },
+      required: ['city', 'arrival', 'departure', 'explanation'],
+    },
+  },
+  {
+    name: 'set_min_days',
+    description:
+      'Guarantee a minimum number of nights in a city. Use when user says "at least 3 days in Tokyo", "give me 4 nights in Rome minimum", "don\'t rush Florence" — and for "one more night in Paris" / "give Paris 2 more nights" / "stay longer in Paris": minNights = the city\'s current nights + the extra. The trip gets longer if it has to (the flight home moves later); the user sees the new dates and the exact total and must Accept, so do not ask which direction first.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        city: { type: 'string', description: 'Exact city name as it appears in the trip.' },
+        minNights: { type: 'number', description: 'Minimum number of nights required.' },
+        explanation: {
+          type: 'string',
+          description: 'One-sentence explanation for the user.',
+        },
+      },
+      required: ['city', 'minNights', 'explanation'],
+    },
+  },
+  {
+    name: 'set_transport_window',
+    description:
+      'Set a time RULE on a leg: "no flights before 5pm from Paris to London", "I need to land by 3pm". Pass null for any bound the user didn\'t specify. For "a later flight", "an evening flight", "something cheaper" use find_transport_option instead. Do NOT use this for "show me more flights" — use show_transport_options for those.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        leg: legParam,
+        from: fromParam,
+        to: toParam,
+        earliestDepart: timeParam('earliest departure'),
+        latestDepart: timeParam('latest departure'),
+        earliestArrive: timeParam('earliest arrival'),
+        latestArrive: timeParam('latest arrival'),
+        explanation: {
+          type: 'string',
+          description: 'One-sentence explanation for the user.',
+        },
+      },
+      required: ['explanation'],
+    },
+  },
+  {
+    name: 'show_transport_options',
+    description:
+      'Refresh the transport card for a specific leg with the cheapest flight/train options — no time constraint. Use when the user asks "are there more flights?", "show me trains from X to Y", "what are my options from A to B". REQUIRES a specific leg. If the user is vague about which leg in a multi-leg trip, use ask_which_leg instead.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        leg: legParam,
+        from: fromParam,
+        to: toParam,
+        explanation: {
+          type: 'string',
+          description: 'One-sentence explanation like "Here are the cheapest options for Rome → Florence".',
+        },
+      },
+      required: ['explanation'],
+    },
+  },
+  {
+    name: 'compare_modes',
+    description:
+      'Surface a side-by-side flight-vs-train comparison for a leg between two trip cities. Use when the user is curious about the OTHER mode without committing to a card change yet — "are there any flights?" (when the leg currently uses train), "what about trains?" (when leg uses flight), "is it cheaper to fly or take the train?". Flights to and from home are flights only.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        leg: legParam,
+        from: fromParam,
+        to: toParam,
+        explanation: {
+          type: 'string',
+          description: 'One-sentence framing like "Here\'s flight vs train for Rome → Florence".',
+        },
+      },
+      required: ['explanation'],
+    },
+  },
+  {
+    name: 'add_city',
+    description:
+      'Add a NEW city to the trip. Use when the user says "add Venice", "can we squeeze in Nice after Paris", "add 3 days in Lisbon at the end". The backend prices the new city\'s hotel and the travel in and out, and the user sees a diff to Accept or Reject. Only for a specific city — if the user names a country or region ("add somewhere in Spain"), use answer_only to ask which city. But when the user leaves the choice to you ("a city of your choice", "you pick", "surprise me", "your call"), pick ONE real city yourself that fits what they said and call this tool with it — do not list options or ask which.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        city: { type: 'string', description: 'The city to add, plain English name ("Venice").' },
+        afterCity: {
+          type: ['string', 'null'],
+          description: 'Existing trip city the new one goes right after — ONLY when the user said where. Otherwise null: the server places it where it adds the least detour.',
+        },
+        userSaidWhere: {
+          type: 'boolean',
+          description: 'True only if the user named the position ("after Prague", "at the end", "start with Rome"). False when they did not say where (including "a city of your choice") — then leave afterCity/beforeCity null.',
+        },
+        beforeCity: {
+          type: ['string', 'null'],
+          description:
+            'Existing trip city the new one goes right BEFORE — use for "before Florence", "start with Rome", "at the beginning" (the first city). Set this or afterCity, not both.',
+        },
+        nights: {
+          type: ['number', 'null'],
+          description: 'Nights in the new city, only if the user said ("3 days in Lisbon" → 3). Omit otherwise (default 2).',
+        },
+        explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
+      },
+      required: ['city', 'explanation'],
+    },
+  },
+  {
+    name: 'reorder_cities',
+    description:
+      'Change the ORDER of the cities already in the trip (nights per city kept). Use for "move Salzburg after Vienna", "swap Munich and Vienna", "start with Vienna" — pass the full new order. For "put the Austrian cities together" pass groupCountry instead (the server checks whether they already are). For "what\'s the best order?" / "optimize the order" set optimize=true and leave order empty: the server picks the order with the least backtracking and distance. The user sees the re-priced trip with its exact total and must Accept.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        order: { type: 'array', items: { type: 'string' }, description: 'Every trip city exactly once, in the new order.' },
+        optimize: { type: 'boolean', description: 'True for "best order" / "optimize": the server decides the order.' },
+        groupCountry: {
+          type: 'string',
+          description: 'For "put the Austrian cities together" / "keep the Italian ones next to each other": the country (e.g. "Austria"). Leave order empty: the server checks whether they already are, and groups them with the least travel if not.',
+        },
+        explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
+      },
+      required: ['explanation'],
+    },
+  },
+  {
+    name: 'remove_city',
+    description:
+      'Remove a city that is in the trip. Use when the user says "drop Florence", "skip Milan", "remove Berlin". Its nights go to the city before it, so the trip dates stay the same.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        city: { type: 'string', description: 'Exact city name as it appears in the trip.' },
+        explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
+      },
+      required: ['city', 'explanation'],
+    },
+  },
+  {
+    name: 'replace_city',
+    description:
+      'Swap one trip city for a different one on the same dates. Use when the user says "swap Florence for Bologna", "Naples instead of Rome", "actually Venice not Verona".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        old: { type: 'string', description: 'Exact name of the trip city being replaced.' },
+        new: { type: 'string', description: 'The city that takes its place, plain English name.' },
+        explanation: { type: 'string', description: 'One-sentence explanation for the user.' },
+      },
+      required: ['old', 'new', 'explanation'],
+    },
+  },
+  ...WEATHER_TOOLS,
+];
+
+/** The system prompt for one turn. Today's date is computed per call. */
+export function chatSystemPrompt(currentTrip: any): string {
+  const context = tripContextForChat(currentTrip);
+  return `You are BlueMurr AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
+
+Today is ${todayIso()} (UTC). Trip dates are always in the future: a date the user gives without a year ("Dec 10", "the 15th") means its next occurrence after today.
+
+THE TRIP'S LEGS: TRIP CONTEXT "legs" lists every leg in travel order, INCLUDING the flight from home to the first city and the flight from the last city back home. Each leg has an id, its current option and the other options on its card (cardOptions, each with an optionId). Always name a leg by its id.
+- "my flight home", "the flight back", "the return", "back to <home city>" = the leg whose id ends in "→home".
+- "my flight out", "the flight there", "out of <home city>" = the leg whose id starts with "home→".
+
+Tools:
+1. answer_only — plain questions, explanations, small talk.
+2. ask_which_leg — the user wants to change or see a flight/train without saying which leg, and there is more than one leg. Do NOT guess a leg.
+3. select_transport_option — switch a leg to one specific option already in its cardOptions ("the British Airways one", "the 19:25", "the cheapest one").
+4. find_transport_option — a different option described by what it should be: later / earlier, a time of day, a time bound, cheaper, a mode, an airline. Proposes the cheapest match. Use list=true when the user asked to see options ("show me evening flights home").
+5. set_transport_window — a time rule on a leg ("no flights before 5pm").
+6. show_transport_options — refresh a leg's card with its cheapest options ("are there more flights?").
+7. compare_modes — flight vs train on a leg between two trip cities.
+8. pin_city_dates — lock a city to specific dates.
+9. set_min_days — a minimum stay in a city.
+10. add_city / remove_city / replace_city — add, drop or swap a city. Each change is shown to the user as a diff to Accept, so call the tool directly instead of asking "are you sure?".
+11. reorder_cities — change the order of the trip's cities, group a country's cities, or find the best order.
+12. ${WEATHER_PROMPT_LINE}
+ALWAYS pick exactly one tool per turn.
+
+Each request stands on its own: never carry a time bound, airline or other filter over from an earlier message unless the user clearly refers back to it ("the same time", "that one"). "Make it cheaper" with no leg named: ask which leg (ask_which_leg).
+Changing transport: if the option the user names is in that leg's cardOptions, use select_transport_option; otherwise find_transport_option — call it straight away (an airline the user names → operator; a time → the matching time fields). Never ask whether to search, and never answer that an option "isn't on the card": search for it. Pass what they asked ("later in the evening" → relative "later" AND timeOfDay "evening"; "cheaper" → cheaper true). The server searches, checks and words the result — don't promise prices or times yourself.
+
+If there is only ONE leg, use it. If the user names a city pair that isn't a leg, call the tool with what they said; the server lists the real legs.
+
+City edits: ONE city edit per turn. If the user asks for several at once, do the first and say you'll do the next after they accept. If it's unclear which city they mean (e.g. "swap one of the Italian cities", "add a beach town", a country instead of a city), use answer_only to ask. Use the exact trip spelling for cities already in the trip.
+When the user leaves the choice of city to you ("add another city of your choice", "you pick", "surprise me with another stop", "your call"), that is not unclear: pick ONE real city yourself — one that fits what they said (a vibe, the season, the dates) and sits near the route — and call add_city with it straight away, userSaidWhere false. Do not list options or ask which; the user sees the priced change and can Reject it or ask for a different city.
+
+If the user references a city that isn't in the trip for a pin or a min stay, answer_only and ask them to clarify — do NOT invent a pin.
+
+Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them. Prices in TRIP CONTEXT are totals for all travellers.${perPersonWord() ? ` The user is viewing PER-PERSON prices: quote every amount per person (the total divided by ${currentTrip?.travelers} travellers, rounded) and say "per person".` : ''}
+
+TRIP CONTEXT (read-only):
+${JSON.stringify(context, null, 2)}
+`;
+}
+
+/**
+ * Run one chat turn. See the seam comment at the top of this file for the
+ * input and output contract.
+ */
+export async function runTripChat(input: TripChatInput): Promise<TripChatResult> {
+  return withPriceUnits(input.priceMode, input.currentTrip?.travelers, () => runTripChatInUnits(input));
+}
+
+async function runTripChatInUnits(input: TripChatInput): Promise<TripChatResult> {
+  const { message, currentTrip, history } = input;
+  const anthropic = getAnthropicSafe();
+  if (!anthropic) {
+    return {
+      type: 'answer',
+      reply:
+        "I'm offline right now — the Anthropic API key isn't configured on the server. Ask your admin to set ANTHROPIC_API_KEY.",
+    };
+  }
+
+  // Prior history, then the new user message. The trip goes in the system
+  // prompt so Claude sees it as persistent context rather than a turn.
+  const messages: ChatTurn[] = [];
+  for (const turn of history ?? []) messages.push({ role: turn.role, content: turn.content });
+  messages.push({ role: 'user', content: message });
+
+  let response: any;
+  try {
+    response = await createMessage(anthropic, 'chat', {
+      model: DEFAULT_MODEL,
+      max_tokens: 1024,
+      system: chatSystemPrompt(currentTrip),
+      tools: CHAT_TOOLS as any,
+      messages,
+    });
+  } catch (err: any) {
+    logger.warn('plan/chat Claude call failed', { message: err?.message });
+    return {
+      type: 'answer',
+      reply: 'Sorry — I hit an error reaching the AI. Please try again in a moment. If it keeps happening, let us know.',
+    };
+  }
+
+  const toolUse = response.content.find((b: any) => b.type === 'tool_use') as any;
+  if (!toolUse) {
+    // Claude answered in text instead of calling a tool.
+    const textBlock = response.content.find((b: any) => b.type === 'text') as any;
+    return { type: 'answer', reply: textBlock?.text ?? "I'm not sure how to help with that — could you rephrase?" };
+  }
+  return runTool(currentTrip, toolUse.name as string, (toolUse.input ?? {}) as any, message);
+}
+
+/** Dispatch one tool call. Exported for tests of a tool without a model. */
+export async function runTool(currentTrip: any, toolName: string, toolInput: any, message?: string): Promise<TripChatResult> {
+  if (toolName === 'answer_only') return { type: 'answer', reply: toolInput.answer };
+
+  const legs = tripLegs(currentTrip);
+
+  if (toolName === 'ask_which_leg') return { type: 'answer', reply: whichLegReply(legs) };
+
+  if (toolName === 'select_transport_option') return selectOption(currentTrip, legs, toolInput);
+  if (toolName === 'find_transport_option') return findOption(currentTrip, legs, toolInput, toolName);
+
+  // --- City edits: add_city / remove_city / replace_city. Priced (new
+  //     city's hotels, the legs that changed, home flights when the trip's
+  //     ends changed) and returned as a proposal. Nothing is applied until Accept.
+  if (toolName === 'reorder_cities') return reorderCities(currentTrip, toolInput);
+  if (toolName === 'add_city' || toolName === 'remove_city' || toolName === 'replace_city') {
+    const op = cityEditOpFromTool(toolName, toolInput);
+    if (!op) return { type: 'answer', reply: "Which city did you mean? Tell me the name and I'll work it out." };
+    const built = await buildCityEditProposal(currentTrip, toolName, op);
+    if (built.type === 'answer') return built;
+    // Worded from the plan, not the model's `explanation`, which is written
+    // before anything was searched (see compare_modes, D-07).
+    return {
+      type: 'proposal',
+      reply: `${describeCityEdit(built.proposal)}${built.proposal.placementNote ? ` ${built.proposal.placementNote}` : ''} ${built.proposal.note}${homeFlightChanges(currentTrip, built.proposal)}${choiceWords(built.proposal)} Accept to apply it.`,
+      proposal: built.proposal,
+    };
+  }
+
+  if (toolName === 'get_weather') return runWeatherTool(currentTrip, toolInput, message ?? '');
+  if (toolName === 'packing_list') return runPackingTool(currentTrip, toolInput, message ?? '');
+
+  if (toolName === 'compare_modes') return compareModes(currentTrip, legs, toolInput);
+  if (toolName === 'set_transport_window' || toolName === 'show_transport_options') {
+    return refreshLeg(currentTrip, legs, toolName, toolInput);
+  }
+  if (toolName === 'pin_city_dates' || toolName === 'set_min_days') return await dateTool(currentTrip, toolName, toolInput);
+
+  logger.warn('plan/chat unknown tool', { toolName });
+  return { type: 'answer', reply: "I'm not sure how to help with that — could you rephrase?" };
+}
+
+/** A leg lookup that isn't a leg, as the reply to send instead. */
+function lookupReply(lookup: Exclude<LegLookup, { kind: 'leg' }>, legs: TripLeg[], noun = 'flight or train'): string {
+  if (lookup.kind === 'missing') return whichLegReply(legs);
+  if (lookup.kind === 'not_a_leg') return notALegReply(legs, lookup);
+  return `I couldn't find a ${lookup.from} → ${lookup.to} ${noun} in your trip — its legs are ${listLegs(legs)}.`;
+}
+
+/** The leg a leg-tool names; with no leg named, the only leg if there is just one. */
+function legFor(currentTrip: any, legs: TripLeg[], input: any): LegLookup {
+  const lookup = resolveLeg(currentTrip, legs, { leg: input?.leg, from: input?.from, to: input?.to });
+  if (lookup.kind === 'missing' && legs.length === 1) return { kind: 'leg', leg: legs[0] };
+  return lookup;
+}
+
+/** Propose `after`, or say why not. The reply is written from the checked proposal. */
+function propose(
+  currentTrip: any,
+  leg: TripLeg,
+  after: LegChoice,
+  request: ChoiceRequest,
+  toolName: string,
+  lead: string,
+): TripChatResult {
+  // A price of 0 means the fare is unknown (a train no provider priced). The
+  // header counts it as $0, so the proposal would announce the old fare as a
+  // saving. Not offered.
+  if (!(after.price > 0)) {
+    return {
+      type: 'answer',
+      reply: `${describeChoice(after)} on ${shortDate(after.departDate ?? leg.date)} has no fare I can price, so I haven't proposed it — nothing changed.`,
+    };
+  }
+  const proposal = buildTransportProposal(currentTrip, leg, after, request, toolName);
+  const problems = verifyTransportProposal(proposal, leg);
+  if (problems.length > 0) {
+    logger.error('plan/chat transport proposal failed verification', { leg: leg.id, problems, after });
+    return {
+      type: 'answer',
+      reply: `I couldn't set that up for ${legLabel(leg)} — the option I found didn't check out (${problems[0]}), so nothing changed.`,
+    };
+  }
+  return { type: 'proposal', reply: describeTransportProposal(proposal, leg, lead), proposal };
+}
+
+/** select_transport_option: exactly the card option the user named. */
+async function selectOption(currentTrip: any, legs: TripLeg[], input: any): Promise<TripChatResult> {
+  const optionId = typeof input?.optionId === 'string' ? input.optionId.trim() : '';
+  // The option id carries its leg; use it when the leg wasn't given.
+  const ref = input?.leg ?? (optionId ? optionId.replace(/[#~]\d+$/, '') : undefined);
+  const lookup = legFor(currentTrip, legs, { leg: ref });
+  if (lookup.kind !== 'leg') return { type: 'answer', reply: lookupReply(lookup, legs) };
+  const leg = lookup.leg;
+  const n = /(?:^|[#~])(\d+)$/.exec(optionId)?.[1];
+  // Fall back to "#n on this leg" only when the id names this leg (or none):
+  // "London→home#2" must never pick option 2 of Paris→London.
+  const prefix = optionId.replace(/[#~]?\d+$/, '');
+  const prefixLookup = prefix ? legFor(currentTrip, legs, { leg: prefix }) : null;
+  const sameLeg = !prefix || (prefixLookup?.kind === 'leg' && prefixLookup.leg.id === leg.id);
+  let option =
+    leg.options.find((o) => o.optionId === optionId) ??
+    (n != null && sameLeg ? leg.options.find((o) => o.optionId === `${leg.id}#${n}`) : undefined);
+  // "Switch to the British Airways one" with no optionId: that airline's
+  // cheapest option on the card — or, when the card has none (a listing can
+  // have replaced it), search the leg for that airline instead of asking.
+  const operator = typeof input?.operator === 'string' ? input.operator.trim() : '';
+  if (!option && operator && !optionId) {
+    const named = (c: LegChoice) => !!c.operator && c.operator.toLowerCase().includes(operator.toLowerCase());
+    const onCard = leg.options
+      .filter((o) => named(o) && !(leg.current && o.optionId === leg.current.optionId))
+      .sort((a, b) => (a.price || Infinity) - (b.price || Infinity))[0];
+    if (onCard) option = onCard;
+    else if (leg.current && named(leg.current)) {
+      return { type: 'answer', reply: `${describeChoice(leg.current)} is already ${legPhrase(leg)}, so there's nothing to change.` };
+    } else return findOption(currentTrip, legs, { leg: leg.id, operator }, 'find_transport_option');
+  }
+  if (!option) {
+    const listed = leg.options.filter((o) => o !== leg.current);
+    return {
+      type: 'answer',
+      reply: listed.length
+        ? `I couldn't find that option on the ${legLabel(leg)} card. It shows: ${listed.map((o) => `${describeChoice(o)} ${money(o.price)}`).join('; ')}. Which one?`
+        : `The ${legLabel(leg)} card has no other options yet — want me to search for some?`,
+    };
+  }
+  if (leg.current && option.optionId === leg.current.optionId) {
+    return { type: 'answer', reply: `${describeChoice(option)} is already ${legPhrase(leg)}, so there's nothing to change.` };
+  }
+  return propose(currentTrip, leg, option, { optionId: option.optionId }, 'select_transport_option', `Switch ${legPhrase(leg)} to`);
+}
+
+/**
+ * Options a listing shows. No more than the card keeps (frontend
+ * lib/transportChange.ts MAX_ALTERNATIVES = 4): the reply says they are all
+ * on the card, and at 5 the fifth was cut from it.
+ */
+const LIST_LIMIT = 4;
+
+/**
+ * find_transport_option (and set_transport_window / show_transport_options on
+ * a home leg): search the leg, keep what satisfies the request, then propose
+ * the cheapest match — or list the matches when `list` is set. No match: say
+ * so and change nothing.
+ */
+async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolName: string, forceList = false): Promise<TripChatResult> {
+  const lookup = legFor(currentTrip, legs, input);
+  if (lookup.kind !== 'leg') return { type: 'answer', reply: lookupReply(lookup, legs) };
+  const leg = lookup.leg;
+
+  const read = readRequest(input);
+  if (!read.ok) return { type: 'answer', reply: `${read.reply} Nothing changed.` };
+  const request = read.request;
+  const problem = requestProblem(request, leg);
+  if (problem) return { type: 'answer', reply: `${problem}. Nothing changed.` };
+
+  const searched = await searchLeg(currentTrip, leg);
+  if (!searched.ok) return { type: 'answer', reply: `${searched.reply} Nothing changed.` };
+  const what = describeRequest(request, leg);
+  const when = shortDate(leg.date);
+  if (searched.choices.length === 0) {
+    return { type: 'answer', reply: `I couldn't find any options for ${legLabel(leg)} on ${when}, so nothing changed.` };
+  }
+  const matches = matchingChoices(searched.choices, request, leg);
+  if (matches.length === 0) {
+    const why = unmetSummary(searched.choices, request, leg);
+    return {
+      type: 'answer',
+      reply: `I searched ${searched.choices.length} option${searched.choices.length === 1 ? '' : 's'} for ${legLabel(leg)} on ${when} and none is ${/^[aeiou]/i.test(what) ? 'an' : 'a'} ${what}${why}. Nothing changed — want me to try a different time or day?`,
+    };
+  }
+
+  // Long journeys (tripLegs.ts LONG_RATIO): never picked or listed first for
+  // "later", "evening", "cheaper"…; an airline the user named is theirs to
+  // choose, however long ("the TAP one").
+  const limit = request.operator ? null : journeyLimit(searched.choices, leg.current);
+  const sensible = matches.filter((c) => !isLongJourney(c, limit));
+  const long = matches.filter((c) => isLongJourney(c, limit));
+
+  if (input?.list === true || forceList) {
+    const pool = sensible.length > 0 ? sensible : long;
+    const shown = pool.slice(0, LIST_LIMIT);
+    const lines = shown.map((c, i) => {
+      const delta = leg.current ? ` (${moneyDiff(leg.current.price, c.price)})` : '';
+      const takes = isLongJourney(c, limit) ? ` — ${journeyWords(c)}` : '';
+      return `${i + 1}. ${describeChoice(c)} — ${money(c.price)}${delta}${takes}`;
+    });
+    const more =
+      sensible.length === 0
+        ? ` — every one is a long journey (more than ${aboutHours(limit!)})`
+        : pool.length > shown.length
+          ? ` (${pool.length} found, cheapest ${shown.length} shown)`
+          : '';
+    const skipped =
+      sensible.length > 0 && long.length > 0
+        ? `\nI left out ${long.length} that take more than ${aboutHours(limit!)} (the quickest of those: ${formatMinutes(Math.min(...long.map((c) => c.durationMinutes)))}).`
+        : '';
+    const onCard = leg.current
+      ? `They're on the ${legLabel(leg)} card now — pick one there, or tell me which and I'll set it up for you to accept. Nothing has changed yet.`
+      : 'Tell me which one you want and I\'ll set it up for you to accept.';
+    return {
+      type: 'leg_options',
+      reply: `${capitalize(what)} options for ${legLabel(leg)} on ${when}${more}:\n${lines.join('\n')}${skipped}\n${onCard}`,
+      legOptions: {
+        leg: { id: leg.id, kind: leg.kind, index: leg.index, from: leg.from, to: leg.to, date: leg.date },
+        options: shown,
+        totalFound: pool.length,
+      },
+    };
+  }
+
+  // "A cheaper flight home (London → New York):" / "The cheapest later
+  // evening flight home (London → New York) I found:".
+  const label = legLabel(leg);
+  const subject =
+    leg.kind === 'return' ? `${what} home (${label})` : leg.kind === 'outbound' ? `${what} out (${label})` : `${what} for ${label}`;
+  if (sensible.length === 0) return allLongReply(searched.choices, long, request, leg, limit!, `${what} ${leg.kind === 'return' ? 'home' : leg.kind === 'outbound' ? 'out' : `for ${label}`}`);
+  // Cheaper matches skipped for being long: the lead says what was picked.
+  const skippedCheaper = long.some((c) => c.price > 0 && c.price < sensible[0].price);
+  const lead = skippedCheaper
+    ? `The cheapest ${subject} I found that doesn't take more than ${aboutHours(limit!)}:`
+    : request.cheaper
+      ? `A ${subject}:`
+      : `The cheapest ${subject} I found:`;
+  return propose(currentTrip, leg, sensible[0], request, toolName, lead);
+}
+
+/** A long-journey limit as words: "about 16h" (15h 54m reads oddly; the rule itself is exact). */
+const aboutHours = (limit: number) => `about ${formatMinutes(Math.round(limit / 60) * 60)}`;
+
+/**
+ * Every match is a long journey: propose none of them. Say so with their
+ * journey times, and name the sensible flight closest to what was asked
+ * (the latest one that day for "later" / "evening", the earliest for
+ * "earlier" / "morning") so the user can choose.
+ */
+function allLongReply(all: LegChoice[], long: LegChoice[], request: ChoiceRequest, leg: TripLeg, limit: number, what: string): TripChatResult {
+  const when = shortDate(leg.date);
+  const quickest = Math.min(...long.map((c) => c.durationMinutes));
+  const fastest = Math.min(...all.map((c) => c.durationMinutes).filter((m) => m > 0));
+  const top = long.slice(0, 3).map((c, i) => {
+    const delta = leg.current ? ` (${moneyDiff(leg.current.price, c.price)})` : '';
+    return `${i + 1}. ${describeChoice(c)} — ${journeyWords(c)}, ${money(c.price)}${delta}`;
+  });
+  const cur = leg.current;
+  const sensibleOthers = all.filter((c) => !isLongJourney(c, limit) && !(cur && sameService(c, cur)) && !!c.departTime);
+  const wantsLater = request.relative === 'later' || request.timeOfDay === 'evening' || request.timeOfDay === 'afternoon' || !!request.window?.earliestDepart;
+  const wantsEarlier = request.relative === 'earlier' || request.timeOfDay === 'morning' || !!request.window?.latestDepart;
+  let alt: LegChoice | undefined;
+  const byPrice = (a: LegChoice, b: LegChoice) => (a.price || Infinity) - (b.price || Infinity);
+  if (wantsLater) {
+    const later = sensibleOthers.filter((c) => !cur?.departTime || c.departTime! > cur.departTime);
+    const latest = later.map((c) => c.departTime!).sort().pop();
+    alt = later.filter((c) => c.departTime === latest).sort(byPrice)[0];
+  } else if (wantsEarlier) {
+    const earlier = sensibleOthers.filter((c) => !cur?.departTime || c.departTime! < cur.departTime);
+    const earliest = earlier.map((c) => c.departTime!).sort()[0];
+    alt = earlier.filter((c) => c.departTime === earliest).sort(byPrice)[0];
+  }
+  const altLine = alt
+    ? ` The ${wantsLater ? 'latest' : 'earliest'} sensible flight that day: ${describeChoice(alt)} — ${journeyWords(alt)}, ${money(alt.price)}${cur ? ` (${moneyDiff(cur.price, alt.price)})` : ''}.`
+    : cur?.departTime && (wantsLater || wantsEarlier)
+      ? ` Yours (${cur.departTime}) is already the ${wantsLater ? 'latest' : 'earliest'} sensible flight that day.`
+      : '';
+  return {
+    type: 'answer',
+    reply:
+      `Every ${what} on ${when} is a very long journey — the quickest takes ${formatMinutes(quickest)}, against ${formatMinutes(fastest)} for the fastest flight that day:\n${top.join('\n')}\n` +
+      `${altLine.trim()} Nothing changed — tell me if you want one of these anyway, or another day.`.trim(),
+  };
+}
+
+/** " — the latest leaves at 12:23" style hint for a no-match reply. */
+function unmetSummary(choices: LegChoice[], request: ChoiceRequest, leg: TripLeg): string {
+  const times = choices.map((c) => c.departTime).filter((t): t is string => !!t).sort();
+  if ((request.relative === 'later' || request.window?.earliestDepart) && times.length) {
+    return ` (the latest leaves at ${times[times.length - 1]})`;
+  }
+  if ((request.relative === 'earlier' || request.window?.latestDepart) && times.length) {
+    return ` (the earliest leaves at ${times[0]})`;
+  }
+  if (request.cheaper && leg.current) {
+    // The same exclusion the match uses: the user's own flight is never "a
+    // cheaper flight", even when a fresh search prices it lower (Duffel
+    // re-prices on every search) — so it must not be quoted as the cheapest.
+    const cur = leg.current;
+    const byPrice = (cs: LegChoice[]) => cs.map((c) => c.price).filter((p) => p > 0).sort((a, b) => a - b)[0];
+    const other = byPrice(choices.filter((c) => !sameService(c, cur)));
+    const own = byPrice(choices.filter((c) => sameService(c, cur)));
+    const bits: string[] = [];
+    if (other != null) bits.push(`the cheapest other flight is ${money(other)}, you have ${money(cur.price)}`);
+    if (own != null && Math.round(own) < Math.round(cur.price)) bits.push(`your own flight now shows ${money(own)}`);
+    if (bits.length) return ` (${bits.join('; ')})`;
+  }
+  return '';
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// ─── compare_modes ────────────────────────────────────────────────
+
+async function compareModes(currentTrip: any, legs: TripLeg[], toolInput: any): Promise<TripChatResult> {
+  const lookup = legFor(currentTrip, legs, toolInput);
+  if (lookup.kind === 'unknown_city') {
+    return { type: 'answer', reply: `I couldn\'t find a ${lookup.from} → ${lookup.to} leg in your trip.` };
+  }
+  // A comparison for a non-leg would be priced on the wrong day (the
+  // from-city's departure to a DIFFERENT next city), and its "Switch" button
+  // asks for that non-leg as a refresh next.
+  if (lookup.kind !== 'leg') return { type: 'answer', reply: lookupReply(lookup, legs) };
+  const leg = lookup.leg;
+  if (leg.kind !== 'intercity') {
+    return {
+      type: 'answer',
+      reply: `I can only search flights to and from home, so there's no train to compare for ${legLabel(leg)}. Want me to look for a different flight instead?`,
+    };
+  }
+  const fromCity = currentTrip.cities[leg.index];
+  const toCity = currentTrip.cities[leg.index + 1];
+
+  const travelDate = leg.date;
+  if (!travelDate) {
+    return { type: 'answer', reply: `I need a departure date for ${fromCity.name} before I can compare options.` };
+  }
+
+  const cmp = await compareLeg({
+    origin: fromCity.name,
+    destination: toCity.name,
+    date: travelDate,
+    travelers: currentTrip.travelers ?? 1,
+    originCountry: fromCity.country ?? getCityCountry(fromCity.name),
+    destinationCountry: toCity.country ?? getCityCountry(toCity.name),
+  }).catch(() => null);
+
+  if (!cmp || (!cmp.flightOption && !cmp.trainOption)) {
+    return {
+      type: 'answer',
+      reply: `I couldn\'t find any flight or train options for ${fromCity.name} → ${toCity.name} on ${travelDate}.`,
+    };
+  }
+
+  const fmtDuration = (mins: number) => {
+    if (!mins || !Number.isFinite(mins)) return '—';
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h === 0) return `${m}m`;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  };
+
+  const flightSummary = cmp.flightOption
+    ? {
+        mode: 'flight' as const,
+        operator: cmp.flightOption.carrier,
+        price: cmp.flightOption.price,
+        currency: cmp.flightOption.currency,
+        duration: fmtDuration(cmp.flightOption.durationMinutes),
+        durationMinutes: cmp.flightOption.durationMinutes,
+        stops: cmp.flightOption.stops,
+        bookingUrl: cmp.flightOption.bookingUrl ?? null,
+      }
+    : null;
+
+  const trainSummary = cmp.trainOption
+    ? {
+        mode: 'train' as const,
+        operator: cmp.trainOption.operator,
+        price: cmp.trainOption.price ?? 0,
+        currency: cmp.trainOption.currency ?? 'USD',
+        duration: fmtDuration(cmp.trainOption.durationMinutes),
+        durationMinutes: cmp.trainOption.durationMinutes,
+        bookingUrl: cmp.trainOption.bookingUrl ?? null,
+      }
+    : null;
+
+  // The reply is built from what the search found, not the model's
+  // `explanation` (D-07).
+  return {
+    type: 'mode_comparison',
+    reply: describeComparison(fromCity.name, toCity.name, travelDate, flightSummary, trainSummary, cmp),
+    comparison: {
+      fromCity: fromCity.name,
+      toCity: toCity.name,
+      date: travelDate,
+      flight: flightSummary,
+      train: trainSummary,
+      cheapest: cmp.cheapest,
+      fastest: cmp.fastest,
+      recommendation: cmp.recommendation,
+      priceDifference: cmp.priceDifference,
+      timeDifference: cmp.timeDifference,
+    },
+  };
+}
+
+// ─── set_transport_window / show_transport_options ────────────────
+
+/**
+ * Leg-refresh tools. On an inter-city leg both re-search it and return a
+ * leg_refresh the frontend writes onto the card (unchanged behaviour). On a
+ * home leg — stored on trip.origin, not on a city pair — a window becomes a
+ * proposal for the cheapest flight inside it, and a refresh lists the
+ * cheapest flights on the card without changing the selection.
+ *
+ * set_transport_window also returns the window in updatedConstraints, which
+ * the frontend keeps on the in-memory trip. That is a record, not a rule: no
+ * save path writes it and no re-optimization reads it.
+ */
+async function refreshLeg(currentTrip: any, legs: TripLeg[], toolName: string, toolInput: any): Promise<TripChatResult> {
+  const lookup = legFor(currentTrip, legs, toolInput);
+  if (lookup.kind === 'unknown_city') {
+    return { type: 'answer', reply: `I couldn\'t find a ${lookup.from} → ${lookup.to} flight or train in your trip.` };
+  }
+  // Both cities exist but aren't consecutive: there is no such leg to
+  // refresh. The frontend applies a refresh by city NAME — it sets the
+  // from-city's transportOut and the to-city's transportIn — so on Rome →
+  // Venice → Florence a "Rome → Florence" refresh overwrote Rome's real
+  // Rome → Venice leg (B9). Answer instead, naming the legs that do exist.
+  if (lookup.kind !== 'leg') return { type: 'answer', reply: lookupReply(lookup, legs) };
+  const leg = lookup.leg;
+
+  // Every leg, inter-city included, the same way: "show me options" adds them
+  // to the leg's card and changes nothing; a time window is a priced proposal
+  // the user Accepts. (Live: an inter-city refresh swapped the selected leg on
+  // its own — "Leave Paris after 3pm" added $77 to the header and "show me
+  // options" took it off again, with no Accept and a reply saying "pick one".)
+  if (toolName === 'show_transport_options') return findOption(currentTrip, legs, { leg: leg.id }, toolName, true);
+  return findOption(currentTrip, legs, { ...toolInput, leg: leg.id, list: false }, toolName);
+}
+
+// ─── pin_city_dates / set_min_days ────────────────────────────────
+
+/**
+ * Date-bearing tools: compute a new set of city dates + a visual diff.
+ *
+ * The proposal's reply is the model's own `explanation`, written before
+ * anything was checked — so a constraint we can't apply must NOT become a
+ * proposal (B10). Each failed check answers instead: "I couldn't <attempt>:
+ * <reason>."
+ */
+async function dateTool(currentTrip: any, toolName: string, toolInput: any): Promise<TripChatResult> {
+  const existingConstraints: TripConstraints = currentTrip.constraints ?? {};
+  let constraintUpdate: TripConstraints = {};
+  const replyText = toolInput.explanation ?? 'I have a proposed change for you.';
+  let attempt = '';
+  let target: any = null;
+  let minNights: number | null = null;
+  const couldnt = (reason: string): TripChatResult => ({ type: 'answer', reply: `I couldn\'t ${attempt}: ${reason}.` });
+
+  if (toolName === 'pin_city_dates') {
+    const match = (currentTrip.cities ?? []).find((c: any) => c.name.toLowerCase() === String(toolInput.city).toLowerCase());
+    if (!match) {
+      return {
+        type: 'answer',
+        reply: `I couldn\'t find "${toolInput.city}" in your trip. Did you mean one of: ${(currentTrip.cities ?? [])
+          .map((c: any) => c.name)
+          .join(', ')}?`,
+      };
+    }
+    attempt =
+      isIsoDate(toolInput.arrival) && isIsoDate(toolInput.departure)
+        ? `pin ${match.name} to ${toolInput.arrival} – ${toolInput.departure}`
+        : `pin ${match.name}`;
+    const problem = pinProblem(toolInput.arrival, toolInput.departure);
+    if (problem) return couldnt(problem);
+    target = match;
+    constraintUpdate = { pinned_cities: [{ city: match.name, arrival: toolInput.arrival, departure: toolInput.departure }] };
+  } else {
+    const match = (currentTrip.cities ?? []).find((c: any) => c.name.toLowerCase() === String(toolInput.city).toLowerCase());
+    if (!match) return { type: 'answer', reply: `I couldn\'t find "${toolInput.city}" in your trip.` };
+    minNights = parseMinNights(toolInput.minNights);
+    if (minNights == null) {
+      attempt = `set a minimum stay for ${match.name}`;
+      return couldnt(
+        `it has to be a whole number of nights from 1 to ${MAX_STAY_NIGHTS}, and I got ${JSON.stringify(toolInput.minNights ?? null)}`,
+      );
+    }
+    attempt = `give ${match.name} at least ${minNights} night${minNights === 1 ? '' : 's'}`;
+    target = match;
+    constraintUpdate = { min_days: [{ city: match.name, minNights }] };
+  }
+
+  const proposedConstraints = mergeConstraints(existingConstraints, constraintUpdate);
+  const dbShapeCities = (currentTrip.cities ?? []).map((c: any) => ({
+    name: c.name,
+    arrival_date: c.dates?.arrival ?? c.arrival_date ?? null,
+    departure_date: c.dates?.departure ?? c.departure_date ?? null,
+  }));
+  const { cities: newCities, diff } = applyDateConstraints(dbShapeCities, proposedConstraints);
+
+  if (target) {
+    // Valid on its own can still be impossible in context: a pin that pushes
+    // earlier cities into the past, or two pins with too little room.
+    const schedule = scheduleProblem(dbShapeCities, newCities);
+    if (schedule) return couldnt(schedule);
+    if (minNights != null) {
+      const shortfall = minDaysProblem(newCities[(currentTrip.cities ?? []).indexOf(target)], minNights, proposedConstraints);
+      if (shortfall) return couldnt(shortfall);
+    }
+  }
+
+  // Dates that move are priced before they are proposed, as a city edit of
+  // the same cities: the card then states the exact total Accept gives.
+  if (diff.length > 0) {
+    const before = stopsOf(currentTrip);
+    const moved = before.map((s, i) => ({ name: s.name, arrival: String(newCities[i].arrival_date ?? s.arrival), departure: String(newCities[i].departure_date ?? s.departure) }));
+    const plan = planDateEdit(before, moved);
+    const firstShift = Math.round((Date.parse(`${moved[0].arrival}T00:00:00Z`) - Date.parse(`${before[0].arrival}T00:00:00Z`)) / 86_400_000);
+    const oldStart = tripStart(currentTrip, before);
+    const start = firstShift !== 0 && oldStart ? addDays(oldStart, firstShift) : undefined;
+    const priced = await priceCityEditPlan(
+      currentTrip,
+      toolName as 'pin_city_dates' | 'set_min_days',
+      { kind: 'dates', city: target?.name ?? '' },
+      before,
+      plan,
+      attempt || 'change the dates',
+      start,
+    );
+    if (priced.type === 'answer') return priced;
+    priced.proposal.constraints = proposedConstraints;
+    return {
+      type: 'proposal',
+      reply: `${replyText} ${plan.note}${homeFlightChanges(currentTrip, priced.proposal)}${choiceWords(priced.proposal)} Accept to apply it.`.replace(/\s+/g, ' ').trim(),
+      proposal: priced.proposal,
+    };
+  }
+
+  const proposedTrip = {
+    ...currentTrip,
+    constraints: proposedConstraints,
+    cities: (currentTrip.cities ?? []).map((c: any, i: number) => ({
+      ...c,
+      dates: { arrival: newCities[i].arrival_date, departure: newCities[i].departure_date },
+    })),
+  };
+
+  return {
+    type: 'proposal',
+    reply: replyText,
+    proposal: { kind: 'date_shift', toolName, toolInput, diff, proposedConstraints, proposedTrip },
+  };
+}
+
+// ─── Helpers (moved unchanged from routes/plan.ts) ────────────────
+
+/**
+ * The leg's current transport (frontend Transport shape) as a LegOption, so
+ * a refresh can list it first and the frontend's legOptionToTransport
+ * rebuilds the same selection. priceDelta is 0 by definition.
+ */
+function transportToLegOption(t: any, currency: string): LegOption {
+  return {
+    mode: t.mode,
+    operator: t.operator ?? '',
+    flightNumber: (t.mode === 'train' ? t.trainNumber : t.flightNumber) ?? null,
+    price: t.price,
+    currency,
+    departTime: t.departTime ?? null,
+    arriveTime: t.arriveTime ?? null,
+    duration: t.duration ?? '',
+    durationMinutes: parseDurationMinutes(t.duration),
+    stops: t.layovers ?? 0,
+    bookingUrl: t.bookingUrl ?? null,
+    priceDelta: 0,
+  };
+}
+
+/** Same departure at the same price — a fresh search re-finding the current option. */
+function isSameLegOption(a: LegOption, b: LegOption): boolean {
+  return a.mode === b.mode && a.operator === b.operator && a.departTime === b.departTime && Math.abs(a.price - b.price) < 0.01;
+}
+
+/** "Here's your trip with Venice added after Rome." — from the planned edit. */
+/**
+ * The home flights a city or date edit re-searched, as sentences: the card's
+ * total includes them, so the reply says what they are and what they replace
+ * (live: swapping London for Edinburgh read "−$421" with no word that the
+ * $867 flight home had become a $414 one from Edinburgh).
+ */
+function homeFlightChanges(currentTrip: any, p: CityEditProposal): string {
+  const was = (old: any) => (old && Number(old.price) > 0 ? ` (was ${old.operator || 'a flight'} at ${money(Number(old.price))})` : '');
+  const flight = (l: any) =>
+    `${l.operator || 'a flight'} ${[l.originAirport, l.departTime].filter(Boolean).join(' ')} → ${[l.destAirport, l.arriveTime].filter(Boolean).join(' ')} on ${shortDate(l.departDate)}, ${money(Number(l.price) || 0)}${perPersonWord()}`;
+  const out: string[] = [];
+  const legs: Array<['outboundLeg' | 'returnLeg', string]> = [['outboundLeg', 'Flight out'], ['returnLeg', 'Flight home']];
+  for (const [key, label] of legs) {
+    if (!(key in p)) continue;
+    const next = (p as any)[key];
+    const old = currentTrip?.origin?.[key];
+    if (next == null) out.push(`I found no ${label.toLowerCase()} for the new dates, so the total leaves it out.`);
+    else out.push(`${label}: ${flight(next)}${was(old)}.`);
+  }
+  return out.length ? ` ${out.join(' ')}` : '';
+}
+
+/**
+ * reorder_cities: the order the user gave, or (optimize) the one with the
+ * least backtracking and distance — priced like any city edit.
+ */
+async function reorderCities(currentTrip: any, rawInput: any): Promise<TripChatResult> {
+  let input = rawInput;
+  const names: string[] = (currentTrip?.cities ?? []).map((c: any) => String(c.name ?? ''));
+  if (names.length < 2) return { type: 'answer', reply: 'There is only one city in this trip, so there is no order to change.' };
+  let order: string[];
+  let why = '';
+  const group = typeof input?.groupCountry === 'string' ? input.groupCountry.trim() : '';
+  if (group) {
+    // "Put the Austrian cities together": already together → say so, propose nothing.
+    const geos = names.map((n) => cityGeo(n, names));
+    const want = countryCode(group);
+    const inIt = geos.map((g, i) => (g && (g.country === want || (currentTrip.cities[i]?.country ?? '').toLowerCase() === group.toLowerCase()) ? i : -1)).filter((i) => i >= 0);
+    if (inIt.length < 2) {
+      return { type: 'answer', reply: inIt.length === 1 ? `Only ${names[inIt[0]]} is in ${group}, so there's nothing to group.` : `None of ${names.join(', ')} is in ${group}.` };
+    }
+    if (inIt[inIt.length - 1] - inIt[0] === inIt.length - 1) {
+      return { type: 'answer', reply: `${inIt.map((i) => names[i]).join(' and ')} are already next to each other (${names.join(' → ')}), so nothing needs to move.` };
+    }
+    input = { ...input, optimize: true };
+  }
+  if (input?.optimize === true || !Array.isArray(input?.order) || input.order.length === 0) {
+    const geos = names.map((n) => cityGeo(n, names));
+    if (geos.some((g) => !g)) return { type: 'answer', reply: "I couldn't place every city on the map, so I can't work out the best order." };
+    const home = currentTrip?.origin?.city ? cityGeo(String(currentTrip.origin.city)) : null;
+    const returnsHome = (currentTrip?.returnToHome ?? true) !== false;
+    const best = bestOrder(geos as CityGeo[], home, returnsHome);
+    order = best.map((g) => g.name);
+    const before = routeKm(geos as CityGeo[], home, returnsHome);
+    const after = routeKm(best, home, returnsHome);
+    if (order.every((n, i) => n === names[i])) {
+      return { type: 'answer', reply: `${names.join(' → ')} is already the order with the least backtracking and travel, so I'd keep it.` };
+    }
+    const splitsBefore = countrySplits((geos as CityGeo[]).map((g) => g.country));
+    why =
+      ` It ${splitsBefore > 0 ? 'stops leaving a country and coming back, and ' : ''}cuts about ${Math.max(0, Math.round(before - after)).toLocaleString('en-US')} km of travel` +
+      ' — the card shows the exact change in price.';
+  } else {
+    order = input.order.map((x: any) => String(x));
+  }
+  const op = cityEditOpFromTool('reorder_cities', { order });
+  if (!op) return { type: 'answer', reply: `Which order? The cities are ${names.join(', ')}.` };
+  const built = await buildCityEditProposal(currentTrip, 'reorder_cities', op);
+  if (built.type === 'answer') return built;
+  const p = built.proposal;
+  return {
+    type: 'proposal',
+    reply: `Here's your trip as ${p.after.map((s) => s.name).join(' → ')}.${why} ${p.note}${homeFlightChanges(currentTrip, p)}${choiceWords(p)} Accept to apply it.`,
+    proposal: p,
+  };
+}
+
+/** "Austria" / "Austrian" / "AT" → "AT" (null-safe; unknown → the input upper-cased). */
+function countryCode(name: string): string {
+  const n = name.trim().toLowerCase().replace(/(n|ian|ish|ese)$/, '');
+  if (/^[a-z]{2}$/i.test(name.trim())) return name.trim().toUpperCase();
+  try {
+    const dn = new Intl.DisplayNames(['en'], { type: 'region' });
+    for (let a = 65; a <= 90; a++) {
+      for (let b = 65; b <= 90; b++) {
+        const code = String.fromCharCode(a, b);
+        const label = (dn.of(code) ?? '').toLowerCase();
+        if (label && label !== code.toLowerCase() && (label === name.trim().toLowerCase() || label.startsWith(n))) return code;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return name.trim().toUpperCase();
+}
+
+/** What a re-search did with the legs the user had chosen, as sentences. */
+const choiceWords = (p: CityEditProposal) => (p.choiceNotes?.length ? ` ${p.choiceNotes.join(' ')}` : '');
+
+function describeCityEdit(p: CityEditProposal): string {
+  const op = p.op;
+  if (op.kind === 'replace') {
+    const added = p.after.find((s) => s.status === 'replaced');
+    return `Here's your trip with ${added?.name ?? op.newCity} instead of ${added?.replaces ?? op.oldCity}.`;
+  }
+  if (op.kind === 'remove') return `Here's your trip without ${p.removed[0] ?? op.city}.`;
+  if (op.kind !== 'add') return `Here's your trip as ${p.after.map((s) => s.name).join(' → ')}.`;
+  const idx = p.after.findIndex((s) => s.status === 'added');
+  const prev = idx > 0 ? p.after[idx - 1].name : null;
+  return `Here's your trip with ${op.city} added${idx === p.after.length - 1 ? ' at the end' : prev ? ` after ${prev}` : ''}.`;
+}
+
+/**
+ * The compare_modes reply, stated from the same numbers the card shows. A
+ * missing mode is said plainly, a train with no price is "at an unknown
+ * price", and cheaper/faster is only claimed when both sides have the number.
+ */
+function describeComparison(
+  from: string,
+  to: string,
+  date: string,
+  flight: { price: number; duration: string; durationMinutes: number } | null,
+  train: { price: number; duration: string; durationMinutes: number } | null,
+  cmp: { cheapest: string; fastest: string },
+): string {
+  const leg = `${from} → ${to}`;
+  const price = (p: number) => (p > 0 ? `from $${Math.round(p)}` : 'at an unknown price');
+  if (flight && !train) return `I found no train for ${leg} on ${date} — only flights, ${price(flight.price)} (${flight.duration}).`;
+  if (train && !flight) return `I found no flight for ${leg} on ${date} — only trains, ${price(train.price)} (${train.duration}).`;
+  if (!flight || !train) return `I couldn\'t find any flight or train options for ${leg} on ${date}.`;
+
+  const found = `${leg} on ${date}: flight ${price(flight.price)} (${flight.duration}), train ${price(train.price)} (${train.duration}).`;
+  const isMode = (m: string) => m === 'flight' || m === 'train';
+  const cheaper = flight.price > 0 && train.price > 0 && isMode(cmp.cheapest) ? cmp.cheapest : null;
+  const faster = flight.durationMinutes > 0 && train.durationMinutes > 0 && isMode(cmp.fastest) ? cmp.fastest : null;
+  if (cheaper && cheaper === faster) return `${found} The ${cheaper} is both cheaper and faster.`;
+  if (cheaper && faster) return `${found} The ${cheaper} is cheaper; the ${faster} is faster.`;
+  if (cheaper) return `${found} The ${cheaper} is cheaper.`;
+  if (faster) return `${found} The ${faster} is faster.`;
+  return found;
+}
+
+/** How a window bound reads in a reply. */
+const WINDOW_BOUND_LABEL = {
+  earliestDepart: 'earliest departure',
+  latestDepart: 'latest departure',
+  earliestArrive: 'earliest arrival',
+  latestArrive: 'latest arrival',
+} as const;
+
+/** "arriving before 14:00", "departing between 17:00 and 22:00"; '' with no bounds. */
+function describeWindow(w: {
+  earliestDepart?: string | null;
+  latestDepart?: string | null;
+  earliestArrive?: string | null;
+  latestArrive?: string | null;
+}): string {
+  const bits: string[] = [];
+  if (w.earliestDepart && w.latestDepart) bits.push(`departing between ${w.earliestDepart} and ${w.latestDepart}`);
+  else if (w.earliestDepart) bits.push(`departing after ${w.earliestDepart}`);
+  else if (w.latestDepart) bits.push(`departing before ${w.latestDepart}`);
+
+  if (w.earliestArrive && w.latestArrive) bits.push(`arriving between ${w.earliestArrive} and ${w.latestArrive}`);
+  else if (w.earliestArrive) bits.push(`arriving after ${w.earliestArrive}`);
+  else if (w.latestArrive) bits.push(`arriving before ${w.latestArrive}`);
+
+  return bits.join(', ');
+}

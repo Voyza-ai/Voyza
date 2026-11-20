@@ -27,6 +27,7 @@ import VibePills from './VibePills';
 import BudgetPicker from './BudgetPicker';
 import TripSummaryCard from './TripSummaryCard';
 import { CHAT_EDIT_PREFILL } from '@/lib/tripSummary';
+import { dedupeVibes, joinVibes, splitVibeText, vibeBubbleText, vibeList, vibePhrase } from '@/lib/vibes';
 
 type ChatMsg = {
   id: string;
@@ -91,6 +92,8 @@ export default function ConversationalPlanner({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [widget, setWidget] = useState<Widget>(null);
+  // The vibe widget's picked pills, before Continue.
+  const [vibeDraft, setVibeDraft] = useState<string[]>([]);
   const [showRecap, setShowRecap] = useState(false);
   const [quickReplies, setQuickReplies] = useState<string[]>([]);
   const [failCount, setFailCount] = useState(0);
@@ -153,7 +156,13 @@ export default function ConversationalPlanner({
       if (u.budget !== undefined && u.budget !== null) setAnswer('budget', u.budget);
       if (u.budgetPerPerson !== undefined && u.budgetPerPerson !== null)
         setAnswer('budgetPerPerson', u.budgetPerPerson);
-      if (isSet(u.vibe)) setAnswer('vibe', u.vibe);
+      if (isSet(u.vibe)) {
+        // "a beach and food trip" → Beach + Food when the words are vibes we
+        // know; anything else stays one vibe, as said.
+        const vibes = splitVibeText(u.vibe);
+        setAnswer('vibes', vibes);
+        setAnswer('vibe', joinVibes(vibes));
+      }
       if (u.returnToHome !== undefined && u.returnToHome !== null)
         setAnswer('returnToHome', u.returnToHome);
       if (isSet(u.notes)) setAnswer('extraNotes', u.notes);
@@ -195,7 +204,8 @@ export default function ConversationalPlanner({
         a.dateRange?.start &&
         a.dateRange?.end &&
         a.travelers &&
-        a.origin, // where they're flying FROM — required for the flight search
+        a.origin && // where they're flying FROM — required for the flight search
+        typeof a.returnToHome === 'boolean', // round-trip vs one-way — asked, never assumed
     );
   }, []);
 
@@ -396,7 +406,7 @@ export default function ConversationalPlanner({
         : 'No limit set',
     },
     { icon: Home, label: 'From', value: a.origin ?? 'Not set' },
-    { icon: Sparkles, label: 'Vibe', value: a.vibe ?? 'Open' },
+    { icon: Sparkles, label: 'Vibe', value: vibeList(a).length > 0 ? vibePhrase(vibeList(a)) : 'Open' },
   ];
 
   return (
@@ -562,9 +572,17 @@ export default function ConversationalPlanner({
           {/* ── Vibe widget ── */}
           {widget === 'vibe' && (
             <VibePills
-              onSelect={(v) => {
+              selected={vibeDraft}
+              onChange={setVibeDraft}
+              onContinue={() => {
+                const picked = dedupeVibes(vibeDraft);
+                if (picked.length === 0) return;
+                // Stored as picked, whatever the AI makes of the sentence.
+                setAnswer('vibes', picked);
+                setAnswer('vibe', joinVibes(picked));
                 setWidget(null);
-                send(`${v} vibes`);
+                setVibeDraft([]);
+                send(`${vibeBubbleText(picked)} vibes`);
               }}
             />
           )}
@@ -705,6 +723,16 @@ export default function ConversationalPlanner({
               e.preventDefault();
               const v = input;
               setInput('');
+              // Pills picked and then something typed: the picks go with it
+              // rather than vanishing with the widget.
+              const picked = widget === 'vibe' ? dedupeVibes(vibeDraft) : [];
+              if (picked.length > 0 && v.trim()) {
+                setAnswer('vibes', picked);
+                setAnswer('vibe', joinVibes(picked));
+                setVibeDraft([]);
+                send(`${vibeBubbleText(picked)} vibes. ${v.trim()}`);
+                return;
+              }
               send(v);
             }}
             className="flex items-center gap-2"
