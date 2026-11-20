@@ -12,6 +12,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { City } from '@/lib/types';
+import { HotelPhotoFrame, useHotelPhotos } from './HotelHero';
 import { getCityColor } from '@/lib/cityColors';
 import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
 import { useTripStore } from '@/store/tripStore';
@@ -166,18 +167,19 @@ export default function CityCard({
 
       </div>
 
-      {/* Hotel pill — darker shade of card bg. my-auto centers it in
-          whatever extra height the card absorbed (cards stretch to fill
-          the full flowchart height), keeping header top / hint bottom. */}
-      <div
-        className="mx-4 rounded-2xl my-auto"
-        style={{ background: `${color.text}15` }}
-      >
-        <HotelSection city={city} cityIndex={index} color={color} />
+      {/* The chosen hotel's photos, then the hotel pill (a darker shade of
+          the card). my-auto centres the pair in whatever height the card
+          absorbed (cards stretch to the flowchart's height), keeping the
+          header at the top and the hint at the bottom. */}
+      <div className="mx-4 my-auto flex flex-col gap-3 min-h-0">
+        <CardPhotos city={city} color={color} />
+        <div className="rounded-2xl" style={{ background: `${color.text}15` }}>
+          <HotelSection city={city} cityIndex={index} color={color} />
+        </div>
       </div>
 
       {/* Open detail hint */}
-      <div className="px-6 pb-5 pt-1">
+      <div className="px-6 pb-5 pt-3">
         <div
           className="text-center text-[11px] uppercase tracking-wider transition-colors"
           style={{ color: isActive ? color.text : 'rgba(0,0,0,0.35)' }}
@@ -188,6 +190,28 @@ export default function CityCard({
 
       {/* Color picker on hover */}
     </motion.div>
+  );
+}
+
+/* ------------------------------ Hotel photos ----------------------------- */
+
+/**
+ * The chosen hotel's photos, in a frame squarer than the guide's to suit the
+ * card. Left out for the traveller's own stay and for a hotel with none, so
+ * the card never shows an empty frame. Clicking a photo opens the guide like
+ * the rest of the card; the arrows only step the photos.
+ */
+function CardPhotos({ city, color }: { city: City; color: { bg: string; text: string; border: string } }) {
+  const hotel = city.customHotel ? null : city.hotels[city.selectedHotelIndex] ?? city.hotels[0] ?? null;
+  const photos = useHotelPhotos(hotel);
+  if (!hotel || photos.length === 0) return null;
+  return (
+    <HotelPhotoFrame
+      photos={photos}
+      name={hotel.name}
+      accent={color}
+      className="aspect-[4/3] max-h-[26vh]"
+    />
   );
 }
 

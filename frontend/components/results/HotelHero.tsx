@@ -103,20 +103,12 @@ export default function HotelHero({
           fades in over the old one, so there is never an empty frame. The
           traveller's own stay has no photos to show, so no frame at all. */}
       {!customName && (
-      <div className="relative w-full h-[clamp(110px,16vh,170px)] rounded-2xl overflow-hidden" style={{ background: '#eef0f4' }}>
-        <AnimatePresence initial={false}>
-          <motion.div
-            key={hotel?.name ?? ''}
-            className="absolute inset-0"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.35, ease: [0.22, 0.61, 0.36, 1] }}
-          >
-            <PhotoStrip photos={photos} name={hotel?.name ?? ''} accent={accent} />
-          </motion.div>
-        </AnimatePresence>
-      </div>
+      <HotelPhotoFrame
+        photos={photos}
+        name={hotel?.name ?? ''}
+        accent={accent}
+        className="h-[clamp(110px,16vh,170px)]"
+      />
       )}
       {customName && (
         <div className="flex items-start justify-between gap-4">
@@ -196,6 +188,40 @@ export default function HotelHero({
   );
 }
 
+/**
+ * A hotel's photos in a rounded frame; choosing another hotel cross-fades to
+ * its photos (the new strip fades in over the old, so the frame is never
+ * empty). Shared by the city guide and the flowchart's city card.
+ */
+export function HotelPhotoFrame({
+  photos,
+  name,
+  accent,
+  className,
+}: {
+  photos: string[];
+  name: string;
+  accent: Accent;
+  className: string;
+}) {
+  return (
+    <div className={`relative w-full rounded-2xl overflow-hidden ${className}`} style={{ background: '#eef0f4' }}>
+      <AnimatePresence initial={false}>
+        <motion.div
+          key={name}
+          className="absolute inset-0"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 0.61, 0.36, 1] }}
+        >
+          <PhotoStrip photos={photos} name={name} accent={accent} />
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+}
+
 /** Photos side by side in a scroll-snapped row: swipe, scroll, or the arrows. */
 function PhotoStrip({ photos, name, accent }: { photos: string[]; name: string; accent: Accent }) {
   const rowRef = useRef<HTMLDivElement>(null);
@@ -257,7 +283,10 @@ function PhotoStrip({ photos, name, accent }: { photos: string[]; name: string; 
         <>
           <button
             type="button"
-            onClick={() => go(index - 1)}
+            onClick={(e) => {
+              e.stopPropagation();
+              go(index - 1);
+            }}
             disabled={index === 0}
             className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center shadow-sm disabled:opacity-0 transition-opacity"
             style={{ color: accent.text }}
@@ -267,7 +296,10 @@ function PhotoStrip({ photos, name, accent }: { photos: string[]; name: string; 
           </button>
           <button
             type="button"
-            onClick={() => go(index + 1)}
+            onClick={(e) => {
+              e.stopPropagation();
+              go(index + 1);
+            }}
             disabled={index >= shown.length - 1}
             className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center shadow-sm disabled:opacity-0 transition-opacity"
             style={{ color: accent.text }}
