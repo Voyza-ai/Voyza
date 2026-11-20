@@ -203,6 +203,38 @@ function writeGeoCache(key: string, entry: GeoCacheEntry) {
 }
 
 /**
+ * The coordinates a stay's repeated hotel search found, kept per browser for
+ * a week: that search is a metered Booking call, and without this every
+ * opening of an older trip's city guide paid for it again.
+ */
+const STAY_SEARCH_KEY = 'voyza.staysearchgeo.v1';
+const STAY_SEARCH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+type StaySearchEntry = { at: number; points: Record<string, [number, number]> };
+
+function readStaySearch(key: string): Map<string, GeoPoint> | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const all = JSON.parse(window.localStorage.getItem(STAY_SEARCH_KEY) ?? '{}') as Record<string, StaySearchEntry>;
+    const hit = all[key];
+    if (!hit || Date.now() - hit.at >= STAY_SEARCH_TTL_MS) return null;
+    return new Map(Object.entries(hit.points).map(([k, [lat, lon]]) => [k, { lat, lon }]));
+  } catch {
+    return null;
+  }
+}
+function writeStaySearch(key: string, points: Map<string, GeoPoint>) {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(STAY_SEARCH_KEY) ?? '{}') as Record<string, StaySearchEntry>;
+    const now = Date.now();
+    for (const k of Object.keys(all)) if (now - all[k].at >= STAY_SEARCH_TTL_MS) delete all[k];
+    all[key] = { at: now, points: Object.fromEntries(Array.from(points).map(([k, p]) => [k, [p.lat, p.lon]])) };
+    window.localStorage.setItem(STAY_SEARCH_KEY, JSON.stringify(all));
+  } catch {
+    // Storage blocked: the next map searches again.
+  }
+}
+
+/**
  * Where a hotel is, from its name: Photon first, Nominatim when Photon is
  * down. Only a lodging near the city whose name passes `sameHotelName`
  * counts, the closest such if several do. Answers, including "not found", are
@@ -272,23 +304,30 @@ export async function locateHotels(
   // matched by name. One request for the whole set, served from the
   // backend's cache when the stay was searched in the last ten minutes.
   if (points.some((p) => !p)) {
-    // Bounded: the map waits on this, and a slow search must not hold it up.
-    const rows = await Promise.race([
-      search({
-        city: city.name,
-        checkin: city.dates.arrival,
-        checkout: city.dates.departure,
-        adults: travelers,
-      }).catch(() => []),
-      new Promise<[]>((r) => setTimeout(() => r([]), SEARCH_WAIT_MS)),
-    ]);
-    const byName = new Map<string, GeoPoint>();
-    for (const r of rows) {
-      if (typeof r.lat === 'number' && typeof r.lng === 'number') byName.set(hotelKey(r.name), { lat: r.lat, lon: r.lng });
+    // Once per stay per browser: what an earlier search found is reused.
+    const stayKey = `${hotelKey(city.name)}|${city.dates.arrival}|${city.dates.departure}|${travelers}`;
+    let byName = readStaySearch(stayKey);
+    if (!byName) {
+      // Bounded: the map waits on this, and a slow search must not hold it up.
+      const rows = await Promise.race([
+        search({
+          city: city.name,
+          checkin: city.dates.arrival,
+          checkout: city.dates.departure,
+          adults: travelers,
+        }).catch(() => null),
+        new Promise<null>((r) => setTimeout(() => r(null), SEARCH_WAIT_MS)),
+      ]);
+      byName = new Map<string, GeoPoint>();
+      for (const r of rows ?? []) {
+        if (typeof r.lat === 'number' && typeof r.lng === 'number') byName.set(hotelKey(r.name), { lat: r.lat, lon: r.lng });
+      }
+      // A search that failed or ran out of time is not kept: tried again next time.
+      if (rows) writeStaySearch(stayKey, byName);
     }
     entries.forEach((e, i) => {
       if (points[i]) return;
-      const p = byName.get(hotelKey(e.hotel.name)) ?? null;
+      const p = byName!.get(hotelKey(e.hotel.name)) ?? null;
       if (near(p)) points[i] = p;
     });
   }
