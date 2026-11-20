@@ -23,6 +23,7 @@ import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import NoRailDataNotice from '@/components/results/NoRailDataNotice';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
+import MissingPricesNotice from '@/components/results/MissingPricesNotice';
 import { searchHotels, fetchHomeLegs, updateTrip, compareLeg, fetchSharedTrip, type LegComparison } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
@@ -81,6 +82,8 @@ function ResultsPageInner() {
   const tripId = searchParams.get('tripId');
   const [view, setView] = useState<ResultsView>('flowchart');
   const [openCityIndex, setOpenCityIndex] = useState<number | null>(null);
+  // The guide is on its way back into its card: the view behind it fades in.
+  const [guideClosing, setGuideClosing] = useState(false);
   const [openActivitiesIndex, setOpenActivitiesIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1203,8 +1206,24 @@ function ResultsPageInner() {
   const pricedTrip = frozenTrip ?? currentTrip;
 
   const handleCityClick = (cityIndex: number) => {
+    setGuideClosing(false);
     setOpenCityIndex(cityIndex);
     setOpenActivitiesIndex(null);
+  };
+
+  /**
+   * Where city `i`'s card is on screen, for the guide to grow out of and
+   * shrink back into — or null when it is not in view (another tab is open,
+   * or the flowchart is scrolled away from it), and the guide just fades.
+   */
+  const cityCardRect = (i: number): DOMRect | null => {
+    const area = cardsAreaRef.current;
+    const el = area?.querySelector(`[data-city-card="${i}"]`);
+    if (!area || !el) return null;
+    const r = el.getBoundingClientRect();
+    const a = area.getBoundingClientRect();
+    const visible = r.width > 0 && r.right > a.left + 40 && r.left < a.right - 40;
+    return visible ? r : null;
   };
 
   const handleActivitiesClick = (cityIndex: number) => {
@@ -1240,9 +1259,11 @@ function ResultsPageInner() {
           cards start at the left edge and the chat ends at the right edge. */}
       {/* When the trip is editable the left edge holds the "Suggested Cities"
           pull-out tab, so the content starts just clear of it. */}
-      <div className={`flex-1 min-h-0 flex flex-col md:flex-row gap-3 pb-2 pt-[3rem] w-full ${editable ? 'pl-9' : 'pl-2'} ${chatAllowed && !chatOpen ? 'pr-9' : 'pr-2'}`}>
-        {/* Main column — header pinned, cards fill the rest */}
-        <div className="flex-1 min-w-0 flex flex-col min-h-0">
+      <div className={`flex-1 min-h-0 flex flex-col pb-2 pt-[3rem] w-full ${editable ? 'pl-9' : 'pl-2'} ${chatAllowed && !chatOpen ? 'pr-9' : 'pr-2'}`}>
+        {/* Header and notices across the full width, so the cards and the
+            BlueMurr AI panel below start on the same line and are the same
+            height. */}
+        <div className="flex-shrink-0">
           <ResultsHeader
             trip={currentTrip}
             pricedTrip={frozenTrip ?? undefined}
@@ -1294,6 +1315,7 @@ function ResultsPageInner() {
             <BudgetOverBanner budget={currentTrip.budget} totalCost={liveTripTotal(pricedTrip)} />
           )}
           <NoRailDataNotice trip={currentTrip} />
+          <MissingPricesNotice trip={currentTrip} />
           {currentTrip.vibeTierUp && (
             <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
           )}
@@ -1304,7 +1326,11 @@ function ResultsPageInner() {
               onChoose={chooseOrigin}
             />
           )}
+        </div>
 
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 mt-3">
+        {/* Main column — the cards fill it */}
+        <div className="flex-1 min-w-0 flex flex-col min-h-0">
           {/* Full-height cards area */}
           <div
             ref={cardsAreaRef}
@@ -1334,21 +1360,7 @@ function ResultsPageInner() {
                 })}
               </div>
             )}
-            {openCityIndex !== null ? (
-              <CityDetailPanel
-                trip={currentTrip}
-                cityIndex={openCityIndex}
-                onClose={() => setOpenCityIndex(null)}
-                onPrev={() =>
-                  setOpenCityIndex((i) => (i !== null && i > 0 ? i - 1 : i))
-                }
-                onNext={() =>
-                  setOpenCityIndex((i) =>
-                    i !== null && i < currentTrip.cities.length - 1 ? i + 1 : i
-                  )
-                }
-              />
-            ) : openActivitiesIndex !== null ? (
+            {openActivitiesIndex !== null ? (
               <ActivitiesDetailPanel
                 trip={currentTrip}
                 cityIndex={openActivitiesIndex}
@@ -1362,7 +1374,23 @@ function ResultsPageInner() {
                   )
                 }
               />
-            ) : view === 'flowchart' ? (
+            ) : (
+              /* The view stays mounted under the city guide — faded out, not
+                 unmounted — so the guide can grow out of the card that was
+                 clicked and shrink back into it, and the flowchart keeps its
+                 scroll. Hidden once faded, so it takes no clicks or tabs. */
+              <motion.div
+                className="h-full"
+                initial={false}
+                animate={
+                  openCityIndex !== null && !guideClosing
+                    ? { opacity: 0, transitionEnd: { visibility: 'hidden' } }
+                    : { opacity: 1, visibility: 'visible' }
+                }
+                transition={{ duration: 0.3, ease: [0.22, 0.61, 0.36, 1] }}
+                aria-hidden={openCityIndex !== null && !guideClosing}
+              >
+            {view === 'flowchart' ? (
               <Flowchart
                 trip={currentTrip}
                 onCityClick={handleCityClick}
@@ -1387,6 +1415,30 @@ function ResultsPageInner() {
                 <CalendarView trip={currentTrip} onCityClick={handleCityClick} />
               </div>
             )}
+              </motion.div>
+            )}
+            {openCityIndex !== null && (
+              <div className="absolute inset-0 z-20">
+                <CityDetailPanel
+                  trip={currentTrip}
+                  cityIndex={openCityIndex}
+                  originOf={cityCardRect}
+                  onCloseStart={() => setGuideClosing(true)}
+                  onClose={() => {
+                    setOpenCityIndex(null);
+                    setGuideClosing(false);
+                  }}
+                  onPrev={() =>
+                    setOpenCityIndex((i) => (i !== null && i > 0 ? i - 1 : i))
+                  }
+                  onNext={() =>
+                    setOpenCityIndex((i) =>
+                      i !== null && i < currentTrip.cities.length - 1 ? i + 1 : i
+                    )
+                  }
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -1404,11 +1456,12 @@ function ResultsPageInner() {
             take the width; a tab on the right edge brings it back. */}
         {chatAllowed && (
           <aside
-            className={`max-h-[45vh] md:max-h-none md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 md:mt-3 ${chatOpen ? 'flex' : 'hidden'}`}
+            className={`max-h-[45vh] md:max-h-none md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 ${chatOpen ? 'flex' : 'hidden'}`}
           >
             <AIChatPanel trip={currentTrip} onHide={() => setChatOpen(false)} />
           </aside>
         )}
+        </div>
       </div>
 
       {/* BlueMurr AI pull-out tab — the right-edge twin of "Suggested Cities". */}

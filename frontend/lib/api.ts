@@ -110,6 +110,13 @@ export type HotelResult = {
    */
   priceSuspect?: boolean;
   priceSuspectReason?: string;
+  /** Where Booking says the property is. Absent on a row without a usable pair. */
+  lat?: number;
+  lng?: number;
+  /** Booking's district, usually the borough ("Camden"). */
+  district?: string;
+  /** Street address ("86 Brick Lane"). */
+  address?: string;
   /** The search was too thin to price-check this row — see `Hotel.priceUnverified`. */
   priceUnverified?: boolean;
 };
@@ -122,6 +129,8 @@ export async function searchHotels(params: {
   adults?: number;
   rooms?: number;
   maxPrice?: number;
+  /** A later page of the same search (0 = the first, the default). */
+  page?: number;
 }): Promise<HotelResult[]> {
   const data = await apiFetch<{ hotels: HotelResult[] }>('/api/hotels/search', {
     method: 'POST',
@@ -136,6 +145,20 @@ export async function searchHotels(params: {
   // the trip's hotel. Ranking at the source makes `hotels[0]` mean "best"
   // everywhere instead of asking three call sites to remember.
   return rankHotels(data.hotels);
+}
+
+/**
+ * A Booking hotel's photo gallery (large size, best first) for the city
+ * guide's photo strip. [] when the hotel has none or the lookup fails —
+ * the strip then keeps the one photo the search gave.
+ */
+export async function fetchHotelPhotos(hotelId: string): Promise<string[]> {
+  try {
+    const data = await apiFetch<{ photos: string[] }>(`/api/hotels/photos?hotelId=${encodeURIComponent(hotelId)}`);
+    return Array.isArray(data.photos) ? data.photos : [];
+  } catch {
+    return [];
+  }
 }
 
 // ─── Train Search ────────────────────────────────────────────

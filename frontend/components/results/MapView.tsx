@@ -108,7 +108,7 @@ const POSITRON = 'https://tiles.openfreemap.org/styles/positron';
 // BlueMurr blue palette — recolours the (greyscale) positron basemap to match
 // the app's brand blue and the #f0f4f8 page wash, so the map reads as part of
 // BlueMurr rather than a generic OSM tile set.
-const BLUE = {
+export const BLUE = {
   land: '#eef3fb',
   water: '#bcd4f0',
   park: '#eef3fb', // same as land — parks/woods blend in, no patches on the map
@@ -164,14 +164,14 @@ function applyBlueMurrBlue(style: any) {
 // `swatch` is the little colour chip in the picker. The `voyza` key itself is a
 // lowercase internal — it's the persisted localStorage value, and renaming it
 // would silently reset every user's saved theme choice.
-type StyleKey = 'voyza' | 'light';
+export type StyleKey = 'voyza' | 'light';
 const STYLES: Record<StyleKey, { label: string; url: string; swatch: string; bluify?: boolean }> = {
   voyza: { label: 'BlueMurr', url: POSITRON, swatch: '#bcd4f0', bluify: true },
   light: { label: 'Light', url: POSITRON, swatch: '#e7e7ea' },
 };
 const STYLE_STORAGE_KEY = 'voyza.mapStyle';
 
-const readStoredStyle = (): StyleKey => {
+export const readStoredStyle = (): StyleKey => {
   if (typeof window === 'undefined') return 'voyza';
   const s = window.localStorage.getItem(STYLE_STORAGE_KEY) as StyleKey | null;
   return s && s in STYLES ? s : 'voyza';
@@ -180,7 +180,7 @@ const readStoredStyle = (): StyleKey => {
 // Fetched + transformed once per theme, then shared across mounts/switches.
 const stylePromises: Partial<Record<StyleKey, Promise<maplibregl.StyleSpecification | string>>> = {};
 
-function loadMapStyle(key: StyleKey): Promise<maplibregl.StyleSpecification | string> {
+export function loadMapStyle(key: StyleKey): Promise<maplibregl.StyleSpecification | string> {
   if (stylePromises[key]) return stylePromises[key]!;
   const cfg = STYLES[key];
   stylePromises[key] = fetch(cfg.url)
@@ -353,7 +353,7 @@ function shortestBounds(points: GeoPoint[]): maplibregl.LngLatBounds {
   return bounds;
 }
 
-const SPOT_STYLE: Record<SpotKind, { color: string; label: string; paths: string[] }> = {
+export const SPOT_STYLE: Record<SpotKind, { color: string; label: string; paths: string[] }> = {
   airport: {
     color: '#475569',
     label: 'Airport',
@@ -392,7 +392,7 @@ const spotSvg = (kind: SpotKind, size = 13) =>
     .join('')}</svg>`;
 
 /** Width a spot's name is allowed before it gets an ellipsis. */
-const SPOT_LABEL_MAX = 130;
+export const SPOT_LABEL_MAX = 130;
 
 /**
  * A spot marker: 24px white disc with a coloured ring and glyph, and its name

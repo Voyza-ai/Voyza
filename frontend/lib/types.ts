@@ -128,6 +128,23 @@ export type Hotel = {
    * `effectiveRating` takes a 9.5-from-3-reviews at face value.
    */
   reviewCount?: number;
+  /** Where the hotel is, from the provider — pins it on the city guide's hotel map. */
+  lat?: number;
+  lng?: number;
+  /** Photos of the hotel, large size, best first. Absent on trips saved before photos were kept. */
+  photos?: string[];
+  /** Booking's id for the hotel — what its photo gallery is looked up by. */
+  providerId?: string;
+  /** Street address from Booking ("86 Brick Lane"). */
+  address?: string;
+  /** Booking's district, usually the borough ("Camden"). Not shown; see `neighbourhood`. */
+  district?: string;
+  /**
+   * The neighbourhood a traveller would know it by ("Spitalfields"), from the
+   * hotel's coordinates — see lib/hotelArea.ts. Absent until looked up, and
+   * when nothing trustworthy was found.
+   */
+  neighbourhood?: string;
 };
 
 /** A user-supplied hotel/Airbnb that overrides the ranked list selection. */

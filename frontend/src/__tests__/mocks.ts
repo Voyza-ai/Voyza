@@ -64,6 +64,9 @@ jest.mock('framer-motion', () => {
     AnimatePresence: ({ children }: any) => children,
     Reorder: { Group: ReorderGroup, Item: ReorderItem },
     useAnimation: () => ({ start: jest.fn() }),
+    // Animations finish at once, so code awaiting one carries straight on.
+    useAnimationControls: () => ({ start: jest.fn(() => Promise.resolve()), set: jest.fn(), stop: jest.fn() }),
+    useReducedMotion: () => false,
     useMotionValue: (val: number) => ({ get: () => val, set: jest.fn() }),
     useDragControls: () => ({ start: jest.fn() }),
   };
@@ -126,6 +129,7 @@ jest.mock('@/hooks/useCanvasRealtime', () => ({
 jest.mock('@/lib/api', () => ({
   searchFlights: jest.fn().mockResolvedValue([]),
   searchHotels: jest.fn().mockResolvedValue([]),
+  fetchHotelPhotos: jest.fn().mockResolvedValue([]),
   searchTrains: jest.fn().mockResolvedValue([]),
   optimizeTrip: jest.fn().mockResolvedValue(null),
   getOptimizeProgress: jest.fn().mockResolvedValue(null),

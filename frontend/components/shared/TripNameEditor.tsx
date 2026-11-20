@@ -25,6 +25,7 @@ export default function TripNameEditor({
   className = '',
   inputClassName = '',
   placeholder = 'Name this trip',
+  displayValue,
 }: {
   /** Current name. May be empty — the placeholder covers that case. */
   value: string;
@@ -37,6 +38,11 @@ export default function TripNameEditor({
   className?: string;
   inputClassName?: string;
   placeholder?: string;
+  /**
+   * What to show instead of `value` when not editing — a shortened form of a
+   * long name. The full name is then on hover, and editing starts from it.
+   */
+  displayValue?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -121,7 +127,8 @@ export default function TripNameEditor({
     );
   }
 
-  const shown = value || placeholder;
+  const shown = (value && displayValue) || value || placeholder;
+  const shortened = !!value && !!displayValue && displayValue !== value;
 
   return (
     <button
@@ -129,7 +136,13 @@ export default function TripNameEditor({
       onClick={begin}
       // Non-owners still get a button so the explanation is reachable by
       // keyboard, but it shouldn't advertise itself as an edit affordance.
-      title={canRename ? 'Rename this trip' : 'Only the trip owner can rename this trip'}
+      title={
+        shortened
+          ? `${value}${canRename ? ' — click to rename' : ''}`
+          : canRename
+            ? 'Rename this trip'
+            : 'Only the trip owner can rename this trip'
+      }
       className={`group/name inline-flex items-center gap-1.5 min-w-0 max-w-full text-left ${
         canRename ? 'cursor-text' : 'cursor-default'
       } ${saving ? 'opacity-60' : ''}`}

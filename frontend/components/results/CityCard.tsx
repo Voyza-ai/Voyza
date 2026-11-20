@@ -12,8 +12,8 @@ import {
   Plus,
 } from 'lucide-react';
 import { City } from '@/lib/types';
+import { HotelPhotoFrame, useHotelPhotos } from './HotelHero';
 import { getCityColor } from '@/lib/cityColors';
-import { getVibeColor, VIBE_LABEL } from '@/lib/cityTheme';
 import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
 import { cityHotelTrust } from '@/lib/hotelPriceTrust';
 import { PriceTrustChip } from './PriceTrust';
@@ -103,6 +103,8 @@ export default function CityCard({
       onMouseLeave={onLeave}
       onClick={onClick}
       tabIndex={0}
+      // Where the city guide grows out of when this card is clicked.
+      data-city-card={index}
       className="relative flex-shrink-0 flex-1 min-h-0 flex flex-col w-[300px] rounded-3xl border-2 cursor-pointer overflow-hidden transition-colors duration-300 outline-none"
       style={{
         background: color.bg,
@@ -165,41 +167,21 @@ export default function CityCard({
           )}
         </div>
 
-        {/* Vibe chips */}
-        {city.vibes && city.vibes.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-3">
-            {city.vibes.map((v) => {
-              const c = getVibeColor(v);
-              return (
-                <span
-                  key={v}
-                  className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border"
-                  style={{
-                    background: `rgba(255,255,255,0.7)`,
-                    borderColor: `${c}60`,
-                    color: c,
-                  }}
-                >
-                  {VIBE_LABEL[v]}
-                </span>
-              );
-            })}
-          </div>
-        )}
       </div>
 
-      {/* Hotel pill — darker shade of card bg. my-auto centers it in
-          whatever extra height the card absorbed (cards stretch to fill
-          the full flowchart height), keeping header top / hint bottom. */}
-      <div
-        className="mx-4 rounded-2xl my-auto"
-        style={{ background: `${color.text}15` }}
-      >
-        <HotelSection city={city} cityIndex={index} color={color} />
+      {/* The chosen hotel's photos, then the hotel pill (a darker shade of
+          the card). my-auto centres the pair in whatever height the card
+          absorbed (cards stretch to the flowchart's height), keeping the
+          header at the top and the hint at the bottom. */}
+      <div className="mx-4 my-auto flex flex-col gap-3 min-h-0">
+        <CardPhotos city={city} color={color} />
+        <div className="rounded-2xl" style={{ background: `${color.text}15` }}>
+          <HotelSection city={city} cityIndex={index} color={color} />
+        </div>
       </div>
 
       {/* Open detail hint */}
-      <div className="px-6 pb-5 pt-1">
+      <div className="px-6 pb-5 pt-3">
         <div
           className="text-center text-[11px] uppercase tracking-wider transition-colors"
           style={{ color: isActive ? color.text : 'rgba(0,0,0,0.35)' }}
@@ -210,6 +192,28 @@ export default function CityCard({
 
       {/* Color picker on hover */}
     </motion.div>
+  );
+}
+
+/* ------------------------------ Hotel photos ----------------------------- */
+
+/**
+ * The chosen hotel's photos, in a frame squarer than the guide's to suit the
+ * card. Left out for the traveller's own stay and for a hotel with none, so
+ * the card never shows an empty frame. Clicking a photo opens the guide like
+ * the rest of the card; the arrows only step the photos.
+ */
+function CardPhotos({ city, color }: { city: City; color: { bg: string; text: string; border: string } }) {
+  const hotel = city.customHotel ? null : city.hotels[city.selectedHotelIndex] ?? city.hotels[0] ?? null;
+  const photos = useHotelPhotos(hotel);
+  if (!hotel || photos.length === 0) return null;
+  return (
+    <HotelPhotoFrame
+      photos={photos}
+      name={hotel.name}
+      accent={color}
+      className="aspect-[4/3] max-h-[26vh]"
+    />
   );
 }
 

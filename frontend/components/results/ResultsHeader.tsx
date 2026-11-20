@@ -47,6 +47,18 @@ type ResultsHeaderProps = {
   publicView?: boolean;
 };
 
+/**
+ * A route name shortened for the header: past three cities, the first three
+ * and "+N more" ("Lisbon → Porto → Madrid + 4 more"). Only route-style names
+ * (cities joined by arrows) are shortened; a name someone typed is shown as
+ * typed. Display only — the saved name is untouched.
+ */
+export function shortRouteTitle(title: string): string {
+  const parts = title.split(' → ').map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 3) return title;
+  return `${parts.slice(0, 3).join(' → ')} + ${parts.length - 3} more`;
+}
+
 const formatDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   const date = new Date(y, (m || 1) - 1, d || 1);
@@ -371,8 +383,8 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
 
   return (
     <div className="px-4 pt-3 pb-0">
-      {/* Left: meta, title, then the trip's price boxes under the title.
-          Right: who's on the trip + Share. The left column shrinks
+      {/* Left: meta, then the title with who's on the trip. Right: the
+          price view switch, the trip's price boxes, and Share. The left column shrinks
           (flex-1 + min-w-0) so a long route title truncates instead of
           pushing the right cluster onto a second row. */}
       <div className="flex items-start justify-between gap-4">
@@ -407,53 +419,46 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               {trip.cities.length} {trip.cities.length === 1 ? 'stop' : 'stops'}
             </div>
           </div>
-          <TripNameEditor
-            value={trip.title ?? ''}
-            canRename={canRename}
-            onRename={handleRename}
-            onDenied={() => collab?.showToast('Only the trip owner can rename this trip', 'info')}
-            placeholder="Name this trip"
-            className="text-[22px] leading-tight font-semibold text-gray-900"
-            inputClassName="text-[22px] leading-tight font-semibold text-gray-900 w-[380px] max-w-full"
-          />
+          {/* The trip's name, then who is on it. */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="min-w-0">
+            <TripNameEditor
+              value={trip.title ?? ''}
+              canRename={canRename}
+              onRename={handleRename}
+              onDenied={() => collab?.showToast('Only the trip owner can rename this trip', 'info')}
+              placeholder="Name this trip"
+              displayValue={shortRouteTitle(trip.title ?? '')}
+              className="text-[22px] leading-tight font-semibold text-gray-900"
+              inputClassName="text-[22px] leading-tight font-semibold text-gray-900 w-[380px] max-w-full"
+            />
+            </div>
+            {collab?.active && trip.id && (
+              <div className="flex-shrink-0">
+              <CollaboratorAvatars
+                tripId={trip.id}
+                presence={collab.presence}
+                selfId={collab.self?.id ?? null}
+                refreshKey={membersKey}
+                onClick={canShare ? handleShare : undefined}
+              />
+              </div>
+            )}
+          </div>
           {renameError && (
             <p className="text-[11px] mt-0.5" style={{ color: '#dc2626' }}>
               {renameError}
             </p>
           )}
 
-          {/* Total trip + savings boxes, under the title */}
-          <div className="flex items-center gap-2 mt-2">
-            {/* Total cost */}
-            <div
-              className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
-              style={{
-                background: 'linear-gradient(180deg, rgba(79,142,247,0.12) 0%, rgba(79,142,247,0.04) 100%)',
-                borderColor: 'rgba(79,142,247,0.30)',
-              }}
-            >
-              <div className="text-[#4f8ef7]/70 text-[9px] uppercase tracking-wider">
-                {priceMode === 'total' ? 'Total trip' : 'Per person'}
-              </div>
-              <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
-                ${animatedTotal.toLocaleString()}
-              </div>
-              {showToggle && (
-                <div className="text-[#4f8ef7]/55 text-[9px]">
-                  ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
-                </div>
-              )}
-              {caveatCount > 0 && (
-                <div
-                  data-testid="total-price-caveat"
-                  title={caveatTitle}
-                  className="text-[#4f8ef7]/70 text-[9px] mt-0.5 underline decoration-dashed underline-offset-2 cursor-help whitespace-nowrap"
-                >
-                  {caveatText}
-                </div>
-              )}
-            </div>
+        </div>
 
+        {/* Right: collaborators + Share (and, for collaborators, their own
+            actions). Share replaces "Edit in Canvas": the results page is
+            the canvas now. */}
+        <div className="flex items-center gap-2.5 flex-shrink-0 pt-1">
+          {/* Prices, then Share — together on the right, under the account
+              corner, so the left keeps the trip's name and facts. */}
             {/* Savings — clickable when date-shift options exist: opens a
                 menu of alternative start dates with their real, re-priced
                 savings (the optimizer scored each shifted date already). */}
@@ -499,7 +504,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
                 <div
                   role="dialog"
                   aria-label="Ways to save"
-                  className="absolute left-0 top-full mt-2 w-[300px] max-h-[70vh] overflow-y-auto bg-white border rounded-xl shadow-lg z-50"
+                  className="absolute right-0 top-full mt-2 w-[300px] max-h-[70vh] overflow-y-auto bg-white border rounded-xl shadow-lg z-50"
                   style={{ borderColor: 'rgba(52,211,153,0.35)' }}
                 >
                   <div className="px-3 pt-2.5 pb-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
@@ -596,7 +601,39 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               )}
             </div>
             )}
-
+            {/* Total cost */}
+            <div
+              className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
+              style={{
+                background: 'linear-gradient(180deg, rgba(79,142,247,0.12) 0%, rgba(79,142,247,0.04) 100%)',
+                borderColor: 'rgba(79,142,247,0.30)',
+              }}
+            >
+              <div className="text-[#4f8ef7]/70 text-[9px] uppercase tracking-wider">
+                {priceMode === 'total' ? 'Total trip' : 'Per person'}
+              </div>
+              <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
+                ${animatedTotal.toLocaleString()}
+              </div>
+              {/* Three lines, like the Price check box beside it: a price
+                  caveat takes the third line — the other figure is one
+                  click away on the switch next to this box. */}
+              {caveatCount > 0 ? (
+                <div
+                  data-testid="total-price-caveat"
+                  title={caveatTitle}
+                  className="text-[#4f8ef7]/70 text-[9px] underline decoration-dashed underline-offset-2 cursor-help whitespace-nowrap"
+                >
+                  {caveatText}
+                </div>
+              ) : (
+                showToggle && (
+                  <div className="text-[#4f8ef7]/55 text-[9px]">
+                    ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
+                  </div>
+                )
+              )}
+            </div>
             {showToggle && (
               <div
                 className="flex items-center p-0.5 rounded-full border bg-white/80"
@@ -631,81 +668,69 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               </div>
             )}
 
+          {/* The actions, a step apart from the prices: secondary ones
+              first, the main one last — where Share sits for the owner. */}
+          <div className="flex items-center gap-2 ml-3 pl-4 border-l border-gray-200 self-stretch">
+            {role === 'viewer' && (
+              <span
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] text-gray-500 bg-white/80 border border-gray-200"
+                title="The owner shared this trip with you to view"
+              >
+                <Eye size={11} />
+                View only
+              </span>
+            )}
+
+            {(role === 'editor' || role === 'suggester') && (
+              <button
+                onClick={collab?.saveCopy}
+                disabled={collab?.busy}
+                title="Save the trip as it is now to your own trips — the shared trip is untouched"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-blue-50 disabled:opacity-40"
+                style={{ color: '#2563eb', borderColor: '#2563eb', background: '#ffffff' }}
+              >
+                <Copy size={13} />
+                Save a copy
+              </button>
+            )}
+
+            {role === 'suggester' && collab?.hasLocalChanges && (
+              <>
+                <button
+                  onClick={collab.discard}
+                  disabled={collab.busy}
+                  title="Throw away your changes"
+                  className="flex items-center px-3.5 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-red-50 disabled:opacity-40"
+                  style={{ color: '#dc2626', borderColor: '#dc2626', background: '#ffffff' }}
+                >
+                  Discard
+                </button>
+                <button
+                  onClick={collab.propose}
+                  disabled={collab.busy}
+                  title="Your changes go to the owner for approval"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
+                  style={{ background: '#2563eb' }}
+                >
+                  <Send size={13} />
+                  {collab.busy ? 'Sending…' : 'Propose changes'}
+                </button>
+              </>
+            )}
+
+            {canShare && (
+              <button
+                onClick={handleShare}
+                disabled={saving}
+                data-testid="share-button"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
+                style={{ background: '#2563eb', borderColor: '#2563eb' }}
+              >
+                <Share2 size={13} />
+                {saving ? 'Saving...' : 'Share'}
+              </button>
+            )}
           </div>
-        </div>
-
-        {/* Right: collaborators + Share (and, for collaborators, their own
-            actions). Share replaces "Edit in Canvas": the results page is
-            the canvas now. */}
-        <div className="flex items-center gap-2.5 flex-shrink-0 pt-1">
-          {collab?.active && trip.id && (
-            <CollaboratorAvatars
-              tripId={trip.id}
-              presence={collab.presence}
-              selfId={collab.self?.id ?? null}
-              refreshKey={membersKey}
-              onClick={canShare ? handleShare : undefined}
-            />
-          )}
-
-          {role === 'viewer' && (
-            <span
-              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] text-gray-500 bg-white/80 border border-gray-200"
-              title="The owner shared this trip with you to view"
-            >
-              <Eye size={11} />
-              View only
-            </span>
-          )}
-
-          {role === 'suggester' && collab?.hasLocalChanges && (
-            <>
-              <button
-                onClick={collab.discard}
-                disabled={collab.busy}
-                title="Throw away your changes"
-                className="px-3 py-2 rounded-xl text-[12px] font-medium text-gray-500 border border-gray-200 bg-white transition-all hover:bg-gray-50 hover:text-gray-700 disabled:opacity-40"
-              >
-                Discard
-              </button>
-              <button
-                onClick={collab.propose}
-                disabled={collab.busy}
-                title="Your changes go to the owner for approval"
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
-                style={{ background: '#2563eb' }}
-              >
-                <Send size={13} />
-                {collab.busy ? 'Sending…' : 'Propose changes'}
-              </button>
-            </>
-          )}
-
-          {(role === 'editor' || role === 'suggester') && (
-            <button
-              onClick={collab?.saveCopy}
-              disabled={collab?.busy}
-              title="Save the trip as it is now to your own trips — the shared trip is untouched"
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-blue-50 disabled:opacity-40"
-              style={{ color: '#2563eb', borderColor: '#2563eb', background: '#ffffff' }}
-            >
-              <Copy size={13} />
-              Save a copy
-            </button>
-          )}
-
-          {canShare && (
-            <button
-              onClick={handleShare}
-              disabled={saving}
-              data-testid="share-button"
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
-              style={{ background: '#2563eb', borderColor: '#2563eb' }}
-            >
-              <Share2 size={13} />
-              {saving ? 'Saving...' : 'Share'}
-            </button>
-          )}
         </div>
       </div>
 
