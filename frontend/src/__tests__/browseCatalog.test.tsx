@@ -213,8 +213,23 @@ describe('Browse — live catalog', () => {
   });
 });
 
+
+// A browser that shares its position (New York), so "Plan a similar trip"
+// takes the auto-run path from the detected airport.
+const shareNewYorkPosition = () =>
+  Object.defineProperty(global.navigator, 'geolocation', {
+    value: { getCurrentPosition: (ok: any) => ok({ coords: { latitude: 40.71, longitude: -74.0 } }) },
+    configurable: true,
+  });
+
 describe('Plan a similar trip', () => {
+  afterEach(() => {
+    // @ts-expect-error cleanup
+    delete global.navigator.geolocation;
+  });
+
   it('stages the preset shape for a fresh optimize and autoruns the planner', async () => {
+    shareNewYorkPosition();
     render(<BrowsePage />);
     fireEvent.click(screen.getByText('Paris Long Weekend'));
     fireEvent.click(await screen.findByText('Plan a similar trip'));
@@ -232,7 +247,7 @@ describe('Plan a similar trip', () => {
     const nights =
       (new Date(staged.dateRange.end).getTime() - new Date(staged.dateRange.start).getTime()) / 86_400_000;
     expect(Math.round(nights)).toBe(presetNights(paris));
-    // No geolocation in jsdom → the New York (JFK) default origin.
+    // The detected position's airport city.
     expect(staged.origin).toBe('New York');
     expect(mockedEvents).toHaveBeenCalledWith([{ slug: 'paris-long-weekend', kind: 'use' }]);
   });
@@ -242,11 +257,27 @@ describe('Plan a similar trip', () => {
     // A previous planning session left a 30-night answer behind — nights
     // outranks the date range in the optimizer, so it must not survive.
     useTripStore.setState({ answers: { nights: 30, destinations: ['Tokyo'] } });
+    shareNewYorkPosition();
     render(<BrowsePage />);
     fireEvent.click(screen.getByText('Paris Long Weekend'));
     fireEvent.click(await screen.findByText('Plan a similar trip'));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/plan?resume=1&autorun=1'));
     expect(useTripStore.getState().answers.nights).toBeUndefined();
     expect(useTripStore.getState().answers.destinations).toBeUndefined();
+  });
+
+  it('without a location it opens the AI planner to ask where they fly from, not a silent New York trip', async () => {
+    const { useTripStore } = require('@/store/tripStore');
+    useTripStore.setState({ answers: { nights: 30 } });
+    render(<BrowsePage />); // no geolocation in jsdom
+    fireEvent.click(screen.getByText('Paris Long Weekend'));
+    fireEvent.click(await screen.findByText('Plan a similar trip'));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/plan'));
+    expect(sessionStorage.getItem('bluemurr-autorun')).toBeNull();
+    const seed = useTripStore.getState().answers.rawInput as string;
+    expect(seed).toContain('Paris');
+    expect(seed).toContain(`${presetNights(paris)} nights`);
+    expect(seed).not.toContain('New York');
+    expect(useTripStore.getState().answers.nights).toBeUndefined();
   });
 });

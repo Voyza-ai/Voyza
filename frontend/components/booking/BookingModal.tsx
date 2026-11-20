@@ -216,6 +216,12 @@ export default function BookingModal({ transport: transportProp, date, travelers
   );
 
   const applyQuote = useCallback((q: BookingQuote) => {
+    // A reply without the quote's core fields (a proxy error page, a changed
+    // API) used to throw inside this setState and take the whole results page
+    // down with "Application error". Fail inside the modal instead.
+    if (!q || !Array.isArray(q.passengers) || !q.requirements || !Array.isArray(q.slices)) {
+      throw new Error('Could not load this fare. Close this and try again.');
+    }
     setQuote(q);
     setPassengers((prev) =>
       prev.length === q.passengers.length

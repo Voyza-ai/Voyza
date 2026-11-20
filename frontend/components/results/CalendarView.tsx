@@ -372,7 +372,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
 
       {/* Footer summary */}
       <div className="mt-8 text-gray-400 text-[12px] text-center">
-        {totalNights} nights · {trip.cities.length} cities · click a day to see its itinerary
+        {totalNights} night{totalNights === 1 ? '' : 's'} · {trip.cities.length} {trip.cities.length === 1 ? 'city' : 'cities'} · click a day to see its itinerary
         {weather.typicalYears && (
           <div className="mt-1" data-testid="weather-typical-note">
             Weather marked avg: typical for the date ({weather.typicalYears} average), not a forecast

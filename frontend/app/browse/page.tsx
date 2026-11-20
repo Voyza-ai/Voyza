@@ -289,7 +289,27 @@ function BrowsePageInner() {
     if (planning) return;
     setPlanning(true);
     sendPresetEvents([{ slug: preset.slug, kind: 'use' }]);
-    const origin = (await detectOrigin()) ?? { city: 'New York', airports: ['JFK'] };
+    const detected = await detectOrigin();
+    if (!detected) {
+      // No location: this used to auto-run from New York (JFK) without a
+      // word, so anyone else got flights from the wrong home. Open the AI
+      // planner with the preset's shape instead; it asks where they fly from.
+      const nights = presetNights(preset);
+      const names = preset.cities.map((c) => c.name);
+      const where = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+      const vibe = presetVibes(preset)[0];
+      useTripStore.getState().resetPlanning();
+      useTripStore
+        .getState()
+        .setAnswer(
+          'rawInput',
+          `A trip like "${preset.title}": ${where}, about ${nights} nights, ${travelers} traveler${travelers === 1 ? '' : 's'}${vibe ? `, ${vibe.toLowerCase()} vibe` : ''}.`,
+        );
+      setPlanning(false);
+      router.push('/plan');
+      return;
+    }
+    const origin = detected;
     const start = new Date();
     start.setDate(start.getDate() + 30);
     const end = new Date(start);

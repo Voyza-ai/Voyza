@@ -682,7 +682,9 @@ Each suggestion:
 - Is something BlueMurr AI can actually do (below)
 
 BlueMurr AI CAN: explain the trip (why this city order, why a price); lock a city to specific dates; give a city more nights; set a departure or arrival time limit on one leg; show cheaper or other flight/train options for one named leg; compare flight vs train for one named leg.
-BlueMurr AI can NOT: book anything, add activities, tours or restaurants, change hotels, or add, remove or swap cities. Never suggest those.
+BlueMurr AI can NOT: book anything, add activities, tours or restaurants, show, filter or change hotels, or add, remove or swap cities. Never suggest those.
+
+Prices are in US dollars: write any amount with "$", never €, £ or another currency. "totalCost" is the whole trip's price (flights included), never one city's: if a suggestion mentions it, call it the trip ("Why does this trip cost $1,355?").
 
 Trains: mention a train only for a leg whose "trainFound" is true in "legs". If no leg has "trainFound": true, do not mention trains at all.
 Never suggest anything about a leg whose "optionFound" is false: nothing was found for it.
@@ -720,7 +722,7 @@ Return ONLY a JSON array of 4 strings, no prose, no markdown fences.`,
 
 /** Suggestions for things no chat tool does (booking, activities, …). */
 const CANT_DO_SUGGESTION =
-  /\b(activit(?:y|ies)|tours?|restaurants?|book(?:s|ed|ing)?|reserv\w*|tickets?)\b/i;
+  /\b(activit(?:y|ies)|tours?|restaurants?|book(?:s|ed|ing)?|reserv\w*|tickets?)\b|\bhotels?\b.*\b(options?|under|cheaper|nicer|upgrade|other|swap|change|less|alternatives?)\b|\b(options?|cheaper|nicer|upgrade|other|swap|change|alternatives?)\b.*\bhotels?\b|[€£]/i;
 /** Suggestions about trains — dropped when no leg of the trip has one. */
 const TRAIN_SUGGESTION = /\b(trains?|rail)\b/i;
 

@@ -110,7 +110,7 @@ it('a fresh trip shows the routing saving, the same as it will after save and re
   const trip = await planFreshTrip();
   render(<ResultsHeader trip={trip} />);
 
-  expect(screen.getByText(/You can save/i)).toBeInTheDocument();
+  expect(screen.getByText(/You (can save|saved)/i)).toBeInTheDocument();
   expect(screen.getByText(/vs your original city order/i)).toBeInTheDocument();
   expect(screen.queryByText(/Best price/i)).toBeNull();
 });

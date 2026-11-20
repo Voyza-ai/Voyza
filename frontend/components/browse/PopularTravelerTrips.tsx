@@ -17,8 +17,10 @@ export default function PopularTravelerTrips() {
   const user = useAuthStore((s) => s.user);
   const [trips, setTrips] = useState<PopularTrip[]>([]);
 
+  // Keyed on the id so a session refresh (new user object) doesn't refetch.
+  const userId = user?.id;
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     let disposed = false;
     getPopularTrips({ sort: 'popular', limit: 3 })
       .then((r) => !disposed && setTrips(r.trips))
@@ -26,7 +28,7 @@ export default function PopularTravelerTrips() {
     return () => {
       disposed = true;
     };
-  }, [user]);
+  }, [userId]);
 
   if (!user || trips.length === 0) return null;
 

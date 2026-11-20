@@ -51,10 +51,17 @@ describe('the autorun status line', () => {
     const paris = PRESET_ITINERARIES.find((p) => p.slug === 'paris-long-weekend')!;
     render(<BrowsePage />);
     fireEvent.click(screen.getByText(paris.title));
-    fireEvent.click(screen.getByRole('switch', { name: 'Use my location' })); // no prompt in jsdom
+    // A shared position, so the similar trip auto-runs (without one the
+    // planner asks where they fly from instead).
+    Object.defineProperty(global.navigator, 'geolocation', {
+      value: { getCurrentPosition: (ok: any) => ok({ coords: { latitude: 40.71, longitude: -74.0 } }) },
+      configurable: true,
+    });
     fireEvent.click(screen.getByRole('button', { name: /Plan a similar trip/ }));
     await waitFor(() => expect(sessionStorage.getItem('bluemurr-autorun')).not.toBeNull());
     expect(JSON.parse(sessionStorage.getItem('bluemurr-autorun')!).autorunReason).toBe('similar-trip');
+    // @ts-expect-error cleanup
+    delete global.navigator.geolocation;
   });
 
   it('a similar trip says what it is doing, not "shifted dates"', async () => {

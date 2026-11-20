@@ -425,6 +425,12 @@ If the user references a city that isn't in the trip for a pin or a min stay, an
 
 Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them. Prices in TRIP CONTEXT are totals for all travellers.${perPersonWord() ? ` The user is viewing PER-PERSON prices: quote every amount per person (the total divided by ${currentTrip?.travelers} travellers, rounded) and say "per person".` : ''}
 
+Money: every price in the trip context is in US dollars. Always write amounts with "$" (e.g. "$52/night", "$1,355 total"); never use €, £ or any other currency, and never convert. "totalCost" is the WHOLE trip, not one city's price.
+
+Formatting: reply in plain sentences. No Markdown — no **bold**, no headings, no bullet asterisks.
+
+Hotels: you cannot browse, filter or change hotels. If asked, say the traveller can pick another hotel with the arrows on the city's Stay card or from the hotel list in the city's full guide, where "Find more hotels" brings in more (it has no filters or sorting, so never say it does), and offer what you CAN do (more nights, cheaper legs, dates). Never offer to search hotels.
+
 TRIP CONTEXT (read-only):
 ${JSON.stringify(context, null, 2)}
 `;
