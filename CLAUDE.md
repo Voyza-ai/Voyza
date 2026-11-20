@@ -46,6 +46,12 @@ Supabase service-role client.
   look. Derive from the existing product's own DNA: dark `#0f0f1a` AI
   surfaces, pastel city cards, the dashed-route motif, blue brand.
 - Get design changes approved before merging them into `dev`; show screenshots or a video while they are on the feature branch.
+- **Look at it as a user first, then build it as an engineer.** Before
+  showing or pushing any visual change, screenshot it in the real app at the
+  owner's size (1440×900) and check it the way a traveller would: overlapping
+  labels or markers, text cut off or truncated, things clipped at an edge,
+  lists squeezed to a sliver. Fix what you find, then send the screenshots
+  without being asked.
 
 ## Reporting
 

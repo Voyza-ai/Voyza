@@ -47,6 +47,13 @@ const FRAMES = {
 const CARD_CLEARANCE = 370;
 /** Bottom padding that does the same when the panel is too narrow to keep them beside it. */
 const CARD_CLEARANCE_BELOW = 230;
+/**
+ * Room at the sides and top of the frame. A plate that would still run off
+ * an edge slides back in, or goes below its pin (see declutterLandmarks), so
+ * this only has to keep the pins themselves clear of the edge.
+ */
+const LABEL_CLEARANCE_SIDE = 60;
+const LABEL_CLEARANCE_TOP = 50;
 
 /**
  * The basemap's own place names, all left out of this map: neighbourhoods
@@ -108,6 +115,10 @@ function makeHotelPinEl(pin: HotelPin, picked: boolean, active: boolean, onClick
 
   const label = document.createElement('div');
   label.textContent = `${pin.index + 1} · ${pin.hotel.name}`;
+  // Where plates would collide, the less important one shrinks to its number.
+  label.dataset.full = label.textContent;
+  label.dataset.short = String(pin.index + 1);
+  el.dataset.rank = active ? '0' : picked ? '1' : '2';
   label.style.cssText = `
     position:absolute;bottom:28px;left:50%;transform:translateX(-50%);
     max-width:${active ? 280 : SPOT_LABEL_MAX}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -239,11 +250,74 @@ function declutterLandmarks(
   frame: Element | null,
   card: Element | null,
   cityLabel: maplibregl.Marker | null = null,
+  spots: maplibregl.Marker[] = [],
 ) {
-  const taken: Box[] = hotels.map((m) => boxOf([m.getElement(), ...Array.from(m.getElement().children)]));
+  // Hotels first, the open one, then the pick, then the rest: each keeps its
+  // full name plate unless it would sit on one already placed, when it
+  // shrinks to its number ("3") — the card and list still name it.
+  const view = frame ? boxOf([frame]) : null;
+  const taken: Box[] = [];
+  const byRank = [...hotels].sort((a, b) => Number(a.getElement().dataset.rank) - Number(b.getElement().dataset.rank));
+  for (const m of byRank) taken.push(boxOf([m.getElement().lastElementChild ?? m.getElement()]));
+  for (const m of byRank) {
+    const el = m.getElement();
+    const label = el.firstElementChild as HTMLElement | null;
+    if (!label?.dataset.full) continue;
+    // Above the pin, then below it; full name, then just the number; and for
+    // any but the open hotel, no plate at all rather than one on another.
+    const tries: Array<[string, 'above' | 'below']> = [
+      [label.dataset.full, 'above'],
+      [label.dataset.full, 'below'],
+      [label.dataset.short ?? '', 'above'],
+      [label.dataset.short ?? '', 'below'],
+    ];
+    const place = (text: string, side: 'above' | 'below') => {
+      label.textContent = text;
+      label.style.visibility = 'visible';
+      label.style.bottom = side === 'above' ? '28px' : 'auto';
+      label.style.top = side === 'below' ? '28px' : 'auto';
+      label.style.transform = 'translateX(-50%)';
+      // Slide a plate that runs off the left or right edge back inside.
+      if (view) {
+        const b = boxOf([label]);
+        const shift = b.left < view.left + 4 ? view.left + 4 - b.left : b.right > view.right - 4 ? view.right - 4 - b.right : 0;
+        if (shift) label.style.transform = `translateX(calc(-50% + ${Math.round(shift)}px))`;
+      }
+    };
+    const offTop = (b: Box) => !!view && b.top < view.top + 4;
+    let placed = false;
+    for (const [text, side] of el.dataset.rank === '0' ? tries.slice(0, 2) : tries) {
+      place(text, side);
+      const b = boxOf([label]);
+      if (!offTop(b) && !taken.some((t) => overlaps(t, b, 2))) {
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      if (el.dataset.rank === '0') place(label.dataset.full, 'above');
+      else label.style.visibility = 'hidden';
+    }
+    if (label.style.visibility !== 'hidden') taken.push(boxOf([label]));
+  }
   // Under the open card counts as taken too: a name half under it reads as cut off.
   if (card) taken.push(boxOf([card]));
-  const view = frame ? boxOf([frame]) : null;
+  // The traveller's own plans next: a dot on a hotel pin or under the card is
+  // left out (the pin is there already), and so is one for a place a
+  // landmark already names ("British Museum" twice). The rest are kept, and
+  // the landmark names below give way to them.
+  const fold = (x: string) => x.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const landmarkNames = new Set(landmarks.map((m) => fold(m.getElement().dataset.landmark ?? '')));
+  for (const m of spots) {
+    const el = m.getElement();
+    el.style.visibility = 'visible';
+    const box = boxOf([el]);
+    if (landmarkNames.has(fold(el.dataset.activitySpot ?? '')) || taken.some((t) => overlaps(t, box, 2))) {
+      el.style.visibility = 'hidden';
+    } else {
+      taken.push(box);
+    }
+  }
   for (const m of landmarks) {
     const el = m.getElement();
     el.style.visibility = 'visible';
@@ -296,6 +370,8 @@ export default function HotelMapPanel({
   const landmarkMarkersRef = useRef<maplibregl.Marker[]>([]);
   const spotMarkersRef = useRef<maplibregl.Marker[]>([]);
   const cityLabelRef = useRef<maplibregl.Marker | null>(null);
+  /** What the map was framed on (the pins and nearby plans), to frame again. */
+  const framePtsRef = useRef<GeoPoint[]>([]);
   const [located, setLocated] = useState<{ centre: GeoPoint | null; pins: HotelPin[]; unplaced: HotelEntry[] } | null>(null);
   const [landmarks, setLandmarks] = useState<Landmark[]>([]);
   const [failed, setFailed] = useState(false);
@@ -345,6 +421,7 @@ export default function HotelMapPanel({
         // start) and with room above each pin for its name plate.
         // Too narrow to keep the pins beside the card: keep them above it.
         const narrow = containerRef.current.clientWidth < 760;
+        framePtsRef.current = pts;
         const camera: Partial<maplibregl.MapOptions> =
           pts.length >= 1
             ? {
@@ -355,8 +432,8 @@ export default function HotelMapPanel({
                 fitBoundsOptions: {
                   // Bottom: clear of the map credits line.
                   padding: narrow
-                    ? { top: 60, bottom: CARD_CLEARANCE_BELOW, left: 50, right: 50 }
-                    : { top: 70, bottom: 75, left: CARD_CLEARANCE, right: 60 },
+                    ? { top: LABEL_CLEARANCE_TOP, bottom: CARD_CLEARANCE_BELOW, left: LABEL_CLEARANCE_SIDE, right: LABEL_CLEARANCE_SIDE }
+                    : { top: LABEL_CLEARANCE_TOP, bottom: 75, left: CARD_CLEARANCE, right: LABEL_CLEARANCE_SIDE },
                   // One hotel alone: out far enough to see the landmarks
                   // around it (at 14 London's one pin had none in view).
                   maxZoom: pts.length >= 2 ? 15 : 13,
@@ -366,9 +443,16 @@ export default function HotelMapPanel({
         map = new maplibregl.Map({
           container: containerRef.current,
           style: hotelMapStyle(style),
-          attributionControl: { compact: true },
+          attributionControl: false,
           ...camera,
         });
+        // The credits as the small (i) in the corner, folded from the start:
+        // opened, their line ran under the hotel card.
+        map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+        // MapLibre opens it again once the map has loaded, so fold it then.
+        const fold = () =>
+          containerRef.current?.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
+        map.once('idle', fold);
         map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
         map.on('click', () => setActiveIndex(null));
         let readied = false;
@@ -445,12 +529,8 @@ export default function HotelMapPanel({
   useEffect(() => {
     if (!located || selectedIndex === null) return;
     if (!entries.some((e) => e.index === selectedIndex)) return;
+    // The pin rebuild below checks the frame and re-fits if anything is cut off.
     setActiveIndex(selectedIndex);
-    const pin = located.pins.find((p) => p.index === selectedIndex);
-    const map = mapRef.current;
-    if (pin && map && mapReady && !map.getBounds().contains([pin.point.lon, pin.point.lat])) {
-      map.easeTo({ center: [pin.point.lon, pin.point.lat], duration: 450 });
-    }
     // Only when the pick changes — not when the map finishes loading.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIndex]);
@@ -467,7 +547,17 @@ export default function HotelMapPanel({
   }, [mapReady, located, city.name]);
 
   // Keep landmark names off the hotels and off each other, and the city's
-  // name off all of them.
+  // name off all of them. Also run by the pin rebuild, which replaces the
+  // markers after this effect has already looked at the old ones.
+  const runDeclutter = () =>
+    declutterLandmarks(
+      markersRef.current,
+      landmarkMarkersRef.current,
+      containerRef.current,
+      containerRef.current?.parentElement?.querySelector('[data-testid=hotel-map-card]') ?? null,
+      cityLabelRef.current,
+      spotMarkersRef.current,
+    );
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -478,6 +568,7 @@ export default function HotelMapPanel({
         containerRef.current,
         containerRef.current?.parentElement?.querySelector('[data-testid=hotel-map-card]') ?? null,
         cityLabelRef.current,
+        spotMarkersRef.current,
       );
     const raf = requestAnimationFrame(run);
     map.on('moveend', run);
@@ -485,7 +576,7 @@ export default function HotelMapPanel({
       cancelAnimationFrame(raf);
       map.off('moveend', run);
     };
-  }, [mapReady, landmarks, located, selectedIndex, activeIndex]);
+  }, [mapReady, landmarks, located, selectedIndex, activeIndex, spotKey]);
 
   // Pins: rebuilt when the pick or the open card changes.
   useEffect(() => {
@@ -502,6 +593,43 @@ export default function HotelMapPanel({
         .setLngLat([pin.point.lon, pin.point.lat])
         .addTo(map),
     );
+    // Every pin and its name in view and clear of the open card. If one is
+    // cut off at an edge or covered, frame the map again with room for the
+    // card, rather than nudge it and push another pin under.
+    const raf = requestAnimationFrame(() => {
+      runDeclutter();
+      const frame = containerRef.current;
+      if (!frame || framePtsRef.current.length === 0) return;
+      const view = boxOf([frame]);
+      const card = frame.parentElement?.querySelector('[data-testid=hotel-map-card]');
+      const c = card ? boxOf([card]) : null;
+      const margin = 8;
+      const bad = markersRef.current.some((m) => {
+        const el = m.getElement();
+        const disc = boxOf([el.lastElementChild ?? el]);
+        const cut = disc.left < view.left + margin || disc.right > view.right - margin || disc.top < view.top + margin || disc.bottom > view.bottom - margin;
+        const label = el.firstElementChild as HTMLElement | null;
+        const openPlate = el.dataset.rank === '0' && label ? boxOf([label]) : null;
+        return cut || (!!c && (overlaps(disc, c, margin) || (!!openPlate && overlaps(openPlate, c, 4))));
+      });
+      if (!bad) return;
+      const pts = framePtsRef.current;
+      const bounds = pts.reduce(
+        (bb, p) => bb.extend([p.lon, p.lat]),
+        new maplibregl.LngLatBounds([pts[0].lon, pts[0].lat], [pts[0].lon, pts[0].lat]),
+      );
+      map.fitBounds(bounds, {
+        padding: {
+          top: LABEL_CLEARANCE_TOP,
+          bottom: c ? view.bottom - c.top + 24 : 75,
+          left: LABEL_CLEARANCE_SIDE,
+          right: LABEL_CLEARANCE_SIDE,
+        },
+        maxZoom: pts.length >= 2 ? 15 : 13,
+        duration: 400,
+      });
+    });
+    return () => cancelAnimationFrame(raf);
   }, [mapReady, located, selectedIndex, activeIndex]);
 
   const active: CardHotel | null = useMemo(

@@ -101,7 +101,7 @@ export default function HotelHero({
     <div className="flex flex-col gap-2.5" data-testid="hotel-hero">
       {/* Choosing another hotel cross-fades to its photos: the new strip
           fades in over the old one, so there is never an empty frame. */}
-      <div className="relative w-full h-[clamp(130px,22vh,200px)] rounded-2xl overflow-hidden" style={{ background: '#eef0f4' }}>
+      <div className="relative w-full h-[clamp(110px,16vh,170px)] rounded-2xl overflow-hidden" style={{ background: '#eef0f4' }}>
         <AnimatePresence initial={false}>
           <motion.div
             key={hotel?.name ?? ''}
@@ -137,13 +137,14 @@ export default function HotelHero({
           className="flex items-start justify-between gap-4"
         >
           <div className="min-w-0">
-            <div className="text-[17px] font-semibold leading-snug truncate" style={{ color: accent.text }}>
+            {/* Two lines rather than "hub Earls Court - West Brom…" */}
+            <div className="text-[17px] font-semibold leading-snug line-clamp-2" style={{ color: accent.text }}>
               {hotel.name}
             </div>
             {(hotel.neighbourhood || hotel.address) && (
-              <div className="mt-0.5 flex items-center gap-1 text-[12px] text-[#5a6070] min-w-0" data-testid="hotel-area">
-                <MapPin size={11} className="flex-shrink-0" style={{ color: accent.text }} />
-                <span className="truncate">
+              <div className="mt-0.5 flex items-start gap-1 text-[12px] text-[#5a6070] min-w-0" data-testid="hotel-area">
+                <MapPin size={11} className="flex-shrink-0 mt-[3px]" style={{ color: accent.text }} />
+                <span className="line-clamp-2">
                   {hotel.neighbourhood && <span className="font-medium" style={{ color: accent.text }}>{hotel.neighbourhood}</span>}
                   {hotel.neighbourhood && hotel.address ? ' · ' : ''}
                   {hotel.address}

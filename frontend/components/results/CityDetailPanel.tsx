@@ -548,20 +548,6 @@ export default function CityDetailPanel({
             )}
           </div>
 
-          {city.hotels.length > 0 && (
-            <div className="flex items-center gap-2 mb-3">
-              <button
-                type="button"
-                onClick={findMoreHotels}
-                disabled={findingHotels}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-colors disabled:cursor-wait"
-                style={{ borderColor: color.border, background: `${color.text}0c`, color: color.text }}
-              >
-                {findingHotels ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                <span>{findingHotels ? 'Finding hotels…' : 'Find more hotels'}</span>
-              </button>
-            </div>
-          )}
           {hotelNote && (
             <div className="text-[11.5px] mb-2" style={{ color: `${color.text}99` }}>
               {hotelNote}
@@ -582,6 +568,23 @@ export default function CityDetailPanel({
               />
             ))}
           </div>
+
+          {/* After the list: the next set is what you reach for once you've
+              looked through this one — and up top it cost the list a row. */}
+          {city.hotels.length > 0 && (
+            <div className="flex items-center gap-2 mt-3">
+              <button
+                type="button"
+                onClick={findMoreHotels}
+                disabled={findingHotels}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-colors disabled:cursor-wait"
+                style={{ borderColor: color.border, background: `${color.text}0c`, color: color.text }}
+              >
+                {findingHotels ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                <span>{findingHotels ? 'Finding hotels…' : 'Find more hotels'}</span>
+              </button>
+            </div>
+          )}
 
           {/* Custom hotel form — `key` is load-bearing. The form seeds its five
               fields from `current` in useState initialisers, which only run on
@@ -761,8 +764,10 @@ function HotelRow({
             {isSelected ? <Check size={13} strokeWidth={3} /> : rank + 1}
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="text-sm font-medium truncate" style={{ color: color.text }}>{hotel.name}</div>
+            {/* One line for the name, one for the rest: the badges used to
+                wrap onto a line of their own and made every row three tall. */}
+            <div className="text-sm font-medium line-clamp-2" style={{ color: color.text }}>{hotel.name}</div>
+            <div className="text-[12px] mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: `${accent}88` }}>
               {isTop && (
                 <span
                   className="flex items-center gap-0.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold"
@@ -788,8 +793,6 @@ function HotelRow({
                   BlueMurr book
                 </span>
               )}
-            </div>
-            <div className="text-[12px] mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: `${accent}88` }}>
               <span className="flex items-center gap-0.5 text-[#fbbf24]">
                 <Star size={10} fill="currentColor" />
                 {hotel.rating}
