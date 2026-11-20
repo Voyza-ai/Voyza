@@ -639,64 +639,68 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
             </div>
             )}
 
-          {role === 'viewer' && (
-            <span
-              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] text-gray-500 bg-white/80 border border-gray-200"
-              title="The owner shared this trip with you to view"
-            >
-              <Eye size={11} />
-              View only
-            </span>
-          )}
-
-          {role === 'suggester' && collab?.hasLocalChanges && (
-            <>
-              <button
-                onClick={collab.discard}
-                disabled={collab.busy}
-                title="Throw away your changes"
-                className="px-3 py-2 rounded-xl text-[12px] font-medium text-gray-500 border border-gray-200 bg-white transition-all hover:bg-gray-50 hover:text-gray-700 disabled:opacity-40"
+          {/* The actions, a step apart from the prices: secondary ones
+              first, the main one last — where Share sits for the owner. */}
+          <div className="flex items-center gap-2 ml-3 pl-4 border-l border-gray-200 self-stretch">
+            {role === 'viewer' && (
+              <span
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] text-gray-500 bg-white/80 border border-gray-200"
+                title="The owner shared this trip with you to view"
               >
-                Discard
-              </button>
+                <Eye size={11} />
+                View only
+              </span>
+            )}
+
+            {(role === 'editor' || role === 'suggester') && (
               <button
-                onClick={collab.propose}
-                disabled={collab.busy}
-                title="Your changes go to the owner for approval"
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
-                style={{ background: '#2563eb' }}
+                onClick={collab?.saveCopy}
+                disabled={collab?.busy}
+                title="Save the trip as it is now to your own trips — the shared trip is untouched"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-blue-50 disabled:opacity-40"
+                style={{ color: '#2563eb', borderColor: '#2563eb', background: '#ffffff' }}
               >
-                <Send size={13} />
-                {collab.busy ? 'Sending…' : 'Propose changes'}
+                <Copy size={13} />
+                Save a copy
               </button>
-            </>
-          )}
+            )}
 
-          {(role === 'editor' || role === 'suggester') && (
-            <button
-              onClick={collab?.saveCopy}
-              disabled={collab?.busy}
-              title="Save the trip as it is now to your own trips — the shared trip is untouched"
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-blue-50 disabled:opacity-40"
-              style={{ color: '#2563eb', borderColor: '#2563eb', background: '#ffffff' }}
-            >
-              <Copy size={13} />
-              Save a copy
-            </button>
-          )}
+            {role === 'suggester' && collab?.hasLocalChanges && (
+              <>
+                <button
+                  onClick={collab.discard}
+                  disabled={collab.busy}
+                  title="Throw away your changes"
+                  className="px-2.5 py-2 rounded-xl text-[12px] font-medium text-gray-500 transition-colors hover:text-gray-800 hover:bg-gray-100 disabled:opacity-40"
+                >
+                  Discard
+                </button>
+                <button
+                  onClick={collab.propose}
+                  disabled={collab.busy}
+                  title="Your changes go to the owner for approval"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
+                  style={{ background: '#2563eb' }}
+                >
+                  <Send size={13} />
+                  {collab.busy ? 'Sending…' : 'Propose changes'}
+                </button>
+              </>
+            )}
 
-          {canShare && (
-            <button
-              onClick={handleShare}
-              disabled={saving}
-              data-testid="share-button"
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
-              style={{ background: '#2563eb', borderColor: '#2563eb' }}
-            >
-              <Share2 size={13} />
-              {saving ? 'Saving...' : 'Share'}
-            </button>
-          )}
+            {canShare && (
+              <button
+                onClick={handleShare}
+                disabled={saving}
+                data-testid="share-button"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
+                style={{ background: '#2563eb', borderColor: '#2563eb' }}
+              >
+                <Share2 size={13} />
+                {saving ? 'Saving...' : 'Share'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
