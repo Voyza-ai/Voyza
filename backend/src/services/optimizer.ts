@@ -504,6 +504,14 @@ type OptimizeParams = {
    * 2-nights-per-city default.
    */
   totalNights?: number;
+  /**
+   * Nights per city, by city name: a preset's own split ("Lisbon 3, Sintra
+   * 1") kept by "Plan a similar trip" (website audit m11). Each city keeps
+   * its nights in whatever order the optimizer puts it. Used only when it
+   * names every city with a whole number of nights and agrees with
+   * `totalNights`; otherwise the nights are spread evenly, as without it.
+   */
+  cityNights?: Record<string, number>;
   /** Live progress for the planner's search screen (optimizeProgress.ts). */
   onProgress?: ProgressSink;
 };
@@ -699,6 +707,29 @@ function distributeNights(totalNights: number | undefined, cityCount: number): n
   const base = Math.floor(totalNights / cityCount);
   const extra = totalNights - base * cityCount;
   return Array.from({ length: cityCount }, (_, i) => (i < extra ? base + 1 : base));
+}
+
+/**
+ * `cityNights` keyed by trimmed, lower-cased city name, or null when it can't
+ * be used as given: a city missing or named twice, a night count that isn't
+ * a positive whole number, or a total that disagrees with `totalNights`.
+ */
+export function cityNightsByName(
+  cityNights: Record<string, number> | undefined,
+  cities: Array<{ name: string }>,
+  totalNights: number | undefined,
+): Map<string, number> | null {
+  if (!cityNights) return null;
+  const key = (name: string) => name.trim().toLowerCase();
+  const given = new Map<string, number>();
+  for (const [name, nights] of Object.entries(cityNights)) {
+    if (!Number.isInteger(nights) || nights <= 0 || given.has(key(name))) return null;
+    given.set(key(name), nights);
+  }
+  if (given.size !== cities.length || !cities.every((c) => given.has(key(c.name)))) return null;
+  const sum = [...given.values()].reduce((a, b) => a + b, 0);
+  if (typeof totalNights === 'number' && totalNights > 0 && sum !== totalNights) return null;
+  return given;
 }
 
 function getPermutations<T>(arr: T[]): T[][] {
@@ -2102,7 +2133,7 @@ export function firstStayArrival(params: {
 }
 
 export async function optimize(params: OptimizeParams): Promise<OptimizeResult> {
-  const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights, onProgress } = params;
+  const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights, cityNights, onProgress } = params;
 
   if (cities.length < 1) {
     throw new Error('Need at least 1 city to optimize');
@@ -2114,7 +2145,25 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // 2 per city if they didn't specify). Computed once and threaded
   // through scoreRoute, the date assignment loop, and home-leg date
   // calculations so all three see the same per-city schedule.
-  const nightsArray = distributeNights(totalNights, cities.length);
+  //
+  // With `cityNights` each city brings its own nights wherever it lands in
+  // an ordering, so the per-position array depends on the ordering:
+  // `nightsFor(ordering)`. Without it, every ordering shares one positional
+  // array, exactly as before. `nightsArray` is the typed order's.
+  const nightsByCity = cityNightsByName(cityNights, cities, totalNights);
+  if (cityNights && !nightsByCity) {
+    logger.warn('cityNights ignored: it does not name every city once, or disagrees with totalNights', {
+      cities: cities.length,
+      given: Object.keys(cityNights).length,
+    });
+  }
+  const nightsArray = nightsByCity
+    ? cities.map((c) => nightsByCity.get(c.name.trim().toLowerCase())!)
+    : distributeNights(totalNights, cities.length);
+  const nightsFor = (ordering: string[]): number[] =>
+    nightsByCity
+      ? ordering.map((c) => nightsByCity.get(c.trim().toLowerCase()) ?? DEFAULT_NIGHTS_PER_CITY)
+      : nightsArray;
   const totalNightsResolved = nightsArray.reduce((s, n) => s + n, 0);
 
   // Single-city trips are valid when origin is set (vibe-first flows
@@ -2290,7 +2339,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         });
 
   const scoreOrderingWithHomeLegs = async (ordering: string[]): Promise<ScoredRoute> => {
-    const basePromise = scoreRoute(ordering, startDate, travelers, cityMap, nightsArray, ctx);
+    const basePromise = scoreRoute(ordering, startDate, travelers, cityMap, nightsFor(ordering), ctx);
     if (!homeKnown) return basePromise;
 
     // The inter-city legs and both home legs are independent searches, so
@@ -2368,6 +2417,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       const ret = new Map(back);
       return (o: string[]) => [out.get(o[0])!, ...(returnToHome ? [ret.get(o[lastIdx])!] : [])];
     })();
+    // The screen dates each leg by its position. With per-city nights that
+    // is the typed order's dates, close for the others; the orderings it
+    // keeps are then scored on their own dates (scoreOrderingWithHomeLegs).
     const screen = await rankByAdaptiveScreen({
       orderings,
       typed: naiveOrdering,
@@ -2436,8 +2488,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   if (bestOrdering.length > 1) {
     const ranked = topRoutes[0];
     const [rankedLegs, exactLegs] = await Promise.all([
-      scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsArray, ctx),
-      scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsArray, ctx.withTrainDate(undefined)),
+      scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsFor(bestOrdering), ctx),
+      scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsFor(bestOrdering), ctx.withTrainDate(undefined)),
     ]);
     // A leg the real day can't price (the rail search failed or hit the
     // quota) keeps its ranking-day answer: a priced leg must not turn into
@@ -2505,7 +2557,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
             baselineLegsCost,
             travelers,
             cityMap,
-            nightsArray,
+            nightsFor(bestOrdering),
             home,
             probeCtx,
             dateShiftOutcome,
@@ -2535,7 +2587,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         const toCity = cityMap.get(leg.to);
         // Same date as scoring priced the i-th leg on, so its flight search
         // is the one flights.ts already holds.
-        const legDate = legDateAt(startDate, nightsArray, i);
+        const legDate = legDateAt(startDate, nightsFor(bestOrdering), i);
         const result = await searchLegOptions({
           from: leg.from,
           to: leg.to,
@@ -2619,7 +2671,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     if (!transport || probeGate.abandoned) return undefined;
     dateShiftOutcome.hadCandidate = true;
     const [outbound] = await homeLegsTask;
-    const planned = stayDates(bestOrdering, startDate, nightsArray, outbound);
+    const planned = stayDates(bestOrdering, startDate, nightsFor(bestOrdering), outbound);
     const stays = bestOrdering.map((city) => ({
       city,
       checkin: planned[city].arrival,
@@ -2663,7 +2715,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // aligned with the dates we actually queried during scoring. (Computed
   // after the tail: it needs the built outbound flight.) The first stay
   // starts the day the outbound LANDS (firstStayArrival).
-  const dates = stayDates(bestOrdering, startDate, nightsArray, outboundLeg);
+  const dates = stayDates(bestOrdering, startDate, nightsFor(bestOrdering), outboundLeg);
 
   // Every flight search failed and nothing else priced the trip (B14): this
   // is an outage, not a trip. It used to return 200 with every leg

@@ -205,3 +205,22 @@ describe('POST /api/optimize — every 400 says what to do, in one sentence', ()
     oneSentence(res.body.error);
   });
 });
+
+describe('POST /api/optimize — cityNights', () => {
+  it('passes a per-city split through to the optimizer', async () => {
+    const cityNights = { Paris: 3, Rome: 2, Venice: 2 };
+    const res = await request(makeApp()).post('/api/optimize').send(body({ cityNights }));
+    expect(res.status).toBe(200);
+    expect(mockedOptimize.mock.calls[0][0].cityNights).toEqual(cityNights);
+  });
+
+  it.each([
+    ['a fraction', { Paris: 2.5, Rome: 2, Venice: 2.5 }],
+    ['a zero', { Paris: 7, Rome: 0, Venice: 0 }],
+    ['a string', { Paris: '3', Rome: 2, Venice: 2 }],
+  ])('rejects %s', async (_why, cityNights) => {
+    const res = await request(makeApp()).post('/api/optimize').send(body({ cityNights }));
+    expect(res.status).toBe(400);
+    expect(mockedOptimize).not.toHaveBeenCalled();
+  });
+});
