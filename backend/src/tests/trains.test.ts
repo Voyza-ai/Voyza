@@ -274,6 +274,24 @@ describe('searchTrains', () => {
     expect(offers[0].price).toBe(149.7); // 49.90 per adult × 3
   });
 
+  it('labels a Deutsche Bahn fare as a live fare from Deutsche Bahn', async () => {
+    mockDbLeg(frankfurtToMunich('49.90'));
+
+    // A party size no other test uses: searchTrains memoises per leg + party.
+    const offers = await searchTrains(frankfurtMunich(7));
+
+    expect(offers[0].priceSource).toEqual({ kind: 'live', provider: 'Deutsche Bahn' });
+  });
+
+  it('gives an unpriced journey no price source — nothing to call live', async () => {
+    mockDbLeg(frankfurtToMunich());
+
+    const offers = await searchTrains(frankfurtMunich(5));
+
+    expect(offers[0].price).toBeNull();
+    expect(offers[0].priceSource).toBeUndefined();
+  });
+
   it('does not expose the provider per-person field to callers', async () => {
     mockDbLeg(frankfurtToMunich('49.90'));
 

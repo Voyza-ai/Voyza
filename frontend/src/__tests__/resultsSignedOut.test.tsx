@@ -163,3 +163,63 @@ describe('a shared trip link opened signed out', () => {
     window.history.replaceState({}, '', '/');
   });
 });
+
+describe('a "View only" share link opened signed out', () => {
+  const sharedTrip = () => ({
+    trip: {
+      id: 'trip-paris',
+      title: 'Shared Paris trip',
+      status: 'active',
+      totalCost: 900,
+      savings: 0,
+      travelers: 2,
+      savingsTips: [],
+      cities: [
+        buildCity({ name: 'Paris', dates: { arrival: '2027-01-11', departure: '2027-01-13' } }),
+        buildCity({ name: 'Lyon', dates: { arrival: '2027-01-13', departure: '2027-01-15' }, colorIndex: 1 }),
+      ],
+    },
+  });
+  beforeEach(() => mockSearchParams.set('share', '22222222-2222-4222-8222-222222222222'));
+  afterEach(() => mockSearchParams.delete('share'));
+
+  it('shows the trip read-only, with no sign-in wall', async () => {
+    api.fetchSharedTrip.mockResolvedValueOnce(sharedTrip());
+    render(<ResultsPage />);
+    expect(await screen.findByTestId('public-view-banner')).toBeInTheDocument();
+    expect(api.fetchSharedTrip).toHaveBeenCalledWith('trip-paris', '22222222-2222-4222-8222-222222222222');
+    expect(screen.getAllByText('Lyon').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Sign in or create an account to open this trip')).not.toBeInTheDocument();
+    // Read-only: no Share, no nights controls, no drag/remove, no AI chat.
+    expect(screen.queryByTestId('share-button')).not.toBeInTheDocument();
+    expect(screen.getByText('View only')).toBeInTheDocument();
+    expect(screen.queryByLabelText('More nights in Paris')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Remove Paris')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tweak your trip in plain English')).not.toBeInTheDocument();
+    // Nothing protected was asked for.
+    expect(api.getCanvasSession).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('its Sign in button opens sign-in; closing it goes back to viewing', async () => {
+    api.fetchSharedTrip.mockResolvedValueOnce(sharedTrip());
+    render(<ResultsPage />);
+    const banner = await screen.findByTestId('public-view-banner');
+    fireEvent.click(banner.querySelector('button')!);
+    expect(await screen.findByText('Sign in or create an account to open this trip')).toBeInTheDocument();
+    const close = screen.getByText('Sign in or create an account to open this trip').closest('div')!.parentElement!.querySelector('button')!;
+    await act(async () => {
+      fireEvent.click(close);
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(screen.getByTestId('public-view-banner')).toBeInTheDocument();
+  });
+
+  it('a link that is not view-only (or was reset) still asks to sign in', async () => {
+    render(<ResultsPage />);
+    expect(await screen.findByText('Sign in or create an account to open this trip')).toBeInTheDocument();
+    expect(api.fetchSharedTrip).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('public-view-banner')).not.toBeInTheDocument();
+  });
+});

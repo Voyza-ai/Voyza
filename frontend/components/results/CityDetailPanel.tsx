@@ -45,6 +45,8 @@ const HotelMapPanel = dynamic(() => import('./HotelMapPanel'), { ssr: false });
 const EASE = [0.22, 0.61, 0.36, 1] as const;
 const GROW_S = 0.45;
 const SHRINK_S = 0.38;
+import { hotelPriceTrust } from '@/lib/hotelPriceTrust';
+import { PriceTrustChip, PriceTrustNote } from './PriceTrust';
 
 type CityDetailPanelProps = {
   trip: Trip;
@@ -534,6 +536,7 @@ export default function CityDetailPanel({
                 rank={i}
                 isSelected={!city.customHotel && city.selectedHotelIndex === i}
                 nights={nights}
+                hotelsInSearch={city.hotels.length}
                 color={color}
                 onSelect={() => setSelectedHotel(cityIndex, i)}
                 caption={pinned ? 'Your pick' : k === 1 && listed[0].pinned ? 'More hotels' : undefined}
@@ -581,6 +584,7 @@ export default function CityDetailPanel({
             isCustom={!!city.customHotel}
             nights={nights}
             travelers={trip.travelers}
+            hotelsInSearch={city.hotels.length}
             color={color}
           />
         </div>
@@ -680,6 +684,7 @@ function HotelRow({
   rank,
   isSelected,
   nights,
+  hotelsInSearch,
   color,
   onSelect,
   caption,
@@ -688,6 +693,7 @@ function HotelRow({
   rank: number;
   isSelected: boolean;
   nights: number;
+  hotelsInSearch: number;
   color: { bg: string; text: string; border: string; name: string };
   onSelect: () => void;
   /** A small label above the row — "Your pick" when the pick is shown ahead of a new set. */
@@ -695,6 +701,7 @@ function HotelRow({
 }) {
   const priceMode = useTripStore((s) => s.priceMode);
   const travelers = useTripStore((s) => s.currentTrip?.travelers ?? 1);
+  const trust = hotelPriceTrust(hotel, { travelers, hotelsInSearch });
   const taxesGroup = (hotel.taxesPerNight ?? 0) * nights;
   const roomGroup = hotel.pricePerNight * nights;
   const totalGroup = roomGroup + taxesGroup;
@@ -791,6 +798,13 @@ function HotelRow({
                 </>
               )}
             </div>
+            {/* A line of its own, so the details line keeps one row and the
+                price column keeps its width. */}
+            {trust && (
+              <div className="mt-1">
+                <PriceTrustChip trust={trust} accent={accent} size="xs" />
+              </div>
+            )}
           </div>
         </div>
         <div className="text-right flex-shrink-0">
@@ -1003,6 +1017,7 @@ function HotelDetail({
   isCustom,
   nights,
   travelers,
+  hotelsInSearch,
   color,
 }: {
   hotel: Hotel | null;
@@ -1010,9 +1025,12 @@ function HotelDetail({
   isCustom: boolean;
   nights: number;
   travelers: number;
+  hotelsInSearch: number;
   color: { bg: string; text: string; border: string; name: string };
 }) {
   const priceMode = useTripStore((s) => s.priceMode);
+  // A traveller's own hotel is their number: never flagged.
+  const trust = isCustom ? null : hotelPriceTrust(hotel, { travelers, hotelsInSearch });
   if (!hotel) {
     return (
       <div className="flex items-center justify-center h-full" style={{ color: `${color.text}70` }}>
@@ -1067,6 +1085,7 @@ function HotelDetail({
                 <Award size={8} /> Top pick
               </span>
             )}
+            {trust && <PriceTrustChip trust={trust} accent={accent} size="xs" />}
           </div>
         </div>
 
@@ -1154,6 +1173,8 @@ function HotelDetail({
           )}
         </div>
       </div>
+
+      {trust && <PriceTrustNote trust={trust} accent={accent} />}
 
       {/* Booking link */}
       {hotel.bookingUrl && (

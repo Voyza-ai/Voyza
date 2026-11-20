@@ -132,6 +132,7 @@ jest.mock('@/lib/api', () => ({
   fetchHotelPhotos: jest.fn().mockResolvedValue([]),
   searchTrains: jest.fn().mockResolvedValue([]),
   optimizeTrip: jest.fn().mockResolvedValue(null),
+  getOptimizeProgress: jest.fn().mockResolvedValue(null),
   compareLeg: jest.fn().mockResolvedValue(null),
   suggestDestinations: jest.fn().mockResolvedValue([]),
   getShareLink: jest.fn().mockResolvedValue({ mode: 'view', token: 'tok', url: 'https://voyza.test/canvas/trip-1?share=tok' }),
@@ -160,6 +161,9 @@ jest.mock('@/lib/api', () => ({
   saveTrip: jest.fn().mockResolvedValue({ tripId: 'trip-123', trip: {} }),
   getTrips: jest.fn().mockResolvedValue({ trips: [] }),
   getTrip: jest.fn().mockResolvedValue({ trip: {} }),
+  fetchRailDemand: jest.fn().mockResolvedValue({ tripsWithLegs: 0, tripsWithTrain: 0, percent: null, asOf: '' }),
+  // A view-only share link opened signed out; by default the link isn't one.
+  fetchSharedTrip: jest.fn().mockRejectedValue(Object.assign(new Error('not view-only'), { status: 404 })),
   deleteTrip: jest.fn().mockResolvedValue({ success: true }),
   getNotifications: jest.fn().mockResolvedValue({ notifications: [], unreadCount: 0 }),
   markNotificationRead: jest.fn().mockResolvedValue({ notification: {} }),

@@ -1,8 +1,10 @@
+import type { OptimizeProgress } from './searchProgress';
 import { getAuthHeader, refreshAuthHeader } from './supabase';
 import { rankHotels } from './hotelScore';
 import { tripStartDate } from './tripSpan';
 import { withLiveTotal } from './tripTotals';
 import type { TravelLegs } from './geoSchedule';
+import type { Co2Figure, DoorToDoor, RailPriceSource } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -70,6 +72,8 @@ export type FlightOffer = {
   carrier: string;
   carrierCode: string;
   bookingUrl: string;
+  doorToDoor?: DoorToDoor | null;
+  co2?: Co2Figure | null;
 };
 
 export async function searchFlights(params: {
@@ -113,6 +117,8 @@ export type HotelResult = {
   district?: string;
   /** Street address ("86 Brick Lane"). */
   address?: string;
+  /** The search was too thin to price-check this row — see `Hotel.priceUnverified`. */
+  priceUnverified?: boolean;
 };
 
 
@@ -167,6 +173,9 @@ export type TrainOffer = {
   trainType: string;
   bookingUrl: string;
   limitedCoverage: boolean;
+  doorToDoor?: DoorToDoor | null;
+  co2?: Co2Figure | null;
+  priceSource?: RailPriceSource;
 };
 
 export async function searchTrains(params: {
@@ -259,11 +268,30 @@ export async function optimizeTrip(params: {
    * When omitted the backend uses 2 nights per city as the default.
    */
   totalNights?: number;
+  /** Random id to poll getOptimizeProgress with while this runs. */
+  progressId?: string;
 }): Promise<OptimizeResult> {
   return apiFetch<OptimizeResult>('/api/optimize', {
     method: 'POST',
     body: JSON.stringify(params),
   });
+}
+
+/**
+ * Live counts for an optimize run started with `progressId`. Null when the
+ * backend has none (not started yet, expired, or a backend without the
+ * endpoint) — the search screen then shows its steps without numbers.
+ */
+export async function getOptimizeProgress(progressId: string): Promise<OptimizeProgress | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/optimize/progress/${encodeURIComponent(progressId)}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as OptimizeProgress;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Home Legs ───────────────────────────────────────────────
@@ -526,6 +554,9 @@ export type LegOption = {
   stops?: number;
   bookingUrl?: string | null;
   priceDelta: number;
+  doorToDoor?: DoorToDoor | null;
+  co2?: Co2Figure | null;
+  priceSource?: RailPriceSource;
 };
 
 /**
@@ -1020,6 +1051,35 @@ export async function saveTrip(trip: any): Promise<{ tripId: string; trip: any }
 
 export async function getTrips(): Promise<{ trips: any[] }> {
   return apiFetch<{ trips: any[] }>('/api/trips');
+}
+
+/**
+ * A trip opened from its "View only" share link by someone with no account.
+ * No auth header: the link's token is the only credential (backend
+ * routes/shared.ts). 404 when the link is not view-only, was reset, or the
+ * trip is gone.
+ */
+export async function fetchSharedTrip(tripId: string, token: string): Promise<{ trip: any }> {
+  const res = await fetch(`${BASE_URL}/api/shared/${encodeURIComponent(tripId)}?token=${encodeURIComponent(token)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.error ?? `API error ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Share of planned multi-city trips with a train leg (public, counts only). */
+export type RailDemand = {
+  tripsWithLegs: number;
+  tripsWithTrain: number;
+  percent: number | null;
+  asOf: string;
+};
+
+export async function fetchRailDemand(): Promise<RailDemand> {
+  const res = await fetch(`${BASE_URL}/api/stats/rail-demand`);
+  if (!res.ok) throw new ApiError(res.status, `API error ${res.status}`);
+  return res.json();
 }
 
 export async function getTrip(tripId: string): Promise<any> {

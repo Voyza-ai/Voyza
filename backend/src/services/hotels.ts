@@ -28,6 +28,18 @@ export type HotelResult = {
   priceSuspect?: boolean;
   priceSuspectReason?: PriceSuspectReason;
   /**
+   * Set on EVERY row of a search too thin to price-check (fewer than
+   * MIN_RESULTS_TO_FILTER rows after the price cap): every relative rule in
+   * `flagSuspectPrices` switched itself off, so no row's price was checked
+   * against anything. Not the same as `priceSuspect` — nothing is known to be
+   * wrong, it just could not be checked — and a row can carry both.
+   *
+   * An annotation only, like `limitedCoverage` in trains.ts: the price is kept
+   * and still counts in the trip total; the UI explains it. Optional for the
+   * same reason as `priceSuspect`: absent and `false` mean the same thing.
+   */
+  priceUnverified?: boolean;
+  /**
    * Charges Booking lists as EXCLUDED from `price` (city tax, cleaning and
    * service fees), per night, in USD, for the whole party — the same scale as
    * `pricePerNight`. See `excludedChargesTotal`.
@@ -1333,6 +1345,10 @@ export async function searchHotels(params: SearchHotelsParams): Promise<HotelRes
       rows: hotels.length,
       needed: MIN_RESULTS_TO_FILTER,
     });
+    // Every row, not just [0]: none of them was checked. Set here, after the
+    // cache and the cap, on the per-call copies — so a cache hit is annotated
+    // the same as a fresh search, and the count is the one actually returned.
+    hotels = hotels.map((h) => ({ ...h, priceUnverified: true }));
   }
 
   // Last, so it also covers the case a price cap leaves only flagged rows:

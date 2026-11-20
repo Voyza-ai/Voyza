@@ -12,6 +12,7 @@ import { addDays, clampToFuture, todayIso } from '../utils/dates';
 import { withDuffelRetryBudget } from './duffelBudget';
 import { AppError } from '../middleware/error';
 import { searchHotels, plannerHotelPick } from './hotels';
+import type { ProgressSink } from './optimizeProgress';
 
 /**
  * Lookups shared by everything ONE optimize() run does (B8).
@@ -109,7 +110,11 @@ type TrainDateRule = (params: CompareLegParams) => string;
  */
 type SearchPhase = 'score' | 'screen' | 'exact' | 'home' | 'homeLegs' | 'probe';
 
-function createRunContext(tripCityNames: string[]): RunContext {
+function createRunContext(tripCityNames: string[], report?: ProgressSink): RunContext {
+  // Live counts for the planner's search screen (optimizeProgress.ts): each
+  // distinct leg comparison and flight search this run asks for, counted at
+  // the memo / ledger that already dedupes them.
+  const legCounts = { asked: 0, priced: 0 };
   const flightOutcomes: RunContext['flightOutcomes'] = { answered: 0, threw: 0, firstError: undefined };
   const noteThrow = (err: unknown) => {
     flightOutcomes.threw++;
@@ -130,7 +135,10 @@ function createRunContext(tripCityNames: string[]): RunContext {
   const flightsFor = (phase: SearchPhase): typeof searchFlights => (params) => {
     // flights.ts' cache key: a repeat of any of these is not another request.
     const key = [params.origin, params.destination, params.date, params.travelers, params.cabinClass ?? 'economy'].join('|');
-    if (!searchLedger.has(key)) searchLedger.set(key, phase);
+    if (!searchLedger.has(key)) {
+      searchLedger.set(key, phase);
+      report?.({ flightSearches: searchLedger.size });
+    }
     return counted(params);
   };
 
@@ -165,6 +173,15 @@ function createRunContext(tripCityNames: string[]): RunContext {
       if (!hit) {
         hit = compareLeg(params, { getIataCode: iata, searchFlights: flights, ...(onDay ? { trainDate: onDay } : {}) });
         compareMemo.set(key, hit);
+        if (report) {
+          legCounts.asked++;
+          report({ legsAsked: legCounts.asked });
+          const done = () => {
+            legCounts.priced++;
+            report({ legsPriced: legCounts.priced });
+          };
+          hit.then(done, done);
+        }
       }
       return hit;
     };
@@ -487,6 +504,8 @@ type OptimizeParams = {
    * 2-nights-per-city default.
    */
   totalNights?: number;
+  /** Live progress for the planner's search screen (optimizeProgress.ts). */
+  onProgress?: ProgressSink;
 };
 
 const DEFAULT_NIGHTS_PER_CITY = 2;
@@ -2083,7 +2102,7 @@ export function firstStayArrival(params: {
 }
 
 export async function optimize(params: OptimizeParams): Promise<OptimizeResult> {
-  const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights } = params;
+  const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights, onProgress } = params;
 
   if (cities.length < 1) {
     throw new Error('Need at least 1 city to optimize');
@@ -2116,7 +2135,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // fares barely move between neighbouring days, which is all ranking needs;
   // the winner is re-priced on its real days below (exactRoute).
   const rankingTrainDay = legDateAt(startDate, nightsArray, 0);
-  const runCtx = createRunContext(cities.map((c) => c.name));
+  const runCtx = createRunContext(cities.map((c) => c.name), onProgress);
   const ctx = runCtx.withTrainDate(() => rankingTrainDay);
 
   // Step 1: resolve IATA codes in parallel
@@ -2244,6 +2263,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // live mode the metro code when the home airports share one (ORD + MDW →
   // CHI) — and the winner's home cards built from the same answers plus its
   // other airports. 1-3 city trips price them exactly as before.
+  onProgress?.({ stage: 'routes', orderings: orderings.length });
+
   const homeKnown = hasOrigin && resolvedOriginAirports.length > 0;
   const outboundDate = clampToFuture(startDate);
   const returnDate = clampToFuture(addDays(startDate, totalNightsResolved));
@@ -2404,6 +2425,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     : 0;
 
   const bestOrdering = topRoutes[0].ordering;
+  onProgress?.({ stage: 'finishing', bestOrder: bestOrdering });
 
   // The winner's inter-city legs on their real days (see rankingTrainDay):
   // its trains as the trip will show them, with that day's times and fares.

@@ -47,6 +47,10 @@ export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Ho
     bookingUrl: r.bookingUrl,
     reviewCount: r.reviewCount,
     priceSuspect: r.priceSuspect,
+    // Optional annotations: copied only when set, so a plain row maps to
+    // exactly the object it always did.
+    ...(r.priceSuspect && r.priceSuspectReason ? { priceSuspectReason: r.priceSuspectReason } : {}),
+    ...(r.priceUnverified ? { priceUnverified: true } : {}),
     ...(typeof taxes === 'number' && Number.isFinite(taxes) && taxes >= 0
       ? { taxesPerNight: taxes }
       : {}),

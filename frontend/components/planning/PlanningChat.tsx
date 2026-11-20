@@ -6,8 +6,9 @@ import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin, LocateFixed, L
 import { useTripStore, requestCityPicks, startTripPicks, type CityPicksRequest } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ApiError, interpretPlan, optimizeTrip, reviseDestinations, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
+import { ApiError, getOptimizeProgress, interpretPlan, optimizeTrip, reviseDestinations, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
 import { Trip, City, Transport, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
+import { pickLegFacts } from '@/lib/legFacts';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { suggestDestinationsForVibe } from '@/lib/api';
@@ -29,6 +30,9 @@ import type { SummaryField } from '@/lib/tripSummary';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
+import SearchProgress from './SearchProgress';
+import { startSearchProgress, type SearchProgressState } from '@/lib/searchProgress';
+import { capturedLabel, demoTripFor, openDemoTrip } from '@/lib/demoTrips';
 import { usePlannerLeaveGuard } from '@/hooks/usePlannerLeaveGuard';
 import { formatMinutes, humanDay, humanDayRange } from '@/lib/dateHelpers';
 import DatePicker from './DatePicker';
@@ -1116,6 +1120,7 @@ export default function PlanningChat() {
       layovers: opt.mode === 'flight' ? (opt.stops ?? 0) : 0,
       bookingUrl: opt.bookingUrl ?? undefined,
       flightNumber: opt.mode === 'flight' ? (opt.flightNumber ?? undefined) : undefined,
+      ...pickLegFacts(opt, opt.mode),
     });
 
     // Helper: extract a Transport from an optimizer leg.
@@ -1201,6 +1206,7 @@ export default function PlanningChat() {
             ? new Date(otherArriveIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
             : undefined,
           bookingUrl: other.bookingUrl || undefined,
+          ...pickLegFacts(other, otherMode),
         });
       }
 
@@ -1217,6 +1223,7 @@ export default function PlanningChat() {
         layovers: mode === 'flight' ? (picked.stops ?? 0) : 0,
         bookingUrl: picked.bookingUrl || undefined,
         flightNumber: mode === 'flight' ? (picked.carrierCode ?? undefined) : undefined,
+        ...pickLegFacts(picked, mode),
         alternatives,
         // Honest "no train" note when a flight was picked, no train option came
         // back, and the route is short enough (≤6h) that a train would compete.
@@ -1301,6 +1308,18 @@ export default function PlanningChat() {
 
   const [findTripLoading, setFindTripLoading] = useState(false);
   const [findTripStatus, setFindTripStatus] = useState('');
+  /** The running search, step by step (SearchProgress). Null when none is. */
+  const [searchProgress, setSearchProgress] = useState<SearchProgressState | null>(null);
+  // A long search for a trip there is a stored demo of: offer that instead
+  // (lib/demoTrips.ts). Leaving /plan stops the live search (mountedRef).
+  const slowSearchDemo = searchProgress ? demoTripFor(searchProgress.cities) : null;
+  const demoFallback = slowSearchDemo
+    ? {
+        afterSeconds: 20,
+        label: `Taking a while? Open the stored search (prices from ${capturedLabel(slowSearchDemo.capturedAt)})`,
+        onOpen: () => openDemoTrip(slowSearchDemo, (href) => router.push(href)),
+      }
+    : null;
   const [findTripError, setFindTripError] = useState<string | null>(null);
   // Ask before leaving once something is answered, until Find my trip runs.
   usePlannerLeaveGuard(findTripLoading);
@@ -1601,7 +1620,26 @@ export default function PlanningChat() {
         }
       }
 
+      // Live progress: the optimizer reports its own counts under this id
+      // while the request is open, polled here (see lib/searchProgress.ts).
+      const progressId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+      setSearchProgress(startSearchProgress(parsed.destinations, answers.origin ?? undefined));
+      let polling = true;
+      const poll = async () => {
+        while (polling && mountedRef.current) {
+          await new Promise((r) => setTimeout(r, 700));
+          if (!polling) break;
+          const p = await getOptimizeProgress(progressId);
+          if (p && polling) setSearchProgress((s) => (s && s.phase === 'optimize' ? { ...s, optimize: p } : s));
+        }
+      };
+      void poll();
+
       const result = await optimizeTrip({
+        progressId,
         cities: parsed.destinations.map((d: string) => ({ name: d })),
         startDate,
         travelers,
@@ -1613,6 +1651,8 @@ export default function PlanningChat() {
         originAirports: answers.originAirports ?? undefined,
         returnToHome: answers.returnToHome ?? true,
         totalNights: totalNightsForOptimize,
+      }).finally(() => {
+        polling = false;
       });
 
       // The user may have left /plan while that ran. The search outlives the
@@ -1625,6 +1665,7 @@ export default function PlanningChat() {
       if (!mountedRef.current) return;
 
       trip = buildTripFromOptimize(result, travelers);
+      setSearchProgress((s) => (s ? { ...s, phase: 'hotels' } : s));
 
       // Compute a per-night hotel cap from the total budget.
       // Rule of thumb: hotels get ~40% of the total trip budget. For a
@@ -1687,6 +1728,7 @@ export default function PlanningChat() {
       const HOTEL_CONCURRENCY = 2;
 
       const fetchOne = async (city: (typeof trip.cities)[number]) => {
+        setSearchProgress((s) => (s ? { ...s, hotelsActive: [...s.hotelsActive, city.name] } : s));
         try {
           const stay = {
             city: city.name,
@@ -1729,6 +1771,16 @@ export default function PlanningChat() {
           }
         } catch {
           // Hotel search failure is non-fatal
+        } finally {
+          setSearchProgress((s) =>
+            s
+              ? {
+                  ...s,
+                  hotelsActive: s.hotelsActive.filter((n) => n !== city.name),
+                  hotelsDone: [...s.hotelsDone, city.name],
+                }
+              : s,
+          );
         }
         return null;
       };
@@ -1803,6 +1855,7 @@ export default function PlanningChat() {
       // Step 4 lands on /results: the trip goes on screen now, and each city's
       // AI picks fill in when they answer (startTripPicks).
       startTripPicks(trip, picksRequests, picksInFlight);
+      setSearchProgress((s) => (s ? { ...s, phase: 'opening' } : s));
       track('trip_search_succeeded', {
         cities: trip.cities.length,
         travelers: trip.travelers,
@@ -1826,6 +1879,7 @@ export default function PlanningChat() {
     } finally {
       setFindTripLoading(false);
       setFindTripStatus('');
+      setSearchProgress(null);
     }
   };
 
@@ -2436,6 +2490,8 @@ export default function PlanningChat() {
           onFindTrip={handleFindTrip}
           findTripLoading={findTripLoading}
           findTripStatus={findTripStatus}
+          searchProgress={searchProgress}
+          searchFallback={demoFallback}
           findTripError={findTripError}
           onSwitchToGuided={() => {
             setIntent('place');
@@ -2619,7 +2675,12 @@ export default function PlanningChat() {
 
           {/* Auto-run searching state — the date-shift replan has no chat
               mode mounted, so its progress renders here instead. */}
-          {findTripLoading && !intent && (
+          {findTripLoading && !intent && searchProgress && (
+            <div className="mt-3">
+              <SearchProgress progress={searchProgress} fallback={demoFallback} />
+            </div>
+          )}
+          {findTripLoading && !intent && !searchProgress && (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -2859,6 +2920,9 @@ export default function PlanningChat() {
                   </>
                 )}
               </button>
+              {findTripLoading && searchProgress && (
+                <SearchProgress progress={searchProgress} fallback={demoFallback} />
+              )}
               {findTripError && (
                 <p className="text-red-600 text-sm text-center max-w-md">{findTripError}</p>
               )}

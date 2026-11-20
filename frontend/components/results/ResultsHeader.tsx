@@ -23,6 +23,7 @@ import TripNameEditor from '@/components/shared/TripNameEditor';
 import { updateTrip } from '@/lib/api';
 import { useLeaveGuardSave } from '@/lib/leaveGuard';
 import CollaboratorAvatars from './CollaboratorAvatars';
+import { tripPriceCaveats } from '@/lib/hotelPriceTrust';
 import type { TripCollaboration } from '@/hooks/useTripCollaboration';
 
 type ResultsHeaderProps = {
@@ -42,6 +43,8 @@ type ResultsHeaderProps = {
   membersKey?: number;
   /** This person can change the trip: the savings menu's switches apply. */
   canEdit?: boolean;
+  /** Opened from a view-only share link without an account: no Share. */
+  publicView?: boolean;
 };
 
 /**
@@ -62,7 +65,7 @@ const formatDate = (iso: string) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, membersKey = 0, canEdit = true }: ResultsHeaderProps) {
+export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, membersKey = 0, canEdit = true, publicView = false }: ResultsHeaderProps) {
   const shown = pricedTrip ?? trip;
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
@@ -174,7 +177,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
 
   // What this person may do on a shared trip. An unsaved trip, or one whose
   // role is still loading, is the signed-in person's own.
-  const role = collab?.active ? collab.role : 'owner';
+  const role = publicView ? 'viewer' : collab?.active ? collab.role : 'owner';
   const canShare = role === 'owner' || role === 'editor';
 
   // "Save trip" in the leave dialog, for a trip never saved: the Share
@@ -186,6 +189,19 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
   const { start: startDate, end: endDate, nights: totalNights } = tripSpan(shown);
 
   const liveTotal = liveTripTotal(shown);
+  // Hotel prices in that total we can't stand behind (lib/hotelPriceTrust.ts).
+  // They stay IN the total — an unchecked price is most likely real, and a
+  // total without the stay would be wrong for certain — and are named here.
+  const caveats = tripPriceCaveats(shown);
+  const caveatCount = caveats.suspect.length + caveats.unverified.length;
+  const caveatText =
+    caveats.suspect.length > 0
+      ? `incl. ${caveats.suspect.length === 1 ? 'a hotel price that looks off' : `${caveats.suspect.length} hotel prices that look off`}`
+      : `incl. ${caveats.unverified.length === 1 ? '1 unchecked hotel price' : `${caveats.unverified.length} unchecked hotel prices`}`;
+  const caveatTitle = [
+    caveats.suspect.length > 0 ? `Looks off: ${caveats.suspect.join(', ')}` : '',
+    caveats.unverified.length > 0 ? `Couldn't be checked against other hotels: ${caveats.unverified.join(', ')}` : '',
+  ].filter(Boolean).join('. ') + '. Open the city to see why.';
   const travelers = Math.max(1, trip.travelers);
   // Savings tracks the delta vs the original baseline (totalCost - savings was the
   // pre-optimized baseline). When the user picks a more expensive hotel the
@@ -599,10 +615,23 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
                 ${animatedTotal.toLocaleString()}
               </div>
-              {showToggle && (
-                <div className="text-[#4f8ef7]/55 text-[9px]">
-                  ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
+              {/* Three lines, like the Price check box beside it: a price
+                  caveat takes the third line — the other figure is one
+                  click away on the switch next to this box. */}
+              {caveatCount > 0 ? (
+                <div
+                  data-testid="total-price-caveat"
+                  title={caveatTitle}
+                  className="text-[#4f8ef7]/70 text-[9px] underline decoration-dashed underline-offset-2 cursor-help whitespace-nowrap"
+                >
+                  {caveatText}
                 </div>
+              ) : (
+                showToggle && (
+                  <div className="text-[#4f8ef7]/55 text-[9px]">
+                    ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
+                  </div>
+                )
               )}
             </div>
             {showToggle && (
