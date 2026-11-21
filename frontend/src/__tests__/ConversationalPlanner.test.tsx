@@ -244,9 +244,10 @@ describe('ConversationalPlanner', () => {
       expect(screen.queryByText('Use my location')).not.toBeInTheDocument();
     });
 
-    it('is offered when the planner asks where they fly from', async () => {
+    it('is offered when the planner asks where they fly from, right under that question', async () => {
       await openLocationChip();
-      expect(screen.getByText('Use my location')).toBeInTheDocument();
+      const chip = screen.getByRole('button', { name: 'Use my location' });
+      expect(screen.getByText('Lovely! Where are you flying from?').parentElement).toContainElement(chip);
     });
 
     it('is not offered when the question is about something else (the owner\'s report)', async () => {
