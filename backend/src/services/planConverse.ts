@@ -57,7 +57,16 @@ export type ConverseResult = {
     | 'ready'
     | 'redirect';
   quickReplies?: string[];
+  /**
+   * The one trip fact the reply's question asks for, so the page can offer
+   * the matching control (a calendar for dates, "Use my location" for
+   * origin). Absent when the reply asks nothing.
+   */
+  asking?: AskingField;
 };
+
+export const ASKING_FIELDS = ['destinations', 'dates', 'origin', 'travelers', 'returnToHome', 'budget', 'vibe', 'other'] as const;
+export type AskingField = (typeof ASKING_FIELDS)[number];
 
 const RESPOND_TOOL = {
   name: 'respond_to_traveler',
@@ -133,6 +142,12 @@ const RESPOND_TOOL = {
         enum: ['ask', 'show_city_picker', 'show_vibe_picker', 'show_budget_slider', 'ready', 'redirect'],
         description:
           "What the UI should do: 'ask'=plain question; 'show_city_picker'=you provided countries[] and want them to pick cities; 'show_vibe_picker'=you are asking about trip vibe; 'show_budget_slider'=you are asking about budget; 'ready'=minimums met, show the recap; 'redirect'=message was off-topic.",
+      },
+      asking: {
+        type: 'string',
+        enum: [...ASKING_FIELDS],
+        description:
+          "The ONE trip fact your reply's question asks for: 'dates' when you ask when they travel, 'origin' when you ask where they fly FROM, and so on; 'other' for any other question. Omit when your reply asks nothing.",
       },
       quickReplies: {
         type: 'array',
@@ -239,6 +254,7 @@ export async function converse(params: {
         updates,
         action: input.action,
         quickReplies: Array.isArray(input.quickReplies) ? input.quickReplies.slice(0, 4) : undefined,
+        ...((ASKING_FIELDS as readonly string[]).includes(input.asking) ? { asking: input.asking as AskingField } : {}),
       },
     });
   } catch (err: any) {

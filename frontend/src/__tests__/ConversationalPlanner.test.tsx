@@ -226,14 +226,35 @@ describe('ConversationalPlanner', () => {
         configurable: true,
       });
 
+    // The chip is offered only once the planner asks where they fly from.
+    const openLocationChip = async () => {
+      mockedConverse.mockResolvedValueOnce({ reply: 'Lovely! Where are you flying from?', updates: { destinations: ['London'] }, action: 'ask', asking: 'origin' });
+      render(<ConversationalPlanner {...baseProps} />);
+      await sendText('London');
+      await screen.findByText('Use my location');
+    };
+
     afterEach(() => {
       // @ts-expect-error cleanup
       delete global.navigator.geolocation;
     });
 
-    it('offers the location chip until an origin is known', () => {
+    it('is not offered before the planner asks where they fly from', () => {
       render(<ConversationalPlanner {...baseProps} />);
+      expect(screen.queryByText('Use my location')).not.toBeInTheDocument();
+    });
+
+    it('is offered when the planner asks where they fly from', async () => {
+      await openLocationChip();
       expect(screen.getByText('Use my location')).toBeInTheDocument();
+    });
+
+    it('is not offered when the question is about something else (the owner\'s report)', async () => {
+      mockedConverse.mockResolvedValueOnce({ reply: 'London and Madrid — great combo! When are you thinking of going?', updates: { destinations: ['London', 'Madrid'] }, action: 'ask' });
+      render(<ConversationalPlanner {...baseProps} />);
+      await sendText('tryna go london and madrid');
+      await screen.findByText(/great combo/);
+      expect(screen.queryByText('Use my location')).not.toBeInTheDocument();
     });
 
     it('hides the chip once origin is set', () => {
@@ -253,7 +274,7 @@ describe('ConversationalPlanner', () => {
         action: 'ask',
       });
 
-      render(<ConversationalPlanner {...baseProps} />);
+      await openLocationChip();
       fireEvent.click(screen.getByText('Use my location'));
 
       await waitFor(() => {
@@ -278,17 +299,17 @@ describe('ConversationalPlanner', () => {
       });
       mockedConverse.mockResolvedValue({ reply: 'Got it!', updates: {}, action: 'ask' });
 
-      render(<ConversationalPlanner {...baseProps} />);
+      await openLocationChip();
       fireEvent.click(screen.getByText('Use my location'));
-      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(2));
 
       await sendText('train friendly trip in Europe');
-      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(2));
-      await sendText('give me some suggestions');
       await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(3));
+      await sendText('give me some suggestions');
+      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(4));
 
       // EVERY call after the chip must carry the origin as known.
-      for (const call of mockedConverse.mock.calls.slice(1)) {
+      for (const call of mockedConverse.mock.calls.slice(2)) {
         expect(call[0].known.origin).toBe('Philadelphia');
       }
       expect(useTripStore.getState().answers.origin).toBe('Philadelphia');
@@ -307,11 +328,11 @@ describe('ConversationalPlanner', () => {
         action: 'ask',
       });
 
-      render(<ConversationalPlanner {...baseProps} />);
+      await openLocationChip();
       fireEvent.click(screen.getByText('Use my location'));
-      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(1));
-      await sendText('train friendly trip in Europe');
       await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(2));
+      await sendText('train friendly trip in Europe');
+      await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(3));
 
       expect(useTripStore.getState().answers.origin).toBe('Philadelphia');
     });
@@ -320,19 +341,19 @@ describe('ConversationalPlanner', () => {
       setGeolocation({
         getCurrentPosition: (_ok: any, err: any) => err({ code: 1 }),
       });
-      render(<ConversationalPlanner {...baseProps} />);
+      await openLocationChip();
       fireEvent.click(screen.getByText('Use my location'));
 
       expect(
         await screen.findByText(/couldn't get your location/i),
       ).toBeInTheDocument();
-      expect(mockedConverse).not.toHaveBeenCalled();
+      expect(mockedConverse).toHaveBeenCalledTimes(1); // only the question turn
       // Flow not blocked — chip still available for retry, typing still works.
       expect(screen.getByText('Use my location')).toBeInTheDocument();
     });
 
     it('unsupported browser: explains and falls back to typing', async () => {
-      render(<ConversationalPlanner {...baseProps} />);
+      await openLocationChip();
       fireEvent.click(screen.getByText('Use my location'));
       expect(
         await screen.findByText(/doesn't support location sharing/i),
