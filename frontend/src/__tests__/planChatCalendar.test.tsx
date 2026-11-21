@@ -66,6 +66,8 @@ describe('the calendar in the chat', () => {
     render(<ConversationalPlanner {...baseProps} />);
     sendText('london');
     const open = await screen.findByRole('button', { name: 'Open calendar' });
+    // Right under the message that asks — part of that message, not the input area.
+    expect(screen.getByText('When are you thinking of going?').parentElement).toContainElement(open);
     expect(screen.queryByTestId('date-range-calendar')).not.toBeInTheDocument();
     fireEvent.click(open);
     expect(screen.getByTestId('date-range-calendar')).toBeInTheDocument();

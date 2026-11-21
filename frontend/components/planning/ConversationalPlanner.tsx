@@ -94,6 +94,12 @@ export default function ConversationalPlanner({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [widget, setWidget] = useState<Widget>(null);
+  // The dates question offers the calendar; it opens only when asked for,
+  // so typing the dates stays just as easy.
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  useEffect(() => {
+    if (widget !== 'dates') setCalendarOpen(false);
+  }, [widget]);
   // The vibe widget's picked pills, before Continue.
   const [vibeDraft, setVibeDraft] = useState<string[]>([]);
   const [showRecap, setShowRecap] = useState(false);
@@ -124,7 +130,7 @@ export default function ConversationalPlanner({
 
   useEffect(() => {
     scrollRef.current?.scrollTo?.({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, isTyping, widget, showRecap]);
+  }, [messages, isTyping, widget, showRecap, calendarOpen]);
 
   /** Known-state snapshot the backend uses to avoid re-asking. */
   const knownState = useCallback(() => {
@@ -300,12 +306,6 @@ export default function ConversationalPlanner({
   // → origin set directly + announced through the conversation so the AI
   // acknowledges it and never re-asks. All failures fall back to typing.
   const [locating, setLocating] = useState(false);
-  // The dates question offers the calendar; it opens only when asked for,
-  // so typing the dates stays just as easy.
-  const [calendarOpen, setCalendarOpen] = useState(false);
-  useEffect(() => {
-    if (widget !== 'dates') setCalendarOpen(false);
-  }, [widget]);
   const handleUseMyLocation = async () => {
     if (locating || isTyping) return;
     setLocating(true);
@@ -423,6 +423,8 @@ export default function ConversationalPlanner({
     { icon: Sparkles, label: 'Vibe', value: vibeList(a).length > 0 ? vibePhrase(vibeList(a)) : 'Open' },
   ];
 
+  const lastMessageId = messages[messages.length - 1]?.id;
+
   return (
     <>
       {/* ── Conversation ── */}
@@ -448,6 +450,39 @@ export default function ConversationalPlanner({
                 >
                   {msg.content}
                 </div>
+
+                {/* Dates: "Open calendar" right under the question that asks
+                    for them; typing the dates works just the same. */}
+                {msg.role === 'assistant' && msg.id === lastMessageId && widget === 'dates' && !isTyping && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarOpen((o) => !o)}
+                      aria-expanded={calendarOpen}
+                      className="mt-2.5 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all"
+                      style={{ background: '#eff6ff' }}
+                    >
+                      <Calendar size={13} />
+                      {calendarOpen ? 'Close calendar' : 'Open calendar'}
+                    </button>
+                    {calendarOpen && (
+                      <div className="mt-3 w-full">
+                        <DateRangeCalendar
+                          onSelect={(start, end) => {
+                            // Stored as picked, whatever the AI makes of the sentence.
+                            setAnswer('dateRange', { start, end });
+                            setWidget(null);
+                            send(humanDayRange(start, end));
+                          }}
+                          onFlexible={() => {
+                            setWidget(null);
+                            send("I'm flexible on dates");
+                          }}
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
 
                 {/* Failed send → honest reason + Retry */}
                 {msg.failed && (
@@ -700,37 +735,6 @@ export default function ConversationalPlanner({
               editable={() => !isTyping}
             />
           )}
-          {/* ── Dates: an "Open calendar" offer under the dates question;
-              typing the dates works just the same ── */}
-          {widget === 'dates' && !isTyping && (
-            <div className="flex">
-              <button
-                type="button"
-                onClick={() => setCalendarOpen((o) => !o)}
-                aria-expanded={calendarOpen}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all"
-                style={{ background: '#eff6ff' }}
-              >
-                <Calendar size={13} />
-                {calendarOpen ? 'Close calendar' : 'Open calendar'}
-              </button>
-            </div>
-          )}
-          {widget === 'dates' && calendarOpen && !isTyping && (
-            <DateRangeCalendar
-              onSelect={(start, end) => {
-                // Stored as picked, whatever the AI makes of the sentence.
-                setAnswer('dateRange', { start, end });
-                setWidget(null);
-                send(humanDayRange(start, end));
-              }}
-              onFlexible={() => {
-                setWidget(null);
-                send("I'm flexible on dates");
-              }}
-            />
-          )}
-
           {/* Location offer — only while the question is where they fly from */}
           {widget === 'origin' && !answers.origin && !isTyping && (
             <div className="flex">
