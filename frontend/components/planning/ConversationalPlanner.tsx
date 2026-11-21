@@ -25,6 +25,8 @@ import { useTripStore } from '@/store/tripStore';
 import { humanDay, humanDayRange } from '@/lib/dateHelpers';
 import VibePills from './VibePills';
 import BudgetPicker from './BudgetPicker';
+import DateRangeCalendar from './DateRangeCalendar';
+import { askingFrom } from '@/lib/planAsking';
 import TripSummaryCard from './TripSummaryCard';
 import { CHAT_EDIT_PREFILL } from '@/lib/tripSummary';
 import { dedupeVibes, joinVibes, splitVibeText, vibeBubbleText, vibeList, vibePhrase } from '@/lib/vibes';
@@ -37,7 +39,7 @@ type ChatMsg = {
   failed?: 'network' | 'assistant';
 };
 
-type Widget = 'city_picker' | 'vibe' | 'budget' | null;
+type Widget = 'city_picker' | 'vibe' | 'budget' | 'dates' | 'origin' | null;
 
 type ConversationalPlannerProps = {
   /** First message to send automatically (landing-page hero seed). */
@@ -92,6 +94,12 @@ export default function ConversationalPlanner({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [widget, setWidget] = useState<Widget>(null);
+  // The dates question offers the calendar; it opens only when asked for,
+  // so typing the dates stays just as easy.
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  useEffect(() => {
+    if (widget !== 'dates') setCalendarOpen(false);
+  }, [widget]);
   // The vibe widget's picked pills, before Continue.
   const [vibeDraft, setVibeDraft] = useState<string[]>([]);
   const [showRecap, setShowRecap] = useState(false);
@@ -122,7 +130,7 @@ export default function ConversationalPlanner({
 
   useEffect(() => {
     scrollRef.current?.scrollTo?.({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, isTyping, widget, showRecap]);
+  }, [messages, isTyping, widget, showRecap, calendarOpen]);
 
   /** Known-state snapshot the backend uses to avoid re-asking. */
   const knownState = useCallback(() => {
@@ -266,6 +274,12 @@ export default function ConversationalPlanner({
           setWidget('vibe');
         } else if (result.action === 'show_budget_slider' && a.budget == null) {
           setWidget('budget');
+        } else if (result.action === 'ask' && askingFrom(result.reply, result.asking) === 'dates' && !a.dateRange?.start) {
+          // "When are you thinking of going?" → a calendar to answer it with.
+          setWidget('dates');
+        } else if (result.action === 'ask' && askingFrom(result.reply, result.asking) === 'origin' && !a.origin) {
+          // "Where are you flying from?" → "Use my location".
+          setWidget('origin');
         } else if (meetsMinimums() && (result.action === 'ready' || result.action === 'show_vibe_picker' || result.action === 'show_budget_slider')) {
           // Suppressed a redundant widget (or genuine ready) with a complete
           // plan on the table → recap.
@@ -409,6 +423,8 @@ export default function ConversationalPlanner({
     { icon: Sparkles, label: 'Vibe', value: vibeList(a).length > 0 ? vibePhrase(vibeList(a)) : 'Open' },
   ];
 
+  const lastMessageId = messages[messages.length - 1]?.id;
+
   return (
     <>
       {/* ── Conversation ── */}
@@ -434,6 +450,39 @@ export default function ConversationalPlanner({
                 >
                   {msg.content}
                 </div>
+
+                {/* Dates: "Open calendar" right under the question that asks
+                    for them; typing the dates works just the same. */}
+                {msg.role === 'assistant' && msg.id === lastMessageId && widget === 'dates' && !isTyping && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarOpen((o) => !o)}
+                      aria-expanded={calendarOpen}
+                      className="mt-2.5 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all"
+                      style={{ background: '#eff6ff' }}
+                    >
+                      <Calendar size={13} />
+                      {calendarOpen ? 'Close calendar' : 'Open calendar'}
+                    </button>
+                    {calendarOpen && (
+                      <div className="mt-3 w-full">
+                        <DateRangeCalendar
+                          onSelect={(start, end) => {
+                            // Stored as picked, whatever the AI makes of the sentence.
+                            setAnswer('dateRange', { start, end });
+                            setWidget(null);
+                            send(humanDayRange(start, end));
+                          }}
+                          onFlexible={() => {
+                            setWidget(null);
+                            send("I'm flexible on dates");
+                          }}
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
 
                 {/* Failed send → honest reason + Retry */}
                 {msg.failed && (
@@ -686,8 +735,8 @@ export default function ConversationalPlanner({
               editable={() => !isTyping}
             />
           )}
-          {/* Location offer — visible until an origin is known */}
-          {!answers.origin && !isTyping && (
+          {/* Location offer — only while the question is where they fly from */}
+          {widget === 'origin' && !answers.origin && !isTyping && (
             <div className="flex">
               <button
                 onClick={handleUseMyLocation}
