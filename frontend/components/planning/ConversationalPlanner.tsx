@@ -300,6 +300,12 @@ export default function ConversationalPlanner({
   // → origin set directly + announced through the conversation so the AI
   // acknowledges it and never re-asks. All failures fall back to typing.
   const [locating, setLocating] = useState(false);
+  // The dates question offers the calendar; it opens only when asked for,
+  // so typing the dates stays just as easy.
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  useEffect(() => {
+    if (widget !== 'dates') setCalendarOpen(false);
+  }, [widget]);
   const handleUseMyLocation = async () => {
     if (locating || isTyping) return;
     setLocating(true);
@@ -694,8 +700,23 @@ export default function ConversationalPlanner({
               editable={() => !isTyping}
             />
           )}
-          {/* ── Dates calendar: when the question is about dates ── */}
+          {/* ── Dates: an "Open calendar" offer under the dates question;
+              typing the dates works just the same ── */}
           {widget === 'dates' && !isTyping && (
+            <div className="flex">
+              <button
+                type="button"
+                onClick={() => setCalendarOpen((o) => !o)}
+                aria-expanded={calendarOpen}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all"
+                style={{ background: '#eff6ff' }}
+              >
+                <Calendar size={13} />
+                {calendarOpen ? 'Close calendar' : 'Open calendar'}
+              </button>
+            </div>
+          )}
+          {widget === 'dates' && calendarOpen && !isTyping && (
             <DateRangeCalendar
               onSelect={(start, end) => {
                 // Stored as picked, whatever the AI makes of the sentence.

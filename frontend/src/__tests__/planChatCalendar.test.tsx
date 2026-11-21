@@ -56,8 +56,26 @@ describe('the calendar in the chat', () => {
     });
     render(<ConversationalPlanner {...baseProps} />);
     sendText('tryna go london and madrid');
+    // The question offers the calendar; it opens on request.
+    fireEvent.click(await screen.findByRole('button', { name: 'Open calendar' }));
     await screen.findByTestId('date-range-calendar');
   };
+
+  it('offers "Open calendar" under the dates question, closed until clicked; typing still answers', async () => {
+    mockedConverse.mockResolvedValueOnce({ reply: 'When are you thinking of going?', updates: { destinations: ['London'] }, action: 'ask', asking: 'dates' });
+    render(<ConversationalPlanner {...baseProps} />);
+    sendText('london');
+    const open = await screen.findByRole('button', { name: 'Open calendar' });
+    expect(screen.queryByTestId('date-range-calendar')).not.toBeInTheDocument();
+    fireEvent.click(open);
+    expect(screen.getByTestId('date-range-calendar')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close calendar' }));
+    expect(screen.queryByTestId('date-range-calendar')).not.toBeInTheDocument();
+    sendText('mid december for a week');
+    await waitFor(() => expect(mockedConverse).toHaveBeenCalledTimes(2));
+    expect(mockedConverse.mock.calls[1][0].message).toBe('mid december for a week');
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Open calendar' })).not.toBeInTheDocument());
+  });
 
   it('shows under a dates question — from `asking` or from the question itself — and no location chip', async () => {
     await askDates('dates');
@@ -96,7 +114,7 @@ describe('the calendar in the chat', () => {
     render(<ConversationalPlanner {...baseProps} />);
     sendText('hi');
     await screen.findByText(/When are you thinking/);
-    expect(screen.queryByTestId('date-range-calendar')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open calendar' })).not.toBeInTheDocument();
   });
 });
 
