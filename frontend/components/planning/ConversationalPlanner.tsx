@@ -484,6 +484,20 @@ export default function ConversationalPlanner({
                   </>
                 )}
 
+                {/* Location offer: right under "Where are you flying from?" */}
+                {msg.role === 'assistant' && msg.id === lastMessageId && widget === 'origin' && !answers.origin && !isTyping && (
+                  <button
+                    type="button"
+                    onClick={handleUseMyLocation}
+                    disabled={locating}
+                    className="mt-2.5 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all"
+                    style={{ background: '#eff6ff' }}
+                  >
+                    {locating ? <Loader2 size={13} className="animate-spin" /> : <LocateFixed size={13} />}
+                    {locating ? 'Finding your nearest airport…' : 'Use my location'}
+                  </button>
+                )}
+
                 {/* Failed send → honest reason + Retry */}
                 {msg.failed && (
                   <div className="flex items-center gap-3 mt-2">
@@ -734,24 +748,6 @@ export default function ConversationalPlanner({
               }}
               editable={() => !isTyping}
             />
-          )}
-          {/* Location offer — only while the question is where they fly from */}
-          {widget === 'origin' && !answers.origin && !isTyping && (
-            <div className="flex">
-              <button
-                onClick={handleUseMyLocation}
-                disabled={locating}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all"
-                style={{ background: '#eff6ff' }}
-              >
-                {locating ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <LocateFixed size={13} />
-                )}
-                {locating ? 'Finding your nearest airport…' : 'Use my location'}
-              </button>
-            </div>
           )}
           {quickReplies.length > 0 && !isTyping && (
             <div className="flex flex-wrap gap-2">
