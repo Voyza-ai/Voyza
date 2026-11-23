@@ -15,6 +15,7 @@ import {
   ExternalLink,
   X,
   ArrowLeftRight,
+  Moon,
 } from 'lucide-react';
 import { Transport } from '@/lib/types';
 import { useTripStore } from '@/store/tripStore';
@@ -28,7 +29,7 @@ import {
   railPriceShort,
   trainCo2SavingPct,
 } from '@/lib/legFacts';
-import { arrivesNextDay } from '@/lib/cityLegs';
+import { arrivesNextDay, nextIsoDay } from '@/lib/cityLegs';
 
 type ConnectorProps = {
   transport: Transport;
@@ -93,6 +94,10 @@ export default function Connector({
   // In-app booking (Duffel) for a flight we can date. Trains and undated
   // legs keep the plain deep link below.
   const bookDate = transport.departDate ?? legDate;
+  // An overnight leg (it lands the next day): the box says so, with the day it
+  // lands. A small "+1" after the arrival time was the only sign, and the night
+  // on the plane is why the first city's stay starts a day after the trip.
+  const landsOn = arrivesNextDay(transport) && bookDate ? nextIsoDay(bookDate) : null;
   const canBookInApp = isFlight && !transport.unavailable && Boolean(bookDate) && Boolean(transport.from && transport.to);
 
   // An expanded card widens in place (transition-[width], 300ms). Near the
@@ -232,6 +237,18 @@ export default function Connector({
                 ? 'No train data'
                 : (isTrain && railPriceShort(transport.priceSource)) || 'Click for details'}
             </div>
+
+            {/* Overnight: under the box, out of the layout, so every box keeps
+                its size and the dashed lines stay level. */}
+            {landsOn && (
+              <div
+                data-testid="overnight-tag"
+                className="absolute left-1/2 -translate-x-1/2 top-full mt-1 flex items-center gap-1 whitespace-nowrap text-[10px] text-gray-600 leading-none"
+              >
+                <Moon size={10} style={{ color: accentColor }} aria-hidden />
+                <span>Overnight · lands {formatDateLong(landsOn)}</span>
+              </div>
+            )}
           </button>
 
           {/* Right dashed segment */}

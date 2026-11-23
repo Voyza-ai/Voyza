@@ -1,5 +1,6 @@
 'use client';
 
+import { arrivesNextDay, nextIsoDay } from '@/lib/cityLegs';
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
 import { motion, Reorder, useDragControls } from 'framer-motion';
 // PenSquare and Link were left over from before the Edit-in-Canvas button
@@ -689,7 +690,10 @@ export function HomeCard({
   // first paint and the card shows the bare code until it lands.
   const airportName = useAirportNames()(iata);
 
-  const dateIso = leg?.departDate;
+  // Back home shows the arrival time, so it shows the arrival day: an
+  // overnight flight home lands the day after it leaves (it used to read
+  // "Sun, Dec 27 · Arrive 06:40" for a flight landing on Dec 28).
+  const dateIso = direction === 'inbound' ? homeArrivalDate(leg) : leg?.departDate;
   const dateLabel = dateIso ? formatHomeDate(dateIso) : null;
   const time = direction === 'outbound' ? leg?.departTime : leg?.arriveTime;
   const timeLabel = direction === 'outbound' ? 'Depart' : 'Arrive';
@@ -810,6 +814,19 @@ export function HomeCard({
  * Format an ISO date (YYYY-MM-DD) in a compact way for the home
  * card's footer row. Example: "May 24" / "Wed · May 24".
  */
+/** The day a home flight lands: its own arrival date, else the next day for an overnight one. */
+export function homeArrivalDate(leg: HomeLeg | null | undefined): string | undefined {
+  if (!leg?.departDate) return leg?.arriveDate ?? undefined;
+  if (leg.arriveDate) return leg.arriveDate;
+  const mins = leg.durationMinutes ?? 0;
+  const overnight = arrivesNextDay({
+    departTime: leg.departTime ?? undefined,
+    arriveTime: leg.arriveTime ?? undefined,
+    duration: mins > 0 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : '',
+  });
+  return overnight ? nextIsoDay(leg.departDate) : leg.departDate;
+}
+
 function formatHomeDate(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
   const date = new Date(y, (m || 1) - 1, d || 1);
@@ -895,7 +912,8 @@ function AddSlot({
           aria-label={label}
           title="Add a city here"
           className="absolute left-1/2 -translate-x-1/2 w-7 h-7 rounded-full flex items-center justify-center bg-white border border-dashed text-gray-400 opacity-0 group-hover/add:opacity-100 focus:opacity-100 transition-all hover:border-[#2563eb] hover:text-[#2563eb] hover:scale-110"
-          style={{ top: 'calc(50% + 84px)', borderColor: 'rgba(0,0,0,0.2)' }}
+          // 92px: clear of the leg box's caption and its overnight line.
+          style={{ top: 'calc(50% + 92px)', borderColor: 'rgba(0,0,0,0.2)' }}
         >
           <Plus size={14} />
         </button>
