@@ -7,6 +7,7 @@ import { resolveDestinationIata } from './location/destinationAirport';
 import { sameAirportArea } from './location/sameAirportArea';
 import { flightDoorToDoor, trainCo2, trainDoorToDoor as trainDoorToDoorFacts } from './legFacts';
 import { cheapestSensible } from './longJourney';
+import { cityGeo, groundEstimateHours, km, noSensibleFlight as tooSlowForDistance } from './routeGeo';
 
 /**
  * Both options are priced as PARTY TOTALS for `travelers` — Duffel quotes
@@ -23,6 +24,15 @@ export type LegComparison = {
   /** Party-total difference in USD. */
   priceDifference: number;
   timeDifference: number;
+  /**
+   * Set when no train was found and even the FASTEST flight is far beyond
+   * what the distance needs (routeGeo.noSensibleFlight: over 3× a direct
+   * flight's time and over 6h more) — Prague → Vienna with only 22h+
+   * connecting itineraries. The plan shows the leg as "no sensible flight,
+   * about N h by train or bus (estimate)" instead of picking the 22h flight,
+   * and ranking does not choose an order because of its fare.
+   */
+  noSensibleFlight?: { fastestMinutes: number; stops: number; groundHours: [number, number] | null };
 };
 
 /**
@@ -273,6 +283,26 @@ export async function compareLeg(
     }
   }
 
+  // No sensible flight at all, and no train: flag the leg (see LegComparison).
+  let noSensibleFlight: LegComparison['noSensibleFlight'];
+  if (bestFlight && !bestTrain) {
+    const flights = (flightsResult && flightsResult.length > 0 ? flightsResult : [bestFlight]).filter(
+      (f) => knownDuration(f.durationMinutes) != null,
+    );
+    const fastest = flights.sort((a, b) => a.durationMinutes - b.durationMinutes)[0];
+    const names = params.tripCityNames ?? [origin, destination];
+    const a = cityGeo(origin, names);
+    const b = cityGeo(destination, names);
+    const distance = a && b ? km(a, b) : null;
+    if (fastest && distance != null && tooSlowForDistance(fastest.durationMinutes, distance)) {
+      noSensibleFlight = {
+        fastestMinutes: fastest.durationMinutes,
+        stops: fastest.stops ?? 0,
+        groundHours: distance <= 1200 ? groundEstimateHours(distance) : null,
+      };
+    }
+  }
+
   // Door-to-door facts for the card: time city centre to city centre, and
   // CO₂. A flight's total needs its airports — the offer's own, else the
   // codes this leg resolved to (a cached row has none of its own).
@@ -459,6 +489,7 @@ export async function compareLeg(
   }
 
   return {
+    ...(noSensibleFlight ? { noSensibleFlight } : {}),
     flightOption: bestFlight,
     trainOption: bestTrain,
     cheapest,

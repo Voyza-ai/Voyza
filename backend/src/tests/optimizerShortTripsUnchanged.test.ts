@@ -33,6 +33,18 @@ jest.mock('../services/supabase', () => {
 });
 
 // IATA = first three letters, upper-cased ("Paris" → PAR).
+// The golden file was recorded before the planner flagged legs with no
+// sensible flight (compareLeg `noSensibleFlight`, fix/planner-bugs). Its
+// synthetic fares give every European hop a 5–8h flight and no train
+// (London → Paris 7h 51m), which that rule rightly flags — and its ranking
+// penalty then changes the order. This file is about the date-shift deadline,
+// not leg pricing, so the rule is held off here; plannerNoSensibleFlight.test.ts
+// covers it.
+jest.mock('../services/routeGeo', () => ({
+  ...jest.requireActual('../services/routeGeo'),
+  noSensibleFlight: () => false,
+}));
+
 jest.mock('../services/flights', () => ({
   getIataCode: jest.fn(async (name: string) => name.slice(0, 3).toUpperCase()),
   searchFlights: jest.fn(),

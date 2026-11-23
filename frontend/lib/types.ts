@@ -54,6 +54,13 @@ export type Transport = {
    */
   noTrainData?: boolean;
   /**
+   * No sensible flight exists on this short hop and no train was found
+   * (backend compareLeg `noSensibleFlight`: only 22h+ connections for
+   * Prague → Vienna). Shown as the "no direct option" card with a ground
+   * ESTIMATE from distance — never a fare.
+   */
+  noSensibleFlight?: { fastestMinutes: number; stops: number; groundHours: [number, number] | null };
+  /**
    * City centre to city centre, with what the time is made of (backend
    * services/legFacts.ts). Absent on legs priced before it existed, and
    * when an airport's position is unknown.

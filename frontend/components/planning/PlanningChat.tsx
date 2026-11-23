@@ -13,6 +13,7 @@ import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput, parseDateRangeInput } from '@/lib/parseDate';
+import { originNotAPlace, originReask } from '@/lib/originAnswer';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { vibesFromAnswer } from '@/lib/vibeMap';
@@ -720,6 +721,22 @@ export default function PlanningChat() {
     ]);
     setTextInput('');
 
+    // "Where are you flying from?" answered with dates (or a bare number):
+    // not a home city. Re-ask, keeping the dates when the trip has none yet.
+    if (step.id === 'origin') {
+      const reason = originNotAPlace(value);
+      if (reason) {
+        const range = reason === 'dates' ? parseDateRangeInput(value) : null;
+        const keep = !!range && !answers.dateRange;
+        if (keep) setAnswer('dateRange', range!);
+        setMessages((prev) => [
+          ...prev,
+          { id: nextId(), role: 'assistant', content: originReask(reason, keep), stepId: step.id },
+        ]);
+        return;
+      }
+    }
+
     if (step.id === 'destination') {
       // Call AI interpret IMMEDIATELY so we can detect countries and show
       // the city picker inline BEFORE asking about vibe/dates/etc.
@@ -1064,6 +1081,8 @@ export default function PlanningChat() {
 
     if (stepId === 'origin') {
       const value = text.trim().replace(/^📍\s*/, '');
+      // Dates or a number are not a home city: the edit is refused, as an unreadable answer is.
+      if (originNotAPlace(value)) return false;
       setAnswer('origin', stripOriginFiller(value) || value);
       // Airports follow once the place is resolved, as on first answer.
       import('@/lib/locationResolver')
@@ -1138,6 +1157,13 @@ export default function PlanningChat() {
     // alternatives so the Connector card can offer them as one-click
     // swaps.
     const legToTransport = (leg: any, fromCity: string, toCity: string): Transport => {
+      // No sensible flight and no train (a short hop with only 22h+
+      // connections): never put the 22-hour flight on the card as the pick.
+      // The "no direct option" card says so, with a ground estimate.
+      const noSensible = leg?.comparison?.noSensibleFlight;
+      if (noSensible) {
+        return { ...emptyTransport, from: fromCity, to: toCity, unavailable: true, noSensibleFlight: noSensible };
+      }
       // Preferred path: top-4 options array.
       if (Array.isArray(leg?.options) && leg.options.length > 0) {
         const [main, ...rest] = leg.options;

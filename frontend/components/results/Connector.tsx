@@ -137,8 +137,17 @@ export default function Connector({
               style={{ background: `${dimGray}15`, borderColor: `${dimGray}55` }}
             >
               <div className="text-gray-700 text-[11px] font-semibold leading-tight">
-                No direct option
+                {transport.noSensibleFlight ? 'No sensible flight' : 'No direct option'}
               </div>
+              {transport.noSensibleFlight && (
+                <div className="text-[10px] text-gray-600 leading-snug mt-0.5" data-testid="no-sensible-flight">
+                  {transport.noSensibleFlight.groundHours
+                    ? `About ${transport.noSensibleFlight.groundHours[0]}–${transport.noSensibleFlight.groundHours[1]} h by train or bus (estimate)`
+                    : 'Try a train or bus'}
+                  <br />
+                  {`Fastest flight ${Math.floor(transport.noSensibleFlight.fastestMinutes / 60)}h${transport.noSensibleFlight.fastestMinutes % 60 ? ` ${transport.noSensibleFlight.fastestMinutes % 60}m` : ''}`}
+                </div>
+              )}
               <a
                 href={rome2RioUrl}
                 target="_blank"

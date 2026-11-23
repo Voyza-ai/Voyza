@@ -100,6 +100,25 @@ export function roundTripQuestion(origin: string | null): string {
  * Apply the rules to one converse turn. `result` is what the model returned
  * (updates already normalised); the return value is what the client gets.
  */
+/**
+ * Is a would-be home city clearly not a place? An audit (2026-11-18) typed
+ * "January 12 to 19, 2027" at "Where are you flying from?" and it was taken
+ * as the home city. Dates and bare numbers are refused; anything else is left
+ * to the location resolver. Mirrors frontend lib/originAnswer.ts.
+ */
+const MONTH = /\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sept?(ember)?|oct(ober)?|nov(ember)?|dec(ember)?)\b/i;
+const NUMERIC_DATE = /\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/.]\d{1,2}([/.]\d{2,4})?\b/;
+const RELATIVE_DATE = /^(today|tomorrow|tonight|this weekend|next (week|weekend|month|year)|in \d+ (days?|weeks?|months?))$/i;
+const NUMBER_ONLY = /^[\d\s$€£¥.,+\-x×]+$/i;
+
+export function originNotAPlace(text: string): 'dates' | 'number' | null {
+  const t = (text ?? '').trim();
+  if (!t) return null;
+  if ((MONTH.test(t) && /\d/.test(t)) || NUMERIC_DATE.test(t) || RELATIVE_DATE.test(t)) return 'dates';
+  if (NUMBER_ONLY.test(t)) return 'number';
+  return null;
+}
+
 export function guardHomeAnswers(params: {
   message: string;
   history: ConverseTurn[];
@@ -121,6 +140,28 @@ export function guardHomeAnswers(params: {
 
   // ── Where they fly from: said it's home, answered our question, or corrected it ──
   const lastAssistant = [...history].reverse().find((t) => t.role === 'assistant')?.content ?? '';
+
+  // Dates (or a bare number) are not a home city — whatever the model made of
+  // them. Re-ask; any dates the model read from the message are kept.
+  if (typeof updates.origin === 'string') {
+    const notPlace = originNotAPlace(updates.origin);
+    if (notPlace) {
+      delete updates.origin;
+      const kept = !!updates.dates;
+      return {
+        reply:
+          notPlace === 'dates'
+            ? kept
+              ? "That looks like dates — I've noted them. Which city are you flying from?"
+              : 'That looks like dates — which city are you flying from?'
+            : "That doesn't look like a city — which city are you flying from?",
+        updates,
+        action: 'ask',
+        quickReplies: undefined,
+        asking: 'origin',
+      };
+    }
+  }
   let originToConfirm: string | null = null;
   if (typeof updates.origin === 'string' && updates.origin.trim() && !sameCity(updates.origin, known.origin)) {
     const city = updates.origin.trim();

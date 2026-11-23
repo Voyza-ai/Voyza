@@ -523,6 +523,21 @@ const DEFAULT_NIGHTS_PER_CITY = 2;
 const UNAVAILABLE_LEG_PENALTY = 5000;
 
 /**
+ * Ranking penalty for an inter-city leg whose only flights are absurd for its
+ * distance and that has no train (compareLeg's `noSensibleFlight`: Prague →
+ * Vienna with nothing under 22h). The plan shows such a leg as "no sensible
+ * flight, about N h by train or bus (estimate)", so ranking must not choose
+ * an order BECAUSE of its fare. Heavier than any real fare difference,
+ * lighter than a leg with nothing at all. Only ever in `rankCost`.
+ */
+const NO_SENSIBLE_FLIGHT_PENALTY = 1500;
+
+/** What a leg adds to `rankCost`: its price, plus the penalty when no flight on it is sensible. */
+function legRankCost(comparison: LegComparison, cost: number): number {
+  return cost + (comparison.noSensibleFlight ? NO_SENSIBLE_FLIGHT_PENALTY : 0);
+}
+
+/**
  * Ranking penalty for a missing HOME flight — deliberately far heavier than
  * a missing inter-city leg, so ranking is lexicographic: fewest missing home
  * flights first, then fewest missing inter-city legs, then money.
@@ -1161,7 +1176,7 @@ async function scoreRoute(
       unpricedLegs++;
     } else {
       totalCost += leg.cost;
-      rankCost += leg.cost;
+      rankCost += legRankCost(leg.comparison, leg.cost);
     }
   }
 
@@ -2376,7 +2391,10 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         ctx
           .phased(phase)
           .compare(legCompareParams(from, to, legDateAt(startDate, nightsArray, i), travelers, cityMap, ctx))
-          .then(legCost),
+          .then((c) => {
+            const cost = legCost(c);
+            return cost === Infinity ? cost : legRankCost(c, cost);
+          }),
       homeCosts,
       // Read before each round, when every search sent so far is in the ledger.
       budget: { remaining: () => PLAN_SEARCH_BUDGET - ctx.searchLedger.size - reserved },
@@ -2446,7 +2464,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       leg.cost === Infinity && rankedLegs.legs[i].cost !== Infinity ? rankedLegs.legs[i] : leg,
     );
     const legsTotal = legs.reduce((sum, leg) => sum + (leg.cost === Infinity ? 0 : leg.cost), 0);
-    const legsRank = legs.reduce((sum, leg) => sum + (leg.cost === Infinity ? UNAVAILABLE_LEG_PENALTY : leg.cost), 0);
+    const legsRank = legs.reduce((sum, leg) => sum + (leg.cost === Infinity ? UNAVAILABLE_LEG_PENALTY : legRankCost(leg.comparison, leg.cost)), 0);
     const legsUnpriced = legs.filter((leg) => leg.cost === Infinity).length;
     topRoutes[0] = {
       ...ranked,
