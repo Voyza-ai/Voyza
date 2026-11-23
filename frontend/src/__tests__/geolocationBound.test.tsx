@@ -93,7 +93,7 @@ describe('/browse with an ignored location prompt', () => {
     expect(saveTrip).toHaveBeenCalledTimes(1);
   });
 
-  it('"Plan a similar trip" completes from the JFK default within the bound', async () => {
+  it('"Plan a similar trip" with an unanswered prompt opens the planner within the bound (no silent JFK default)', async () => {
     jest.useFakeTimers();
     ignoredPrompt();
     render(<BrowsePage />);
@@ -105,10 +105,10 @@ describe('/browse with an ignored location prompt', () => {
       jest.advanceTimersByTime(DETECT_TIMEOUT_MS);
     });
     jest.useRealTimers();
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/plan?resume=1&autorun=1'));
-    const staged = JSON.parse(sessionStorage.getItem('bluemurr-autorun')!);
-    expect(staged.origin).toBe('New York');
-    expect(staged.originAirports).toEqual(['JFK']);
+    // No position → the AI planner asks where they fly from, instead of a
+    // trip silently priced from New York (JFK).
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/plan'));
+    expect(sessionStorage.getItem('bluemurr-autorun')).toBeNull();
   });
 
   it('turning the location switch off while the prompt is up wins over a position that arrives after', async () => {

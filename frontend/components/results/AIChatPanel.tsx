@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Sparkles, Check, X, Clock, Plane, TrainFront, ArrowRight, PanelRightClose } from 'lucide-react';
 import { Trip, Transport } from '@/lib/types';
@@ -56,6 +56,25 @@ type Message = {
  * baseline is the optimizer's: the cities in the order they were given
  * (optimizer.ts savingsVsNaive), not a "most common routing".
  */
+/**
+ * The model sometimes answers with Markdown emphasis (`**Hotel X**`), which
+ * the bubble showed as literal asterisks. Render `**bold**` as bold and drop
+ * stray `*`/`_` emphasis markers; everything else stays plain text (no HTML
+ * is ever injected — the pieces are React text nodes).
+ */
+function renderInlineMarkdown(text: string): ReactNode {
+  const parts = text.split(/\*\*(.+?)\*\*/g);
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <strong key={i} className="font-semibold text-gray-900">
+        {part}
+      </strong>
+    ) : (
+      part.replace(/(^|\s)[*_](\S[^*_\n]*?\S|\S)[*_](?=\s|[.,;:!?)]|$)/g, '$1$2')
+    ),
+  );
+}
+
 function messageText(m: Message, priceMode: 'total' | 'perPerson', trip: Trip): string {
   if (!m.intro) return m.content;
   const travelers = trip.travelers;
@@ -606,7 +625,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide 
                   border: msg.role === 'user' ? '1px solid rgba(46,107,196,0.2)' : '1px solid rgba(0,0,0,0.06)',
                 }}
               >
-                {messageText(msg, priceMode, trip)}
+                {renderInlineMarkdown(messageText(msg, priceMode, trip))}
               </div>
 
               {/* Proposal card — only for date_shift (pin/min-days).

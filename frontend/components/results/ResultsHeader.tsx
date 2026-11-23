@@ -478,7 +478,7 @@ export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, m
               >
                 <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
                   {nothingToSave ? <CheckCircle2 size={9} /> : <TrendingDown size={9} />}
-                  <span>{nothingToSave ? 'Price check' : 'You can save'}</span>
+                  <span>{nothingToSave ? 'Price check' : shiftIsBest ? 'You can save' : 'You saved'}</span>
                   {(
                     <ChevronDown
                       size={9}

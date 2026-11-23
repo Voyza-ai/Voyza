@@ -174,13 +174,15 @@ const VIBE_STEPS: Step[] = [
   { id: 'dates', question: "When are you thinking?", type: 'dates', skippable: true },
   { id: 'nights', question: "How many nights total?", type: 'nights', skippable: true },
   { id: 'travelers', question: "How many people?", type: 'travelers' },
-  { id: 'budget', question: "What's your budget looking like?", type: 'budget', skippable: true },
+  // Not skippable: the destination suggester needs a budget to pick places
+  // (a skipped budget used to dead-end on "I still need: a budget").
+  { id: 'budget', question: "What's your budget looking like?", type: 'budget' },
   { id: 'notes', question: "Anything else I should know?", type: 'notes', skippable: true, placeholder: 'E.g. "Somewhere warm with good food"' },
 ];
 
 // Budget path: user leads with what they can spend
 const BUDGET_STEPS: Step[] = [
-  { id: 'budget', question: "What's your total budget for this trip?", type: 'budget' },
+  { id: 'budget', question: "What's your budget for this trip?", type: 'budget' },
   { id: 'origin', question: "Where are you starting from?", type: 'origin', placeholder: 'e.g. New York' },
   { id: 'roundtrip', question: "One-way or round-trip?", type: 'roundtrip' },
   { id: 'dates', question: "When are you thinking?", type: 'dates', skippable: true },
@@ -226,6 +228,60 @@ type GuidedSnapshot = {
   msgCounter: number;
 };
 let guidedSession: GuidedSnapshot | null = null;
+
+/**
+ * The same planning session, mirrored to sessionStorage so "Adjust trip"
+ * still works after the results page is reloaded (or the tab restored).
+ * The trip itself already survives a reload (tripStore's
+ * 'bluemurr-current-trip'); without this, Adjust trip after a reload opened a
+ * blank planner because the answers, the AI conversation and the guided
+ * transcript all lived only in memory. Per tab, like the trip snapshot.
+ */
+const PLANNING_SESSION_KEY = 'bluemurr-planning-session';
+type PlanningSessionSnapshot = {
+  v: 1;
+  answers: Record<string, unknown>;
+  chatHistory: unknown[];
+  guided: GuidedSnapshot | null;
+};
+
+function savePlanningSession(guided: GuidedSnapshot | null) {
+  try {
+    const { answers, chatHistory } = useTripStore.getState();
+    const snap: PlanningSessionSnapshot = { v: 1, answers, chatHistory, guided };
+    window.sessionStorage.setItem(PLANNING_SESSION_KEY, JSON.stringify(snap));
+  } catch {
+    // storage blocked or over quota — Adjust trip then works until a reload only
+  }
+}
+
+function clearPlanningSession() {
+  try {
+    window.sessionStorage.removeItem(PLANNING_SESSION_KEY);
+  } catch {
+    // storage blocked — nothing was stored
+  }
+}
+
+/** Put a reloaded tab's planning session back. True when it did. */
+function restorePlanningSession(): boolean {
+  let snap: Partial<PlanningSessionSnapshot> | null = null;
+  try {
+    const raw = window.sessionStorage.getItem(PLANNING_SESSION_KEY);
+    snap = raw ? JSON.parse(raw) : null;
+  } catch {
+    return false;
+  }
+  if (!snap || snap.v !== 1 || !snap.answers || typeof snap.answers !== 'object') return false;
+  useTripStore.setState({
+    answers: snap.answers as ReturnType<typeof useTripStore.getState>['answers'],
+    chatHistory: (Array.isArray(snap.chatHistory) ? snap.chatHistory : []) as ReturnType<
+      typeof useTripStore.getState
+    >['chatHistory'],
+  });
+  guidedSession = snap.guided ?? null;
+  return true;
+}
 
 /**
  * Does a message typed AFTER the destinations were given look like it might
@@ -365,6 +421,14 @@ export default function PlanningChat() {
       useTripStore.getState().resetPlanning();
       if (heroSeed) useTripStore.getState().setAnswer('rawInput', heroSeed);
       guidedSession = null; // the conversation goes with the answers
+      clearPlanningSession();
+    } else if (
+      !guidedSession &&
+      Object.keys(useTripStore.getState().answers).length === 0 &&
+      useTripStore.getState().chatHistory.length === 0
+    ) {
+      // Adjust trip after a reload: memory is empty, the tab's copy is not.
+      restorePlanningSession();
     }
 
     // Read through the store rather than the render closure: `answers` was
@@ -653,8 +717,8 @@ export default function PlanningChat() {
       // all required before we can call suggestDestinationsForVibe.
       if (!a.vibe || !a.vibe.trim()) errors.push('a vibe');
       if (typeof a.budget !== 'number' || a.budget <= 0) errors.push('a budget');
-      if (!a.dateRange?.start) errors.push('travel dates');
-      // Destination is intentionally NOT required — AI suggests one.
+      // Dates are skippable on this path: a missing window is sent to the
+      // suggester as 'flexible'. Destination is NOT required — AI suggests one.
     } else if (mode === 'budget') {
       if (typeof a.budget !== 'number' || a.budget <= 0) errors.push('a budget');
       // dates + vibe optional in BUDGET_STEPS.
@@ -754,6 +818,11 @@ export default function PlanningChat() {
           }
         }
 
+        // A new destination answer replaces any picker still on screen from
+        // an earlier one ("Venezuela" → "actually Venice"): left live, its
+        // "Continue" would overwrite the new answer with the old country.
+        setCitySelectionData(null);
+
         if (parsed.needsCitySelection && parsed.countries?.length > 0) {
           // Store any direct cities (not from a country) as a base
           const directCities: string[] = parsed.destinations?.filter(
@@ -818,6 +887,7 @@ export default function PlanningChat() {
         }
       } catch {
         // Interpret failed — fall back to the raw input as a single destination
+        setCitySelectionData(null);
         setAnswer('destinations', [value]);
       }
     } else if (step.id === 'notes') {
@@ -1851,6 +1921,7 @@ export default function PlanningChat() {
         g.intent === 'place' || g.intent === 'vibe' || g.intent === 'budget'
           ? { ...g, intent: g.intent, msgCounter: msgCounter.current }
           : null;
+      savePlanningSession(guidedSession);
 
       // Step 4 lands on /results: the trip goes on screen now, and each city's
       // AI picks fill in when they answer (startTripPicks).
@@ -1920,10 +1991,16 @@ export default function PlanningChat() {
       //     can swap destinations once that tool ships (see ROADMAP
       //     "Post-results add/remove/replace cities")
       // Reconsider this when real user data comes in on pick-accuracy.
-      if (mode === 'vibe' && (answers.destinations?.length ?? 0) === 0) {
-        setFindTripStatus('Finding destinations that match your vibe...');
+      // The budget path ("I know my budget") has no destination step either,
+      // so it uses the same suggester; a skipped vibe means "open to anything".
+      if ((mode === 'vibe' || mode === 'budget') && (answers.destinations?.length ?? 0) === 0) {
+        setFindTripStatus(
+          mode === 'vibe'
+            ? 'Finding destinations that match your vibe...'
+            : 'Finding the best trips for your budget...',
+        );
         const result = await suggestDestinationsForVibe({
-          vibe: answers.vibe!,
+          vibe: answers.vibe?.trim() || 'Open to anything: the best-value trip for this budget',
           origin: answers.origin!,
           budgetPerPerson: answers.budgetPerPerson
             ? answers.budget!
@@ -1960,7 +2037,7 @@ export default function PlanningChat() {
           {
             id: nextId(),
             role: 'assistant',
-            content: `Based on your vibe, I'm building a trip to ${topPick.destination_city}, ${topPick.destination_country}. ${topPick.why_it_fits_vibe}`,
+            content: `Based on your ${mode === 'vibe' ? 'vibe' : 'budget'}, I'm building a trip to ${topPick.destination_city}, ${topPick.destination_country}. ${topPick.why_it_fits_vibe}`,
           },
         ]);
 
@@ -2323,6 +2400,28 @@ export default function PlanningChat() {
         // cannot see what `handleDatesSelect` just stored.) Anything that
         // isn't a clean range takes the single-date path exactly as before.
         const range = parseDateRangeInput(value);
+        // A date in the past used to be accepted here and only rejected by
+        // the optimizer after "Find my trip"; "yesterday" or "last week"
+        // silently became a month from now. Ask again on the spot instead.
+        const startIso = range ? range.start : parseDateInput(value);
+        const todayIso = (() => {
+          const t = new Date();
+          return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+        })();
+        if (startIso < todayIso || /\b(yesterday|last\s+(week|month|year)|ago)\b/i.test(value)) {
+          setMessages((prev) => [
+            ...prev,
+            { id: nextId(), role: 'user', content: value, stepId: 'dates' },
+            {
+              id: nextId(),
+              role: 'assistant',
+              content: 'That date has already passed. When would you like to go? Pick today or a later date.',
+              stepId: 'dates',
+            },
+          ]);
+          setTextInput('');
+          return;
+        }
         if (range) {
           handleDatesSelect(range.start, range.end, false);
         } else {

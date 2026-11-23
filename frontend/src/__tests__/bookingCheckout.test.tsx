@@ -309,3 +309,27 @@ describe('family bookings: only traveller 1 must be an adult', () => {
     expect(screen.getByText(/child/)).toBeInTheDocument();
   });
 });
+
+// Website audit (m10): a quote reply without its passengers, slices or
+// requirements (a proxy error page, a changed API) threw inside a state
+// update and took the whole results page down with "Application error".
+describe('BookingModal — a malformed quote', () => {
+  it.each([
+    ['a reply with no quote', {}],
+    ['a quote with no passengers', { quote: { ...quote(), passengers: undefined } }],
+    ['a quote with no slices', { quote: { ...quote(), slices: undefined } }],
+    ['a quote with no requirements', { quote: { ...quote(), requirements: undefined } }],
+  ])('%s fails inside the window with a way out', async (_label, reply) => {
+    mQuote.mockResolvedValueOnce(reply as any);
+    renderModal();
+    expect(await screen.findByText(/Could not load this fare/)).toBeInTheDocument();
+    expect(screen.queryByTestId('booking-total')).not.toBeInTheDocument();
+  });
+
+  it('a good quote still shows the fare (control)', async () => {
+    mQuote.mockResolvedValueOnce({ quote: quote() } as any);
+    renderModal();
+    expect(await screen.findByTestId('booking-total')).toBeInTheDocument();
+    expect(screen.queryByText(/Could not load this fare/)).not.toBeInTheDocument();
+  });
+});

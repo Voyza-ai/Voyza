@@ -24,10 +24,10 @@ describe('ResultsHeader', () => {
     expect(screen.getByText(/Total trip/i)).toBeInTheDocument();
   });
 
-  it('displays "You can save" with routing savings when that is the best offer', () => {
+  it('displays "You saved" with the routing savings already applied when that is the best offer', () => {
     const trip = buildTrip({ savings: 249 });
     render(<ResultsHeader trip={trip} />);
-    expect(screen.getByText(/You can save/i)).toBeInTheDocument();
+    expect(screen.getByText(/You saved/i)).toBeInTheDocument();
     // The optimizer's baseline (savingsVsNaive) is the order the traveller
     // typed — the same words the AI chat uses for it.
     expect(screen.getByText('vs your original city order')).toBeInTheDocument();
@@ -48,7 +48,7 @@ describe('ResultsHeader', () => {
       },
     });
     render(<ResultsHeader trip={trip} />);
-    expect(screen.getByText(/You can save/i)).toBeInTheDocument();
+    expect(screen.getByText(/You (can save|saved)/i)).toBeInTheDocument();
     expect(screen.getByText(/by starting Aug 3/i)).toBeInTheDocument();
   });
 
@@ -101,7 +101,7 @@ describe('ResultsHeader', () => {
       },
     } as any);
     render(<ResultsHeader trip={trip} />);
-    fireEvent.click(screen.getByText(/You can save/i));
+    fireEvent.click(screen.getByText(/You (can save|saved)/i));
     expect(screen.getByText('Cheaper start dates')).toBeInTheDocument();
     expect(screen.getByText('2 days earlier')).toBeInTheDocument();
     expect(screen.getByText('1 day later')).toBeInTheDocument();
@@ -129,7 +129,7 @@ describe('ResultsHeader', () => {
       },
     } as any);
     render(<ResultsHeader trip={trip} />);
-    fireEvent.click(screen.getByText(/You can save/i));
+    fireEvent.click(screen.getByText(/You (can save|saved)/i));
     fireEvent.click(screen.getByText('2 days earlier'));
 
     const a = useTripStore.getState().answers;
@@ -161,7 +161,7 @@ describe('ResultsHeader', () => {
       },
     } as any);
     render(<ResultsHeader trip={trip} />);
-    fireEvent.click(screen.getByText(/You can save/i));
+    fireEvent.click(screen.getByText(/You (can save|saved)/i));
     expect(screen.getByText('Cheaper start dates')).toBeInTheDocument();
     expect(screen.getByText('2 days later')).toBeInTheDocument();
     expect(screen.getByText('save $200')).toBeInTheDocument();
@@ -170,7 +170,7 @@ describe('ResultsHeader', () => {
   it('without a date-shift suggestion the pill is not clickable', () => {
     const trip = buildTrip({ savings: 249 });
     render(<ResultsHeader trip={trip} />);
-    fireEvent.click(screen.getByText(/You can save/i));
+    fireEvent.click(screen.getByText(/You (can save|saved)/i));
     expect(screen.queryByText('Cheaper start dates')).not.toBeInTheDocument();
   });
 
@@ -190,7 +190,7 @@ describe('ResultsHeader', () => {
     expect(screen.getByText('Price check')).toBeInTheDocument();
     expect(screen.getByText('Best price')).toBeInTheDocument();
     expect(screen.getByText('for these dates')).toBeInTheDocument();
-    expect(screen.queryByText(/You can save/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/You (can save|saved)/i)).not.toBeInTheDocument();
   });
 
   it('nothing to save and nothing checked: the box makes no claim at all — never "You can save $0"', () => {
@@ -198,7 +198,7 @@ describe('ResultsHeader', () => {
     expect(screen.queryByText('Price check')).not.toBeInTheDocument();
     expect(screen.queryByText('Best price')).not.toBeInTheDocument();
     expect(screen.queryByText('Live prices')).not.toBeInTheDocument();
-    expect(screen.queryByText(/You can save/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/You (can save|saved)/i)).not.toBeInTheDocument();
   });
 
   // Harness, saved "Paris Long Weekend" preset (one city): the meta row read

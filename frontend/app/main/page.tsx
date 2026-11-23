@@ -74,8 +74,11 @@ export default function MainPage() {
   // The "View or edit trips" preview shows the user's real trips, so fetch
   // them once the session is known. Signed-out visitors skip the call and
   // get the empty-state copy instead.
+  // Keyed on the id: a 401 refreshes the session and replaces the user object
+  // for the same person, which re-ran this on every refresh (a request loop).
+  const userId = user?.id;
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       setTrips([]);
       return;
     }
@@ -97,7 +100,7 @@ export default function MainPage() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [userId]);
 
   const handleSelect = (card: HubCard) => {
     if (card.href) router.push(card.href);

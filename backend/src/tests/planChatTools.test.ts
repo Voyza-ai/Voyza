@@ -62,6 +62,7 @@ import planRouter from '../routes/plan';
 import { errorHandler } from '../middleware/error';
 import { getAnthropicSafe } from '../services/anthropic';
 import { normalizeTimeOfDay, searchLegOptions } from '../services/legOptions';
+import { chatSystemPrompt } from '../services/tripChat';
 const { searchFlights } = require('../services/flights');
 
 function createApp() {
@@ -535,6 +536,28 @@ describe('D-07 — chat suggestions only offer what the chat can do', () => {
     expect(mockCreate.mock.calls[0][0].messages[0].content).toContain('"optionFound": false');
   });
 
+  // Website audit (M3, M4): chips offered hotel filtering the chat can't do,
+  // and quoted euros or pounds for a trip priced in dollars.
+  it('drops hotel-option and €/£ suggestions; keeps a plain hotel price question', async () => {
+    const res = await suggest([
+      'Cheaper hotel options in Rome?',
+      'Why does Rome cost €400?',
+      'Why is the Rome hotel $120/night?',
+      'Give me 3 nights in Venice',
+    ]);
+    expect(res.body.suggestions.slice(0, 2)).toEqual(['Why is the Rome hotel $120/night?', 'Give me 3 nights in Venice']);
+    expect(res.body.suggestions.join(' ')).not.toMatch(/€|£|hotel options/i);
+  });
+
+  it('tells the suggestion model prices are in US dollars and totalCost is the whole trip', async () => {
+    mockCreate.mockResolvedValueOnce({ content: [{ type: 'text', text: '["a","b","c","d"]' }] });
+    await request(app).post('/api/plan/chat-suggestions').send({ currentTrip: baseTrip() });
+    const system = mockCreate.mock.calls[0][0].system;
+    expect(system).toContain('Prices are in US dollars');
+    expect(system).toContain('"totalCost" is the whole trip');
+    expect(system).toContain('show, filter or change hotels');
+  });
+
   it('keeps suggestions about legs that have an option (control)', async () => {
     const res = await suggest(['Why Rome before Venice?', 'Cheaper Venice → Florence flight?', 'Flights Rome to Venice after 9am', 'Give me 3 nights in Venice']);
     expect(res.body.suggestions).toEqual(['Why Rome before Venice?', 'Cheaper Venice → Florence flight?', 'Flights Rome to Venice after 9am', 'Give me 3 nights in Venice']);
@@ -588,5 +611,21 @@ describe("today's date in the planner prompts", () => {
     expect(res.status).toBe(200);
     expect(systemOf(0)).toContain("Today's date: 2026-10-30 (UTC).");
     expect(systemOf(0)).toContain('next occurrence after today');
+  });
+});
+
+// Website audit (M4, m2, M3): the chat quoted € and £, answered in Markdown
+// (literal ** in the bubble) and offered to search hotels it can't touch.
+describe('chat system prompt — dollars, plain sentences, no hotel search', () => {
+  it('asks for US dollars, no Markdown, and points hotel questions at the guide', () => {
+    const system = chatSystemPrompt(baseTrip());
+    expect(system).toContain('every price in the trip context is in US dollars');
+    expect(system).toContain('never use €, £ or any other currency');
+    expect(system).toContain('"totalCost" is the WHOLE trip');
+    expect(system).toContain('No Markdown');
+    expect(system).toContain('you cannot browse, filter or change hotels');
+    expect(system).toContain('"Find more hotels"');
+    // Before the trip context, so the rules aren't read as part of it.
+    expect(system.indexOf('No Markdown')).toBeLessThan(system.indexOf('TRIP CONTEXT (read-only):'));
   });
 });

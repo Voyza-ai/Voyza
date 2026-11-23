@@ -246,7 +246,7 @@ describe('results page: an accepted AI date change re-prices legs and hotels', (
     // Legs and flights have landed; the hotels have not.
     await waitFor(() => expect(useTripStore.getState().currentTrip!.origin?.returnLeg?.departDate).toBe('2027-01-18'));
     expect(perPersonLine()).toBe(before);
-    expect(screen.queryByText('You can save')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^You (can save|saved)$/)).not.toBeInTheDocument();
 
     await act(async () => {
       releaseHotels();
@@ -256,7 +256,7 @@ describe('results page: an accepted AI date change re-prices legs and hotels', (
       expect(perPersonLine()).toBe(`$${Math.round(liveTripTotal(useTripStore.getState().currentTrip!) / 6).toLocaleString()} /person`),
     );
     expect(liveTripTotal(useTripStore.getState().currentTrip!)).toBeLessThan(liveTripTotal(trip));
-    expect(screen.queryByText('You can save')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^You (can save|saved)$/)).not.toBeInTheDocument();
     expect(settled).toBeTruthy();
   });
 

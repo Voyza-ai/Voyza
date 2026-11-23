@@ -31,12 +31,20 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
 
   // The profile photo lives on the profile row, not the auth user — fetch it
   // once per signed-in user. Settings updates the store directly on change.
+  //
+  // Asked at most once per user id. A 401 makes apiFetch refresh the session,
+  // which hands the store a new user object for the same person; keyed on
+  // that object, a rejected token re-ran this on every refresh and looped
+  // /api/users/me about ten times a second until rate limits hit.
+  const userId = user?.id;
+  const avatarAskedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!user || avatarUrl !== undefined) return;
+    if (!userId || avatarUrl !== undefined || avatarAskedFor.current === userId) return;
+    avatarAskedFor.current = userId;
     let live = true;
     getCurrentUser()
       .then((p) => {
-        if (live && useAuthStore.getState().user?.id === user.id) {
+        if (live && useAuthStore.getState().user?.id === userId) {
           useAuthStore.getState().setAvatarUrl(p.avatarUrl ?? null);
         }
       })
@@ -46,7 +54,7 @@ export default function Navbar({ minimal = false, tabs }: NavbarProps) {
     return () => {
       live = false;
     };
-  }, [user, avatarUrl]);
+  }, [userId, avatarUrl]);
 
   // Close dropdown on outside click
   useEffect(() => {
