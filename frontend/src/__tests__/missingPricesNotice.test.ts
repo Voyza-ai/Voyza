@@ -49,6 +49,17 @@ describe('missing prices notice (M2)', () => {
     ).toEqual(['a way from Lisbon to Sintra']);
   });
 
+  it('a hop with no sensible flight is "a sensible flight", not "a way" (it has a train-or-bus estimate)', () => {
+    expect(
+      missingPriceParts({
+        cities: [
+          city('Prague', { transportOut: { unavailable: true, noSensibleFlight: { fastestMinutes: 1370, stops: 2, groundHours: [4, 5] } } }),
+          city('Vienna'),
+        ],
+      } as any),
+    ).toEqual(['a sensible flight from Prague to Vienna']);
+  });
+
   it('two cities without a hotel read as "London or Paris", not one place', () => {
     expect(missingPriceParts({ cities: [city('London', { hotel: { name: '' }, hotels: [] }), city('Paris', { hotel: { name: '' }, hotels: [] })] } as any)).toEqual([
       'a hotel in London or Paris',

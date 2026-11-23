@@ -26,7 +26,11 @@ export function missingPriceParts(trip: Pick<Trip, 'cities' | 'origin' | 'return
     }
   }
   cities.slice(0, -1).forEach((c, i) => {
-    if (c.transportOut?.unavailable) parts.push(`a way from ${c.name} to ${cities[i + 1].name}`);
+    // A hop with only absurd flights (no sensible one) is not "no way" there:
+    // the card gives a train-or-bus estimate; the total leaves the leg out.
+    if (c.transportOut?.unavailable) {
+      parts.push(c.transportOut.noSensibleFlight ? `a sensible flight from ${c.name} to ${cities[i + 1].name}` : `a way from ${c.name} to ${cities[i + 1].name}`);
+    }
   });
   // A city with nothing found keeps an empty placeholder hotel ({ name: '' }).
   const noHotel = cities.filter((c) => !c.hotel?.name && (c.hotels?.length ?? 0) === 0).map((c) => c.name);
