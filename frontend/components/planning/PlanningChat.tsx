@@ -1192,6 +1192,8 @@ export default function PlanningChat() {
       // unavailable so the user sees an explicit "no transport" card rather
       // than an empty $0 pill.
       if (!comp) return { ...emptyTransport, from: fromCity, to: toCity, unavailable: true };
+      // Nothing bookable: the card shows a train-or-bus estimate when the hop allows one.
+      const ground = comp.groundEstimate ? { groundEstimate: comp.groundEstimate } : {};
 
       const rec = comp.recommendation; // 'flight' | 'train' | 'unavailable'
       const flight = comp.flightOption;
@@ -1200,7 +1202,7 @@ export default function PlanningChat() {
       const picked = useFlight ? flight : train;
       // Both upstreams returned nothing (Duffel found no offers AND the rail
       // provider had no coverage). Surface to the UI explicitly.
-      if (!picked) return { ...emptyTransport, from: fromCity, to: toCity, unavailable: true };
+      if (!picked) return { ...emptyTransport, from: fromCity, to: toCity, unavailable: true, ...ground };
 
       const mode: 'flight' | 'train' = useFlight ? 'flight' : 'train';
       const durationMin = picked.durationMinutes ?? 0;

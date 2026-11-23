@@ -61,6 +61,13 @@ export type Transport = {
    */
   noSensibleFlight?: { fastestMinutes: number; stops: number; groundHours: [number, number] | null };
   /**
+   * Nothing bookable found — no train, no flight — on a close hop over land
+   * (backend compareLeg `groundEstimate`: Lisbon → Sintra, where All Aboard
+   * has no CP trains). Shown on the "unavailable" card as an ESTIMATE of time
+   * by train or bus; it has no price, so the total still leaves the leg out.
+   */
+  groundEstimate?: GroundEstimate;
+  /**
    * City centre to city centre, with what the time is made of (backend
    * services/legFacts.ts). Absent on legs priced before it existed, and
    * when an airport's position is unknown.
@@ -576,3 +583,6 @@ export type GroupMember = {
   role: 'owner' | 'member' | 'viewer';
   avatarUrl?: string;
 };
+
+/** Door-to-door minutes by train or bus, low–high, estimated from distance (never a fare). */
+export type GroundEstimate = { minutes: [number, number]; km: number };

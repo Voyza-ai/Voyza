@@ -1,3 +1,4 @@
+import type { GroundEstimate } from './types';
 import type { OptimizeProgress } from './searchProgress';
 import { getAuthHeader, refreshAuthHeader } from './supabase';
 import { rankHotels } from './hotelScore';
@@ -333,6 +334,8 @@ export type LegComparison = {
   recommendation: 'flight' | 'train' | 'unavailable';
   priceDifference: number;
   timeDifference: number;
+  /** Nothing bookable found on a close hop over land: a train-or-bus ESTIMATE from distance, never a fare. */
+  groundEstimate?: GroundEstimate;
 };
 
 export async function compareLeg(params: {
@@ -696,6 +699,8 @@ export type CityEditProposal = {
     userChoice?: Trip['cities'][number]['transportOut']['userChoice'];
     /** No sensible flight exists on this pair: priced, but flagged on the card. */
     flag?: { fastestMinutes: number; stops: number; groundHours: [number, number] | null };
+    /** Nothing found (options empty) on a close hop over land: an estimate, never a fare. */
+    groundEstimate?: GroundEstimate;
   }>;
   /** Where an added city went and why (said in the reply). */
   placementNote?: string;

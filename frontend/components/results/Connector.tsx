@@ -2,6 +2,7 @@
 
 // Plain conditional rendering — no AnimatePresence (it gets stuck mid-exit
 // when the tab is throttled or not visible). The morph is now an instant swap.
+import { groundEstimateLine } from '@/lib/groundEstimate';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import BookingModal from '@/components/booking/BookingModal';
@@ -137,8 +138,15 @@ export default function Connector({
               style={{ background: `${dimGray}15`, borderColor: `${dimGray}55` }}
             >
               <div className="text-gray-700 text-[11px] font-semibold leading-tight">
-                {transport.noSensibleFlight ? 'No sensible flight' : 'No direct option'}
+                {transport.noSensibleFlight ? 'No sensible flight' : transport.groundEstimate ? 'No train or flight found' : 'No direct option'}
               </div>
+              {!transport.noSensibleFlight && transport.groundEstimate && (
+                // Nothing bookable, but a close hop over land: how long by
+                // ground, as an estimate. No fare — the total leaves it out.
+                <div className="text-[10px] text-gray-600 leading-snug mt-0.5" data-testid="ground-estimate">
+                  {groundEstimateLine(transport.groundEstimate)}
+                </div>
+              )}
               {transport.noSensibleFlight && (
                 <div className="text-[10px] text-gray-600 leading-snug mt-0.5" data-testid="no-sensible-flight">
                   {transport.noSensibleFlight.groundHours

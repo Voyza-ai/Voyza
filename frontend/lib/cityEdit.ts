@@ -81,6 +81,7 @@ export function applyCityEdit(input: Trip, proposal: CityEditProposal): Trip {
     let out: Transport;
     if (leg) {
       out = legToTransport(leg.options, from.name, to.name, leg.date);
+      if (out.unavailable && leg.groundEstimate) out = { ...out, groundEstimate: leg.groundEstimate };
       // The user's choice for this pair, kept (the backend re-searched by it).
       if (leg.userChoice) out = { ...out, userChoice: leg.userChoice };
     } else if (to.transportIn?.from?.toLowerCase() === from.name.toLowerCase() && from.transportOut?.to?.toLowerCase() !== to.name.toLowerCase()) {

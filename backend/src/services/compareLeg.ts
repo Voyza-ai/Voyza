@@ -7,7 +7,7 @@ import { resolveDestinationIata } from './location/destinationAirport';
 import { sameAirportArea } from './location/sameAirportArea';
 import { flightDoorToDoor, trainCo2, trainDoorToDoor as trainDoorToDoorFacts } from './legFacts';
 import { cheapestSensible } from './longJourney';
-import { cityGeo, groundEstimateHours, km, noSensibleFlight as tooSlowForDistance } from './routeGeo';
+import { cityGeo, groundEstimateFor, groundEstimateHours, km, noSensibleFlight as tooSlowForDistance } from './routeGeo';
 
 /**
  * Both options are priced as PARTY TOTALS for `travelers` — Duffel quotes
@@ -33,6 +33,14 @@ export type LegComparison = {
    * and ranking does not choose an order because of its fare.
    */
   noSensibleFlight?: { fastestMinutes: number; stops: number; groundHours: [number, number] | null };
+  /**
+   * Set when NOTHING bookable was found (no train, no flight) on a close hop
+   * over land — Lisbon → Sintra, where All Aboard has no CP trains and
+   * nothing flies: door-to-door minutes by train or bus, low–high, as an
+   * ESTIMATE from distance (routeGeo.groundEstimateFor). No price: the total
+   * still leaves the leg out. Absent when the hop is far or across the sea.
+   */
+  groundEstimate?: { minutes: [number, number]; km: number };
 };
 
 /**
@@ -303,6 +311,12 @@ export async function compareLeg(
     }
   }
 
+  // Nothing bookable at all: a ground estimate when the hop is close and over land.
+  let groundEstimate: LegComparison['groundEstimate'];
+  if (!bestFlight && !bestTrain) {
+    groundEstimate = groundEstimateFor(origin, destination, params.tripCityNames ?? [origin, destination]) ?? undefined;
+  }
+
   // Door-to-door facts for the card: time city centre to city centre, and
   // CO₂. A flight's total needs its airports — the offer's own, else the
   // codes this leg resolved to (a cached row has none of its own).
@@ -490,6 +504,7 @@ export async function compareLeg(
 
   return {
     ...(noSensibleFlight ? { noSensibleFlight } : {}),
+    ...(groundEstimate ? { groundEstimate } : {}),
     flightOption: bestFlight,
     trainOption: bestTrain,
     cheapest,

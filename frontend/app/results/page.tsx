@@ -1718,7 +1718,10 @@ function comparisonToTransport(
   const main =
     asTransport(preferTrain ? 'train' : 'flight') ?? asTransport(preferTrain ? 'flight' : 'train');
   if (!main) {
-    return { mode: 'flight', operator: '', duration: '', price: 0, from, to, departDate: date, unavailable: true };
+    return {
+      mode: 'flight', operator: '', duration: '', price: 0, from, to, departDate: date, unavailable: true,
+      ...(result?.groundEstimate ? { groundEstimate: result.groundEstimate } : {}),
+    };
   }
   const other = asTransport(main.mode === 'flight' ? 'train' : 'flight');
   return { ...main, alternatives: other ? [other] : [] };

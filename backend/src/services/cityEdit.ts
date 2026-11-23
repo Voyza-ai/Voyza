@@ -5,7 +5,7 @@ import { searchHotels, roomsFor, type HotelResult } from './hotels';
 import { searchLegOptions, type LegOption } from './legOptions';
 import { firstStayArrival, searchHomeLegOptions, type HomeLeg } from './optimizer';
 import { pickByPreference, readPreference, type LegPreference } from './legPreference';
-import { cityGeo, groundEstimateHours, km, noSensibleFlight, rankInsertions, type CityGeo, type Insertion } from './routeGeo';
+import { cityGeo, groundEstimateFor, groundEstimateHours, km, noSensibleFlight, rankInsertions, type CityGeo, type Insertion } from './routeGeo';
 import { formatMinutes } from './tripLegs';
 import { getCityCountry } from '../data/cityCountries';
 import { resolve } from './location/resolve';
@@ -295,6 +295,8 @@ export type CityEditLeg = {
   userChoice?: LegPreference;
   /** No sensible flight exists (the fastest is far beyond the distance): shown on the card. */
   flag?: { fastestMinutes: number; stops: number; groundHours: [number, number] | null };
+  /** Nothing found (options empty) on a close hop over land: compareLeg's `groundEstimate`. */
+  groundEstimate?: { minutes: [number, number]; km: number };
 };
 
 export type CityEditProposal = {
@@ -599,7 +601,8 @@ export async function priceCityEditPlan(
             ' The total includes that flight — swap it on the card if you go by ground.',
         );
       }
-      return { index: i, from: from.name, to: to.name, date, options: picked.ordered.slice(0, 4), ...(pref ? { userChoice: pref } : {}), ...(flag ? { flag } : {}) };
+      const ground = r.options.length === 0 ? groundEstimateFor(from.name, to.name, tripCityNames) : null;
+      return { index: i, from: from.name, to: to.name, date, options: picked.ordered.slice(0, 4), ...(pref ? { userChoice: pref } : {}), ...(flag ? { flag } : {}), ...(ground ? { groundEstimate: ground } : {}) };
     } catch (err: any) {
       logger.warn('cityEdit: leg search failed', { from: from.name, to: to.name, message: err?.message });
       return { index: i, from: from.name, to: to.name, date, options: [] };
