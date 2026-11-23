@@ -255,7 +255,9 @@ export const useTripStore = create<TripStore>((set) => ({
       const { alternatives: _chosenAlts, userChoice: _chosenPref, ...chosenFlat } = chosen;
       const { alternatives: _curAlts, userChoice: _curPref, ...currentFlat } = currentOut;
       const newAlts: Transport[] = alts.filter((_, i) => i !== alternativeIndex);
-      newAlts.unshift(currentFlat);
+      // A "no option" placeholder is not an option to go back to (it would
+      // read as a $0 leg).
+      if (!currentOut.unavailable) newAlts.unshift(currentFlat);
       // A hand pick is the user's choice: a later date edit keeps its time.
       const userChoice = { source: 'card' as const, departTime: chosenFlat.departTime ?? null, operator: chosenFlat.operator || null };
       const newOut: Transport = { ...chosenFlat, alternatives: newAlts, userChoice };

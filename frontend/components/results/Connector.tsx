@@ -148,6 +148,19 @@ export default function Connector({
                   {`Fastest flight ${Math.floor(transport.noSensibleFlight.fastestMinutes / 60)}h${transport.noSensibleFlight.fastestMinutes % 60 ? ` ${transport.noSensibleFlight.fastestMinutes % 60}m` : ''}`}
                 </div>
               )}
+              {transport.noSensibleFlight && transport.alternatives?.[0] && transport.alternatives[0].price > 0 && (
+                // Still bookable: take the long flight anyway, and it is priced.
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    pickAlternative(0);
+                  }}
+                  className="text-[10px] text-[#2e6bc4] underline mt-1 hover:text-[#1e5ab3]"
+                  data-testid="use-long-flight"
+                >
+                  {`Use it anyway · $${displayAmount(transport.alternatives[0].price, priceMode, travelers).toLocaleString()}`}
+                </button>
+              )}
               <a
                 href={rome2RioUrl}
                 target="_blank"

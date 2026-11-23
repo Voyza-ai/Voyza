@@ -296,7 +296,10 @@ export default function Flowchart({
       <motion.div
         layoutScroll
         ref={scrollRef}
-        className="flex-1 min-h-0 overflow-x-auto overflow-y-auto overscroll-x-contain scrollbar-hide"
+        // mx-14: the scroll arrows sit in their own gutters, never over a
+        // card — at the right edge they used to cover the leg card there
+        // (its price, its "No sensible flight" note).
+        className="flex-1 min-h-0 mx-14 overflow-x-auto overflow-y-auto overscroll-x-contain scrollbar-hide"
         style={{
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',

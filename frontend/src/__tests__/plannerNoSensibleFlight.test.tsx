@@ -8,7 +8,8 @@
 import './mocks';
 import { mockPush } from './mocks';
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { liveTripTotal } from '@/lib/tripTotals';
 import PlanningChat from '@/components/planning/PlanningChat';
 import Connector from '@/components/results/Connector';
 import { useTripStore } from '@/store/tripStore';
@@ -83,7 +84,25 @@ it('Prague → Vienna with no sensible flight: the card is not the 22-hour fligh
   expect(screen.getByText('No sensible flight')).toBeInTheDocument();
   expect(screen.getByTestId('no-sensible-flight')).toHaveTextContent('About 4–5 h by train or bus (estimate)');
   expect(screen.getByTestId('no-sensible-flight')).toHaveTextContent('Fastest flight 22h 50m');
-  expect(document.body.textContent).not.toMatch(/\$301/);
+  // The 22h flight is not the card's pick (no $301 price pill); it is only offered.
+  expect(screen.queryByText('$301')).toBeNull();
+  expect(screen.getByTestId('use-long-flight')).toHaveTextContent('Use it anyway · $301');
+});
+
+it('the long flight can still be taken from the card: it becomes the leg and the total includes it', async () => {
+  const trip = await plan(true);
+  const before = liveTripTotal(trip);
+  const leg = trip.cities[0].transportOut;
+  expect(leg.alternatives?.map((a) => [a.operator, a.price])).toEqual([['LOT', 301]]);
+  render(<Connector transport={leg} index={0} cityIndex={0} isExpanded={false} onToggle={() => {}} />);
+  expect(screen.getByTestId('use-long-flight')).toHaveTextContent('Use it anyway · $301');
+  fireEvent.click(screen.getByTestId('use-long-flight'));
+  const after = useTripStore.getState().currentTrip!;
+  expect(after.cities[0].transportOut).toMatchObject({ operator: 'LOT', price: 301, duration: '22h 50m' });
+  expect(after.cities[0].transportOut.unavailable).toBeFalsy();
+  // The "no option" placeholder is not kept as a $0 alternative.
+  expect(after.cities[0].transportOut.alternatives ?? []).toEqual([]);
+  expect(liveTripTotal(after) - before).toBe(301);
 });
 
 it('an unflagged leg is planned as before (control)', async () => {

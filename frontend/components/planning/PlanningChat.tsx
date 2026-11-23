@@ -1162,7 +1162,12 @@ export default function PlanningChat() {
       // The "no direct option" card says so, with a ground estimate.
       const noSensible = leg?.comparison?.noSensibleFlight;
       if (noSensible) {
-        return { ...emptyTransport, from: fromCity, to: toCity, unavailable: true, noSensibleFlight: noSensible };
+        // The long flights stay on the leg as alternatives: a traveller who
+        // wants one anyway takes it from the card, and it is then priced.
+        const alternatives = Array.isArray(leg?.options)
+          ? leg.options.filter((o: any) => o?.mode === 'flight').map((o: any) => optionToTransport(o, fromCity, toCity))
+          : [];
+        return { ...emptyTransport, from: fromCity, to: toCity, unavailable: true, noSensibleFlight: noSensible, alternatives };
       }
       // Preferred path: top-4 options array.
       if (Array.isArray(leg?.options) && leg.options.length > 0) {
