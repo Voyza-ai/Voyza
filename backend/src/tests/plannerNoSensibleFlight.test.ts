@@ -56,7 +56,7 @@ jest.mock('../services/flights', () => {
   };
 });
 
-// Rail is off in production: no train for any leg.
+// No train for any leg: the case under test (a rail search that found nothing).
 jest.mock('../services/trains', () => ({ searchTrains: jest.fn().mockResolvedValue([]) }));
 
 import { compareLeg } from '../services/compareLeg';

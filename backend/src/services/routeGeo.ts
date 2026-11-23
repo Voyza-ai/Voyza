@@ -120,8 +120,10 @@ export function noSensibleFlight(fastestMinutes: number, distanceKm: number): bo
 }
 
 /**
- * Ground travel time as an ESTIMATE from distance (rail data is off in
- * production): road/rail distance ≈ 1.3 × straight line, at 60–90 km/h.
+ * Ground travel time as an ESTIMATE from distance, for a leg where the rail
+ * search found no train (production has rail: All Aboard answered Prague →
+ * Vienna with live ÖBB / České dráhy fares on 2026-11-23): road/rail
+ * distance ≈ 1.3 × straight line, at 60–90 km/h.
  * Returned as whole hours, low–high. Never a price.
  */
 export function groundEstimateHours(distanceKm: number): [number, number] {
