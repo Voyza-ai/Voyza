@@ -938,6 +938,20 @@ export function annotateTravel(events: ScheduledEvent[], legs?: TravelLegs | nul
   return events;
 }
 
+/**
+ * Which of `keys` a day fills when it has `room` for fewer than all of them:
+ * the ones with the most `left`, ties in `keys` order. Keys with none left are off.
+ */
+function fullestFirst<K extends string>(keys: readonly K[], left: (k: K) => number, room: number): Record<K, boolean> {
+  const on = new Set(
+    keys
+      .filter((k) => left(k) > 0)
+      .sort((x, y) => left(y) - left(x))
+      .slice(0, room),
+  );
+  return Object.fromEntries(keys.map((k) => [k, on.has(k)])) as Record<K, boolean>;
+}
+
 /** What `buildCityScheduleFromSuggestions` produces for one city stay. */
 export type CitySchedule = {
   /** Per-day events, keyed by ISO date. Same shape `City.schedule` holds. */
@@ -1122,19 +1136,52 @@ export function buildCityScheduleFromSuggestions(
     const advance = (p: Located | undefined) => {
       if (hasCoords(p)) anchor = p;
     };
-    const morning = takeActivity('morning', null);
+
+    // ── Each day takes its share of what is left. Filling each day to the
+    //    brim spent a long stay's picks in its first days: Rome, 6 nights,
+    //    had Mar 11–13 full and Mar 14–15 at "0 events" (website audit m6).
+    //    A day now takes the picks left divided by the stay days left
+    //    (rounded up), still at most one per time of day and one per meal.
+    //    A stay with picks to spare plans exactly as before; a long one is
+    //    spread evenly, with no empty days. What a short day drops goes
+    //    back for the days after. The fly-home day is not a stay day: it
+    //    takes only what the stay could not use.
+    const laterDays = Math.max(0, stayDays - dayIdx - 1);
+    const actsLeft = actBuckets.morning.length + actBuckets.afternoon.length + actBuckets.evening.length;
+    const mealsLeft =
+      restBuckets.breakfast.length + restBuckets.lunch.length + restBuckets.dinner.length + restBuckets.any.length;
+    const actRoom = laterDays === 0 ? Infinity : Math.ceil(actsLeft / (laterDays + 1));
+    const mealRoom = laterDays === 0 ? Infinity : Math.ceil(mealsLeft / (laterDays + 1));
+    // With room for fewer than the day could hold, the times of day (and
+    // meals) with the most picks left go first, so no one of them piles up
+    // at the end: when the evening always gave way, Rome's second evening
+    // walk was left for the fly-home day. On a tie: morning, afternoon,
+    // evening; dinner, lunch, breakfast.
+    const actOn = Number.isFinite(actRoom)
+      ? fullestFirst(['morning', 'afternoon', 'evening'] as const, (b) => actBuckets[b].length, actRoom)
+      : { morning: true, afternoon: true, evening: true };
+    // A meal with only "any" picks left for it ranks after one with its own.
+    const anyFor = (m: 'breakfast' | 'lunch' | 'dinner') =>
+      (m === 'breakfast' ? restBuckets.any.filter(suitsBreakfast) : restBuckets.any).length > 0 ? 0.5 : 0;
+    const mealOn = Number.isFinite(mealRoom)
+      ? fullestFirst(['dinner', 'lunch', 'breakfast'] as const, (m) => restBuckets[m].length || anyFor(m), mealRoom)
+      : { breakfast: true, lunch: true, dinner: true };
+    const takeAct = (bucket: ActBucket, near: Located | null): ActivitySuggestion | undefined =>
+      actOn[bucket] ? takeActivity(bucket, near) : undefined;
+
+    const morning = takeAct('morning', null);
     advance(morning);
-    const breakfast = takeRestaurant('breakfast', morning ?? null);
-    const lunch = takeRestaurant('lunch', anchor);
+    const breakfast = mealOn.breakfast ? takeRestaurant('breakfast', morning ?? null) : undefined;
+    const lunch = mealOn.lunch ? takeRestaurant('lunch', anchor) : undefined;
     advance(lunch?.suggestion);
-    const afternoon = takeActivity('afternoon', anchor);
+    const afternoon = takeAct('afternoon', anchor);
     advance(afternoon);
-    const evening = takeActivity('evening', anchor);
+    const evening = takeAct('evening', anchor);
     advance(evening);
     // An evening food outing — a food tour, "Dinner at …" — IS the day's
     // dinner (live: The Ledbury at 18:00, then a food tour at 20:45).
     const eveningMeal = !!evening && (evening.category === 'food' || namesDinner(evening.name));
-    const dinner = eveningMeal ? undefined : takeRestaurant('dinner', anchor);
+    const dinner = eveningMeal || !mealOn.dinner ? undefined : takeRestaurant('dinner', anchor);
     const chosenActivities: Record<ActBucket, ActivitySuggestion | undefined> = { morning, afternoon, evening };
     const chosenMeals: Record<'breakfast' | 'lunch' | 'dinner', ReturnType<typeof takeRestaurant>> = {
       breakfast,

@@ -15,6 +15,7 @@ import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput, parseDateRangeInput } from '@/lib/parseDate';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
+import { stagedCountry, usableCityNights } from '@/lib/cityNights';
 import { vibesFromAnswer } from '@/lib/vibeMap';
 import { dedupeVibes, joinVibes, pillsAndText, splitVibeText, vibeBubbleText, vibeList } from '@/lib/vibes';
 // `originAirportsForCity` is a VALUE import, so the 60 KB hot set lands in
@@ -1317,7 +1318,7 @@ export default function PlanningChat() {
         name,
         // Fill from the world-cities dataset / the user's vibe answer so
         // AI-planned cards match the preset cards (country line + chips).
-        country: countryForCity(name),
+        country: stagedCountry(answers.cityCountries, name) ?? countryForCity(name),
         dates: cityDates,
         transportIn,
         transportOut: emptyTransport,
@@ -1710,7 +1711,10 @@ export default function PlanningChat() {
 
       const result = await optimizeTrip({
         progressId,
-        cities: parsed.destinations.map((d: string) => ({ name: d })),
+        cities: parsed.destinations.map((d: string) => {
+          const country = stagedCountry(answers.cityCountries, d);
+          return country ? { name: d, country } : { name: d };
+        }),
         startDate,
         travelers,
         budget: totalBudget,
@@ -1721,6 +1725,7 @@ export default function PlanningChat() {
         originAirports: answers.originAirports ?? undefined,
         returnToHome: answers.returnToHome ?? true,
         totalNights: totalNightsForOptimize,
+        cityNights: usableCityNights(answers.cityNights, parsed.destinations, totalNightsForOptimize),
       }).finally(() => {
         polling = false;
       });

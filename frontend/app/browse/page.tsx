@@ -325,6 +325,11 @@ function BrowsePageInner() {
       returnToHome: true,
       planningMode: 'destination',
       vibe: presetVibes(preset)[0],
+      // The preset's own night split and countries (website audit m11: Lisbon
+      // 3 + Sintra 1 came back as 2 + 2, and Sintra with no country). The
+      // planner sends the split only while it still matches the trip.
+      cityNights: Object.fromEntries(preset.cities.map((c) => [c.name, c.nights])),
+      cityCountries: Object.fromEntries(preset.cities.map((c) => [c.name, c.country])),
       // Read by the planner for its status line — no date was shifted here —
       // and never stored as an answer.
       autorunReason: 'similar-trip',

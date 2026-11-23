@@ -202,6 +202,20 @@ export function syncCitySchedule(
     if (relaid) {
       old = relaid.schedule;
       unscheduled = [...(relaid.unscheduled ?? [])];
+      // The relay re-plans every stop it finds on the old days, including
+      // one the traveller resized (which this file counts as their own) and
+      // those of trips saved before stops kept their planned length. Such a
+      // stop is not also moved below as their own block: it came out twice
+      // after a Canvas swap, the resized Colosseum at 06:45 the next morning
+      // as well as in the new plan.
+      const replanned = new Set<string>();
+      for (const events of Object.values(relaid.schedule))
+        for (const e of events) if (e.category === 'activity' || e.category === 'restaurant') replanned.add(itemKey(parseStop(e).name));
+      for (const u of relaid.unscheduled ?? []) replanned.add(itemKey(u.title));
+      for (let i = orphans.length - 1; i >= 0; i--) {
+        const { e } = orphans[i];
+        if ((e.category === 'activity' || e.category === 'restaurant') && replanned.has(itemKey(parseStop(e).name))) orphans.splice(i, 1);
+      }
     }
   }
 

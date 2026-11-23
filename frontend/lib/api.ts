@@ -111,6 +111,8 @@ export type HotelResult = {
   priceSuspect?: boolean;
   priceSuspectReason?: string;
   /** Where Booking says the property is. Absent on a row without a usable pair. */
+  /** Booking's kind of property ("Hotels", "Campsites", …), when the row carries one. */
+  accommodationType?: string;
   lat?: number;
   lng?: number;
   /** Booking's district, usually the borough ("Camden"). */
@@ -268,6 +270,11 @@ export async function optimizeTrip(params: {
    * When omitted the backend uses 2 nights per city as the default.
    */
   totalNights?: number;
+  /**
+   * Nights per city, by name. Each city keeps them wherever the optimizer
+   * puts it; ignored unless it names every city and adds up to totalNights.
+   */
+  cityNights?: Record<string, number>;
   /** Random id to poll getOptimizeProgress with while this runs. */
   progressId?: string;
 }): Promise<OptimizeResult> {

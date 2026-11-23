@@ -128,6 +128,8 @@ export type Hotel = {
    * `effectiveRating` takes a 9.5-from-3-reviews at face value.
    */
   reviewCount?: number;
+  /** Booking's kind of property ("Hotels", "Campsites", …), when the search row carries one. */
+  accommodationType?: string;
   /** Where the hotel is, from the provider — pins it on the city guide's hotel map. */
   lat?: number;
   lng?: number;
@@ -530,6 +532,15 @@ export type PlanningAnswers = {
    * hardcoded 2-nights-per-city default).
    */
   nights?: number;
+  /**
+   * Nights per city, by name: a preset's own split, staged by "Plan a
+   * similar trip" (website audit m11: Lisbon 3 + Sintra 1 came back 2 + 2).
+   * Sent to the optimizer only while it names exactly the trip's
+   * destinations and adds up to its nights (`usableCityNights`).
+   */
+  cityNights?: Record<string, number>;
+  /** Each city's country, by name, staged with `cityNights` from the preset (Sintra has none in the city dataset). */
+  cityCountries?: Record<string, string>;
 };
 
 /**

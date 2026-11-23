@@ -115,6 +115,12 @@ const optimizeSchema = z.object({
    * 2 nights per city. When set, distributed evenly across cities.
    */
   totalNights: z.number().int().positive().max(180).optional(),
+  /**
+   * Nights per city, by name ("Plan a similar trip" keeps a preset's split).
+   * The optimizer uses it only when it names every city and agrees with
+   * totalNights (cityNightsByName); otherwise nights are spread evenly.
+   */
+  cityNights: z.record(z.string().min(1), z.number().int().positive().max(180)).optional(),
   /** Client-made id to poll GET /api/optimize/progress/:id with while this runs. */
   progressId: z.string().regex(PROGRESS_ID).optional(),
 }).superRefine((input, ctx) => {

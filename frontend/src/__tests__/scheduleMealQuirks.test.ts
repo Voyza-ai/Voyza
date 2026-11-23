@@ -91,10 +91,12 @@ describe('breakfast', () => {
         spot("L'Ami Jean", 'Basque-French bistro', '$$', 'dinner'),
       ],
     );
-    const at = (d: string) => meals(s).filter((m) => m.d === d && m.start < 11 * 60).map((m) => m.e.title.replace(/ \(.*\)$/, ''));
+    const breakfasts = meals(s)
+      .filter((m) => m.start < 11 * 60)
+      .sort((a, b) => a.d.localeCompare(b.d))
+      .map((m) => m.e.title.replace(/ \(.*\)$/, ''));
     // The one marked breakfast first, then the crêperie — never Septime, ahead of it in the queue.
-    expect(at('2027-01-13')).toEqual(['Du Pain et des Idées']);
-    expect(at('2027-01-14')).toEqual(['Breizh Café']);
+    expect(breakfasts).toEqual(['Du Pain et des Idées', 'Breizh Café']);
     expect(meals(s).find((m) => /^Septime/.test(m.e.title))!.start).toBeGreaterThanOrEqual(11 * 60);
   });
 });
