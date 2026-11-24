@@ -45,7 +45,57 @@ export function isLongMinutes(minutes: number | null | undefined, limit: number 
   return limit != null && known(minutes) && minutes > limit;
 }
 
-type Timed = { price: number | null | undefined; durationMinutes?: number | null };
+/**
+ * Small hours — leaving or arriving from 00:00 to 04:59 local time.
+ *
+ * Cheapest-first picked Prague → Vienna as an ÖBB train leaving at 00:36
+ * ($120, 6h 53m), and Salzburg → Prague at 00:13 to save $26 over the 11:11;
+ * the next cheapest Salzburg train left at 19:07 and arrived at 03:09. Either
+ * way the traveller loses a night (a hotel paid for and left at midnight, or
+ * a city reached with nowhere to go at 3 am). A small-hours option is still
+ * offered, but every priced option at sensible hours goes first. A night train
+ * that leaves in the evening and arrives in the morning is not small hours.
+ */
+export const SMALL_HOURS_END = 5;
+
+type Clock = { departTime?: string | null; departure?: string | null; arriveTime?: string | null; arrival?: string | null };
+
+/** HH from "00:36" or an ISO "2027-03-19T00:36"; null = unknown. */
+function hourOf(hhmm: string | null | undefined, iso: string | null | undefined): number | null {
+  const raw = (typeof hhmm === 'string' && hhmm) || (typeof iso === 'string' && iso.includes('T') ? iso.split('T')[1] : '');
+  const m = /^(\d{1,2}):\d{2}/.exec(raw || '');
+  if (!m) return null;
+  const h = Number(m[1]);
+  return h >= 0 && h < 24 ? h : null;
+}
+
+/** True when the option leaves or arrives between 00:00 and 04:59; unknown times never count. */
+export function inSmallHours(o: Clock): boolean {
+  const dep = hourOf(o.departTime, o.departure);
+  const arr = hourOf(o.arriveTime, o.arrival);
+  return (dep != null && dep < SMALL_HOURS_END) || (arr != null && arr < SMALL_HOURS_END);
+}
+
+type Timed = Clock & {
+  price: number | null | undefined;
+  durationMinutes?: number | null;
+};
+
+/**
+ * Sort key shared by every pick: priced before unpriced, then sensible hours
+ * before small hours, then cheapest. Long journeys are ranked by the caller (their
+ * limit depends on which options are judged together).
+ */
+export function pickKey(o: Timed): [number, number, number] {
+  const priced = typeof o.price === 'number' && o.price > 0;
+  return [priced ? 0 : 1, inSmallHours(o) ? 1 : 0, priced ? (o.price as number) : Infinity];
+}
+
+export function comparePick(a: Timed, b: Timed): number {
+  const ka = pickKey(a);
+  const kb = pickKey(b);
+  return ka[0] - kb[0] || ka[1] - kb[1] || ka[2] - kb[2];
+}
 
 /**
  * The cheapest option that is not a long journey; the cheapest of all when
@@ -59,15 +109,15 @@ export function cheapestSensible<T extends Timed>(options: T[]): T | undefined {
 
 /**
  * Cheapest first, with long journeys after every sensible option (each group
- * still cheapest first). Unpriced options (null / 0) go last within a group.
+ * still cheapest first). Within a group: unpriced options (null / 0) last,
+ * and small-hours departures after every priced daytime one.
  * Stable: equal prices keep their order.
  */
 export function sensibleFirst<T extends Timed>(options: T[]): T[] {
   const limit = longJourneyLimit(options.map((o) => o.durationMinutes));
   const rank = (o: T) => (isLongMinutes(o.durationMinutes, limit) ? 1 : 0);
-  const price = (o: T) => (typeof o.price === 'number' && o.price > 0 ? o.price : Infinity);
   return options
     .map((o, i) => ({ o, i }))
-    .sort((a, b) => rank(a.o) - rank(b.o) || price(a.o) - price(b.o) || a.i - b.i)
+    .sort((a, b) => rank(a.o) - rank(b.o) || comparePick(a.o, b.o) || a.i - b.i)
     .map((x) => x.o);
 }
