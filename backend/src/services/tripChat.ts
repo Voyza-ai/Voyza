@@ -360,7 +360,7 @@ export const CHAT_TOOLS = [
   {
     name: 'remove_city',
     description:
-      'Remove a city that is in the trip. Use when the user says "drop Florence", "skip Milan", "remove Berlin". Its nights go to the city before it, so the trip dates stay the same.',
+      'Remove a city that is in the trip. Use when the user says "drop Florence", "skip Milan", "remove Berlin". The trip gets shorter by its nights: the cities after it move earlier, and the flight home with them.',
     input_schema: {
       type: 'object' as const,
       properties: {
