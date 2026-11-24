@@ -14,6 +14,7 @@ import {
   type SuggestedPlace,
 } from './location/destinationAirport';
 import { sameAirportArea } from './location/sameAirportArea';
+import { islandIata } from './location/islandNames';
 import { parseIsoDuration } from '../utils/duration';
 import { withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
 import { elapsedMinutesBetween } from '../utils/localTime';
@@ -614,6 +615,14 @@ export async function getIataCode(
   // In-memory, no network, and no database read.
   const fromArtifact = resolveDestinationIata(cityName, context);
   if (fromArtifact) return fromArtifact;
+
+  // An island-style name neither knows as written ("Grand Turk Island",
+  // "Mykonos Island"): retry it with the island word stripped, against the
+  // curated table and the artifact only, behind the guards in islandNames.ts
+  // that keep "Hamilton Island" from flying to Ontario. Also in-memory, and
+  // ahead of the cache for the same reason the artifact is.
+  const fromIsland = islandIata(cityName, context);
+  if (fromIsland) return fromIsland;
 
   // Where the artifact says this name is, when it could not answer it. Empty
   // when it knows nothing about the name and there is no trip.

@@ -32,7 +32,7 @@
  *
  *  - `expectDestination` THROWS when a query resolves to nothing, and a test
  *    proves it throws. Every single-case assertion goes through it.
- *  - the census asserts a COUNT as well as a set: 176 of 194 reproduced. An
+ *  - the census asserts a COUNT as well as a set: 176 of 195 reproduced. An
  *    empty or truncated artifact fails it, and so does an empty table.
  *  - the census comparator is re-run over a deliberately corrupted copy of
  *    the table, and is required to report the corruption. A comparator that
@@ -142,8 +142,9 @@ describe('cityAirports decisions: the table and the artifact are both real', () 
   it('is not a stub on either side', () => {
     expect(locationArtifact.places.length).toBeGreaterThan(30_000);
     // 169 when the thirteen were decided; `lagos` has since gone to the
-    // resolver and 26 demo and preset keys have come in, both asserted below.
-    expect(Object.keys(CITY_AIRPORTS).length).toBe(194);
+    // resolver, 26 demo and preset keys and `grand turk` have come in, all
+    // asserted below.
+    expect(Object.keys(CITY_AIRPORTS).length).toBe(195);
     expect(getStaticIata('Kyoto')).toBeTruthy();
   });
 
@@ -392,7 +393,7 @@ describe('cityAirports decisions: the demo towns and preset cities', () => {
   });
 
   /**
-   * Thirteen keys the artifact cannot answer: the reason each row exists.
+   * Fourteen keys the artifact cannot answer: the reason each row exists.
    * The code is asserted to be a live airport or metro in the right country,
    * which is the whole of what Duffel's guesses got wrong.
    */
@@ -410,6 +411,7 @@ describe('cityAirports decisions: the demo towns and preset cities', () => {
     ['flåm', 'BGO', 'NO'],
     ['flam', 'BGO', 'NO'],
     ['koh phi phi', 'HKT', 'TH'],
+    ['grand turk', 'GDT', 'TC'],
   ];
 
   it.each(UNANSWERED)('"%s" is %s, in %s, where the artifact has nothing', (key, iata, country) => {
@@ -505,6 +507,7 @@ const LOAD_BEARING = [
   'cinque terre',
   'flam',
   'flåm',
+  'grand turk',
   'hakone',
   'hallstatt',
   'interlaken',
@@ -523,20 +526,21 @@ const LOAD_BEARING = [
 ];
 
 describe('cityAirports decisions: the census', () => {
-  it('reproduces 176 of the 194 entries, and names the eighteen it does not', () => {
+  it('reproduces 176 of the 195 entries, and names the nineteen it does not', () => {
     // The ratchet. A new disagreement — an upstream reclassification, a new
     // airport, a changed pin — fails here with the key named, instead of
     // surfacing when someone deletes the table.
     //
-    // The eighteen are every row that is load-bearing: the two hand-written
-    // cases, and sixteen keys from the demo-and-preset pass — thirteen the
-    // artifact cannot answer and three it answers wrongly. Each is asserted
-    // on its own terms above.
+    // The nineteen are every row that is load-bearing: the two hand-written
+    // cases, sixteen keys from the demo-and-preset pass — thirteen the
+    // artifact cannot answer and three it answers wrongly — and `grand turk`,
+    // an island the artifact cannot answer either. Each is asserted on its
+    // own terms above.
     //
     // Non-vacuous twice over: the count fails against a truncated artifact,
     // and against an empty one EVERY key would be listed rather than these.
     const { compared, reproduced, disagreed } = census();
-    expect(compared).toBe(194);
+    expect(compared).toBe(195);
     expect(reproduced).toBe(176);
     expect(disagreed.map((d) => d.key).sort()).toEqual(LOAD_BEARING);
   });
