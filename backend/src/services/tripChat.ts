@@ -38,6 +38,7 @@
  * is written from that data — never from the model's own text, which is
  * written before anything was searched (D-07).
  */
+import { comparePick } from './longJourney';
 import { logger } from '../utils/logger';
 import { addDays, todayIso } from '../utils/dates';
 import {
@@ -83,6 +84,8 @@ import {
   formatMinutes,
   isLongJourney,
   journeyLimit,
+  limitFor,
+  type JourneyLimit,
   journeyWords,
   notALegReply,
   perPersonWord,
@@ -657,8 +660,13 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
   // "later", "evening", "cheaper"…; an airline the user named is theirs to
   // choose, however long ("the TAP one").
   const limit = request.operator ? null : journeyLimit(searched.choices, leg.current);
-  const sensible = matches.filter((c) => !isLongJourney(c, limit));
+  const sensibleAll = matches.filter((c) => !isLongJourney(c, limit));
   const long = matches.filter((c) => isLongJourney(c, limit));
+  // No time asked for ("cheaper", a mode): a small-hours departure (00:00–04:59)
+  // comes after every priced daytime one — cheapest-first proposed a 00:36
+  // train to save a few dollars. A time the user asked for is theirs.
+  const askedTime = !!(request.relative || request.timeOfDay || request.window || request.operator);
+  const sensible = askedTime ? sensibleAll : [...sensibleAll].sort(comparePick);
 
   if (input?.list === true || forceList) {
     const pool = sensible.length > 0 ? sensible : long;
@@ -670,13 +678,13 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
     });
     const more =
       sensible.length === 0
-        ? ` — every one is a long journey (more than ${aboutHours(limit!)})`
+        ? ` — every one is a long journey (more than ${aboutHours(limitFor(limit!, long)!)})`
         : pool.length > shown.length
           ? ` (${pool.length} found, cheapest ${shown.length} shown)`
           : '';
     const skipped =
       sensible.length > 0 && long.length > 0
-        ? `\nI left out ${long.length} that take more than ${aboutHours(limit!)} (the quickest of those: ${formatMinutes(Math.min(...long.map((c) => c.durationMinutes)))}).`
+        ? `\nI left out ${long.length} that take more than ${aboutHours(limitFor(limit!, long)!)} (the quickest of those: ${formatMinutes(Math.min(...long.map((c) => c.durationMinutes)))}).`
         : '';
     const onCard = leg.current
       ? `They're on the ${legLabel(leg)} card now — pick one there, or tell me which and I'll set it up for you to accept. Nothing has changed yet.`
@@ -701,7 +709,7 @@ async function findOption(currentTrip: any, legs: TripLeg[], input: any, toolNam
   // Cheaper matches skipped for being long: the lead says what was picked.
   const skippedCheaper = long.some((c) => c.price > 0 && c.price < sensible[0].price);
   const lead = skippedCheaper
-    ? `The cheapest ${subject} I found that doesn't take more than ${aboutHours(limit!)}:`
+    ? `The cheapest ${subject} I found that doesn't take more than ${aboutHours(limitFor(limit!, long)!)}:`
     : request.cheaper
       ? `A ${subject}:`
       : `The cheapest ${subject} I found:`;
@@ -717,10 +725,12 @@ const aboutHours = (limit: number) => `about ${formatMinutes(Math.round(limit / 
  * (the latest one that day for "later" / "evening", the earliest for
  * "earlier" / "morning") so the user can choose.
  */
-function allLongReply(all: LegChoice[], long: LegChoice[], request: ChoiceRequest, leg: TripLeg, limit: number, what: string): TripChatResult {
+function allLongReply(all: LegChoice[], long: LegChoice[], request: ChoiceRequest, leg: TripLeg, limit: JourneyLimit, what: string): TripChatResult {
   const when = shortDate(leg.date);
   const quickest = Math.min(...long.map((c) => c.durationMinutes));
-  const fastest = Math.min(...all.map((c) => c.durationMinutes).filter((m) => m > 0));
+  // Against the fastest of the same mode(s) as the long ones — the rule they failed.
+  const longModes = new Set(long.map((c) => c.mode));
+  const fastest = Math.min(...all.filter((c) => longModes.has(c.mode)).map((c) => c.durationMinutes).filter((m) => m > 0));
   const top = long.slice(0, 3).map((c, i) => {
     const delta = leg.current ? ` (${moneyDiff(leg.current.price, c.price)})` : '';
     return `${i + 1}. ${describeChoice(c)} — ${journeyWords(c)}, ${money(c.price)}${delta}`;
@@ -748,7 +758,7 @@ function allLongReply(all: LegChoice[], long: LegChoice[], request: ChoiceReques
   return {
     type: 'answer',
     reply:
-      `Every ${what} on ${when} is a very long journey — the quickest takes ${formatMinutes(quickest)}, against ${formatMinutes(fastest)} for the fastest flight that day:\n${top.join('\n')}\n` +
+      `Every ${what} on ${when} is a very long journey — the quickest takes ${formatMinutes(quickest)}, against ${formatMinutes(fastest)} for the fastest ${longModes.size === 1 && longModes.has('train') ? 'train' : 'flight'} that day:\n${top.join('\n')}\n` +
       `${altLine.trim()} Nothing changed — tell me if you want one of these anyway, or another day.`.trim(),
   };
 }

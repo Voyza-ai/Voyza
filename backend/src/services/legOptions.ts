@@ -18,7 +18,7 @@ import { searchTrains, TrainOffer, type RailPriceSource } from './trains';
 import { flightDoorToDoor, trainCo2, trainDoorToDoor, type Co2Figure, type DoorToDoor } from './legFacts';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
-import { longJourneyLimit, isLongMinutes } from './longJourney';
+import { comparePick, longJourneyLimit, isLongMinutes } from './longJourney';
 
 export type TimeWindow = {
   earliestDepart?: string | null; // HH:MM
@@ -453,9 +453,11 @@ export function orderLegOptions(options: LegOption[], limit: number): LegOption[
     isLongMinutes(o.durationMinutes, o.mode === 'flight' ? flightLimit : trainLimit) ? 1 : 0;
   const price = (o: LegOption) =>
     typeof o.price === 'number' && o.price > 0 ? o.price : Infinity;
+  // Within a group: priced first, daytime before small hours (00:00–04:59),
+  // cheapest first (longJourney.ts comparePick).
   const sorted = options
     .map((o, i) => ({ o, i }))
-    .sort((a, b) => rank(a.o) - rank(b.o) || price(a.o) - price(b.o) || a.i - b.i)
+    .sort((a, b) => rank(a.o) - rank(b.o) || comparePick(a.o, b.o) || a.i - b.i)
     .map((x) => x.o);
 
   const top = sorted.slice(0, Math.max(0, limit));

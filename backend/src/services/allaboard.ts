@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import type { ProviderTrainOffer } from './trains';
+import { isLongMinutes, longJourneyLimit } from './longJourney';
 
 /**
  * All Aboard (allaboard.eu) — European rail search via their GraphQL API.
@@ -19,9 +20,10 @@ import type { ProviderTrainOffer } from './trains';
  *   getJourneyOffer(journey, …)    → live fares from the operators (SLOW —
  *                                    30s+ cold, ~3s once their cache is warm)
  *
- * Because live pricing is slow, we only price a few journeys spread across
- * the day and return the rest unpriced (limitedCoverage), matching the
- * honest-data pattern used for Deutsche Bahn fares.
+ * Because live pricing is slow and quota-metered, we price up to
+ * OFFER_CANDIDATES of the day's journeys (sensible-length daytime ones first,
+ * see pickOfferCandidates) and return the rest unpriced (limitedCoverage),
+ * matching the honest-data pattern used for Deutsche Bahn fares.
  */
 
 /** getLocations: a name lookup, fast even cold. */
@@ -36,8 +38,25 @@ const LOCATION_TIMEOUT_MS = 10_000;
  */
 const JOURNEY_TIMEOUT_MS = 25_000;
 const OFFER_TIMEOUT_MS = 30_000;
-/** How many journeys get live-priced per search (spread across the day). */
-const OFFER_CANDIDATES = 3;
+/**
+ * How many journeys get live-priced per search. The cap is ours, not the
+ * provider's: getJourneyOffer prices any journey id getJourneys returned.
+ * It was 3 (first, middle and last of the day), and those are often the
+ * worst three to price: live, 2027-03-19/20 (2026-11-23), Munich → Prague's
+ * last was a 39h three-ticket journey, Vienna → Munich's first and last
+ * were 05:38 and a 22:44 sleeper (NO_FARES), and the 18 daytime trains
+ * between them got one fare. Salzburg → Prague went from 2 fares to 4.
+ * Most of the newly picked journeys on that probe came back UNKNOWN (no
+ * fare yet — the provider's cold path), as cold picks did under the old
+ * rule, so the gain grows as their cache warms.
+ *
+ * Quota: pricing is getJourneyOffer only, which the timetable quota does
+ * not meter. 6 doubles a NEW route-and-day's offer requests (3 → up to 6;
+ * a search is 2 + 1 + up to 6 requests). The gateway sends no rate-limit
+ * headers, so per-request is the honest unit. Repeats come from trains.ts's
+ * 10-minute cache when the answer was complete.
+ */
+export const OFFER_CANDIDATES = 6;
 /** Cap on unpriced schedule rows returned when pricing fails. */
 const MAX_UNPRICED = 3;
 
@@ -203,14 +222,54 @@ type SearchParams = {
   travelers: number;
 };
 
+/** A departure's local hour, read from its ISO string ("…T06:49:00+01:00"). */
+function localHour(iso: string | undefined): number | null {
+  const m = /T(\d{2}):/.exec(iso ?? '');
+  return m ? Number(m[1]) : null;
+}
+
+/** Departures from 06:00 up to 21:00 local count as daytime. */
+const DAY_START_HOUR = 6;
+const DAY_END_HOUR = 21;
+
+/** `k` items spread evenly over `items` (in their order), always keeping the first and last. */
+function spread<T>(items: T[], k: number): T[] {
+  if (items.length <= k) return items;
+  if (k <= 0) return [];
+  if (k === 1) return [items[0]];
+  const picked = new Set<number>();
+  for (let i = 0; i < k; i++) picked.add(Math.round((i * (items.length - 1)) / (k - 1)));
+  return [...picked].sort((a, b) => a - b).map((i) => items[i]);
+}
+
+export type OfferCandidateInput = { departure?: string; durationMinutes: number | null };
+
 /**
- * Pick which journeys to live-price: first, middle, and last of the day.
- * Pricing is the slow call, so a spread gives morning/midday/evening fares
- * without paying the cost of pricing all ~20 timetable entries.
+ * Pick which of the day's journeys (in timetable order) to live-price, at
+ * most `cap` of them, returned as indices in timetable order.
+ *
+ * Journeys that are long by longJourney.ts's rule (over max(fastest × 2,
+ * fastest + 3h)) are never priced: every picker downstream puts them behind
+ * any sensible option, so a fare for one is quota spent on a train nobody is
+ * offered. Of the rest, daytime departures (06:00–21:00) come first, then
+ * night ones; when a group has more journeys than the slots left, they are
+ * spread across the day rather than taking the earliest.
  */
-function pickOfferCandidates(count: number): number[] {
-  if (count <= OFFER_CANDIDATES) return Array.from({ length: count }, (_, i) => i);
-  return [0, Math.floor(count / 2), count - 1];
+export function pickOfferCandidates(
+  journeys: OfferCandidateInput[],
+  cap: number = OFFER_CANDIDATES,
+): number[] {
+  const limit = longJourneyLimit(journeys.map((j) => j.durationMinutes));
+  const day: number[] = [];
+  const night: number[] = [];
+  journeys.forEach((j, i) => {
+    if (isLongMinutes(j.durationMinutes, limit)) return;
+    const h = localHour(j.departure);
+    (h != null && h >= DAY_START_HOUR && h < DAY_END_HOUR ? day : night).push(i);
+  });
+  const fromDay = spread(day, cap);
+  const fromNight = spread(night, cap - fromDay.length);
+  return [...fromDay, ...fromNight].sort((a, b) => a - b);
 }
 
 /**
@@ -280,7 +339,7 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
     if (journeys.length === 0) return { offers: [], complete: notYet.length === 0 };
     let pricingFailed = notYet.length > 0;
 
-    // Live-price a spread of the day's journeys. USD is requested natively so
+    // Live-price the picked journeys (pickOfferCandidates). USD is requested natively so
     // no FX conversion is needed. Amounts arrive in cents. Failures are
     // per-journey and non-fatal.
     //
@@ -299,7 +358,15 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
     // path on which it can be multiplied twice.
     const party = Math.max(1, Math.floor(params.travelers) || 1);
     const passengers = Array.from({ length: party }, () => '{type: ADULT}').join(', ');
-    const candidates = pickOfferCandidates(journeys.length);
+    const candidates = pickOfferCandidates(
+      journeys.map((j) => {
+        const segs = segmentsOf(j.itinerary);
+        const dep = segs[0]?.departureAt;
+        const arr = segs[segs.length - 1]?.arrivalAt;
+        const minutes = dep && arr ? (new Date(arr).getTime() - new Date(dep).getTime()) / 60000 : NaN;
+        return { departure: dep, durationMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : null };
+      }),
+    );
     const priced = new Map<number, number>();
     await Promise.all(
       candidates.map(async (idx) => {
