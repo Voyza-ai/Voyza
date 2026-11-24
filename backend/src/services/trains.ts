@@ -519,8 +519,8 @@ function toPartyTotal(offer: ProviderTrainOffer, travelers: number): TrainOffer 
 /**
  * Global cap on concurrent train searches — the same gate flights.ts puts
  * in front of Duffel, sized for a coarser unit of work. One slot here is a
- * whole route's provider fan-out: All Aboard spends up to 6 requests per
- * route (2 location lookups, 1 getJourneys, 3 getJourneyOffer) and
+ * whole route's provider fan-out: All Aboard spends up to 9 requests per
+ * route (2 location lookups, 1 getJourneys, up to 6 getJourneyOffer) and
  * Deutsche Bahn another 3, where MAX_CONCURRENT_SEARCHES gates a single
  * Duffel call — so 8 slots is roughly the same order of concurrent
  * provider requests as that 6.
@@ -528,7 +528,7 @@ function toPartyTotal(offer: ProviderTrainOffer, travelers: number): TrainOffer 
  * Why it's needed: the optimizer fans out over every candidate ordering
  * (120 orderings × 4 legs = 480 concurrent compareLeg calls for a 5-city
  * trip). The dedupe below collapses those to ~80 distinct legs, but
- * ungated those 80 still fire ~240 getJourneyOffer calls at once — the
+ * ungated those 80 still fire up to ~480 getJourneyOffer calls at once — the
  * request allaboard.ts documents as "30s+ cold" — and the provider sheds
  * the burst, so the legs come back with no fare at all.
  */
