@@ -14,7 +14,8 @@
  * cheapest sensible option. Either way, a very long journey (tripLegs.ts
  * LONG_RATIO) is only picked when nothing else exists.
  */
-import { LONG_EXTRA_MIN, LONG_RATIO, formatMinutes } from './tripLegs';
+import { formatMinutes } from './tripLegs';
+import { isLongMinutes, longJourneyLimit } from './longJourney';
 
 export type LegPreference = {
   source: 'chat' | 'card';
@@ -34,6 +35,8 @@ export type Pickable = {
   operator: string;
   price: number;
   durationMinutes: number;
+  /** Leg options carry it; home-leg rows (all flights) don't. */
+  mode?: 'flight' | 'train';
 };
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -114,10 +117,16 @@ export type Pick<T> = {
 export function pickByPreference<T extends Pickable>(options: T[], pref: LegPreference | null, label: string, when: string): Pick<T> {
   const byPrice = [...options].sort((a, b) => (a.price || Infinity) - (b.price || Infinity));
   if (byPrice.length === 0) return { ordered: [], note: null };
-  const known = byPrice.map((o) => o.durationMinutes).filter((m) => m > 0);
-  const fastest = known.length ? Math.min(...known) : 0;
-  const limit = fastest > 0 ? Math.max(fastest * LONG_RATIO, fastest + LONG_EXTRA_MIN) : Infinity;
-  const sensible = byPrice.filter((o) => !(o.durationMinutes > 0 && o.durationMinutes > limit));
+  // Long against the fastest option of its OWN mode, as compareLeg and
+  // orderLegOptions judge it. Across modes, Salzburg → Prague (2027-03-21)
+  // judged every train against a 3h 40m one-stop flight (limit 7h 20m): the
+  // $381.99 and $387.87 trains (9h 10m, 8h 02m) were dropped as "long" and the
+  // chat picked the $408.17 one, while the 6h 01m train made them sensible.
+  const limitFor = new Map<string | undefined, number | null>();
+  for (const mode of new Set(byPrice.map((o) => o.mode))) {
+    limitFor.set(mode, longJourneyLimit(byPrice.filter((o) => o.mode === mode).map((o) => o.durationMinutes)));
+  }
+  const sensible = byPrice.filter((o) => !isLongMinutes(o.durationMinutes, limitFor.get(o.mode) ?? null));
   const pool = sensible.length > 0 ? sensible : byPrice;
 
   let pick = pool[0];

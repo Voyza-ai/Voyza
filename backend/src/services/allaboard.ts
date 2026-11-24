@@ -341,36 +341,51 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
             pricingFailed = true;
             logger.warn('All Aboard offer pricing incomplete', { journey: journeys[idx]?.id, statuses: offerNotYet });
           }
-          const offers = (offerData.getJourneyOffer.itinerary ?? []).flatMap(
-            (item) => item.offers ?? [],
-          );
-          const usdAmounts: number[] = [];
-          for (const o of offers) {
-            const raw = o.price?.amount;
-            if (typeof raw !== 'number' || !(raw > 0)) continue;
-            const units = raw / 100;
-            const code = o.price?.currency?.trim().toUpperCase();
+          // One SegmentCollection is one TICKET for part of the journey —
+          // Salzburg → Prague via Vienna (2027-03-21, 19:07) came back as
+          // Salzburg → Wien $257.20 and Wien → Praha $130.67 for two adults.
+          // Its offers are alternative fares (classes) for that ticket. So a
+          // journey costs the cheapest fare of EACH ticket, summed, and has no
+          // price when any ticket has none. Taking the cheapest offer across
+          // every ticket priced that journey as one of its parts ($130.67
+          // for a $387.87 trip), which then won every cheapest-train pick.
+          const tickets = offerData.getJourneyOffer.itinerary ?? [];
+          let total = 0;
+          let everyTicketPriced = tickets.length > 0;
+          for (const ticket of tickets) {
+            const usdAmounts: number[] = [];
+            for (const o of ticket.offers ?? []) {
+              const raw = o.price?.amount;
+              if (typeof raw !== 'number' || !(raw > 0)) continue;
+              const units = raw / 100;
+              const code = o.price?.currency?.trim().toUpperCase();
 
-            if (!code || code === 'USD') {
-              usdAmounts.push(units);
-              continue;
-            }
+              if (!code || code === 'USD') {
+                usdAmounts.push(units);
+                continue;
+              }
 
-            const usd = await convertToUsd(units, code);
-            if (usd === null || !Number.isFinite(usd) || usd <= 0) {
-              logger.warn('All Aboard offer dropped — no USD rate for its currency', {
+              const usd = await convertToUsd(units, code);
+              if (usd === null || !Number.isFinite(usd) || usd <= 0) {
+                logger.warn('All Aboard offer dropped — no USD rate for its currency', {
+                  journey: journeys[idx]?.id,
+                  currency: code,
+                });
+                continue;
+              }
+              logger.warn('All Aboard quoted a currency other than the USD requested', {
                 journey: journeys[idx]?.id,
                 currency: code,
               });
-              continue;
+              usdAmounts.push(usd);
             }
-            logger.warn('All Aboard quoted a currency other than the USD requested', {
-              journey: journeys[idx]?.id,
-              currency: code,
-            });
-            usdAmounts.push(usd);
+            if (usdAmounts.length === 0) {
+              everyTicketPriced = false;
+              break;
+            }
+            total += Math.min(...usdAmounts);
           }
-          if (usdAmounts.length > 0) priced.set(idx, Math.min(...usdAmounts) / party);
+          if (everyTicketPriced && total > 0) priced.set(idx, total / party);
         } catch (err: any) {
           pricingFailed = true;
           logger.warn('All Aboard offer pricing failed (non-fatal)', {

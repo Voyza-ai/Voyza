@@ -98,7 +98,7 @@
  *   bath BRS, sintra LIS, siena FLR, lucerne ZRH, cozumel CZM,
  *   la fortuna SJO, luxor LXR, krabi KBV, taichung RMQ, tainan TNN
  *
- * THIRTEEN keys the artifact cannot answer: towns under its 15,000 floor with
+ * FOURTEEN keys the artifact cannot answer: towns under its 15,000 floor with
  * no airport of their own. Each names the airport a traveller flies into, and
  * where two are equally large the owner's rule — size beats distance — needed
  * a real-world tiebreak, stated:
@@ -125,6 +125,11 @@
  *                       Sogndal (33 km) is a small regional field
  *   koh phi phi   HKT   ferries run from Phuket and Krabi, both "large" in
  *                       the data; Phuket is far the busier airport
+ *   grand turk    GDT   an island, not a town: GeoNames files its town as
+ *                       Cockburn Town (which the artifact answers GDT) and
+ *                       Duffel's place search returns nothing for the name,
+ *                       so the trip got no flights at all. GDT is on the
+ *                       island, 1.9 km from Cockburn Town.
  *
  * THREE overrule the artifact, and the measured reason is stated:
  *
@@ -151,6 +156,8 @@ export const CITY_AIRPORTS: Record<string, string> = {
   seattle: 'SEA', washington: 'WAS', 'new orleans': 'MSY', austin: 'AUS',
   honolulu: 'HNL', toronto: 'YTO', vancouver: 'YVR', montreal: 'YMQ',
   'mexico city': 'MEX', cancun: 'CUN', havana: 'HAV', 'panama city': 'PTY',
+  // Grand Turk is an island; its town and airport, decided in the header.
+  'grand turk': 'GDT',
   // Demo and preset towns, decided in the header. Playa del Carmen is CUN,
   // not the island airport the artifact leads with; Monteverde and Manuel
   // Antonio have no airport of their own.
