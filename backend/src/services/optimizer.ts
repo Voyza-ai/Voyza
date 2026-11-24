@@ -1,3 +1,4 @@
+import { comparePick } from './longJourney';
 import { compareLeg, LegComparison, type CompareLegParams } from './compareLeg';
 import { getIataCode, searchFlights, type IataLookupContext } from './flights';
 import { isDuffelTestOffer, withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
@@ -1604,7 +1605,10 @@ async function searchHomeFlights(ctx: RunContext, params: {
   // One airport's test-airline fare must not undercut another's real one.
   const all = withoutTestAirlineWhenRealOffered(perAirport.flat(), (x: any) => x.offer);
   if (all.length === 0) return [];
-  all.sort((a, b) => (a.offer.price ?? Infinity) - (b.offer.price ?? Infinity));
+  // Cheapest first, but a flight leaving or landing 00:00–04:59 goes after
+  // every priced one at sensible hours (longJourney.ts small hours): a Boston →
+  // Prague outbound landing at 01:31 strands the traveller at the airport.
+  all.sort((a, b) => comparePick(a.offer, b.offer));
 
   return all.slice(0, limit).map(({ offer, homeAirport }) => toHomeFlightOffer(offer, homeAirport, cityIata, reverse));
 }
@@ -1786,7 +1790,10 @@ async function searchHomeOffers(ctx: RunContext, params: {
 
   // One airport's test-airline fare must not undercut another's real one.
   const all = withoutTestAirlineWhenRealOffered(found, (x) => x.offer);
-  all.sort((a, b) => (a.offer.price ?? Infinity) - (b.offer.price ?? Infinity));
+  // Cheapest first, but a flight leaving or landing 00:00–04:59 goes after
+  // every priced one at sensible hours (longJourney.ts small hours): a Boston →
+  // Prague outbound landing at 01:31 strands the traveller at the airport.
+  all.sort((a, b) => comparePick(a.offer, b.offer));
   return {
     offers: all.map(({ offer, homeAirport }) => toHomeFlightOffer(offer, homeAirport, cityIata, reverse)),
     leftOut: usable.filter((a) => !searched.includes(a)),
