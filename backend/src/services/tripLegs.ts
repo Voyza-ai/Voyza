@@ -675,15 +675,30 @@ export function describeRequest(request: ChoiceRequest, leg: TripLeg): string {
 export { LONG_RATIO, LONG_EXTRA_MIN };
 
 /**
- * The longest a sensible option may take on this leg, from the fastest one
- * known (searched options and the current one). null = no durations known.
+ * The longest a sensible option may take on this leg, per mode: a FLIGHT
+ * against the fastest flight, a TRAIN against the fastest train (searched
+ * options and the current one) — the planner's rule (compareLeg,
+ * orderLegOptions, pickByPreference). Across modes, a 4h 03m Vienna → Munich
+ * train was "long" next to a 1h flight (limit 4h). null for a mode = no
+ * durations known for it.
  */
-export function journeyLimit(choices: LegChoice[], current?: LegChoice | null): number | null {
-  return longJourneyLimit([...choices, ...(current ? [current] : [])].map((c) => c.durationMinutes));
+export type JourneyLimit = { flight: number | null; train: number | null };
+
+export function journeyLimit(choices: LegChoice[], current?: LegChoice | null): JourneyLimit {
+  const all = [...choices, ...(current ? [current] : [])];
+  const of = (mode: 'flight' | 'train') => longJourneyLimit(all.filter((c) => c.mode === mode).map((c) => c.durationMinutes));
+  return { flight: of('flight'), train: of('train') };
 }
 
-export function isLongJourney(c: LegChoice, limit: number | null): boolean {
-  return limit != null && c.durationMinutes > 0 && c.durationMinutes > limit;
+export function isLongJourney(c: LegChoice, limit: JourneyLimit | null): boolean {
+  const l = limit ? limit[c.mode] : null;
+  return l != null && c.durationMinutes > 0 && c.durationMinutes > l;
+}
+
+/** The limit to quote for these options: their mode's, or the larger when both modes are among them. */
+export function limitFor(limit: JourneyLimit, options: LegChoice[]): number | null {
+  const ls = [...new Set(options.map((c) => c.mode))].map((m) => limit[m]).filter((l): l is number => l != null);
+  return ls.length ? Math.max(...ls) : null;
 }
 
 /** 1830 → "30h 30m", 58 → "58m", 480 → "8h". */

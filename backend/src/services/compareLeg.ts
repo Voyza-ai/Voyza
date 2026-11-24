@@ -265,12 +265,12 @@ export async function compareLeg(
       ...(cachedTrain.price != null ? { priceSource: { kind: 'cached' as const } } : {}),
     };
   } else if (trainsResult && Array.isArray(trainsResult) && trainsResult.length > 0) {
-    const withPrice = trainsResult.filter((t) => t.price !== null);
-    if (withPrice.length > 0) {
-      bestTrain = withPrice.reduce((a, b) => (a.price! < b.price! ? a : b));
-    } else {
-      bestTrain = trainsResult[0]; // take first even without price
-    }
+    // The cheapest train that isn't a long journey against the fastest TRAIN
+    // (longJourney.ts) — unpriced only when no sensible train has a price.
+    // Plain cheapest priced Munich → Prague (2027-03-19) as All Aboard's
+    // 23:09 → 14:21 two days later, 39h 12m at $76.60, over the 5h 37m
+    // Länderbahn train it had no fare for; the trip showed the 39h train.
+    bestTrain = cheapestSensible(trainsResult) ?? null;
   }
 
   // Door-to-door facts for the card: time city centre to city centre, and
