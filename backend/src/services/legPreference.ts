@@ -15,7 +15,7 @@
  * LONG_RATIO) is only picked when nothing else exists.
  */
 import { formatMinutes } from './tripLegs';
-import { isLongMinutes, longJourneyLimit } from './longJourney';
+import { comparePick, isLongMinutes, longJourneyLimit } from './longJourney';
 
 export type LegPreference = {
   source: 'chat' | 'card';
@@ -115,7 +115,8 @@ export type Pick<T> = {
  * sensible one with a note saying so.
  */
 export function pickByPreference<T extends Pickable>(options: T[], pref: LegPreference | null, label: string, when: string): Pick<T> {
-  const byPrice = [...options].sort((a, b) => (a.price || Infinity) - (b.price || Infinity));
+  // Priced first, daytime before small hours (00:00–04:59), cheapest first.
+  const byPrice = [...options].sort(comparePick);
   if (byPrice.length === 0) return { ordered: [], note: null };
   // Long against the fastest option of its OWN mode, as compareLeg and
   // orderLegOptions judge it. Across modes, Salzburg → Prague (2027-03-21)

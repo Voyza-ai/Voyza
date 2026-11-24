@@ -23,9 +23,13 @@ describe('pickByPreference: long journeys are judged within a mode', () => {
   it('does not call a train long next to a much faster flight', () => {
     // Across modes the 3h 40m flight set the limit at 7h 20m, both cheaper
     // trains were "long", and the $408.17 train was picked. Against the
-    // fastest TRAIN (6h 01m, limit 12h 02m) all three are sensible.
+    // fastest TRAIN (6h 01m, limit 12h 02m) all three are sensible. The two
+    // cheaper ones leave at 00:13 or arrive at 03:09 (small hours, longJourney.ts),
+    // so the 11:11 train is the pick — not the flight.
     const { ordered } = pickByPreference(salzburgPrague, null, 'Salzburg → Prague', 'Mar 21');
-    expect(ordered[0]).toMatchObject({ mode: 'train', price: 381.99 });
+    expect(ordered[0]).toMatchObject({ mode: 'train', price: 408.17, departTime: '11:11' });
+    // Then the flight at sensible hours, then the small-hours trains.
+    expect(ordered.slice(1, 4).map((o) => o.price)).toEqual([420.4, 381.99, 387.87]);
   });
 
   it('still buries a long flight behind a sensible one', () => {
