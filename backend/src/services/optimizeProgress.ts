@@ -83,4 +83,49 @@ export function readProgress(id: string, now: number = Date.now()): OptimizeProg
 /** Tests only. */
 export function _resetProgress() {
   entries.clear();
+  finals.clear();
+}
+
+/**
+ * The FULL answer of a two-phase optimize (prototype, exp/optimizer-speed):
+ * POST /api/optimize answered with the first answer and `finalPending: true`;
+ * the rest of the run lands here, for GET /api/optimize/final/:id. Same id,
+ * same TTL and cap as the progress entries.
+ */
+type FinalEntry =
+  | { state: 'pending'; at: number }
+  | { state: 'done'; at: number; result: unknown }
+  | { state: 'failed'; at: number; status: number; message: string };
+
+const finals = new Map<string, FinalEntry>();
+
+export function trackFinal(id: string, run: Promise<unknown>, now: () => number = Date.now): void {
+  const t = now();
+  for (const [k, f] of finals) if (t - f.at > PROGRESS_TTL_MS) finals.delete(k);
+  while (finals.size >= MAX_ENTRIES) {
+    const oldest = finals.keys().next().value;
+    if (oldest === undefined) break;
+    finals.delete(oldest);
+  }
+  finals.set(id, { state: 'pending', at: t });
+  run.then(
+    (result) => finals.set(id, { state: 'done', at: now(), result }),
+    (err: any) =>
+      finals.set(id, {
+        state: 'failed',
+        at: now(),
+        status: Number(err?.statusCode) || 500,
+        message: err?.message ?? 'Optimize failed',
+      }),
+  );
+}
+
+export function readFinal(id: string, now: number = Date.now()): FinalEntry | null {
+  const f = finals.get(id);
+  if (!f) return null;
+  if (now - f.at > PROGRESS_TTL_MS) {
+    finals.delete(id);
+    return null;
+  }
+  return f;
 }

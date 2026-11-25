@@ -139,9 +139,11 @@ describe('optimize progress reporting', () => {
     // directed pairs once, with its trains on the trip's first travel day
     // (the rail-quota rule in optimizer.ts) — but a pair's flights are still
     // searched on each day an order puts it, so 12 comparisons — and the
-    // winner's second leg is then re-priced with its trains on its real day:
-    // 13 in all.
-    expect(final.legsAsked).toBe(13);
+    // winner's legs are then re-priced with their trains on their real days:
+    // the second leg on its own day, and the first one too, since ranking
+    // read its trains off the rail board's snapshot (createRailBoard) and a
+    // train that answered after it must still reach the leg: 14 in all.
+    expect(final.legsAsked).toBe(14);
     expect(final.legsPriced).toBe(final.legsAsked);
     // Counted where the run dedupes its searches: never more than were sent.
     expect(final.flightSearches).toBeGreaterThan(0);

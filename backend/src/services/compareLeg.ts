@@ -96,6 +96,13 @@ export type CompareLegDeps = {
    * day's times, so it is NOT written to leg_price_cache under `params.date`.
    */
   trainDate?: string;
+  /**
+   * Where the leg's trains come from; default trains.ts searchTrains. The
+   * optimizer's ranking passes its rail board (optimizer.ts createRailBoard):
+   * every city pair searched once, up front, and ranking waits for those
+   * answers only up to RAIL_RANKING_WAIT_MS.
+   */
+  searchTrains?: (params: Parameters<typeof searchTrains>[0]) => Promise<TrainOffer[]>;
 };
 
 export async function compareLeg(
@@ -105,6 +112,7 @@ export async function compareLeg(
   const { origin, destination, date, travelers, originCountry, destinationCountry } = params;
   const resolveIata = deps.getIataCode ?? getIataCode;
   const findFlights = deps.searchFlights ?? searchFlights;
+  const findTrains = deps.searchTrains ?? searchTrains;
   const trainDate = deps.trainDate ?? date;
   // Only a train searched on the leg's own day may be cached as that day's.
   const trainOnOwnDay = trainDate === date;
@@ -211,7 +219,7 @@ export async function compareLeg(
         })(),
     cachedTrain
       ? Promise.resolve(null)
-      : searchTrains({ origin, destination, date: trainDate, travelers, originCountry, destinationCountry }).catch(() => []),
+      : findTrains({ origin, destination, date: trainDate, travelers, originCountry, destinationCountry }).catch(() => []),
   ]);
 
   // Pick the cheapest flight that isn't a long journey (longJourney.ts).

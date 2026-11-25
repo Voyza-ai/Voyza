@@ -208,10 +208,20 @@ type SearchParams = {
  * Pricing is the slow call, so a spread gives morning/midday/evening fares
  * without paying the cost of pricing all ~20 timetable entries.
  */
-function pickOfferCandidates(count: number): number[] {
-  if (count <= OFFER_CANDIDATES) return Array.from({ length: count }, (_, i) => i);
+function pickOfferCandidates(count: number, max: number = OFFER_CANDIDATES): number[] {
+  if (count <= max) return Array.from({ length: count }, (_, i) => i);
+  if (max === 1) return [0];
+  if (max === 2) return [0, Math.floor(count / 2)];
   return [0, Math.floor(count / 2), count - 1];
 }
+
+/**
+ * A lighter search, for ranking only (prototype variant B2,
+ * exp/optimizer-speed): direct trains only (`filter: {types: [NON_STOP]}`,
+ * which getJourneys accepts) and fewer journeys priced. Ranking needs a fare
+ * per city pair, not the day's timetable.
+ */
+export type AllAboardSearchOptions = { nonStopOnly?: boolean; offerCandidates?: number };
 
 /**
  * What a search found, and whether that is the whole answer. `complete` is
@@ -230,7 +240,10 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
   return (await searchAllAboardDetailed(params)).offers;
 }
 
-export async function searchAllAboardDetailed(params: SearchParams): Promise<AllAboardResult> {
+export async function searchAllAboardDetailed(
+  params: SearchParams,
+  opts: AllAboardSearchOptions = {},
+): Promise<AllAboardResult> {
   if (!env.ALLABOARD_API_KEY) return { offers: [], complete: true };
   const { origin, destination, date } = params;
   const session = randomUUID();
@@ -247,7 +260,7 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
 
     const data = await gql<{ getJourneys: AaJourney[] }>(
       `query($o: ID!, $d: ID!, $date: Date!) {
-        getJourneys(origin: $o, destination: $d, date: $date) {
+        getJourneys(origin: $o, destination: $d, date: $date${opts.nonStopOnly ? ', filter: {types: [NON_STOP]}' : ''}) {
           id
           status
           itinerary {
@@ -299,7 +312,7 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
     // path on which it can be multiplied twice.
     const party = Math.max(1, Math.floor(params.travelers) || 1);
     const passengers = Array.from({ length: party }, () => '{type: ADULT}').join(', ');
-    const candidates = pickOfferCandidates(journeys.length);
+    const candidates = pickOfferCandidates(journeys.length, opts.offerCandidates ?? OFFER_CANDIDATES);
     const priced = new Map<number, number>();
     await Promise.all(
       candidates.map(async (idx) => {

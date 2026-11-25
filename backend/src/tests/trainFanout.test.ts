@@ -53,7 +53,7 @@ beforeEach(() => {
 });
 
 describe('searchTrains fan-out', () => {
-  it('dedupes concurrent calls per leg, gates distinct legs at 8, and looks each city up once', async () => {
+  it('dedupes concurrent calls per leg, gates distinct legs at 24, and looks each city up once', async () => {
     let locationCalls = 0;
     let journeyCalls = 0;
     let inFlightJourneys = 0;
@@ -110,55 +110,80 @@ describe('searchTrains fan-out', () => {
       return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
     });
 
-    // 5 cities → 12 distinct legs, each requested 3 times concurrently, the
-    // way 3 orderings that share a leg would.
-    const cities = ['Paris', 'Rome', 'Madrid', 'Amsterdam', 'Lisbon'];
+    // 6 cities → 30 distinct legs, each requested 3 times concurrently, the
+    // way 3 orderings that share a leg would. (A 5-city trip's 20 pairs all
+    // start at once: the optimizer's rail board searches them up front.)
+    const cities = ['Paris', 'Rome', 'Madrid', 'Amsterdam', 'Lisbon', 'Vienna'];
     const legs: Array<[string, string]> = [];
-    for (const a of cities) for (const b of cities) if (a !== b && legs.length < 12) legs.push([a, b]);
-    expect(legs).toHaveLength(12);
+    for (const a of cities) for (const b of cities) if (a !== b) legs.push([a, b]);
+    expect(legs).toHaveLength(30);
 
     const results = legs.flatMap(([origin, destination]) =>
       [0, 1, 2].map(() => searchTrains({ origin, destination, date: '2026-10-01', travelers: 1 })),
     );
-    expect(results).toHaveLength(36);
+    expect(results).toHaveLength(90);
 
     await settle();
-    // Gate: only 8 of the 12 distinct legs got as far as getJourneys.
-    expect(journeyCalls).toBe(8);
-    expect(gates).toHaveLength(8);
+    // Gate: only 24 of the 30 distinct legs got as far as getJourneys.
+    expect(journeyCalls).toBe(24);
+    expect(gates).toHaveLength(24);
 
     // Drain: releasing one journey frees one slot, which admits the next leg.
     let guard = 0;
-    while (journeyCalls < 12 || gates.length > 0) {
+    while (journeyCalls < 30 || gates.length > 0) {
       gates.shift()?.();
       await settle();
-      if (++guard > 100) throw new Error('fan-out test did not drain');
+      if (++guard > 200) throw new Error('fan-out test did not drain');
     }
     const offers = await Promise.all(results);
 
-    expect(journeyCalls).toBe(12); // dedupe: 36 calls → 12 provider searches
-    expect(peakJourneys).toBe(8); // gate: never more than 8 in flight
-    expect(locationCalls).toBe(5); // promise cache: one getLocations per city
+    expect(journeyCalls).toBe(30); // dedupe: 90 calls → 30 provider searches
+    expect(peakJourneys).toBe(24); // gate: never more than 24 in flight
+    expect(locationCalls).toBe(6); // promise cache: one getLocations per city
     // Every duplicate caller got the same (deduped) result.
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 30; i++) {
       expect(offers[i * 3 + 1]).toBe(offers[i * 3]);
       expect(offers[i * 3 + 2]).toBe(offers[i * 3]);
     }
     expect(offers[0][0].price).toBe(42);
   });
 
-  it('does not cache a failed search, so the next caller retries', async () => {
+  it('remembers a failed search as no rail answer: the next caller does not wait, one that opts out retries', async () => {
     // Every request fails → both providers return [] non-fatally. That is
-    // not "no trains on this route": All Aboard timing out on a cold search
-    // used to be cached for 10 minutes, so every trip search in that window
-    // priced the route on flights only. The next caller must search again.
+    // not "no trains on this route" and is not cached as the route's trains
+    // (All Aboard timing out on a cold search used to be, for 10 minutes).
+    // It IS remembered as "no rail answer" (noRailAnswer, 15 min): the next
+    // search answers at once instead of paying the same wait again. Work
+    // nobody waits on can still ask again (ignoreNoAnswer).
     mockFetch.mockRejectedValue(new Error('everything down'));
     const params = { origin: 'Oslo', destination: 'Bergen', date: '2026-10-01', travelers: 1 };
     await expect(searchTrains(params)).resolves.toEqual([]);
     await settle();
     const callsAfterFirst = mockFetch.mock.calls.length;
     await expect(searchTrains(params)).resolves.toEqual([]);
+    expect(mockFetch.mock.calls.length).toBe(callsAfterFirst);
+    await expect(searchTrains(params, { ignoreNoAnswer: true })).resolves.toEqual([]);
     expect(mockFetch.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+  });
+
+  it('forgets a no-answer route-day after 15 minutes', async () => {
+    mockFetch.mockRejectedValue(new Error('everything down'));
+    const params = { origin: 'Oslo', destination: 'Trondheim', date: '2026-10-02', travelers: 1 };
+    const t0 = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(t0);
+    try {
+      await searchTrains(params);
+      await settle();
+      const calls = mockFetch.mock.calls.length;
+      now.mockReturnValue(t0 + 14 * 60_000);
+      await searchTrains(params);
+      expect(mockFetch.mock.calls.length).toBe(calls);
+      now.mockReturnValue(t0 + 16 * 60_000);
+      await searchTrains(params);
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(calls);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('retries a route whose first search timed out, and finds the train once All Aboard answers', async () => {
@@ -208,7 +233,9 @@ describe('searchTrains fan-out', () => {
     await expect(searchTrains(params)).resolves.toEqual([]);
     await settle();
     journeysFail = false;
-    const second = await searchTrains(params);
+    // Remembered as no rail answer: answered at once, without asking.
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    const second = await searchTrains(params, { ignoreNoAnswer: true });
     expect(second).toHaveLength(1);
     expect(second[0].operator).toBe('ÖBB');
     expect(second[0].price).toBeCloseTo(56.05, 2);
@@ -246,8 +273,12 @@ describe('searchTrains fan-out', () => {
     expect(first[0].price).toBeNull(); // timetable row, unpriced
     await settle();
     pricingFails = false;
-    const second = await searchTrains(params);
+    // No fare is no rail answer: remembered, with its timetable row.
+    expect((await searchTrains(params))[0].price).toBeNull();
+    const second = await searchTrains(params, { ignoreNoAnswer: true });
     expect(second[0].price).toBe(30);
+    // And a priced answer replaces the memory for everyone.
+    expect((await searchTrains(params))[0].price).toBe(30);
   });
 
   it('a RATE_LIMITED answer is not "no trains": it is not cached, and the next search finds the train', async () => {
@@ -289,7 +320,10 @@ describe('searchTrains fan-out', () => {
     await expect(searchTrains(params)).resolves.toEqual([]);
     await settle();
     limited = false;
-    const second = await searchTrains(params);
+    // Remembered as no rail answer — a rate-limited key is not asked again.
+    await expect(searchTrains(params)).resolves.toEqual([]);
+    expect(journeyCalls).toBe(1);
+    const second = await searchTrains(params, { ignoreNoAnswer: true });
     expect(journeyCalls).toBe(2);
     expect(second).toHaveLength(1);
     expect(second[0].operator).toBe('SBB');
@@ -318,7 +352,8 @@ describe('searchTrains fan-out', () => {
     expect((await searchTrains(params))[0].price).toBeNull();
     await settle();
     limited = false;
-    expect((await searchTrains(params))[0].price).toBe(40);
+    expect((await searchTrains(params))[0].price).toBeNull(); // remembered
+    expect((await searchTrains(params, { ignoreNoAnswer: true }))[0].price).toBe(40);
   });
 
   it('NO_TIMETABLE is a real answer and is cached', async () => {

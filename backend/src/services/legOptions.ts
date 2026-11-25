@@ -91,6 +91,13 @@ type SearchParams = {
    * each name gets its no-context answer, as before.
    */
   tripCityNames?: string[];
+  /**
+   * Where the trains come from; default trains.ts searchTrains. The
+   * optimizer passes its run's rail (optimizer.ts RunRail), so the winner's
+   * alternatives reuse the answer its exact re-price got for the same
+   * route-day instead of searching it again.
+   */
+  searchTrains?: (params: Parameters<typeof searchTrains>[0]) => Promise<TrainOffer[]>;
 };
 
 /**
@@ -375,7 +382,7 @@ export async function searchLegOptions(
         return [] as FlightOffer[];
       }
     })(),
-    searchTrains({
+    (params.searchTrains ?? searchTrains)({
       origin: from,
       destination: to,
       date,

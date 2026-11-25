@@ -12,6 +12,8 @@ import { addDays, clampToFuture, todayIso } from '../utils/dates';
 import { withDuffelRetryBudget } from './duffelBudget';
 import { AppError } from '../middleware/error';
 import { searchHotels, plannerHotelPick } from './hotels';
+import { searchTrains, type SearchTrainsParams, type TrainOffer } from './trains';
+import { trainSearchKey } from './trainKey';
 import type { ProgressSink } from './optimizeProgress';
 
 /**
@@ -91,10 +93,82 @@ type RunContext = {
   trainDate?: TrainDateRule;
   /**
    * The same run context (memos, phase, counters), with `compare` searching
-   * trains by `rule` — undefined puts every leg back on its own day.
+   * trains by `rule` — undefined puts every leg back on its own day. Drops
+   * any train source (withTrainSource): only ranking reads the rail board.
    */
   withTrainDate(rule: TrainDateRule | undefined): RunContext;
+  /** Where `compare` gets trains from (see createRailBoard); undefined: `rail.search`. */
+  trainSource?: TrainSource;
+  /** This run's rail searches, one per route-day (see RunRail). */
+  rail: RunRail;
+  /** The same run context, with `compare` taking its trains from `source`. */
+  withTrainSource(source: TrainSource | undefined): RunContext;
 };
+
+/**
+ * A replacement for searchTrains inside compareLeg (CompareLegDeps.searchTrains).
+ * `id` goes into the compare memo key: a leg priced on a source's trains is
+ * a different answer from the same leg searched normally.
+ */
+type TrainSource = {
+  id: string;
+  search: (params: SearchTrainsParams) => Promise<TrainOffer[]>;
+};
+
+/**
+ * Every rail search one optimize() run makes — the rail board, the winner's
+ * real days, its leg alternatives, the date-shift probe — goes through here,
+ * keyed exactly as trains.ts caches (trainSearchKey). The FIRST answer for a
+ * route-day is the run's answer, incomplete or not: trains.ts drops an
+ * incomplete answer from its cache, so production's 4-city plan searched
+ * Paris → Prague on one day three times, ~25 s each, and the winner's exact
+ * re-price and its alternatives searched the same route-day back to back.
+ *
+ * `retry` is variant C only: one more search, once per run, of a route-day
+ * whose answer had no priced train — for the work after the first answer.
+ */
+type RunRail = {
+  search: (params: SearchTrainsParams) => Promise<TrainOffer[]>;
+  retry: (params: SearchTrainsParams) => Promise<TrainOffer[]>;
+  /** Variant B2: the lighter ranking search (searchTrains' `quick`), once per route-day. */
+  quick: (params: SearchTrainsParams) => Promise<TrainOffer[]>;
+};
+
+function createRunRail(searchFn: typeof searchTrains = searchTrains): RunRail {
+  const first = new Map<string, Promise<TrainOffer[]>>();
+  const retried = new Map<string, Promise<TrainOffer[]>>();
+  const quickMemo = new Map<string, Promise<TrainOffer[]>>();
+  const quick = (params: SearchTrainsParams): Promise<TrainOffer[]> => {
+    const key = trainSearchKey(params);
+    let hit = quickMemo.get(key);
+    if (!hit) {
+      hit = searchFn(params, { quick: true }).catch(() => [] as TrainOffer[]);
+      quickMemo.set(key, hit);
+    }
+    return hit;
+  };
+  const search = (params: SearchTrainsParams): Promise<TrainOffer[]> => {
+    const key = trainSearchKey(params);
+    let hit = first.get(key);
+    if (!hit) {
+      hit = searchFn(params).catch(() => [] as TrainOffer[]);
+      first.set(key, hit);
+    }
+    return hit;
+  };
+  const retry = async (params: SearchTrainsParams): Promise<TrainOffer[]> => {
+    const answer = await search(params);
+    if (answer.some((t) => t.price != null)) return answer;
+    const key = trainSearchKey(params);
+    let hit = retried.get(key);
+    if (!hit) {
+      hit = searchFn(params, { ignoreNoAnswer: true }).catch(() => answer);
+      retried.set(key, hit);
+    }
+    return hit;
+  };
+  return { search, retry, quick };
+}
 
 /** Which day to search a leg's trains on, given what compareLeg is asked. */
 type TrainDateRule = (params: CompareLegParams) => string;
@@ -164,14 +238,24 @@ function createRunContext(tripCityNames: string[], report?: ProgressSink): RunCo
   // One memo for every phase: a leg priced by the screen is the same leg
   // when scoring reads it.
   const compareMemo = new Map<string, Promise<LegComparison>>();
-  const build = (phase: SearchPhase, trainDate: TrainDateRule | undefined): RunContext => {
+  const rail = createRunRail();
+  const build = (
+    phase: SearchPhase,
+    trainDate: TrainDateRule | undefined,
+    trainSource: TrainSource | undefined,
+  ): RunContext => {
     const flights = flightsFor(phase);
     const compare = (params: CompareLegParams): Promise<LegComparison> => {
       const onDay = trainDate?.(params);
-      const key = compareKey(params, onDay);
+      const key = compareKey(params, onDay) + (trainSource ? `|rail@${trainSource.id}` : '');
       let hit = compareMemo.get(key);
       if (!hit) {
-        hit = compareLeg(params, { getIataCode: iata, searchFlights: flights, ...(onDay ? { trainDate: onDay } : {}) });
+        hit = compareLeg(params, {
+          getIataCode: iata,
+          searchFlights: flights,
+          ...(onDay ? { trainDate: onDay } : {}),
+          searchTrains: trainSource ? trainSource.search : rail.search,
+        });
         compareMemo.set(key, hit);
         if (report) {
           legCounts.asked++;
@@ -188,11 +272,14 @@ function createRunContext(tripCityNames: string[], report?: ProgressSink): RunCo
     return {
       tripCityNames, iata, homeIata, compare, compareMemo, flights, flightOutcomes, searchLedger,
       trainDate,
-      phased: (next) => build(next, trainDate),
-      withTrainDate: (rule) => build(phase, rule),
+      trainSource,
+      rail,
+      phased: (next) => build(next, trainDate, trainSource),
+      withTrainDate: (rule) => build(phase, rule, undefined),
+      withTrainSource: (source) => build(phase, trainDate, source),
     };
   };
-  return build('score', undefined);
+  return build('score', undefined, undefined);
 }
 
 /**
@@ -273,7 +360,13 @@ function createProbeGate(limit: number): ProbeGate {
  * the run's memo without waiting on the gate. The probe's own comparisons
  * get their own memo, so an answer it was refused never reaches the run's.
  */
-function probeContext(ctx: RunContext, gate: ProbeGate, trainDate?: TrainDateRule): RunContext {
+function probeContext(
+  ctx: RunContext,
+  gate: ProbeGate,
+  trainDate?: TrainDateRule,
+  /** The run's rail the probe reads (variant C: the same retry the winner's legs got). */
+  trainSearch: TrainSource['search'] = ctx.rail.search,
+): RunContext {
   const memo = new Map<string, Promise<LegComparison>>();
   const compare = (params: CompareLegParams): Promise<LegComparison> => {
     const onDay = trainDate?.(params);
@@ -281,7 +374,12 @@ function probeContext(ctx: RunContext, gate: ProbeGate, trainDate?: TrainDateRul
     let hit = ctx.compareMemo.get(key) ?? memo.get(key);
     if (!hit) {
       hit = gate.run(() =>
-        compareLeg(params, { getIataCode: ctx.iata, searchFlights: ctx.flights, ...(onDay ? { trainDate: onDay } : {}) }),
+        compareLeg(params, {
+          getIataCode: ctx.iata,
+          searchFlights: ctx.flights,
+          ...(onDay ? { trainDate: onDay } : {}),
+          searchTrains: trainSearch,
+        }),
       );
       memo.set(key, hit);
     }
@@ -294,7 +392,123 @@ function probeContext(ctx: RunContext, gate: ProbeGate, trainDate?: TrainDateRul
     compareMemo: memo,
     flights,
     trainDate,
-    withTrainDate: (rule) => probeContext(ctx, gate, rule),
+    trainSource: undefined,
+    withTrainDate: (rule) => probeContext(ctx, gate, rule, trainSearch),
+    withTrainSource: () => probeContext(ctx, gate, trainDate, trainSearch),
+  };
+}
+
+/**
+ * Longest ranking waits for rail, counted from when the rail board starts
+ * (the top of optimize()). Every city pair's trains are searched once, up
+ * front, on the ranking day (createRailBoard); a pair that has not answered
+ * by then is ranked on its flights.
+ *
+ * Why a cap: ranking used to wait for each leg's train inside every round,
+ * and a cold All Aboard route answers `[ERROR, UNKNOWN]` after ~16-24 s, or
+ * is aborted at 25 s — production's 4-city plan took 177 s on 33 flight
+ * searches (2026-11-24). Warm routes answer in 2-6 s, so 8 s still ranks
+ * on the trains the provider has to hand.
+ */
+const RAIL_RANKING_WAIT_MS = 8_000;
+
+/**
+ * The trip's rail, searched once per ordered city pair on the ranking day,
+ * all at once and before any flight — so ranking rounds wait on flights only.
+ *
+ * `source` is what ranking's compareLeg reads trains from (TrainSource): the
+ * board's answers as they stood at the SNAPSHOT — RAIL_RANKING_WAIT_MS after
+ * the board started, or as soon as every pair has answered, whichever is
+ * first. One snapshot for the whole ranking: every ordering is ranked on the
+ * same trains, so two orderings never differ only by when their legs were
+ * priced. A pair not in the snapshot is ranked on its flights.
+ *
+ * The searches run on after the snapshot (into trains.ts' caches), and the
+ * winner's legs take a late answer when they are priced on their own day
+ * (`answerNow` for the first answer; searchTrains' cache for the rest).
+ * Asking the board for any other day, or a pair it does not hold, searches
+ * as usual.
+ */
+type RailBoard = {
+  source: TrainSource;
+  /** The pair's answer if its search has finished, at any time; undefined while it runs. */
+  answerNow(from: string, to: string): TrainOffer[] | undefined;
+  /** Whether ranking had the pair's answer (false before the snapshot). */
+  snapshotHad(from: string, to: string): boolean;
+  /** For the run's log line: pairs searched, answered by the snapshot, with a priced train in it, and answered by now. */
+  stats(): { pairs: number; inSnapshot: number; pricedInSnapshot: number; settled: number; snapshotMs: number | null };
+};
+
+function createRailBoard(args: {
+  pairs: Array<[string, string]>;
+  day: string;
+  travelers: number;
+  countryOf: (city: string) => string | undefined;
+  waitMs: number;
+  search?: (params: SearchTrainsParams) => Promise<TrainOffer[]>;
+}): RailBoard {
+  const search = args.search ?? ((p: SearchTrainsParams) => searchTrains(p));
+  const started = Date.now();
+  const key = (from: string, to: string) => `${from}\u0000${to}`;
+  const held = new Set<string>();
+  const settled = new Map<string, TrainOffer[]>();
+  const pending: Array<Promise<void>> = [];
+  for (const [from, to] of args.pairs) {
+    const k = key(from, to);
+    if (held.has(k)) continue;
+    held.add(k);
+    pending.push(
+      search({
+        origin: from,
+        destination: to,
+        date: args.day,
+        travelers: args.travelers,
+        originCountry: args.countryOf(from),
+        destinationCountry: args.countryOf(to),
+      }).then(
+        (offers) => {
+          settled.set(k, offers);
+        },
+        () => {
+          settled.set(k, []);
+        },
+      ),
+    );
+  }
+  let snapshotMs: number | null = null;
+  let inSnapshot = 0;
+  let frozen: Map<string, TrainOffer[]> | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const snapshot: Promise<Map<string, TrainOffer[]>> = Promise.race([
+    Promise.all(pending),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, args.waitMs);
+    }),
+  ]).then(() => {
+    clearTimeout(timer);
+    snapshotMs = Date.now() - started;
+    inSnapshot = settled.size;
+    frozen = new Map(settled);
+    return frozen;
+  });
+  return {
+    source: {
+      id: 'board',
+      search: (p) => {
+        const k = key(p.origin, p.destination);
+        if (p.date !== args.day || !held.has(k)) return search(p);
+        return snapshot.then((m) => m.get(k) ?? []);
+      },
+    },
+    answerNow: (from, to) => settled.get(key(from, to)),
+    snapshotHad: (from, to) => frozen?.has(key(from, to)) ?? false,
+    stats: () => ({
+      pairs: held.size,
+      inSnapshot,
+      pricedInSnapshot: frozen ? [...frozen.values()].filter((offers) => offers.some((t) => t.price != null)).length : 0,
+      settled: settled.size,
+      snapshotMs,
+    }),
   };
 }
 
@@ -473,6 +687,11 @@ export type OptimizeResult = {
    * continue. The legs above were priced from `candidates[0]`.
    */
   originClarification?: OriginClarification;
+  /**
+   * Only on a two-phase FIRST answer (OptimizeParams.onFirstAnswer): its
+   * trains are the ranking day's, not yet re-priced on each leg's own day.
+   */
+  provisional?: boolean;
 };
 
 type OptimizeParams = {
@@ -514,6 +733,19 @@ type OptimizeParams = {
   cityNights?: Record<string, number>;
   /** Live progress for the planner's search screen (optimizeProgress.ts). */
   onProgress?: ProgressSink;
+  /**
+   * Two-phase answer (prototype, exp/optimizer-speed). Called once, as soon
+   * as the ranking is decided, with the trip as ranking priced it: the
+   * winner's legs (trains from the rail board's snapshot, so a leg off the
+   * ranking day carries that day's train — `provisional: true`), its home
+   * flights from ranking's own searches, and no leg alternatives or
+   * date-shift check yet. optimize() then finishes as before — trains on
+   * their real days, alternatives, home flights from every airport, the
+   * date-shift probe — and resolves with that full result.
+   */
+  onFirstAnswer?: (first: OptimizeResult) => void;
+  /** Tests only: RAIL_RANKING_WAIT_MS for this run. */
+  railWaitMs?: number;
 };
 
 const DEFAULT_NIGHTS_PER_CITY = 2;
@@ -636,7 +868,14 @@ const SCREEN_LOWER_BOUND = (1 - MAX_DATE_SWING) / (1 + MAX_DATE_SWING);
  * average. More budget buys that back only up to the window: at 48, a
  * quarter of 5-city plans went over 45 and stalled for most of a minute.
  */
-const PLAN_SEARCH_BUDGET = 42;
+//
+// Prototype note (exp/optimizer-speed): Duffel now answers every search with
+// `ratelimit-limit: 30` and a reset on the next wall-clock minute (measured
+// 2026-11-24) — fixed one-minute windows of 30, not ~45. A plan whose ranking
+// needs more than 30 searches waits for the next window; with rail off the
+// critical path that wait is what a 4-5 city first answer is made of.
+// OPT_PLAN_BUDGET overrides this for the benchmark (backend/scripts/opt-bench).
+const PLAN_SEARCH_BUDGET = Number(process.env.OPT_PLAN_BUDGET) > 0 ? Number(process.env.OPT_PLAN_BUDGET) : 42;
 
 /**
  * Most legs one best-first round prices: flights.ts' search slots
@@ -2132,8 +2371,183 @@ export function firstStayArrival(params: {
   return arrival < startDate ? startDate : arrival;
 }
 
+/**
+ * Step 2 of optimize(): the candidate orderings. Full permutations for up to
+ * 5 cities (the first city fixed when there is no home), filtered to the
+ * country-clustered ones; countryGroupedOrderings beyond that.
+ */
+function candidateOrderings(cities: CityInput[], hasOrigin: boolean, cityMap: Map<string, CityInput>): string[][] {
+  // When we have a real origin, "first city" is no longer a hack —
+  // it's just whatever destination is closest/cheapest after flying in
+  // from home. So we test FULL permutations of all destinations (no
+  // fixed-first). When there's no origin, we keep the legacy behavior
+  // (first city fixed) so existing behavior is preserved.
+  if (cities.length > 5) {
+    // Too many cities to permute — score a few orderings that are
+    // country-clustered by construction and let real leg prices pick.
+    return countryGroupedOrderings(cities);
+  }
+  let orderings: string[][];
+  if (hasOrigin) {
+    // Full permutations of all N destinations.
+    orderings = getPermutations(cities).map((p) => p.map((c) => c.name));
+  } else {
+    const rest = cities.slice(1);
+    const perms = getPermutations(rest);
+    orderings = perms.map((p) => [cities[0].name, ...p.map((c) => c.name)]);
+  }
+
+  // Apply the country-clustering filter: reject any ordering that bounces
+  // between countries (e.g. JP → CN → JP → CN). Only keep clustered ones.
+  const clustered = orderings.filter((o) => isCountryClustered(o, cityMap));
+  if (clustered.length > 0) return clustered;
+  logger.warn('Country clustering filter removed all orderings — falling back');
+  return orderings;
+}
+
+/**
+ * The two-phase FIRST answer (OptimizeParams.onFirstAnswer): the trip exactly
+ * as ranking priced it, with nothing searched that ranking had not:
+ *  - the winner's legs from ranking — flights on their own days, trains from
+ *    the rail board's snapshot (the ranking day's). One exception: a leg
+ *    FLOWN on the ranking day whose pair answered after the snapshot takes
+ *    that answer now — it is that day's real train ("fills the leg when it
+ *    arrives").
+ *  - home flights from the searches ranking made (flights.ts' cache on 1-3
+ *    cities; HomeFares' ranking offers on 4+ — the other airports follow in
+ *    the full answer).
+ *  - no leg alternatives and no date-shift check (dateShiftChecked: false).
+ * A deep copy: the full answer keeps working on the same objects.
+ * Null when every flight search failed (the full answer reports the outage).
+ */
+async function firstAnswer(args: {
+  ranked: ScoredRoute[];
+  savingsVsNaive: number;
+  iataCodes: Record<string, string>;
+  originClarification?: OriginClarification;
+  ctx: RunContext;
+  railBoard: RailBoard;
+  rankingTrainDay: string;
+  startDate: string;
+  travelers: number;
+  cityMap: Map<string, CityInput>;
+  nights: number[];
+  home: null | {
+    originAirports: string[];
+    origin?: string;
+    returnToHome: boolean;
+    outboundDate: string;
+    returnDate: string;
+    known: null | { outbound: Promise<HomeFlightOffer[]>; ret: Promise<HomeFlightOffer[]> };
+  };
+}): Promise<OptimizeResult | null> {
+  const { ranked, ctx, railBoard, startDate, travelers, cityMap, nights } = args;
+  const winner = ranked[0];
+  const ordering = winner.ordering;
+
+  const legs = await Promise.all(
+    winner.legs.map(async (leg, i): Promise<OptimizedLeg> => {
+      const date = legDateAt(startDate, nights, i);
+      if (date !== args.rankingTrainDay || railBoard.snapshotHad(leg.from, leg.to)) return leg;
+      const late = railBoard.answerNow(leg.from, leg.to);
+      if (!late || late.length === 0) return leg;
+      const comparison = await compareLeg(legCompareParams(leg.from, leg.to, date, travelers, cityMap, ctx), {
+        getIataCode: ctx.iata,
+        searchFlights: ctx.flights,
+        searchTrains: () => Promise.resolve(late),
+      });
+      return { from: leg.from, to: leg.to, comparison, cost: legCost(comparison) };
+    }),
+  );
+  const sum = (list: OptimizedLeg[], unpriced: number) =>
+    list.reduce((s, l) => s + (l.cost === Infinity ? unpriced : l.cost), 0);
+  const gaps = (list: OptimizedLeg[]) => list.filter((l) => l.cost === Infinity).length;
+  const route: ScoredRoute = {
+    ...winner,
+    legs,
+    totalCost: winner.totalCost - sum(winner.legs, 0) + sum(legs, 0),
+    rankCost: winner.rankCost - sum(winner.legs, UNAVAILABLE_LEG_PENALTY) + sum(legs, UNAVAILABLE_LEG_PENALTY),
+    unpricedLegs: winner.unpricedLegs - gaps(winner.legs) + gaps(legs),
+  };
+
+  let outboundLeg: HomeLeg | null = null;
+  let returnLeg: HomeLeg | null = null;
+  if (args.home) {
+    const h = args.home;
+    [outboundLeg, returnLeg] = await Promise.all([
+      buildHomeLeg(
+        { originAirports: h.originAirports, destinationCity: ordering[0], date: h.outboundDate, travelers, originCity: h.origin },
+        ctx,
+        h.known?.outbound,
+      ),
+      h.returnToHome
+        ? buildHomeLeg(
+            {
+              originAirports: h.originAirports,
+              destinationCity: ordering[ordering.length - 1],
+              date: h.returnDate,
+              travelers,
+              reverse: true,
+              originCity: h.origin,
+            },
+            ctx,
+            h.known?.ret,
+          )
+        : Promise.resolve(null),
+    ]);
+  }
+
+  const { answered, threw } = ctx.flightOutcomes;
+  if (answered === 0 && threw > 0 && route.legs.every((l) => l.cost === Infinity) && !outboundLeg && !returnLeg) {
+    return null;
+  }
+
+  const routes = [route, ...ranked.slice(1)].map(toPublicRoute);
+  return structuredClone({
+    routes,
+    bestRoute: routes[0],
+    savingsVsNaive: args.savingsVsNaive,
+    iataCodes: args.iataCodes,
+    dates: stayDates(ordering, startDate, nights, outboundLeg),
+    dateShiftChecked: false,
+    outboundLeg,
+    returnLeg,
+    ...(args.originClarification ? { originClarification: args.originClarification } : {}),
+    provisional: true,
+  });
+}
+
+/** Exposed for tests. */
+export const _railForTests = { createRailBoard, createRunRail, RAIL_RANKING_WAIT_MS };
+
+/** Every ordered city pair flown in some ordering (and the typed order), once. */
+function adjacentPairs(orderings: string[][]): Array<[string, string]> {
+  const seen = new Set<string>();
+  const pairs: Array<[string, string]> = [];
+  for (const o of orderings) {
+    for (let i = 0; i < o.length - 1; i++) {
+      const k = `${o[i]}\u0000${o[i + 1]}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      pairs.push([o[i], o[i + 1]]);
+    }
+  }
+  return pairs;
+}
+
 export async function optimize(params: OptimizeParams): Promise<OptimizeResult> {
-  const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights, cityNights, onProgress } = params;
+  const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights, cityNights, onProgress, onFirstAnswer } = params;
+  const runStarted = Date.now();
+  /**
+   * Prototype variant C (exp/optimizer-speed, OPT_VARIANT=C): as B, but the
+   * work after the ranking — the winner's trains on their real days, its leg
+   * alternatives, the date-shift probe — searches ONCE more a route-day whose
+   * first answer had no priced train (RunRail.retry, past trains.ts'
+   * noRailAnswer memory). A cold All Aboard route often answers the second
+   * time (T1, 2026-11-24: Paris → Berlin, $87.70 for two, found only by the
+   * retry). The first answer never waits for it; the full answer does.
+   */
+  const retryRailAfterRanking = process.env.OPT_VARIANT === 'C';
 
   if (cities.length < 1) {
     throw new Error('Need at least 1 city to optimize');
@@ -2185,7 +2599,27 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // the winner is re-priced on its real days below (exactRoute).
   const rankingTrainDay = legDateAt(startDate, nightsArray, 0);
   const runCtx = createRunContext(cities.map((c) => c.name), onProgress);
-  const ctx = runCtx.withTrainDate(() => rankingTrainDay);
+  const cityMap = new Map(cities.map((c) => [c.name, c]));
+
+  // Step 2 (first, because the rail board needs it): candidate orderings.
+  const orderings = candidateOrderings(cities, hasOrigin, cityMap);
+
+  // Every city pair's trains, searched now, once, on the ranking day — before
+  // any flight — so ranking waits on flights, and on rail for at most
+  // RAIL_RANKING_WAIT_MS (createRailBoard). Ranking reads trains only from
+  // the board; the winner is re-priced on its real days below.
+  const railBoard = createRailBoard({
+    pairs: adjacentPairs([...orderings, cities.map((c) => c.name)]),
+    day: rankingTrainDay,
+    travelers,
+    countryOf: (name) => cityMap.get(name)?.country ?? getCityCountry(name),
+    waitMs: params.railWaitMs ?? RAIL_RANKING_WAIT_MS,
+    // Variant B2 (OPT_VARIANT=B2): ranking's rail is All Aboard's lighter
+    // search — direct trains only, 2 journeys priced per pair. The winner's
+    // legs are still searched in full on their real days below.
+    search: process.env.OPT_VARIANT === 'B2' ? runCtx.rail.quick : runCtx.rail.search,
+  });
+  const ctx = runCtx.withTrainDate(() => rankingTrainDay).withTrainSource(railBoard.source);
 
   // Step 1: resolve IATA codes in parallel
   const iataCodes: Record<string, string> = {};
@@ -2198,8 +2632,6 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       }
     }),
   );
-
-  const cityMap = new Map(cities.map((c) => [c.name, c]));
 
   // Resolve origin airports: the caller may pass an explicit list (from the
   // frontend's own lookup or user prefs); otherwise resolve the name, and
@@ -2261,38 +2693,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     }
   }
 
-  // Step 2: generate candidate orderings.
-  //
-  // When we have a real origin, "first city" is no longer a hack —
-  // it's just whatever destination is closest/cheapest after flying in
-  // from home. So we test FULL permutations of all destinations (no
-  // fixed-first). When there's no origin, we keep the legacy behavior
-  // (first city fixed) so existing behavior is preserved.
-  let orderings: string[][];
-
-  if (cities.length <= 5) {
-    if (hasOrigin) {
-      // Full permutations of all N destinations.
-      orderings = getPermutations(cities).map((p) => p.map((c) => c.name));
-    } else {
-      const rest = cities.slice(1);
-      const perms = getPermutations(rest);
-      orderings = perms.map((p) => [cities[0].name, ...p.map((c) => c.name)]);
-    }
-
-    // Apply the country-clustering filter: reject any ordering that bounces
-    // between countries (e.g. JP → CN → JP → CN). Only keep clustered ones.
-    const clustered = orderings.filter((o) => isCountryClustered(o, cityMap));
-    if (clustered.length > 0) {
-      orderings = clustered;
-    } else {
-      logger.warn('Country clustering filter removed all orderings — falling back');
-    }
-  } else {
-    // Too many cities to permute — score a few orderings that are
-    // country-clustered by construction and let real leg prices pick.
-    orderings = countryGroupedOrderings(cities);
-  }
+  // Step 2 (candidate orderings) ran above, before the rail board.
 
   // Step 3: score each permutation.
   //
@@ -2478,6 +2879,54 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
 
   const bestOrdering = topRoutes[0].ordering;
   onProgress?.({ stage: 'finishing', bestOrder: bestOrdering });
+  const rankingMs = Date.now() - runStarted;
+
+  // Two-phase (OptimizeParams.onFirstAnswer): the trip as ranking priced it,
+  // now; everything below finishes it.
+  let firstAnswerMs: number | null = null;
+  if (onFirstAnswer) {
+    const first = await firstAnswer({
+      ranked: topRoutes,
+      savingsVsNaive,
+      iataCodes,
+      originClarification,
+      ctx,
+      railBoard,
+      rankingTrainDay,
+      startDate,
+      travelers,
+      cityMap,
+      nights: nightsFor(bestOrdering),
+      home: homeKnown
+        ? {
+            originAirports: resolvedOriginAirports,
+            origin,
+            returnToHome,
+            outboundDate,
+            returnDate,
+            known: homeFares
+              ? {
+                  outbound: homeFares.offers(bestOrdering[0], false),
+                  ret: homeFares.offers(bestOrdering[bestOrdering.length - 1], true),
+                }
+              : null,
+          }
+        : null,
+    }).catch((err: any) => {
+      logger.warn('Optimize first answer failed — the full answer still follows', { errMessage: err?.message });
+      return null;
+    });
+    if (first) {
+      firstAnswerMs = Date.now() - runStarted;
+      onFirstAnswer(first);
+    }
+  }
+
+  // Variant C: the work below searches once more a route-day whose answer had
+  // no priced train (RunRail.retry; see retryRailAfterRanking).
+  const realDayCtx = retryRailAfterRanking
+    ? ctx.withTrainDate(undefined).withTrainSource({ id: 'retry', search: ctx.rail.retry })
+    : ctx.withTrainDate(undefined);
 
   // The winner's inter-city legs on their real days (see rankingTrainDay):
   // its trains as the trip will show them, with that day's times and fares.
@@ -2489,7 +2938,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     const ranked = topRoutes[0];
     const [rankedLegs, exactLegs] = await Promise.all([
       scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsFor(bestOrdering), ctx),
-      scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsFor(bestOrdering), ctx.withTrainDate(undefined)),
+      scoreRoute(bestOrdering, startDate, travelers, cityMap, nightsFor(bestOrdering), realDayCtx),
     ]);
     // A leg the real day can't price (the rail search failed or hit the
     // quota) keeps its ranking-day answer: a priced leg must not turn into
@@ -2526,7 +2975,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   const dateShiftOutcome: DateShiftOutcome = { offsetsPriced: 0, hadCandidate: false, hotelsPriced: false };
   const probesDates = cities.length <= DATE_SHIFT_MAX_CITIES;
   const probeGate = createProbeGate(Infinity);
-  const probeCtx = probeContext(ctx.phased('probe'), probeGate);
+  const probeCtx = probeContext(ctx.phased('probe'), probeGate, undefined, retryRailAfterRanking ? ctx.rail.retry : ctx.rail.search);
   const dateShiftTransportTask = (async (): Promise<DateShiftSuggestion | undefined> => {
     if (!probesDates) return undefined;
     try {
@@ -2599,6 +3048,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           limit: 4,
           // Same airports the scoring priced: the trip decides which Lagos.
           tripCityNames: ctx.tripCityNames,
+          // The run's rail answers: no second search of a route-day (B), or
+          // its one retry (variant C).
+          searchTrains: retryRailAfterRanking ? ctx.rail.retry : ctx.rail.search,
         });
         if (result.options.length > 0) {
           leg.options = result.options;
@@ -2747,6 +3199,15 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     ...(screenStats
       ? { exactRounds: screenStats.rounds, budgetStop: screenStats.budgetStop, reservedForHomeLegs: screenStats.reserved }
       : {}),
+  });
+  // When the plan was decided and answered, and how much rail ranking had.
+  logger.info('Optimize timing', {
+    cities: cities.length,
+    rankingMs,
+    firstAnswerMs,
+    fullAnswerMs: Date.now() - runStarted,
+    rail: railBoard.stats(),
+    ...(retryRailAfterRanking ? { variant: 'C' } : {}),
   });
 
   const publicRoutes = topRoutes.map(toPublicRoute);

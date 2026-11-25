@@ -1,7 +1,8 @@
 import { env } from '../config/env';
 import { getSupabase } from './supabase';
 import { logger } from '../utils/logger';
-import { searchAllAboardDetailed } from './allaboard';
+import { searchAllAboardDetailed, type AllAboardSearchOptions } from './allaboard';
+import { trainSearchKey } from './trainKey';
 import type { Co2Figure, DoorToDoor } from './legFacts';
 
 /**
@@ -305,7 +306,7 @@ interface TrainProvider {
   id: string;
   /** 'none' skips this provider for the route; anything else queries it. */
   coverage(params: SearchTrainsParams): Coverage;
-  search(params: SearchTrainsParams): Promise<ProviderResult>;
+  search(params: SearchTrainsParams, aaOptions?: AllAboardSearchOptions): Promise<ProviderResult>;
 }
 
 /**
@@ -473,7 +474,7 @@ const trainProviders: TrainProvider[] = [
     // when a key is configured; its own location matching decides real
     // coverage per route.
     coverage: () => (env.ALLABOARD_API_KEY ? 'partial' : 'none'),
-    search: (p) => searchAllAboardDetailed(p),
+    search: (p, aaOptions) => searchAllAboardDetailed(p, aaOptions),
   },
   {
     id: 'deutsche-bahn',
@@ -532,7 +533,17 @@ function toPartyTotal(offer: ProviderTrainOffer, travelers: number): TrainOffer 
  * request allaboard.ts documents as "30s+ cold" — and the provider sheds
  * the burst, so the legs come back with no fare at all.
  */
-const MAX_CONCURRENT_TRAIN_SEARCHES = 8;
+//
+// Prototype (exp/optimizer-speed): 24, was 8. The optimizer now searches
+// every city pair's trains at once, up front, and ranks on what answered
+// within RAIL_RANKING_WAIT_MS (optimizer.ts). With 8 slots a 4-city trip's
+// 12 pairs and a 5-city trip's 20 queued behind the first 8, each slot held
+// for a whole cold search (~16-25 s), so the pairs past the eighth could not
+// even start inside that wait. 24 starts a 5-city trip's 20 pairs at once —
+// still a bound, but the shedding burst described above was ~240 fare
+// requests; 24 searches is at most 72. OPT_TRAIN_SLOTS overrides it for the
+// benchmark harness (backend/scripts/opt-bench).
+const MAX_CONCURRENT_TRAIN_SEARCHES = Number(process.env.OPT_TRAIN_SLOTS) > 0 ? Number(process.env.OPT_TRAIN_SLOTS) : 24;
 let activeTrainSearches = 0;
 const trainSearchWaiters: Array<() => void> = [];
 
@@ -562,12 +573,47 @@ async function withTrainSearchSlot<T>(fn: () => Promise<T>): Promise<T> {
 const TRAIN_SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
 const trainSearchCache = new Map<string, { at: number; promise: Promise<TrainOffer[]> }>();
 
+/**
+ * Route-days whose last search came back with NO rail answer — incomplete
+ * (a provider timed out, errored, or answered ERROR/UNKNOWN) and without a
+ * single priced train — and what that search did return (unpriced timetable
+ * rows, or nothing). While an entry is fresh, a search for that route-day
+ * answers with it at once instead of asking again.
+ *
+ * Why: such a search is not cached (it says nothing about the route, see
+ * cachedTrainSearch), so every later ask for the same route-day used to pay
+ * the whole wait again — All Aboard's cold getJourneys answers
+ * `[ERROR, UNKNOWN]` after ~16-24 s, and production's 4-city plan
+ * (2026-11-24) searched Paris → Prague on one day three times, ~25 s each,
+ * one per adaptive round. One wait per route-day per NO_RAIL_ANSWER_TTL_MS is
+ * enough: the leg is priced on its flight, as it would have been anyway.
+ *
+ * In memory, per process — a prototype (exp/optimizer-speed).
+ */
+const NO_RAIL_ANSWER_TTL_MS = 15 * 60 * 1000;
+const noRailAnswer = new Map<string, { at: number; offers: TrainOffer[] }>();
+
+/** A search result that has no rail answer: incomplete and nothing priced. */
+function isNoRailAnswer(r: { offers: TrainOffer[]; complete: boolean }): boolean {
+  return !r.complete && !r.offers.some((o) => o.price != null);
+}
+
 function cachedTrainSearch(
   key: string,
   run: () => Promise<{ offers: TrainOffer[]; complete: boolean }>,
+  opts: { ignoreNoAnswer?: boolean } = {},
 ): Promise<TrainOffer[]> {
   const hit = trainSearchCache.get(key);
   if (hit && Date.now() - hit.at < TRAIN_SEARCH_CACHE_TTL_MS) return hit.promise;
+
+  const remembered = noRailAnswer.get(key);
+  if (remembered) {
+    if (Date.now() - remembered.at < NO_RAIL_ANSWER_TTL_MS) {
+      if (!opts.ignoreNoAnswer) return Promise.resolve(remembered.offers);
+    } else {
+      noRailAnswer.delete(key);
+    }
+  }
 
   const run$ = run();
   const promise = run$.then((r) => r.offers);
@@ -578,8 +624,23 @@ function cachedTrainSearch(
   // Don't cache failures — the next caller should get a fresh attempt. Same
   // for an incomplete answer (a provider timed out or errored): callers
   // already waiting share it, but it is not "this route's trains" for the
-  // next 10 minutes.
-  run$.then((r) => { if (!r.complete) evict(); }, evict);
+  // next 10 minutes. One with no rail answer at all is remembered as such
+  // (noRailAnswer), so the next search does not wait for it again.
+  run$.then(
+    (r) => {
+      if (r.complete) {
+        noRailAnswer.delete(key);
+        return;
+      }
+      evict();
+      if (isNoRailAnswer(r)) noRailAnswer.set(key, { at: Date.now(), offers: r.offers });
+      else noRailAnswer.delete(key);
+    },
+    () => {
+      evict();
+      noRailAnswer.set(key, { at: Date.now(), offers: [] });
+    },
+  );
 
   // Opportunistic sweep so long-running processes don't accumulate entries.
   if (trainSearchCache.size > 500) {
@@ -594,6 +655,7 @@ function cachedTrainSearch(
 /** Exposed for tests. */
 export function clearTrainSearchCache(): void {
   trainSearchCache.clear();
+  noRailAnswer.clear();
 }
 
 /**
@@ -609,30 +671,38 @@ export function clearTrainSearchCache(): void {
  * see `toPartyTotal`. The cache key carries `travelers`, so a normalised
  * result is only ever reused for the same party size.
  */
-export async function searchTrains(params: SearchTrainsParams): Promise<TrainOffer[]> {
-  const { origin, destination, date, travelers, originCountry, destinationCountry } = params;
-  // Both providers resolve city names case-insensitively, so normalise them
-  // into the key — otherwise "Rome" and "rome" each pay for their own search.
-  const key = [
-    origin.toLowerCase(),
-    destination.toLowerCase(),
-    date,
-    travelers,
-    originCountry ?? '',
-    destinationCountry ?? '',
-  ].join('|');
-  return cachedTrainSearch(key, () =>
-    withTrainSearchSlot(() => searchTrainsUncached(params)),
+export async function searchTrains(
+  params: SearchTrainsParams,
+  /**
+   * ignoreNoAnswer: search even when this route-day is remembered as having
+   * no rail answer (noRailAnswer) — for work nobody is waiting on.
+   * quick: All Aboard's lighter ranking search (AllAboardSearchOptions:
+   * direct trains only, 2 journeys priced) — prototype variant B2. Its own
+   * cache key: it is not the route-day's whole timetable.
+   */
+  opts: { ignoreNoAnswer?: boolean; quick?: boolean } = {},
+): Promise<TrainOffer[]> {
+  const key = trainSearchKey(params) + (opts.quick ? '|quick' : '');
+  return cachedTrainSearch(
+    key,
+    () => withTrainSearchSlot(() => searchTrainsUncached(params, opts.quick ? QUICK_RAIL : {})),
+    opts,
   );
 }
 
+/** Variant B2's ranking search (see searchTrains' `quick`). */
+const QUICK_RAIL: AllAboardSearchOptions = { nonStopOnly: true, offerCandidates: 2 };
+
+export type { SearchTrainsParams };
+
 async function searchTrainsUncached(
   params: SearchTrainsParams,
+  aaOptions: AllAboardSearchOptions = {},
 ): Promise<{ offers: TrainOffer[]; complete: boolean }> {
   const active = trainProviders.filter((p) => p.coverage(params) !== 'none');
   const results = await Promise.all(
     active.map((p) =>
-      p.search(params).catch((err: any): ProviderResult => {
+      p.search(params, aaOptions).catch((err: any): ProviderResult => {
         logger.warn('Train provider failed (non-fatal)', {
           provider: p.id,
           message: err?.message,
