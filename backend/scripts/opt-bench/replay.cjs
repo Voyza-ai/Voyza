@@ -294,8 +294,11 @@ function install() {
 
     if (replayRec) {
       const { rec, index } = replayRec;
+      // The simulated window as it stood when this request was accepted.
+      let stamp = null;
       if (MODE === 'replay' && desc.kind === 'duffel') {
         const resetAt = duffelGate(Date.now());
+        if (!resetAt && DUFFEL_LIMIT) stamp = { remaining: DUFFEL_LIMIT - windowCount, resetAt: windowStart + 60_000 };
         if (resetAt) {
           // Simulated 429: refused quickly, like Duffel does.
           await sleep(150, signal);
@@ -330,7 +333,20 @@ function install() {
       }
       const buf = zlib.gunzipSync(Buffer.from(rec.body, 'base64'));
       log({ t: tReq, done: Date.now() - T0, client, op: desc.op, served: `tape#${index}`, status: rec.status, summary: desc.summary, ms: rec.latencyMs, info: inspect(desc.op, rec.status, buf.toString('utf8')) });
-      return makeResponse(buf, { status: rec.status, statusText: rec.statusText || '', headers: rec.headers, url: desc.url });
+      let headersOut = rec.headers;
+      if (stamp) {
+        // The recorded ratelimit-* headers describe the recording's minute,
+        // not this replay's: state the simulated window instead, as Duffel
+        // would (the optimizer paces itself on them).
+        headersOut = rec.headers
+          .filter(([k]) => !/^ratelimit-/i.test(k))
+          .concat([
+            ['ratelimit-limit', String(DUFFEL_LIMIT)],
+            ['ratelimit-remaining', String(Math.max(0, stamp.remaining))],
+            ['ratelimit-reset', new Date(stamp.resetAt).toUTCString()],
+          ]);
+      }
+      return makeResponse(buf, { status: rec.status, statusText: rec.statusText || '', headers: headersOut, url: desc.url });
     }
 
     if (MODE === 'replay') {

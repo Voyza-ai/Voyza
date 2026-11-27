@@ -15,7 +15,9 @@ import { suggestDestinationsForVibe } from '@/lib/api';
 import { parseDateInput, parseDateRangeInput } from '@/lib/parseDate';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
-import { stagedCountry, usableCityNights } from '@/lib/cityNights';
+import { stagedCountry } from '@/lib/cityNights';
+import { optimizeTripRequest } from '@/lib/optimizeRequest';
+import { prewarmOptimize } from '@/lib/prewarm';
 import { vibesFromAnswer } from '@/lib/vibeMap';
 import { dedupeVibes, joinVibes, pillsAndText, splitVibeText, vibeBubbleText, vibeList } from '@/lib/vibes';
 // `originAirportsForCity` is a VALUE import, so the 60 KB hot set lands in
@@ -345,6 +347,41 @@ export default function PlanningChat() {
   const msgCounter = useRef(0);
 
   const nextId = () => `msg-${++msgCounter.current}`;
+
+  // Home-flight pre-search (prototype, exp/optimizer-speed). Once the chat
+  // knows the cities, home, dates, nights and party — after "How many
+  // people?", with budget and notes still to come — ask the backend to search
+  // every home flight the plan will need, so the plan finds them in its
+  // cache instead of spending its own time and Duffel window on them. The
+  // body is built exactly as the plan's (lib/optimizeRequest.ts); sent again
+  // only if the trip changes, and the backend skips a repeat anyway.
+  const prewarmedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const destinations = answers.destinations ?? [];
+    if (destinations.length === 0) return;
+    if (!answers.origin || !answers.origin.trim()) return;
+    if (typeof answers.travelers !== 'number' || answers.travelers < 1) return;
+    const request = optimizeTripRequest({
+      destinations,
+      travelers: answers.travelers,
+      startRaw: answers.dateRange?.start,
+      answers,
+    });
+    const key = JSON.stringify(request);
+    if (prewarmedRef.current === key) return;
+    prewarmedRef.current = key;
+    prewarmOptimize(request);
+  }, [
+    answers.destinations,
+    answers.origin,
+    answers.originAirports,
+    answers.returnToHome,
+    answers.dateRange,
+    answers.nights,
+    answers.travelers,
+    answers.cityNights,
+    answers.cityCountries,
+  ]);
 
   // Latest guided state, read when a search lands — the search's own closure
   // is from the render that started it and can miss bubbles added since.
@@ -1671,25 +1708,15 @@ export default function PlanningChat() {
       // card and a $0 transport cost. Fixed by removing the fork.
       setFindTripStatus('Finding the best routes...');
 
-      // Resolve total nights for the optimizer:
-      //   1. answers.nights (set explicitly via NightsPicker)
-      //   2. derive from concrete date range (start ↔ end ISO dates)
-      //   3. omit (backend uses 2-nights-per-city default)
-      //
-      // Hierarchy matters because some flows set both — if the user
-      // picked dates AND nights, prefer their explicit nights pick.
-      let totalNightsForOptimize: number | undefined;
-      if (typeof answers.nights === 'number' && answers.nights > 0) {
-        totalNightsForOptimize = answers.nights;
-      } else if (answers.dateRange?.start && answers.dateRange?.end) {
-        const iso = /^\d{4}-\d{2}-\d{2}$/;
-        if (iso.test(answers.dateRange.start) && iso.test(answers.dateRange.end)) {
-          const ms =
-            new Date(answers.dateRange.end).getTime() -
-            new Date(answers.dateRange.start).getTime();
-          if (ms > 0) totalNightsForOptimize = Math.max(1, Math.round(ms / 86_400_000));
-        }
-      }
+      // The trip half of the request — cities, dates, nights, home, party —
+      // built by the one function the home-flight pre-search also uses
+      // (lib/optimizeRequest.ts), so the plan finds those flights cached.
+      const tripRequest = optimizeTripRequest({
+        destinations: parsed.destinations,
+        travelers,
+        startRaw: rawStart,
+        answers,
+      });
 
       // Live progress: the optimizer reports its own counts under this id
       // while the request is open, polled here (see lib/searchProgress.ts).
@@ -1711,21 +1738,8 @@ export default function PlanningChat() {
 
       const result = await optimizeTrip({
         progressId,
-        cities: parsed.destinations.map((d: string) => {
-          const country = stagedCountry(answers.cityCountries, d);
-          return country ? { name: d, country } : { name: d };
-        }),
-        startDate,
-        travelers,
+        ...tripRequest,
         budget: totalBudget,
-        // Pass origin through so backend runs full-permutation
-        // optimization AND computes home→first_city (+ optional
-        // last_city→home) legs.
-        origin: answers.origin ?? undefined,
-        originAirports: answers.originAirports ?? undefined,
-        returnToHome: answers.returnToHome ?? true,
-        totalNights: totalNightsForOptimize,
-        cityNights: usableCityNights(answers.cityNights, parsed.destinations, totalNightsForOptimize),
       }).finally(() => {
         polling = false;
       });

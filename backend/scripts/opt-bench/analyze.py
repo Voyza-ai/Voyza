@@ -26,16 +26,20 @@ def load_reqs(path):
     return rows, uid_name
 
 
-def server_timing(path):
+def server_line(path, message):
     if not os.path.exists(path):
         return None
     for line in open(path):
-        if '"Optimize timing"' in line:
+        if f'"{message}"' in line:
             try:
                 return json.loads(line[line.index('{'):])
             except Exception:
                 return None
     return None
+
+
+def server_timing(path):
+    return server_line(path, 'Optimize timing')
 
 
 def answer(resp):
@@ -88,7 +92,7 @@ def analyze(result_path):
     out = {
         'name': r['name'],
         'trip': r['trip'],
-        'version': r['version'] + (('-' + r['variant']) if r.get('variant') else '') + (('-s' + r['slots']) if r.get('slots') else '') + (('-b' + r['budget']) if r.get('budget') else ''),
+        'version': r['version'] + (('-' + r['variant']) if r.get('variant') else '') + (('-s' + r['slots']) if r.get('slots') else '') + (('-b' + r['budget']) if r.get('budget') else '') + (('-rr' + r['rankingRail']) if r.get('rankingRail') else '') + (('-retry' + r['railRetry']) if r.get('railRetry') else '') + (('-g' + str(int(r['prewarm']['gapMs'] / 1000))) if r.get('prewarm') else ''),
         'twoPhase': r.get('twoPhase'),
         'phase': r.get('duffelPhase'),
         'status': r['status'],
@@ -109,6 +113,9 @@ def analyze(result_path):
         'aaOfferRequests': len(offers),
         'routeDays': [' '.join(map(str, rd)) for rd in distinct_rd],
         'misses': len(misses),
+        'prewarm': (r.get('prewarm') or {}).get('server'),
+        'optimizeSearches': (server_line(base + '.server.log', 'Optimize flight searches') or {}),
+        'quotaUsed': r.get('quotaUsed'),
         'live': len(live),
         'first': answer(resp) if (resp or {}).get('finalPending') else None,
         'final': answer(final),

@@ -20,7 +20,7 @@
  * A fresh process per run: flights.ts, trains.ts and allaboard.ts keep
  * process-wide caches, so a second run in the same process would be warm.
  */
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,10 +76,16 @@ async function main() {
   const budget = args.budget ? String(args.budget) : '';
   // Seconds already gone from Duffel's minute window when the run starts.
   const phase = args.phase ? String(args.phase) : '0';
+  // POST /api/optimize/prewarm first, then wait this many seconds (the rest
+  // of the chat: budget and notes) before POST /api/optimize. Version N only.
+  const prewarmGap = args.prewarm !== undefined ? Number(args.prewarm) : null;
+  // Rail for ranking: 'full' to rank on the full All Aboard search (N only).
+  const rankingRail = args['ranking-rail'] ? String(args['ranking-rail']) : '';
+  const railRetry = args['rail-retry'] !== undefined ? String(args['rail-retry']) : '';
   fs.mkdirSync(out, { recursive: true });
   fs.mkdirSync(tapes, { recursive: true });
 
-  const name = `${trip}-${version}${variant ? '-' + variant : ''}${slots ? '-s' + slots : ''}${budget ? '-b' + budget : ''}${twoPhase ? '-2p' : ''}-${mode}${mode === 'replay' ? '-p' + phase : ''}-${tag}`;
+  const name = `${trip}-${version}${variant ? '-' + variant : ''}${slots ? '-s' + slots : ''}${budget ? '-b' + budget : ''}${rankingRail ? '-rr' + rankingRail : ''}${railRetry ? '-retry' + railRetry : ''}${prewarmGap !== null ? '-g' + prewarmGap : ''}${twoPhase ? '-2p' : ''}-${mode}${mode === 'replay' ? '-p' + phase : ''}-${tag}`;
   const reqLog = path.join(out, `${name}.req.jsonl`);
   const srvLog = path.join(out, `${name}.server.log`);
   for (const f of [reqLog, srvLog]) if (fs.existsSync(f)) fs.unlinkSync(f);
@@ -105,7 +111,30 @@ async function main() {
     ...(variant ? { OPT_VARIANT: variant } : {}),
     ...(slots ? { OPT_TRAIN_SLOTS: slots } : {}),
     ...(budget ? { OPT_PLAN_BUDGET: budget } : {}),
+    ...(rankingRail ? { OPT_RANKING_RAIL: rankingRail } : {}),
+    ...(railRetry ? { OPT_RAIL_RETRY: railRetry } : {}),
   });
+  // All Aboard's own counters, before and after a live run (production shares
+  // the key, so a delta can include someone else's searches).
+  const quota = () => {
+    if (mode === 'replay') return null;
+    try {
+      const out = execFileSync('node', [path.join(here, 'aaquota.mjs')], {
+        env: { ...process.env, NODE_USE_ENV_PROXY: '1', NODE_OPTIONS: '' },
+        encoding: 'utf8',
+        timeout: 20_000,
+      });
+      const q = {};
+      for (const line of out.trim().split('\n')) {
+        const r = JSON.parse(line);
+        if (r.resource) q[`${r.resource}/${r.unit}`] = r.remaining;
+      }
+      return q;
+    } catch {
+      return null;
+    }
+  };
+  const quotaBefore = quota();
   const logStream = fs.createWriteStream(srvLog);
   const child = spawn('npx', ['tsx', 'src/index.ts'], { cwd: dir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let serverText = '';
@@ -137,6 +166,17 @@ async function main() {
 
   const progressId = `optbench-${trip}-${version}-${Date.now().toString(36)}`;
   const body = { ...tripBody(trip), progressId, ...(twoPhase ? { twoPhase: true } : {}) };
+  let prewarm = null;
+  if (prewarmGap !== null) {
+    const p0 = Date.now();
+    const r = await fetch(`${base}/api/optimize/prewarm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tripBody(trip)),
+    });
+    prewarm = { status: r.status, body: await r.json(), answeredMs: Date.now() - p0, gapMs: prewarmGap * 1000 };
+    await sleep(Math.max(0, prewarmGap * 1000 - (Date.now() - p0)));
+  }
   const timeline = [];
   const stages = {};
   const t0 = Date.now();
@@ -188,6 +228,10 @@ async function main() {
   await sleep(settle);
   stop();
   logStream.end();
+  const quotaAfter = quota();
+  const quotaUsed =
+    quotaBefore && quotaAfter ? Object.fromEntries(Object.keys(quotaBefore).map((k) => [k, quotaBefore[k] - quotaAfter[k]])) : null;
+  const prewarmLine = serverText.split('\n').find((l) => l.includes('"Optimize prewarm"'));
 
   const result = {
     name,
@@ -200,6 +244,10 @@ async function main() {
     mode,
     twoPhase,
     duffelLimit: mode === 'replay' ? Number(limit) : 0,
+    rankingRail: rankingRail || null,
+    railRetry: railRetry || null,
+    prewarm: prewarm ? { ...prewarm, server: prewarmLine ? JSON.parse(prewarmLine.slice(prewarmLine.indexOf('{'))) : null } : null,
+    quotaUsed,
     status: res.status,
     responseMs,
     finalMs,
@@ -209,7 +257,7 @@ async function main() {
     final: finalJson,
   };
   fs.writeFileSync(path.join(out, `${name}.result.json`), JSON.stringify(result, null, 2));
-  console.log(JSON.stringify({ name, status: res.status, responseMs, finalMs, finishingAt: stages.finishing ?? null }));
+  console.log(JSON.stringify({ name, status: res.status, responseMs, finalMs, finishingAt: stages.finishing ?? null, quotaUsed }));
   process.exit(0);
 }
 
