@@ -9,8 +9,8 @@ import { isLongMinutes, longJourneyLimit } from './longJourney';
  *
  * Coverage: national operators across Western/Central Europe (SNCF, Trenitalia,
  * Renfe, DB, NS, SNCB, SBB, ÖBB, Eurostar, GB operators, Scandinavia…).
- * This is the first real pan-EU rail source; db.transport.rest remains as a
- * second provider (strong DACH schedules) and results are merged upstream.
+ * It is the only rail provider (trains.ts): Deutsche Bahn's community REST
+ * API was removed in 2026-11 after it failed every production search.
  *
  * API shape (test gateway, key is test-scoped):
  *   getLocations(query)            → city/station uids (fast)
@@ -22,8 +22,8 @@ import { isLongMinutes, longJourneyLimit } from './longJourney';
  *
  * Because live pricing is slow and quota-metered, we price up to
  * OFFER_CANDIDATES of the day's journeys (sensible-length daytime ones first,
- * see pickOfferCandidates) and return the rest unpriced (limitedCoverage),
- * matching the honest-data pattern used for Deutsche Bahn fares.
+ * see pickOfferCandidates) and return the rest unpriced (limitedCoverage):
+ * a journey without a real fare is shown as such, never given an invented one.
  */
 
 /** getLocations: a name lookup, fast even cold. */
@@ -351,9 +351,9 @@ export async function searchAllAboardDetailed(params: SearchParams): Promise<All
     // passenger count, dividing it would have silently produced a fraction of
     // the real fare.
     //
-    // The `ProviderTrainOffer` contract stays PER-PERSON (same as Deutsche
-    // Bahn, whose API takes no passenger count and is scaled ×N downstream),
-    // so the party total is divided by the party here and `toPartyTotal` in
+    // The `ProviderTrainOffer` contract stays PER-PERSON (every provider
+    // hands over one adult's fare and is scaled ×N downstream), so the party
+    // total is divided by the party here and `toPartyTotal` in
     // searchTrains multiplies it straight back — their exact figure, and no
     // path on which it can be multiplied twice.
     const party = Math.max(1, Math.floor(params.travelers) || 1);
