@@ -21,7 +21,6 @@ jest.mock('../config/env', () => ({
     DUFFEL_ACCESS_TOKEN: 'test_token',
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'test_key',
-    DB_REST_BASE_URL: 'https://v6.db.transport.rest',
   },
 }));
 
@@ -48,6 +47,13 @@ jest.mock('../services/trains', () => ({
   searchTrains: jest.fn(),
 }));
 
+// The winner's alternatives search, wrapped so a test can have it find a
+// cheaper option than ranking had.
+jest.mock('../services/legOptions', () => {
+  const actual = jest.requireActual('../services/legOptions');
+  return { ...actual, searchLegOptions: jest.fn(actual.searchLegOptions) };
+});
+
 jest.mock('../services/hotels', () => ({
   ...jest.requireActual('../services/hotels'),
   searchHotels: jest.fn(async () => []),
@@ -56,9 +62,12 @@ jest.mock('../services/hotels', () => ({
 import { optimize } from '../services/optimizer';
 import { searchFlights } from '../services/flights';
 import { searchTrains } from '../services/trains';
+import { searchLegOptions } from '../services/legOptions';
 
 const mockedFlights = searchFlights as jest.Mock;
 const mockedTrains = searchTrains as jest.Mock;
+const mockedLegOptions = searchLegOptions as jest.Mock;
+const realLegOptions = jest.requireActual('../services/legOptions').searchLegOptions;
 
 const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 const HOME = ['HMA', 'HMB'];
@@ -98,6 +107,7 @@ function shownTotal(result: Awaited<ReturnType<typeof optimize>>): number {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockedLegOptions.mockImplementation(realLegOptions);
   mockedFlights.mockImplementation(async ({ origin, destination, date, travelers }: any) => {
     // Home flights: the second home airport is always $40 cheaper than the first.
     if (HOME.includes(origin) || HOME.includes(destination)) {
@@ -111,14 +121,25 @@ beforeEach(() => {
 
 describe('the total is the sum of what the trip shows', () => {
   it('a train the alternatives search found after ranking missed it: total follows the train on the card', async () => {
-    // Every route-day's FIRST rail answer comes back empty (an incomplete
-    // search: those are not cached), every later one has a $60 train.
-    const seen = new Map<string, number>();
-    mockedTrains.mockImplementation(async ({ origin, destination, date, travelers }: any) => {
-      const k = `${origin}>${destination}@${date}`;
-      const n = (seen.get(k) ?? 0) + 1;
-      seen.set(k, n);
-      return n === 1 ? [] : [train(origin, destination, date, 60 * travelers)];
+    // Ranking sees no trains at all; the winner's alternatives search then
+    // finds a $60-a-head train on every leg (what a late or retried rail
+    // answer does in production). Built this way, not from rail timing, so
+    // it holds however the optimizer schedules its rail searches.
+    mockedTrains.mockImplementation(async () => []);
+    mockedLegOptions.mockImplementation(async (p: any) => {
+      const found = await realLegOptions(p);
+      const train = {
+        mode: 'train',
+        operator: 'ÖBB',
+        price: 60 * p.travelers,
+        currency: 'USD',
+        departTime: '09:00',
+        arriveTime: '13:00',
+        duration: '4h 0m',
+        durationMinutes: 240,
+        priceDelta: 60 * p.travelers - (p.currentPrice ?? 0),
+      };
+      return { ...found, options: [train, ...found.options] };
     });
 
     const result = await optimize({
