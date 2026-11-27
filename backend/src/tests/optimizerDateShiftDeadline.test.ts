@@ -52,6 +52,7 @@ import { optimize } from '../services/optimizer';
 import { searchFlights } from '../services/flights';
 import { searchHotels } from '../services/hotels';
 import { searchTrains } from '../services/trains';
+import { currentDuffelRetryBudget } from '../services/duffelBudget';
 
 const mockedFlights = searchFlights as jest.Mock;
 const mockedHotels = searchHotels as jest.Mock;
@@ -218,12 +219,22 @@ describe('1-3 city trips keep their probe', () => {
       return [];
     });
     const asked = fares(THREE_PLAN_DATES, 0, '2030-06-09');
+    const probeBudgets = new Set<number | undefined>();
+    const priced = mockedFlights.getMockImplementation()!;
+    mockedFlights.mockImplementation(async (p: any) => {
+      if (!THREE_PLAN_DATES.includes(p.date)) probeBudgets.add(currentDuffelRetryBudget());
+      return priced(p);
+    });
     try {
       const result = await optimize(THREE);
       const probeSearches = asked.filter((a) => !THREE_PLAN_DATES.includes(a.key.split('@')[1]));
       expect(probeSearches.length).toBeGreaterThan(0);
       // It used to wait for them: every probe search went out after.
       expect(Math.min(...probeSearches.map((a) => a.at))).toBeLessThan(slowAnsweredAt);
+      // Started early, it may wait for the next Duffel minute while the plan
+      // still prices its trains (DATE_SHIFT_EARLY_RETRY_WAIT_MS), not 3 s.
+      expect(probeBudgets.size).toBeGreaterThan(0);
+      expect([...probeBudgets]).toEqual([25_000]);
       // Same suggestion as ever, on the same baseline.
       expect(result.dateShiftChecked).toBe(true);
       expect(result.dateShiftSuggestion).toMatchObject({ dayOffset: -1, newStartDate: '2030-06-09', savings: 400 });

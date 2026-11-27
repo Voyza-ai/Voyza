@@ -827,6 +827,18 @@ const MAX_HOME_AIRPORTS = 3;
 const DATE_SHIFT_RETRY_WAIT_MS = 3000;
 
 /**
+ * The same, for a probe started as soon as ranking is done (see optimize(),
+ * Step 7): it may wait for the next Duffel minute while the plan is still
+ * pricing the winner's trains on their real days (~25 s of a 3-city plan,
+ * replayed 2026-11-27), which it used to wait for anyway. With 3 s, a probe
+ * started early met the window ranking had just spent — a 3-city plan's
+ * pre-search (18) and inter-city searches (12) are 30 — and gave up, where
+ * the late one found the next minute already open. A probe still running
+ * when the plan is done gets DATE_SHIFT_GRACE_SHORT_TRIP_MS, as before.
+ */
+const DATE_SHIFT_EARLY_RETRY_WAIT_MS = 25_000;
+
+/**
  * Trips of up to this many cities run the date-shift probe; longer ones do
  * not start it at all.
  *
@@ -3023,9 +3035,11 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         const rankedLegsPriced = rankedWinner.legs.every((leg) => leg.cost !== Infinity);
         if (!rankedLegsPriced && (await probeBaseline) === null) return undefined;
         // Optional work: its Duffel calls may not wait out a rate-limit
-        // window (see DATE_SHIFT_RETRY_WAIT_MS). An offset they can't price
-        // is simply not offered.
-        return await withDuffelRetryBudget(DATE_SHIFT_RETRY_WAIT_MS, () =>
+        // window (see DATE_SHIFT_RETRY_WAIT_MS; started early, while the plan
+        // still works, a little longer). An offset they can't price is simply
+        // not offered.
+        const retryWaitMs = rankedLegsPriced ? DATE_SHIFT_EARLY_RETRY_WAIT_MS : DATE_SHIFT_RETRY_WAIT_MS;
+        return await withDuffelRetryBudget(retryWaitMs, () =>
           findDateShiftSuggestion(
             bestOrdering,
             startDate,
