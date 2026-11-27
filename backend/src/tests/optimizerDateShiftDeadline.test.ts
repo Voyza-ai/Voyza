@@ -187,6 +187,25 @@ describe('the date-shift probe never holds the plan (4+ cities: it does not run)
 });
 
 describe('1-3 city trips keep their probe', () => {
+  it('a leg nobody can price: no probe, and none of its searches sent (it starts early only on a fully priced route)', async () => {
+    // Alpha -> Bravo has no flight (and no train): the trip has a gap, so
+    // there is no baseline to compare a shifted date with.
+    const TWO = { ...THREE, cities: THREE.cities.slice(0, 2), totalNights: 4 };
+    const TWO_PLAN_DATES = ['2030-06-10', '2030-06-12', '2030-06-14'];
+    const asked = fares(TWO_PLAN_DATES, 0, '2030-06-09');
+    const priced = mockedFlights.getMockImplementation()!;
+    mockedFlights.mockImplementation(async (p: any) => {
+      const offers = await priced(p); // recorded in `asked` either way
+      return p.origin !== 'HOM' && p.destination !== 'HOM' ? [] : offers;
+    });
+
+    const result = await optimize(TWO);
+
+    expect(result.bestRoute.legs.some((leg) => leg.cost === Infinity)).toBe(true);
+    expect(asked.filter((a) => !TWO_PLAN_DATES.includes(a.key.split('@')[1]))).toEqual([]);
+    expect(result.dateShiftSuggestion).toBeUndefined();
+  }, 30000);
+
   it("starts as soon as ranking has the ordering, not after the winner's trains on their real days", async () => {
     // The second leg's real day (06-14) has slow trains; ranking's day (06-12) answers at once.
     const TRAIN_DELAY = 800;

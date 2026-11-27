@@ -2991,6 +2991,12 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // need only the ordering and the dates. Its baseline — the winner's legs on
   // their real days, below — follows (`probeBaseline`). It used to start
   // after them, and its Duffel searches were the last ~6 s of a 3-city plan.
+  // Only when ranking priced every leg, though: then the real days price
+  // them all too (a leg they can't price keeps its ranking answer, below).
+  // A leg ranking left unpriced may still be priced on its real day, so that
+  // probe waits for the baseline, as before — and is not started at all if
+  // the gap stays (T4, Lisbon > Sintra: 8 Duffel searches for nothing).
+  const rankedWinner = topRoutes[0];
   const dateShiftOutcome: DateShiftOutcome = { offsetsPriced: 0, hadCandidate: false, hotelsPriced: false };
   const probesDates = cities.length <= DATE_SHIFT_MAX_CITIES;
   const probeGate = createProbeGate(Infinity);
@@ -3014,6 +3020,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       // every leg is priced is known only with the baseline, which
       // findDateShiftSuggestion checks before comparing.
       if (bestOrdering.length > 1 || home) {
+        const rankedLegsPriced = rankedWinner.legs.every((leg) => leg.cost !== Infinity);
+        if (!rankedLegsPriced && (await probeBaseline) === null) return undefined;
         // Optional work: its Duffel calls may not wait out a rate-limit
         // window (see DATE_SHIFT_RETRY_WAIT_MS). An offset they can't price
         // is simply not offered.
