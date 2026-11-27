@@ -240,6 +240,66 @@ describe('searchAllAboard', () => {
   });
 });
 
+describe('searchAllAboard: a journey sold as more than one ticket', () => {
+  // Measured on the test gateway, Salzburg → Prague, 2027-03-21, 2 adults: the
+  // 19:07 via Vienna is two SegmentCollections (two tickets), each with its
+  // own fares — Salzburg → Wien from $257.20, Wien → Praha from $130.67.
+  const salzburgPrague = {
+    getJourneys: [
+      {
+        id: 'via-wien',
+        status: 'SUCCESS',
+        itinerary: [
+          {
+            status: 'SUCCESS',
+            segments: [{ origin: { name: 'Salzburg Hbf' }, destination: { name: 'Wien Hbf' }, departureAt: '2027-03-21T19:07:00+01:00', arrivalAt: '2027-03-21T21:32:00+01:00', operator: { name: 'ÖBB' } }],
+          },
+          {
+            status: 'SUCCESS',
+            segments: [{ origin: { name: 'Wien Hbf' }, destination: { name: 'Praha hl.n.' }, departureAt: '2027-03-21T22:10:00+01:00', arrivalAt: '2027-03-22T03:09:00+01:00', operator: { name: 'ÖBB' } }],
+          },
+        ],
+      },
+    ],
+  };
+  const ticket = (status: string, cents: number[]) => ({
+    status,
+    offers: cents.map((amount, i) => ({ id: `o${i}`, price: { amount, currency: 'USD' } })),
+  });
+  const handlers = (tickets: any[]) => [
+    { match: (b: string) => b.includes('getLocations') && b.includes('Salzburg'), data: { getLocations: [{ uid: 'szg', name: 'Salzburg' }] } },
+    { match: (b: string) => b.includes('getLocations') && b.includes('Prague'), data: { getLocations: [{ uid: 'prg', name: 'Prague' }] } },
+    { match: (b: string) => b.includes('getJourneys'), data: salzburgPrague },
+    { match: (b: string) => b.includes('getJourneyOffer'), data: { getJourneyOffer: { itinerary: tickets } } },
+  ];
+  const params = { origin: 'Salzburg', destination: 'Prague', date: '2027-03-21', travelers: 2 };
+
+  it('costs the cheapest fare of each ticket, added up', async () => {
+    routeFetch(handlers([ticket('SUCCESS', [25720, 48932]), ticket('SUCCESS', [13067, 16340, 18521])]));
+    const [offer] = await searchAllAboard(params);
+    // ($257.20 + $130.67) for two adults — not $130.67, the Vienna → Prague
+    // ticket alone, which taking the cheapest offer across tickets returned.
+    expect(offer.pricePerPerson).toBeCloseTo(387.87 / 2, 2);
+    expect(offer.limitedCoverage).toBe(false);
+  });
+
+  it('has no price when one of its tickets has no fare', async () => {
+    // The same journey on 2027-03-20: Wien → Praha came back NO_FARES. The
+    // Salzburg → Wien ticket's $257.20 is not the price of the trip.
+    routeFetch(handlers([ticket('SUCCESS', [25720, 48932]), ticket('NO_FARES', [])]));
+    const [offer] = await searchAllAboard(params);
+    expect(offer.pricePerPerson).toBeNull();
+    expect(offer.limitedCoverage).toBe(true);
+    expect(offer.priceSource).toBeUndefined();
+  });
+
+  it('still prices a one-ticket journey at its cheapest fare', async () => {
+    routeFetch(handlers([ticket('SUCCESS', [40817, 68806])]));
+    const [offer] = await searchAllAboard(params);
+    expect(offer.pricePerPerson).toBeCloseTo(204.085, 3);
+  });
+});
+
 describe('provider registry integration', () => {
   it('searchTrains merges All Aboard results with Deutsche Bahn', async () => {
     jest.isolateModules(() => {

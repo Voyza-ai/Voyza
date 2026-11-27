@@ -18,7 +18,7 @@ import { searchTrains, TrainOffer, type RailPriceSource } from './trains';
 import { flightDoorToDoor, trainCo2, trainDoorToDoor, type Co2Figure, type DoorToDoor } from './legFacts';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
-import { longJourneyLimit, isLongMinutes } from './longJourney';
+import { comparePick, longJourneyLimit, isLongMinutes } from './longJourney';
 
 export type TimeWindow = {
   earliestDepart?: string | null; // HH:MM
@@ -433,9 +433,9 @@ export async function searchLegOptions(
  * Cheapest first, long journeys (longJourney.ts) after every sensible one,
  * unpriced options (null / 0) last within their group. Two rules on top:
  *
- * 1. A FLIGHT is long against the fastest FLIGHT; a train is never long.
- *    That is compareLeg's own rule (cheapestSensible over flights, plain
- *    cheapest train). Judging both modes together made Vienna → Munich's
+ * 1. A FLIGHT is long against the fastest FLIGHT, a TRAIN against the fastest
+ *    TRAIN — never across modes. That is compareLeg's own rule
+ *    (cheapestSensible over each mode). Judging both modes together made Vienna → Munich's
  *    4h03m ÖBB train ($56) "long" next to a 1h flight (limit 4h00m): it
  *    sorted behind four $364 flights, fell off the top 4, and the card
  *    showed the flight while the optimizer had picked the route on the train.
@@ -450,13 +450,21 @@ export function orderLegOptions(options: LegOption[], limit: number): LegOption[
   const flightLimit = longJourneyLimit(
     options.filter((o) => o.mode === 'flight').map((o) => o.durationMinutes),
   );
+  // Trains the same way, against the fastest TRAIN — never against a flight
+  // (rule 1). Buries a 39h 12m Munich → Prague connection behind the 5h 37m
+  // train, as compareLeg does.
+  const trainLimit = longJourneyLimit(
+    options.filter((o) => o.mode === 'train').map((o) => o.durationMinutes),
+  );
   const rank = (o: LegOption) =>
-    o.mode === 'flight' && isLongMinutes(o.durationMinutes, flightLimit) ? 1 : 0;
+    isLongMinutes(o.durationMinutes, o.mode === 'flight' ? flightLimit : trainLimit) ? 1 : 0;
   const price = (o: LegOption) =>
     typeof o.price === 'number' && o.price > 0 ? o.price : Infinity;
+  // Within a group: priced first, daytime before small hours (00:00–04:59),
+  // cheapest first (longJourney.ts comparePick).
   const sorted = options
     .map((o, i) => ({ o, i }))
-    .sort((a, b) => rank(a.o) - rank(b.o) || price(a.o) - price(b.o) || a.i - b.i)
+    .sort((a, b) => rank(a.o) - rank(b.o) || comparePick(a.o, b.o) || a.i - b.i)
     .map((x) => x.o);
 
   const top = sorted.slice(0, Math.max(0, limit));
