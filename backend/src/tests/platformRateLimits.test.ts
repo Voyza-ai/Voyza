@@ -156,6 +156,85 @@ describe('normal use is never refused', () => {
   }, 120_000);
 });
 
+/**
+ * PlanningChat polls GET /api/optimize/progress/:id every 700 ms while
+ * optimize runs. Measured on production: 57 s for 3 cities (~81 polls),
+ * 177 s for 4 (~252 polls).
+ */
+const POLL_MS = 700;
+function progressPolls(seconds: number): Call[] {
+  const n = Math.ceil((seconds * 1000) / POLL_MS);
+  return Array.from({ length: n }, () => ({ method: 'GET' as const, path: '/api/optimize/progress/3f6c2b1e-7a3d-4c55-9d0e-1a2b3c4d5e6f' }));
+}
+/** One plan as the planner really sends it: optimize, its progress polls while it runs, then the per-city calls. */
+function polledPlan(cities: string[], optimizeSeconds: number): Call[] {
+  const [optimize, ...rest] = plan(cities);
+  return [optimize, ...progressPolls(optimizeSeconds), ...rest];
+}
+
+describe('the optimize progress poll never spends the planner\'s budget', () => {
+  it('three 3-city plans (57 s each) and two 4-city plans (177 s each) with their progress polls and a 30-turn chat, from one IP: zero 429s', async () => {
+    const three = CITIES.slice(0, 3);
+    const four = CITIES.slice(0, 4);
+    const calls = [
+      ...chatTurns(10),
+      ...polledPlan(three, 57),
+      ...chatTurns(10),
+      ...polledPlan(three, 57),
+      ...polledPlan(four, 177),
+      ...chatTurns(10),
+      ...polledPlan(three, 57),
+      ...polledPlan(four, 177),
+    ];
+    const polls = calls.filter((c) => c.path.startsWith('/api/optimize/progress/')).length;
+    expect(polls).toBe(3 * 82 + 2 * 253);
+
+    const { refused, statuses } = await run('203.0.113.40', calls);
+    expect(refused).toEqual([]);
+    // Polls for an id the server never saw answer 404, the rest reach their handlers.
+    expect(new Set(statuses)).toEqual(new Set([200, 400, 404]));
+  }, 120_000);
+
+  it('the progress poll has its own cap, and spends none of the expensive or general budget', async () => {
+    const ip = '198.51.100.40';
+    const cap = (RATE_LIMITS as Record<string, number>).optimizeProgress;
+    expect(cap).toBe(3000);
+    const polls: Call[] = Array.from({ length: cap + 1 }, () => ({
+      method: 'GET',
+      path: '/api/optimize/progress/p-abc123',
+    }));
+    const { refused } = await run(ip, polls);
+    expect(refused).toEqual([`#${cap + 1} GET /api/optimize/progress/p-abc123`]);
+
+    // Every poll before it is untouched by the other limiters: the next paid
+    // call and the next bookkeeping call each see their first-call budget.
+    const paid = await send(ip, { method: 'POST', path: '/api/plan/converse', body: {} });
+    expect(paid.status).toBe(400);
+    expect(paid.headers['ratelimit-remaining']).toBe(String(RATE_LIMITS.expensive - 1));
+    const general = await send(ip, { method: 'GET', path: '/api/trips' });
+    expect(general.status).toBe(401);
+    // The converse call above counted once on the general budget too.
+    expect(general.headers['ratelimit-remaining']).toBe(String(RATE_LIMITS.general - 2));
+  }, 120_000);
+
+  it('only the progress poll is exempt, not the saved-trip leg prices or the optimize run', async () => {
+    const ip = '198.51.100.41';
+    const remaining = async () =>
+      Number((await send(ip, { method: 'POST', path: '/api/plan/converse', body: {} })).headers['ratelimit-remaining']);
+    for (const call of [
+      { method: 'GET', path: '/api/optimize/some-trip-id' },
+      { method: 'POST', path: '/api/optimize' },
+      { method: 'GET', path: '/api/optimize/progress/a/b' },
+    ] as Call[]) {
+      const before = await remaining();
+      await send(ip, call);
+      const after = await remaining();
+      // The call in between was counted on the expensive budget: the second converse plus it.
+      expect(before - after).toBe(2);
+    }
+  });
+});
+
 /** The hotels cap (rateLimit.ts RATE_LIMITS.hotels); see there for the sizing. */
 const HOTELS_CAP = 120;
 

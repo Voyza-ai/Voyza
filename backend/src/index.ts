@@ -13,6 +13,7 @@ import {
   expensiveLimiter,
   locationLimiter,
   optimizeLimiter,
+  optimizeProgressLimiter,
   prewarmLimiter,
 } from './middleware/rateLimit';
 import { startPresetRefreshScheduler, warmPresetChecks } from './services/presets';
@@ -69,6 +70,7 @@ app.post('/api/optimize/prewarm', prewarmLimiter);
 // 429s the planner.
 app.use('/api/locations', locationLimiter);
 app.get('/api/canvas/:tripId/role', canvasRoleLimiter);
+app.get('/api/optimize/progress/:id', optimizeProgressLimiter);
 
 // ─── Routes ───────────────────────────────────────────────────
 app.get('/', (_req, res) => {
