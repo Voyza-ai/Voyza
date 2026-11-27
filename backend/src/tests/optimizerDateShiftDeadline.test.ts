@@ -51,9 +51,11 @@ jest.mock('../services/hotels', () => ({
 import { optimize } from '../services/optimizer';
 import { searchFlights } from '../services/flights';
 import { searchHotels } from '../services/hotels';
+import { searchTrains } from '../services/trains';
 
 const mockedFlights = searchFlights as jest.Mock;
 const mockedHotels = searchHotels as jest.Mock;
+const mockedTrains = searchTrains as jest.Mock;
 
 const offer = (price: number) => ({
   id: `f-${price}`,
@@ -185,6 +187,33 @@ describe('the date-shift probe never holds the plan (4+ cities: it does not run)
 });
 
 describe('1-3 city trips keep their probe', () => {
+  it("starts as soon as ranking has the ordering, not after the winner's trains on their real days", async () => {
+    // The second leg's real day (06-14) has slow trains; ranking's day (06-12) answers at once.
+    const TRAIN_DELAY = 800;
+    let slowAnsweredAt = Infinity;
+    mockedTrains.mockImplementation(async ({ date }: any) => {
+      if (date === '2030-06-14') {
+        await sleep(TRAIN_DELAY);
+        slowAnsweredAt = Math.min(slowAnsweredAt, Date.now());
+      }
+      return [];
+    });
+    const asked = fares(THREE_PLAN_DATES, 0, '2030-06-09');
+    try {
+      const result = await optimize(THREE);
+      const probeSearches = asked.filter((a) => !THREE_PLAN_DATES.includes(a.key.split('@')[1]));
+      expect(probeSearches.length).toBeGreaterThan(0);
+      // It used to wait for them: every probe search went out after.
+      expect(Math.min(...probeSearches.map((a) => a.at))).toBeLessThan(slowAnsweredAt);
+      // Same suggestion as ever, on the same baseline.
+      expect(result.dateShiftChecked).toBe(true);
+      expect(result.dateShiftSuggestion).toMatchObject({ dayOffset: -1, newStartDate: '2030-06-09', savings: 400 });
+    } finally {
+      mockedTrains.mockReset();
+      mockedTrains.mockResolvedValue([]);
+    }
+  }, 30000);
+
   it('a 3-city probe slower than the 4+ city grace still lands', async () => {
     const PROBE_DELAY = 2500;
     fares(THREE_PLAN_DATES, PROBE_DELAY, '2030-06-09');

@@ -1500,11 +1500,17 @@ async function homeFlightsCost(
  *
  * Transport only: the best candidate this returns is then held to the whole
  * trip, hotels included, by confirmDateShiftWithHotels before anyone sees it.
+ *
+ * `baselineLegs` is the winning route's inter-city legs at the requested
+ * dates — on their real days, so it is known only once their trains are —
+ * or null when one is unpriced (its $0 would read as a saving: no
+ * suggestion). The shifted dates are searched without waiting for it; it is
+ * needed only for the comparison at the end.
  */
 async function findDateShiftSuggestion(
   bestOrdering: string[],
   requestedStartDate: string,
-  baselineLegsCost: number,
+  baselineLegs: Promise<number | null>,
   travelers: number,
   cityMap: Map<string, CityInput>,
   nightsArray: number[],
@@ -1536,7 +1542,6 @@ async function findDateShiftSuggestion(
     : null;
   const baselineHomeCost = baselineHome?.cost ?? null;
   const includeHome = home !== null && baselineHomeCost !== null;
-  const baselineCost = baselineLegsCost + (includeHome ? (baselineHomeCost as number) : 0);
   // A priced direction always has its airport; [] (never searched → never
   // offered) is only reachable if that invariant breaks.
   const winnerOnly = (airport: string | null | undefined) => (airport ? [airport] : []);
@@ -1585,6 +1590,11 @@ async function findDateShiftSuggestion(
       }
     }),
   );
+
+  const baselineLegsCost = await baselineLegs;
+  // Nothing real to compare: an unpriced leg, or no legs and no home.
+  if (baselineLegsCost === null || !(baselineLegsCost > 0 || includeHome)) return undefined;
+  const baselineCost = baselineLegsCost + (includeHome ? (baselineHomeCost as number) : 0);
 
   const valid = shifted.filter(
     (s): s is { offset: number; startDate: string; cost: number } => s !== null,
@@ -2969,6 +2979,64 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     }
   }
 
+  // Step 7: date-shift suggestion — probe a few ±1/±2 day offsets on the
+  // winning ordering to see if leaving earlier/later saves meaningful money.
+  // Runs in parallel; any failures silently skip this feature. Its new
+  // searches go through `probeGate`, so that once the plan stops waiting
+  // for it (DATE_SHIFT_GRACE_SHORT_TRIP_MS) the ones not yet sent never are.
+  // Not started at all on 4+ cities (DATE_SHIFT_MAX_CITIES): no suggestion,
+  // dateShiftChecked: false.
+  //
+  // Started here, as soon as ranking has picked the ordering: its searches
+  // need only the ordering and the dates. Its baseline — the winner's legs on
+  // their real days, below — follows (`probeBaseline`). It used to start
+  // after them, and its Duffel searches were the last ~6 s of a 3-city plan.
+  const dateShiftOutcome: DateShiftOutcome = { offsetsPriced: 0, hadCandidate: false, hotelsPriced: false };
+  const probesDates = cities.length <= DATE_SHIFT_MAX_CITIES;
+  const probeGate = createProbeGate(Infinity);
+  const probeCtx = probeContext(ctx.phased('probe'), probeGate, undefined, retryRailAfterRanking ? ctx.rail.retry : ctx.rail.search);
+  let settleProbeBaseline: (legsCost: number | null) => void = () => undefined;
+  // The winner's inter-city legs at the requested dates, or null when one is
+  // unpriced (its $0 would read as a saving): set once they are re-priced.
+  const probeBaseline = new Promise<number | null>((resolve) => {
+    settleProbeBaseline = resolve;
+  });
+  const dateShiftTransportTask = (async (): Promise<DateShiftSuggestion | undefined> => {
+    if (!probesDates) return undefined;
+    try {
+      const home: DateShiftHome | null =
+        hasOrigin && resolvedOriginAirports.length > 0
+          ? { originAirports: resolvedOriginAirports, returnToHome, totalNights: totalNightsResolved }
+          : null;
+      // Probe when there's something real to compare: fully priced inter-
+      // city legs and/or home flights (single-city trips now qualify too —
+      // their home flights are exactly what moves with the date). Whether
+      // every leg is priced is known only with the baseline, which
+      // findDateShiftSuggestion checks before comparing.
+      if (bestOrdering.length > 1 || home) {
+        // Optional work: its Duffel calls may not wait out a rate-limit
+        // window (see DATE_SHIFT_RETRY_WAIT_MS). An offset they can't price
+        // is simply not offered.
+        return await withDuffelRetryBudget(DATE_SHIFT_RETRY_WAIT_MS, () =>
+          findDateShiftSuggestion(
+            bestOrdering,
+            startDate,
+            probeBaseline,
+            travelers,
+            cityMap,
+            nightsFor(bestOrdering),
+            home,
+            probeCtx,
+            dateShiftOutcome,
+          ),
+        );
+      }
+    } catch (err: any) {
+      logger.warn('Date-shift probe failed (non-fatal)', { message: err?.message });
+    }
+    return undefined;
+  })();
+
   // The work below searches once more a route-day whose answer had no priced
   // train (RunRail.retry; see retryRailAfterRanking).
   const realDayCtx = retryRailAfterRanking
@@ -3004,6 +3072,12 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
       unpricedLegs: ranked.unpricedLegs - rankedLegs.unpricedLegs + legsUnpriced,
     };
   }
+  {
+    const winningLegs = topRoutes[0].legs;
+    settleProbeBaseline(
+      winningLegs.every((leg) => leg.cost !== Infinity) ? winningLegs.reduce((sum, leg) => sum + leg.cost, 0) : null,
+    );
+  }
 
   // Steps 7, 7.5 and 8 only READ the winning route and the trip's dates,
   // and none needs another's answer, so they run together. They used to run
@@ -3011,60 +3085,6 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // trips in front of the enrichment's and the home legs' (mocked-latency
   // harness: the tail alone was ~5-6s of a 3-city run). Each keeps its own
   // non-fatal error handling, exactly as before.
-
-  // Step 7: date-shift suggestion — probe a few ±1/±2 day offsets on the
-  // winning ordering to see if leaving earlier/later saves meaningful money.
-  // Runs in parallel; any failures silently skip this feature. Its new
-  // searches go through `probeGate`, so that once the plan stops waiting
-  // for it (DATE_SHIFT_GRACE_SHORT_TRIP_MS) the ones not yet sent never are.
-  // Not started at all on 4+ cities (DATE_SHIFT_MAX_CITIES): no suggestion,
-  // dateShiftChecked: false.
-  const dateShiftOutcome: DateShiftOutcome = { offsetsPriced: 0, hadCandidate: false, hotelsPriced: false };
-  const probesDates = cities.length <= DATE_SHIFT_MAX_CITIES;
-  const probeGate = createProbeGate(Infinity);
-  const probeCtx = probeContext(ctx.phased('probe'), probeGate, undefined, retryRailAfterRanking ? ctx.rail.retry : ctx.rail.search);
-  const dateShiftTransportTask = (async (): Promise<DateShiftSuggestion | undefined> => {
-    if (!probesDates) return undefined;
-    try {
-      // Baseline = the winning route's inter-city legs (plus, inside the
-      // probe, the home flights) at the requested dates — exactly what each
-      // shifted date re-prices. Skipped when any inter-city leg is unpriced:
-      // its $0 would read as a saving.
-      const winningLegs = topRoutes[0].legs;
-      const allLegsPriced = winningLegs.every((leg) => leg.cost !== Infinity);
-      const baselineLegsCost = allLegsPriced
-        ? winningLegs.reduce((sum, leg) => sum + leg.cost, 0)
-        : 0;
-      const home: DateShiftHome | null =
-        hasOrigin && resolvedOriginAirports.length > 0
-          ? { originAirports: resolvedOriginAirports, returnToHome, totalNights: totalNightsResolved }
-          : null;
-      // Probe when there's something real to compare: fully priced inter-
-      // city legs and/or home flights (single-city trips now qualify too —
-      // their home flights are exactly what moves with the date).
-      if (allLegsPriced && (baselineLegsCost > 0 || home)) {
-        // Optional work: its Duffel calls may not wait out a rate-limit
-        // window (see DATE_SHIFT_RETRY_WAIT_MS). An offset they can't price
-        // is simply not offered.
-        return await withDuffelRetryBudget(DATE_SHIFT_RETRY_WAIT_MS, () =>
-          findDateShiftSuggestion(
-            bestOrdering,
-            startDate,
-            baselineLegsCost,
-            travelers,
-            cityMap,
-            nightsFor(bestOrdering),
-            home,
-            probeCtx,
-            dateShiftOutcome,
-          ),
-        );
-      }
-    } catch (err: any) {
-      logger.warn('Date-shift probe failed (non-fatal)', { message: err?.message });
-    }
-    return undefined;
-  })();
 
   // Step 7.5: enrich the winning route's inter-city legs with top-N
   // alternatives. The scoring pass uses compareLeg (1 cheapest pair)
