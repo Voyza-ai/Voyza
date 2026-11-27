@@ -20,10 +20,11 @@ import { requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
 import { compareLeg } from '../services/compareLeg';
 import { getCachedLegPrices } from '../services/legCache';
-import { optimize, type OptimizeResult } from '../services/optimizer';
+import { optimize, prewarmHomeFlights, type OptimizeResult } from '../services/optimizer';
 import { PROGRESS_ID, readFinal, readProgress, startProgress, trackFinal } from '../services/optimizeProgress';
 import { getSupabase } from '../services/supabase';
 import { addDays, todayIso } from '../utils/dates';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -308,6 +309,33 @@ router.post(
     } finally {
       onProgress?.({ stage: 'done' });
     }
+  }),
+);
+
+// ─── POST /api/optimize/prewarm ──────────────────────────────
+// The planner's home-flight pre-search (prototype, exp/optimizer-speed): sent
+// during the chat, once the trip's cities, home, dates and party are known,
+// it searches every home flight the plan will need into the same cache
+// POST /api/optimize reads (optimizer.ts prewarmHomeFlights). Answers 202 at
+// once; the searches run on. Takes the optimize request's own body, checked
+// by the same schema, so its airports and dates are the plan's.
+router.post(
+  '/optimize/prewarm',
+  asyncHandler(async (req, res) => {
+    const parsed = optimizeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new AppError(400, optimizeErrorMessage(parsed.error, req.body), parsed.error.flatten().fieldErrors);
+    }
+    const { progressId: _p, twoPhase: _t, budget: _b, ...input } = parsed.data;
+    if (!input.origin || !input.origin.trim()) {
+      res.status(202).json({ prewarming: false });
+      return;
+    }
+    const cities = input.cities.map((c) => (typeof c === 'string' ? { name: c } : c));
+    void prewarmHomeFlights({ ...input, cities }).catch((err: any) =>
+      logger.warn('Optimize prewarm failed (non-fatal)', { errMessage: err?.message }),
+    );
+    res.status(202).json({ prewarming: true });
   }),
 );
 

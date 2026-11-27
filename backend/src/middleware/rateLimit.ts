@@ -54,6 +54,7 @@ export const RATE_LIMITS = {
   general: 600,
   expensive: 300,
   optimize: 40,
+  prewarm: 20,
   hotels: 120,
   canvasRole: 600,
   locations: 600,
@@ -199,6 +200,27 @@ export const expensiveLimiter = rateLimit({
 export const optimizeLimiter = rateLimit({
   windowMs: WINDOW_MS,
   max: RATE_LIMITS.optimize,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip,
+  message: { error: 'Too many requests to this resource — please slow down.' },
+});
+
+/**
+ * POST /api/optimize/prewarm, on top of the expensive cap (prototype,
+ * exp/optimizer-speed).
+ *
+ * The planner fires it once per trip, during the chat, and it searches every
+ * home flight the plan will need: 2 × cities × home airports Duffel requests,
+ * up to 30 (5 cities from New York) through the token every user shares. A
+ * repeat of the same trip within 10 minutes asks nothing (optimizer.ts
+ * prewarmHomeFlights). 20 is twice the heavy session's 10 plans — a trip
+ * edited once before it is planned — and at most ~600 searches a window per
+ * IP, against 40 optimizes' ~2,000.
+ */
+export const prewarmLimiter = rateLimit({
+  windowMs: WINDOW_MS,
+  max: RATE_LIMITS.prewarm,
   standardHeaders: true,
   legacyHeaders: false,
   skip,

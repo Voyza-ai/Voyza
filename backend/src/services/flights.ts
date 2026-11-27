@@ -210,6 +210,48 @@ let duffelPausedUntil = 0;
 /** Exposed for tests: forget any rate-limit pause. */
 export function resetDuffelRateLimitPause(): void {
   duffelPausedUntil = 0;
+  duffelWindow = null;
+}
+
+/**
+ * Duffel's own count of this token's window, as its last answer stated it.
+ * Every Duffel response — accepted or 429 — carries `ratelimit-limit` (30),
+ * `ratelimit-remaining` and `ratelimit-reset` (the next wall-clock minute):
+ * fixed one-minute windows of 30 requests, shared by every user of the token
+ * (measured 2026-11-24; the old "~45 a minute" no longer holds).
+ *
+ * When an answer says the window is spent, every search waits for the reset
+ * (duffelPausedUntil) instead of being sent and refused: a 429 still costs a
+ * round trip, and a burst of them used to be how a plan learned the window
+ * was gone. Prototype (exp/optimizer-speed).
+ */
+type DuffelWindow = { limit: number; remaining: number; resetAt: number; seenAt: number };
+let duffelWindow: DuffelWindow | null = null;
+
+/** The window as Duffel last reported it (null before any answer, or once it has reset). */
+export function duffelWindowState(): DuffelWindow | null {
+  if (duffelWindow && Date.now() >= duffelWindow.resetAt) return null;
+  return duffelWindow;
+}
+
+/** Read Duffel's rate-limit headers off a response (Headers-like or absent). */
+function noteDuffelWindow(headers: any): void {
+  const get = typeof headers?.get === 'function' ? (k: string) => headers.get(k) : () => null;
+  const limit = Number(get('ratelimit-limit'));
+  const remaining = Number(get('ratelimit-remaining'));
+  const reset = get('ratelimit-reset');
+  if (!Number.isFinite(remaining) || reset == null) return;
+  const delay = parseResetHeader(String(reset));
+  if (delay == null) return;
+  const resetAt = Date.now() + delay;
+  // Answers can arrive out of order: keep the newest window's lowest count.
+  if (duffelWindow && duffelWindow.resetAt >= resetAt - 1000 && duffelWindow.remaining <= remaining && Date.now() < duffelWindow.resetAt) {
+    return;
+  }
+  duffelWindow = { limit: Number.isFinite(limit) ? limit : 30, remaining, resetAt, seenAt: Date.now() };
+  if (remaining <= 0 && delay > 0) {
+    duffelPausedUntil = Math.max(duffelPausedUntil, resetAt);
+  }
 }
 
 function rateLimitedError(waitMs: number): Error {
@@ -240,6 +282,7 @@ export async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promi
     try {
       return await fn();
     } catch (err: any) {
+      noteDuffelWindow(err?.headers);
       const status = errorStatus(err);
       const retryable = status === 429 || status === 502 || status === 503 || status === 504;
       if (retryable && attempt < maxAttempts) {
@@ -309,14 +352,30 @@ function cachedSearch(key: string, run: () => Promise<FlightOffer[]>): Promise<F
   return promise;
 }
 
-export async function searchFlights(params: SearchFlightsParams): Promise<FlightOffer[]> {
+function searchKey(params: SearchFlightsParams): string {
   const { origin, destination, date, travelers, cabinClass } = params;
+  return `${origin}|${destination}|${date}|${travelers}|${cabinClass ?? 'economy'}`;
+}
+
+export async function searchFlights(params: SearchFlightsParams): Promise<FlightOffer[]> {
   // A place to itself (ZRH → ZRH, LHR → LON) is not a flight, and never
   // reaches Duffel. Callers that count outcomes (the optimizer) skip such a
   // leg before getting here; this is the floor for every other path.
-  if (sameAirportArea(origin, destination)) return [];
-  const key = `${origin}|${destination}|${date}|${travelers}|${cabinClass ?? 'economy'}`;
-  return cachedSearch(key, () => searchFlightsUncached(params));
+  if (sameAirportArea(params.origin, params.destination)) return [];
+  return cachedSearch(searchKey(params), () => searchFlightsUncached(params));
+}
+
+/**
+ * Whether searchFlights would answer this from its cache (or a search already
+ * in flight) rather than send a Duffel request. The optimizer counts only
+ * the searches that cost a request against Duffel's window (see
+ * PLAN_SEARCH_BUDGET); a home flight the planner pre-searched during the chat
+ * (optimizer.ts prewarmHomeFlights) does not.
+ */
+export function isFlightSearchCached(params: SearchFlightsParams): boolean {
+  if (sameAirportArea(params.origin, params.destination)) return true;
+  const hit = searchCache.get(searchKey(params));
+  return !!hit && Date.now() - hit.at < SEARCH_CACHE_TTL_MS;
 }
 
 /**
@@ -374,8 +433,8 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
     // every other search. Each attempt now takes a slot only while it is
     // actually talking to Duffel.
     const offerRequest = await withRetry(() =>
-      withSearchSlot(() =>
-        duffel.offerRequests.create({
+      withSearchSlot(async () => {
+        const answer = await duffel.offerRequests.create({
           slices: [
             {
               origin,
@@ -388,8 +447,10 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
           passengers: Array.from({ length: travelers }, () => ({ type: 'adult' as const })),
           cabin_class: (cabinClass as any) || 'economy',
           return_offers: true,
-        }),
-      ),
+        });
+        noteDuffelWindow((answer as any)?.headers);
+        return answer;
+      }),
     );
 
     const offers = offerRequest.data.offers ?? [];

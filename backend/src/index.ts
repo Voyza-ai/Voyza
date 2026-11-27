@@ -13,6 +13,7 @@ import {
   expensiveLimiter,
   locationLimiter,
   optimizeLimiter,
+  prewarmLimiter,
 } from './middleware/rateLimit';
 import { startPresetRefreshScheduler, warmPresetChecks } from './services/presets';
 import { originIndex } from './services/location/originAirports';
@@ -61,6 +62,8 @@ app.use(
 // The optimize RUN fans out to dozens of Duffel searches, so it keeps a cap
 // near its old one on top of the shared expensive cap (rateLimit.ts).
 app.post('/api/optimize', optimizeLimiter);
+// The chat's home-flight pre-search: its own small cap (rateLimit.ts).
+app.post('/api/optimize/prewarm', prewarmLimiter);
 // Their own budgets, excluded from the general one above — see rateLimit.ts
 // for why a typeahead or a background poll sharing the planner's allowance
 // 429s the planner.

@@ -574,45 +574,34 @@ const TRAIN_SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
 const trainSearchCache = new Map<string, { at: number; promise: Promise<TrainOffer[]> }>();
 
 /**
- * Route-days whose last search came back with NO rail answer — incomplete
- * (a provider timed out, errored, or answered ERROR/UNKNOWN) and without a
- * single priced train — and what that search did return (unpriced timetable
- * rows, or nothing). While an entry is fresh, a search for that route-day
- * answers with it at once instead of asking again.
+ * Route-days every provider answered, completely, with no journey at all: a
+ * real "no route" (All Aboard: no timetable that day, or a city it does not
+ * cover), not a search that timed out or came back ERROR/UNKNOWN. Remembered
+ * for NO_ROUTE_TTL_MS, past the 10-minute cache, so later plans do not ask
+ * again for a route the provider has said does not exist.
  *
- * Why: such a search is not cached (it says nothing about the route, see
- * cachedTrainSearch), so every later ask for the same route-day used to pay
- * the whole wait again — All Aboard's cold getJourneys answers
- * `[ERROR, UNKNOWN]` after ~16-24 s, and production's 4-city plan
- * (2026-11-24) searched Paris → Prague on one day three times, ~25 s each,
- * one per adaptive round. One wait per route-day per NO_RAIL_ANSWER_TTL_MS is
- * enough: the leg is priced on its flight, as it would have been anyway.
+ * An INCOMPLETE answer is never remembered, here or in the cache: a cold All
+ * Aboard search answers `[ERROR, UNKNOWN]` after 13-25 s and very often finds
+ * the train the next time (2026-11-24: Paris -> Berlin, Amsterdam -> Berlin,
+ * Paris -> Berlin on T2), so remembering it turned other users' plans
+ * flights-only. (An earlier prototype did, for 15 minutes; replaced.)
  *
  * In memory, per process — a prototype (exp/optimizer-speed).
  */
-const NO_RAIL_ANSWER_TTL_MS = 15 * 60 * 1000;
-const noRailAnswer = new Map<string, { at: number; offers: TrainOffer[] }>();
-
-/** A search result that has no rail answer: incomplete and nothing priced. */
-function isNoRailAnswer(r: { offers: TrainOffer[]; complete: boolean }): boolean {
-  return !r.complete && !r.offers.some((o) => o.price != null);
-}
+const NO_ROUTE_TTL_MS = 24 * 60 * 60 * 1000;
+const noRoute = new Map<string, number>();
 
 function cachedTrainSearch(
   key: string,
   run: () => Promise<{ offers: TrainOffer[]; complete: boolean }>,
-  opts: { ignoreNoAnswer?: boolean } = {},
 ): Promise<TrainOffer[]> {
   const hit = trainSearchCache.get(key);
   if (hit && Date.now() - hit.at < TRAIN_SEARCH_CACHE_TTL_MS) return hit.promise;
 
-  const remembered = noRailAnswer.get(key);
-  if (remembered) {
-    if (Date.now() - remembered.at < NO_RAIL_ANSWER_TTL_MS) {
-      if (!opts.ignoreNoAnswer) return Promise.resolve(remembered.offers);
-    } else {
-      noRailAnswer.delete(key);
-    }
+  const knownNoRoute = noRoute.get(key);
+  if (knownNoRoute !== undefined) {
+    if (Date.now() - knownNoRoute < NO_ROUTE_TTL_MS) return Promise.resolve([]);
+    noRoute.delete(key);
   }
 
   const run$ = run();
@@ -624,22 +613,18 @@ function cachedTrainSearch(
   // Don't cache failures — the next caller should get a fresh attempt. Same
   // for an incomplete answer (a provider timed out or errored): callers
   // already waiting share it, but it is not "this route's trains" for the
-  // next 10 minutes. One with no rail answer at all is remembered as such
-  // (noRailAnswer), so the next search does not wait for it again.
+  // next 10 minutes. A complete answer with nothing in it is a real "no
+  // route", remembered for a day (noRoute).
   run$.then(
     (r) => {
-      if (r.complete) {
-        noRailAnswer.delete(key);
+      if (!r.complete) {
+        evict();
         return;
       }
-      evict();
-      if (isNoRailAnswer(r)) noRailAnswer.set(key, { at: Date.now(), offers: r.offers });
-      else noRailAnswer.delete(key);
+      if (r.offers.length === 0) noRoute.set(key, Date.now());
+      else noRoute.delete(key);
     },
-    () => {
-      evict();
-      noRailAnswer.set(key, { at: Date.now(), offers: [] });
-    },
+    evict,
   );
 
   // Opportunistic sweep so long-running processes don't accumulate entries.
@@ -649,13 +634,19 @@ function cachedTrainSearch(
       if (v.at < cutoff) trainSearchCache.delete(k);
     }
   }
+  if (noRoute.size > 5000) {
+    const cutoff = Date.now() - NO_ROUTE_TTL_MS;
+    for (const [k, at] of noRoute) {
+      if (at < cutoff) noRoute.delete(k);
+    }
+  }
   return promise;
 }
 
 /** Exposed for tests. */
 export function clearTrainSearchCache(): void {
   trainSearchCache.clear();
-  noRailAnswer.clear();
+  noRoute.clear();
 }
 
 /**
@@ -674,23 +665,20 @@ export function clearTrainSearchCache(): void {
 export async function searchTrains(
   params: SearchTrainsParams,
   /**
-   * ignoreNoAnswer: search even when this route-day is remembered as having
-   * no rail answer (noRailAnswer) — for work nobody is waiting on.
-   * quick: All Aboard's lighter ranking search (AllAboardSearchOptions:
-   * direct trains only, 2 journeys priced) — prototype variant B2. Its own
-   * cache key: it is not the route-day's whole timetable.
+   * quick: All Aboard's lighter search, for the optimizer's ranking only
+   * (AllAboardSearchOptions: direct trains only, 2 journeys priced). Its own
+   * cache key: it is not the route-day's whole timetable, and "no direct
+   * train" is not "no route".
    */
-  opts: { ignoreNoAnswer?: boolean; quick?: boolean } = {},
+  opts: { quick?: boolean } = {},
 ): Promise<TrainOffer[]> {
   const key = trainSearchKey(params) + (opts.quick ? '|quick' : '');
-  return cachedTrainSearch(
-    key,
-    () => withTrainSearchSlot(() => searchTrainsUncached(params, opts.quick ? QUICK_RAIL : {})),
-    opts,
+  return cachedTrainSearch(key, () =>
+    withTrainSearchSlot(() => searchTrainsUncached(params, opts.quick ? QUICK_RAIL : {})),
   );
 }
 
-/** Variant B2's ranking search (see searchTrains' `quick`). */
+/** The ranking's rail search (see searchTrains' `quick`). */
 const QUICK_RAIL: AllAboardSearchOptions = { nonStopOnly: true, offerCandidates: 2 };
 
 export type { SearchTrainsParams };

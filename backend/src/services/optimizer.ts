@@ -1,7 +1,6 @@
 import { compareLeg, LegComparison, type CompareLegParams } from './compareLeg';
-import { getIataCode, searchFlights, type IataLookupContext } from './flights';
+import { getIataCode, isFlightSearchCached, searchFlights, type IataLookupContext } from './flights';
 import { isDuffelTestOffer, withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
-import { duffelLiveMode } from '../utils/duffelMode';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
 import { searchLegOptions, LegOption } from './legOptions';
@@ -84,6 +83,12 @@ type RunContext = {
    * flights.ts already holds.
    */
   searchLedger: Map<string, SearchPhase>;
+  /**
+   * The ledger's searches that were not in flights.ts' cache when first asked
+   * for — the ones that cost this run a Duffel request (a home flight the
+   * chat pre-searched, prewarmHomeFlights, does not).
+   */
+  sentLedger: Map<string, SearchPhase>;
   /** The same run context, with its searches recorded under `phase`. */
   phased(phase: SearchPhase): RunContext;
   /**
@@ -124,13 +129,19 @@ type TrainSource = {
  * Paris → Prague on one day three times, ~25 s each, and the winner's exact
  * re-price and its alternatives searched the same route-day back to back.
  *
- * `retry` is variant C only: one more search, once per run, of a route-day
- * whose answer had no priced train — for the work after the first answer.
+ * `retry`: one more search, once per run, of a route-day whose answer had no
+ * priced train — for the work after the ranking (the winner's legs, their
+ * alternatives, the date-shift probe). A cold All Aboard search very often
+ * answers the second time; the plan before this prototype found those trains
+ * by searching the same route-day again and again (see trains.ts noRoute).
+ * A route-day the provider said has no route is not searched again.
+ *
+ * `quick`: the ranking's lighter search (searchTrains' `quick`).
  */
 type RunRail = {
   search: (params: SearchTrainsParams) => Promise<TrainOffer[]>;
   retry: (params: SearchTrainsParams) => Promise<TrainOffer[]>;
-  /** Variant B2: the lighter ranking search (searchTrains' `quick`), once per route-day. */
+  /** The ranking's lighter search (searchTrains' `quick`), once per route-day. */
   quick: (params: SearchTrainsParams) => Promise<TrainOffer[]>;
 };
 
@@ -162,7 +173,7 @@ function createRunRail(searchFn: typeof searchTrains = searchTrains): RunRail {
     const key = trainSearchKey(params);
     let hit = retried.get(key);
     if (!hit) {
-      hit = searchFn(params, { ignoreNoAnswer: true }).catch(() => answer);
+      hit = searchFn(params).catch(() => answer);
       retried.set(key, hit);
     }
     return hit;
@@ -206,11 +217,13 @@ function createRunContext(tripCityNames: string[], report?: ProgressSink): RunCo
     }
   };
   const searchLedger = new Map<string, SearchPhase>();
+  const sentLedger = new Map<string, SearchPhase>();
   const flightsFor = (phase: SearchPhase): typeof searchFlights => (params) => {
     // flights.ts' cache key: a repeat of any of these is not another request.
     const key = [params.origin, params.destination, params.date, params.travelers, params.cabinClass ?? 'economy'].join('|');
     if (!searchLedger.has(key)) {
       searchLedger.set(key, phase);
+      if (!isFlightSearchCached(params)) sentLedger.set(key, phase);
       report?.({ flightSearches: searchLedger.size });
     }
     return counted(params);
@@ -270,7 +283,7 @@ function createRunContext(tripCityNames: string[], report?: ProgressSink): RunCo
       return hit;
     };
     return {
-      tripCityNames, iata, homeIata, compare, compareMemo, flights, flightOutcomes, searchLedger,
+      tripCityNames, iata, homeIata, compare, compareMemo, flights, flightOutcomes, searchLedger, sentLedger,
       trainDate,
       trainSource,
       rail,
@@ -364,7 +377,7 @@ function probeContext(
   ctx: RunContext,
   gate: ProbeGate,
   trainDate?: TrainDateRule,
-  /** The run's rail the probe reads (variant C: the same retry the winner's legs got). */
+  /** The run's rail the probe reads: the same retry the winner's legs got. */
   trainSearch: TrainSource['search'] = ctx.rail.search,
 ): RunContext {
   const memo = new Map<string, Promise<LegComparison>>();
@@ -847,35 +860,38 @@ const MAX_DATE_SWING = 0.3;
 const SCREEN_LOWER_BOUND = (1 - MAX_DATE_SWING) / (1 + MAX_DATE_SWING);
 
 /**
- * Most Duffel searches one 4-5 city plan may send: Duffel accepts ~45 a
- * minute per token and stalls the rest until the window resets, so a plan
- * that stays under this never waits on the rate limit by itself (with 3 to
- * spare for a retry or a neighbour's search). Counted over the run's whole
- * search ledger: home flights, screen, best-first, and the winner's own home
- * flights, which are reserved before best-first starts.
+ * Most INTER-CITY Duffel searches (screen + best-first) one 4-5 city plan may
+ * send: one of Duffel's windows. Duffel answers every request with
+ * `ratelimit-limit: 30` and a `ratelimit-reset` on the next wall-clock minute
+ * (measured 2026-11-24): fixed one-minute windows of 30 per token, shared by
+ * every user — not the ~45 this was first sized on.
  *
- * Production's shipped screen sent 79 for one 5-city Chicago plan on the
- * test token (home 26, screen 20, exact 33 over 25 rounds) and took 54-89 s
- * cold (2026-11-02). A 5-city plan's fixed cost is now 30 (10 home + 20
- * screen), plus the winner's other home airports (2 from Chicago, 4 from New
- * York), which leaves best-first 8-12.
+ * Home flights are outside it: every traveller airport is searched for every
+ * city and direction (searchHomeOffers), a fixed 2 × cities × airports that
+ * the planner pre-searches during the chat (prewarmHomeFlights), and that
+ * flights.ts serves from its cache here. What is left for best-first is the
+ * same as before or more: 5 cities 30 − 20 screen = 10 (was 42 − 10 home −
+ * 20 screen − 4 reserved = 8 from New York), 4 cities 30 − 12 = 18 (was 18).
  *
- * What it trades (gate, 1,000 simulated plans per row, 2026-11-02): every
- * 5-city plan ≤ 42 and 27-31 s modelled cold (before: 38-69 on average, up
- * to 101, and 42-102 s), but best-first can no longer always prove its
- * winner — with ±30% fares 98% of plans still pick the exhaustive one, the
- * worst 5% dearer; with test-mode fares (±60-80%) they are 6% dearer on
- * average. More budget buys that back only up to the window: at 48, a
- * quarter of 5-city plans went over 45 and stalled for most of a minute.
+ * When a window is spent (by the pre-search, this plan or anyone else on the
+ * token), flights.ts stops sending until Duffel's reset (noteDuffelWindow)
+ * rather than collecting 429s.
+ *
+ * History: production's shipped screen sent 79 for one 5-city Chicago plan
+ * (home 26, screen 20, exact 33 over 25 rounds; 54-89 s cold, 2026-11-02).
+ * With ±30% fares 98% of budget-limited plans still picked the exhaustive
+ * winner (gate, 1,000 simulated plans, 2026-11-02).
+ *
+ * OPT_PLAN_BUDGET overrides it for the benchmark (backend/scripts/opt-bench).
  */
-//
-// Prototype note (exp/optimizer-speed): Duffel now answers every search with
-// `ratelimit-limit: 30` and a reset on the next wall-clock minute (measured
-// 2026-11-24) — fixed one-minute windows of 30, not ~45. A plan whose ranking
-// needs more than 30 searches waits for the next window; with rail off the
-// critical path that wait is what a 4-5 city first answer is made of.
-// OPT_PLAN_BUDGET overrides this for the benchmark (backend/scripts/opt-bench).
-const PLAN_SEARCH_BUDGET = Number(process.env.OPT_PLAN_BUDGET) > 0 ? Number(process.env.OPT_PLAN_BUDGET) : 42;
+const PLAN_SEARCH_BUDGET = Number(process.env.OPT_PLAN_BUDGET) > 0 ? Number(process.env.OPT_PLAN_BUDGET) : 30;
+
+/** Inter-city searches a run has asked for so far (what PLAN_SEARCH_BUDGET counts). */
+function interCitySearches(ctx: RunContext): number {
+  let n = 0;
+  for (const phase of ctx.searchLedger.values()) if (phase === 'screen' || phase === 'exact') n++;
+  return n;
+}
 
 /**
  * Most legs one best-first round prices: flights.ts' search slots
@@ -885,46 +901,6 @@ const PLAN_SEARCH_BUDGET = Number(process.env.OPT_PLAN_BUDGET) > 0 ? Number(proc
  * ≈ 65 s on their own.
  */
 const EXACT_ROUND_WIDTH = 6;
-
-/**
- * Metro codes Duffel searches as one city, and the airports each one covers:
- * the IATA metropolitan areas behind the codes this app already sends Duffel
- * as destinations (cityAirports.ts). On Duffel's live mode, when the
- * traveller's first home airport and at least one more belong to one of
- * these, a home flight is ranked with ONE search on the metro code
- * (rankingGroup), and each offer is kept only if it flies from or to one of
- * THEIR airports — London's search also answers for City, Southend and
- * Luton. (On the test token a metro search answers only placeholders, so it
- * is not used there.)
- *
- * Deliberately conservative: an airport missing here is simply ranked on the
- * first airport alone. Only areas whose membership is settled are listed;
- * Chicago is ORD + MDW (Gary, which the location data adds, has no airline
- * service). A city search is still not a promise to cover every member:
- * measured on Duffel 2026-11-02, WAS to Paris and to Miami answered for IAD
- * and DCA only, while BWI searched alone was cheaper on both. So ranking
- * reads the metro answer as it is, and the winner's home flights search on
- * its own each of the traveller's airports the answer left out
- * (HomeOffers.leftOut, HomeFares.complete).
- */
-const DUFFEL_METRO_AIRPORTS: Readonly<Record<string, readonly string[]>> = {
-  NYC: ['JFK', 'LGA', 'EWR'],
-  CHI: ['ORD', 'MDW'],
-  WAS: ['IAD', 'DCA', 'BWI'],
-  LON: ['LHR', 'LGW', 'STN', 'LTN', 'LCY', 'SEN'],
-  PAR: ['CDG', 'ORY'],
-  MIL: ['MXP', 'LIN', 'BGY'],
-  ROM: ['FCO', 'CIA'],
-  STO: ['ARN', 'BMA', 'NYO'],
-  MOW: ['SVO', 'DME', 'VKO'],
-  TYO: ['HND', 'NRT'],
-  OSA: ['KIX', 'ITM'],
-  SEL: ['ICN', 'GMP'],
-  YTO: ['YYZ', 'YTZ'],
-  SAO: ['GRU', 'CGH', 'VCP'],
-  RIO: ['GIG', 'SDU'],
-  BUE: ['EZE', 'AEP'],
-};
 
 /**
  * Distribute a total night count across N cities.
@@ -1911,70 +1887,31 @@ function toHomeFlightOffer(o: any, homeAirport: string, cityIata: string, revers
 }
 
 /**
- * The ONE search that prices a home flight for ranking, per city and
- * direction: the traveller's first airport (their primary, as resolved) —
- * or, on Duffel's LIVE mode, the metro code when that airport's metro
- * (DUFFEL_METRO_AIRPORTS) covers two or more of theirs: ORD + MDW is CHI,
- * JFK + LGA + EWR is NYC. Every other airport is left for the winner's own
- * home flights (HomeFares.complete).
+ * Home-flight offers for one city and direction from EVERY one of the
+ * traveller's airports (homeAirportsFor), one search each, cheapest first —
+ * what ranking (the cheapest) and the home card (the top four) read on a 4+
+ * city trip. The same searches searchHomeFlights makes for 1-3 cities, so the
+ * planner's pre-search during the chat (prewarmHomeFlights) serves both.
  *
- * Why not the metro code always: on the TEST token (production today) a CHI
- * or NYC search answers only test-airline placeholders under the metro code
- * itself, so every one of them fell back to its airports one by one — 26
- * home searches instead of 10 on production's 5-city Chicago plan
- * (2026-11-02). Why not the first airport always: it costs the same 10
- * searches for 5 cities, but ranks blind to the other airports — on the
- * gate's live model (each airport its own fare), even pricing every ordering
- * with home flights ranked on the first airport alone picked the exhaustive
- * winner in 38% of 5-city Chicago plans, 5.7% dearer on average and 45% at
- * worst, where the metro answer is exact (backend/scripts/opt-speed/
- * results/budget/gate-after.json, exhaustiveRankedOnFirstAirport). Why not
- * every airport: 20-30 searches for 5 cities, half of a Duffel rate-limit
- * window before a single inter-city leg.
- */
-function rankingGroup(airports: string[], metroSearch: boolean): { code: string; airports: string[] } {
-  const primary = airports[0];
-  if (metroSearch) {
-    for (const [code, members] of Object.entries(DUFFEL_METRO_AIRPORTS)) {
-      if (!members.includes(primary)) continue;
-      const covered = airports.filter((a) => members.includes(a));
-      if (covered.length >= 2) return { code, airports: covered };
-    }
-  }
-  return { code: primary, airports: [primary] };
-}
-
-/**
- * Home-flight offers for one city and direction from the traveller's own
- * airports, cheapest first — what both ranking (the cheapest) and the home
- * card (the top four, after HomeFares.complete) read on a 4+ city trip.
+ * It used to rank on ONE search per city and direction — the first airport,
+ * or on Duffel's live mode the metro code — and search the rest only for the
+ * winner. That ranks blind to the other airports: on the gate's live model,
+ * pricing every ordering with home flights ranked on the first airport alone
+ * picked the exhaustive winner in 38% of 5-city Chicago plans, 5.7% dearer on
+ * average and 45% at worst (backend/scripts/opt-speed/results/budget/
+ * gate-after.json, exhaustiveRankedOnFirstAirport), and a metro answer can
+ * leave an airport out (WAS answered for IAD and DCA, not the cheaper BWI;
+ * Duffel, 2026-11-02). Every airport is compared now, for every trip size —
+ * the owner's rule (2026-11-27). The cost is 2 × cities × airports searches
+ * (30 for 5 cities from New York), which the chat's pre-search moves out of
+ * the plan's own time.
  *
- * One search (rankingGroup), then more only where that one cannot price the
- * flight:
- *  - A metro answer is attributed to the airport each offer really flies
- *    from (or to, on the way back), and an offer from an airport not on the
- *    traveller's list is dropped — a London search also answers for City,
- *    Southend and Luton; one that does not say which airport it uses cannot
- *    be attributed and is dropped too. If the metro search fails, or answers
- *    only for airports that are not the traveller's (theirs crowded out of a
- *    capped answer, or test-mode placeholders), the first airport is
- *    searched alone instead. An empty answer means nothing flies: final.
- *  - If what was searched has no real airline at all — nothing flies from
- *    the first airport, or only the test airline does — the traveller's
- *    other airports are searched too, now: ranking must not write a city off,
- *    or rank it on a placeholder fare, when another airport may have a real
- *    flight (withoutTestAirlineWhenRealOffered).
- *
- * The airports not searched are `leftOut`: the winner's home flights search
- * them (HomeFares.complete), so the fare the traveller sees is the cheapest
- * real one from every airport they listed. Ranking reads only the searched
- * ones, at the risk of missing a cheaper left-out airport when choosing which
- * city goes first or last — the price of one search per city and direction.
+ * `leftOut` is always empty; it stays so HomeFares' callers need no change.
  */
 type HomeOffers = {
-  /** Offers from the airports searched so far, cheapest first. */
+  /** Offers from the airports searched, cheapest first. */
   offers: HomeFlightOffer[];
-  /** Their airports not searched yet. */
+  /** Their airports not searched (none: every airport is). */
   leftOut: string[];
   /** The trip city's code the searches used. */
   cityIata: string;
@@ -1988,8 +1925,6 @@ async function searchHomeOffers(ctx: RunContext, params: {
   date: string;
   travelers: number;
   reverse: boolean;
-  /** Rank on the metro code where there is one (Duffel live mode). */
-  metroSearch: boolean;
 }): Promise<HomeOffers> {
   const { tripCity, date, travelers, reverse } = params;
   const airports = homeAirportsFor(params.originAirports);
@@ -2005,61 +1940,30 @@ async function searchHomeOffers(ctx: RunContext, params: {
   const usable = airports.filter((a) => !sameAirportArea(a, cityIata));
   if (usable.length === 0) return { ...NO_HOME_OFFERS, cityIata };
 
-  const search = (homeCode: string) =>
-    ctx.flights({
-      origin: reverse ? cityIata : homeCode,
-      destination: reverse ? homeCode : cityIata,
-      date,
-      travelers,
-    });
-  const alone = async (homeAirport: string) => {
-    try {
-      return (await search(homeAirport)).map((offer: any) => ({ offer, homeAirport }));
-    } catch {
-      return [];
-    }
-  };
-
-  const group = rankingGroup(usable, params.metroSearch);
-  let found: Array<{ offer: any; homeAirport: string }>;
-  let searched: string[];
-  if (group.airports.length === 1) {
-    found = await alone(group.code);
-    searched = [group.code];
-  } else {
-    let offers: any[] | null = null;
-    try {
-      offers = await search(group.code);
-    } catch {
-      // Refused: as if it had answered for none of theirs.
-    }
-    const ours = (offers ?? []).flatMap((offer: any) => {
-      const real = String((reverse ? offer.destinationAirport : offer.originAirport) ?? '').toUpperCase();
-      return group.airports.includes(real) ? [{ offer, homeAirport: real }] : [];
-    });
-    if (ours.length > 0) {
-      found = ours;
-      searched = group.airports.filter((a) => ours.some((o) => o.homeAirport === a));
-    } else if (offers && offers.length === 0) {
-      found = [];
-      searched = [...group.airports];
-    } else {
-      found = await alone(usable[0]);
-      searched = [usable[0]];
-    }
-  }
-  if (!found.some(({ offer }) => !isDuffelTestOffer(offer))) {
-    const rest = usable.filter((a) => !searched.includes(a));
-    found = [...found, ...(await Promise.all(rest.map(alone))).flat()];
-    searched = [...searched, ...rest];
-  }
+  const found = (
+    await Promise.all(
+      usable.map(async (homeAirport) => {
+        try {
+          const offers = await ctx.flights({
+            origin: reverse ? cityIata : homeAirport,
+            destination: reverse ? homeAirport : cityIata,
+            date,
+            travelers,
+          });
+          return offers.map((offer: any) => ({ offer, homeAirport }));
+        } catch {
+          return [];
+        }
+      }),
+    )
+  ).flat();
 
   // One airport's test-airline fare must not undercut another's real one.
   const all = withoutTestAirlineWhenRealOffered(found, (x) => x.offer);
   all.sort((a, b) => (a.offer.price ?? Infinity) - (b.offer.price ?? Infinity));
   return {
     offers: all.map(({ offer, homeAirport }) => toHomeFlightOffer(offer, homeAirport, cityIata, reverse)),
-    leftOut: usable.filter((a) => !searched.includes(a)),
+    leftOut: [],
     cityIata,
   };
 }
@@ -2082,7 +1986,6 @@ function createHomeFares(
   originAirports: string[],
   travelers: number,
   dates: { outbound: string; ret: string },
-  metroSearch: boolean,
 ): HomeFares {
   const memo = new Map<string, Promise<HomeOffers>>();
   const get = (city: string, reverse: boolean): Promise<HomeOffers> => {
@@ -2095,7 +1998,6 @@ function createHomeFares(
         date: reverse ? dates.ret : dates.outbound,
         travelers,
         reverse,
-        metroSearch,
       });
       memo.set(key, hit);
     }
@@ -2535,19 +2437,162 @@ function adjacentPairs(orderings: string[][]): Array<[string, string]> {
   return pairs;
 }
 
+/**
+ * Per-city nights, by position in the typed order, and the trip's total —
+ * the one rule optimize() and prewarmHomeFlights share, so the pre-searched
+ * return date is the one the plan asks for. With `cityNights` each city
+ * brings its own nights (nightsByCity); otherwise they are spread evenly.
+ */
+function tripNights(
+  cities: CityInput[],
+  totalNights: number | undefined,
+  cityNights: Record<string, number> | undefined,
+): { nightsByCity: Map<string, number> | null; nightsArray: number[]; totalNightsResolved: number } {
+  const nightsByCity = cityNightsByName(cityNights, cities, totalNights);
+  const nightsArray = nightsByCity
+    ? cities.map((c) => nightsByCity.get(c.name.trim().toLowerCase())!)
+    : distributeNights(totalNights, cities.length);
+  return { nightsByCity, nightsArray, totalNightsResolved: nightsArray.reduce((sum, n) => sum + n, 0) };
+}
+
+/**
+ * The traveller's home airports, as optimize() prices them (before
+ * homeAirportsFor caps and filters them), and the name's own resolution.
+ *
+ * The caller's list wins when it gave one: the frontend fills it from
+ * frontend/lib/locationResolver.ts, a second implementation reading the
+ * browser hot set, held to resolveOriginAirports' no-context answer by
+ * originAirportsBrowserParity.test.ts. Otherwise the name is resolved with
+ * the destinations as context (a trip through Florence and Venice says which
+ * Rome is home), and failing that the home city's own airport code.
+ *
+ * The NAME is resolved unconditionally: whether it was ambiguous is a fact
+ * about what the traveller typed, and optimize() reports it as
+ * `originClarification` even when the caller chose the airports. An
+ * in-memory artifact lookup — no network, no Duffel.
+ */
+async function homeAirportList(args: {
+  origin: string;
+  originAirports?: string[];
+  cityNames: string[];
+  homeIata: (cityName: string) => Promise<string>;
+}): Promise<{ airports: string[]; resolution: ReturnType<typeof resolveOriginAirports> }> {
+  const resolution = resolveOriginAirports(args.origin, { tripDestinationNames: args.cityNames });
+  if (args.originAirports && args.originAirports.length > 0) return { airports: args.originAirports, resolution };
+  if (resolution.airports.length > 0) return { airports: resolution.airports, resolution };
+  try {
+    // The HOME city — no trip context (see RunContext.homeIata).
+    return { airports: [await args.homeIata(args.origin)], resolution };
+  } catch {
+    logger.warn('Could not resolve origin IATA', { origin: args.origin });
+    return { airports: [], resolution };
+  }
+}
+
+/** What the planner knows once it has asked "How many people?" (see prewarmHomeFlights). */
+export type PrewarmParams = Pick<
+  OptimizeParams,
+  'cities' | 'startDate' | 'travelers' | 'origin' | 'originAirports' | 'returnToHome' | 'totalNights' | 'cityNights'
+>;
+
+export type PrewarmOutcome = {
+  /** Home-flight searches asked for (those already in flights.ts' cache cost nothing). */
+  searches: number;
+  /** True when the same trip was pre-searched within PREWARM_TTL_MS: nothing was asked. */
+  deduped: boolean;
+};
+
+/** flights.ts keeps a search 10 minutes; a repeat inside that finds them all there. */
+const PREWARM_TTL_MS = 10 * 60 * 1000;
+const prewarmed = new Map<string, number>();
+
+/**
+ * Search, during the planner chat, the home flights the plan will need:
+ * every city, both directions, from every one of the traveller's airports —
+ * exactly the searches optimize() makes for them (searchHomeFlights on 1-3
+ * cities, searchHomeOffers on 4-5), with the same airports, city codes,
+ * dates and party, so flights.ts' cache answers optimize() from them.
+ *
+ * Why it can: home flights depend only on which city is first or last, the
+ * two travel days and the party — not on the order of the cities — and the
+ * planner knows all of those after "How many people?", while budget and
+ * notes are still to come. Why it matters: ranking compares every home
+ * airport (searchHomeOffers), 2 × cities × airports searches — 30 for 5
+ * cities from New York, a whole Duffel window — which no longer sit in the
+ * plan's own time.
+ *
+ * Fire-and-forget for the caller (POST /api/optimize/prewarm answers at
+ * once). A repeat of the same trip within PREWARM_TTL_MS asks nothing; a
+ * search that fails is simply searched again by optimize().
+ */
+export async function prewarmHomeFlights(params: PrewarmParams): Promise<PrewarmOutcome> {
+  const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights, cityNights } = params;
+  if (!origin || !origin.trim() || cities.length === 0) return { searches: 0, deduped: false };
+  const cityNames = cities.map((c) => c.name);
+  const { totalNightsResolved } = tripNights(cities, totalNights, cityNights);
+  const outboundDate = clampToFuture(startDate);
+  const returnDate = clampToFuture(addDays(startDate, totalNightsResolved));
+  const ctx = createRunContext(cityNames);
+  const home = await homeAirportList({ origin, originAirports, cityNames, homeIata: ctx.homeIata });
+  const airports = homeAirportsFor(home.airports);
+  if (airports.length === 0) return { searches: 0, deduped: false };
+
+  const key = JSON.stringify([airports, cityNames, outboundDate, returnToHome ? returnDate : null, travelers]);
+  const now = Date.now();
+  for (const [k, at] of prewarmed) if (now - at > PREWARM_TTL_MS) prewarmed.delete(k);
+  if (prewarmed.has(key)) return { searches: 0, deduped: true };
+  prewarmed.set(key, now);
+
+  const started = Date.now();
+  const searches: Array<Promise<unknown>> = [];
+  await Promise.all(
+    cityNames.map(async (city) => {
+      let cityIata: string;
+      try {
+        cityIata = await ctx.iata(city);
+      } catch {
+        return; // optimize() will not price it either
+      }
+      for (const airport of airports) {
+        if (sameAirportArea(airport, cityIata)) continue;
+        searches.push(searchFlights({ origin: airport, destination: cityIata, date: outboundDate, travelers }).catch(() => []));
+        if (returnToHome) {
+          searches.push(searchFlights({ origin: cityIata, destination: airport, date: returnDate, travelers }).catch(() => []));
+        }
+      }
+    }),
+  );
+  await Promise.all(searches);
+  logger.info('Optimize prewarm', { cities: cities.length, airports: airports.length, searches: searches.length, ms: Date.now() - started });
+  return { searches: searches.length, deduped: false };
+}
+
+/** Tests only. */
+export function _resetPrewarm(): void {
+  prewarmed.clear();
+}
+
 export async function optimize(params: OptimizeParams): Promise<OptimizeResult> {
   const { cities, startDate, travelers, origin, originAirports, returnToHome = true, totalNights, cityNights, onProgress, onFirstAnswer } = params;
   const runStarted = Date.now();
   /**
-   * Prototype variant C (exp/optimizer-speed, OPT_VARIANT=C): as B, but the
-   * work after the ranking — the winner's trains on their real days, its leg
-   * alternatives, the date-shift probe — searches ONCE more a route-day whose
-   * first answer had no priced train (RunRail.retry, past trains.ts'
-   * noRailAnswer memory). A cold All Aboard route often answers the second
-   * time (T1, 2026-11-24: Paris → Berlin, $87.70 for two, found only by the
-   * retry). The first answer never waits for it; the full answer does.
+   * The work after the ranking — the winner's trains on their real days, its
+   * leg alternatives, the date-shift probe — searches ONCE more a route-day
+   * whose first answer had no priced train (RunRail.retry). A cold All Aboard
+   * route often answers the second time (T1, 2026-11-24: Paris → Berlin,
+   * $87.70 for two, found only by the retry), and a train the plan used to
+   * find must still be found. OPT_RAIL_RETRY=0 turns it off, for the
+   * benchmark (backend/scripts/opt-bench) only.
    */
-  const retryRailAfterRanking = process.env.OPT_VARIANT === 'C';
+  const retryRailAfterRanking = process.env.OPT_RAIL_RETRY !== '0';
+  /**
+   * Ranking's rail: All Aboard's lighter search (direct trains, 2 fares per
+   * pair — searchTrains' `quick`), which answers a cold route-day in ~3 s
+   * against 8-25 s for the full one, at no extra quota once the route-day's
+   * timetable is fetched (measured 2026-11-27). OPT_RANKING_RAIL=full ranks
+   * on the full search, for the benchmark only.
+   */
+  const quickRankingRail = process.env.OPT_RANKING_RAIL !== 'full';
 
   if (cities.length < 1) {
     throw new Error('Need at least 1 city to optimize');
@@ -2564,21 +2609,17 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // an ordering, so the per-position array depends on the ordering:
   // `nightsFor(ordering)`. Without it, every ordering shares one positional
   // array, exactly as before. `nightsArray` is the typed order's.
-  const nightsByCity = cityNightsByName(cityNights, cities, totalNights);
+  const { nightsByCity, nightsArray, totalNightsResolved } = tripNights(cities, totalNights, cityNights);
   if (cityNights && !nightsByCity) {
     logger.warn('cityNights ignored: it does not name every city once, or disagrees with totalNights', {
       cities: cities.length,
       given: Object.keys(cityNights).length,
     });
   }
-  const nightsArray = nightsByCity
-    ? cities.map((c) => nightsByCity.get(c.name.trim().toLowerCase())!)
-    : distributeNights(totalNights, cities.length);
   const nightsFor = (ordering: string[]): number[] =>
     nightsByCity
       ? ordering.map((c) => nightsByCity.get(c.trim().toLowerCase()) ?? DEFAULT_NIGHTS_PER_CITY)
       : nightsArray;
-  const totalNightsResolved = nightsArray.reduce((s, n) => s + n, 0);
 
   // Single-city trips are valid when origin is set (vibe-first flows
   // typically produce one destination, e.g. "Reykjavik for adventure").
@@ -2614,10 +2655,9 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     travelers,
     countryOf: (name) => cityMap.get(name)?.country ?? getCityCountry(name),
     waitMs: params.railWaitMs ?? RAIL_RANKING_WAIT_MS,
-    // Variant B2 (OPT_VARIANT=B2): ranking's rail is All Aboard's lighter
-    // search — direct trains only, 2 journeys priced per pair. The winner's
-    // legs are still searched in full on their real days below.
-    search: process.env.OPT_VARIANT === 'B2' ? runCtx.rail.quick : runCtx.rail.search,
+    // The lighter search (see quickRankingRail). The winner's legs are still
+    // searched in full on their real days below.
+    search: quickRankingRail ? runCtx.rail.quick : runCtx.rail.search,
   });
   const ctx = runCtx.withTrainDate(() => rankingTrainDay).withTrainSource(railBoard.source);
 
@@ -2644,52 +2684,21 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   let resolvedOriginAirports: string[] = [];
   let originClarification: OriginClarification | undefined;
   if (hasOrigin) {
-    // Resolve the NAME unconditionally, even when the caller supplied its own
-    // airports. Whether the name was ambiguous is a fact about what the
-    // traveller typed, not about which airports we ended up pricing, and the
-    // caller cannot report it: the frontend's lookup returns a confident list
-    // or nothing, with no way to say "this matched four places".
-    //
-    // This used to sit inside the `else` below, which made the feature almost
-    // dead. The frontend answers `Portland` with ["PDX","SLE"] and `Melbourne`
-    // with ["MEL","AVV","MEB"] from its own copy of the artifact, so the
-    // branch never ran and the two clearest ambiguous origins never produced a
-    // clarification. Only names the frontend's hot set MISSED could ever ask.
-    //
-    // Free to do here: an in-memory artifact lookup, no network, no Duffel.
-    const resolution = resolveOriginAirports(origin!, {
-      // The destinations are the strongest context available here and cost
-      // nothing: a trip through Florence and Venice says which Rome is home.
-      tripDestinationNames: cities.map((c) => c.name),
+    const home = await homeAirportList({
+      origin: origin!,
+      originAirports,
+      cityNames: cities.map((c) => c.name),
+      homeIata: ctx.homeIata,
     });
-    if (resolution.needsClarification) {
+    resolvedOriginAirports = home.airports;
+    // Whether the name was ambiguous is a fact about what the traveller
+    // typed, not about which airports we ended up pricing (homeAirportList).
+    if (home.resolution.needsClarification) {
       originClarification = {
         input: origin!,
-        reason: resolution.needsClarification.reason,
-        candidates: resolution.needsClarification.candidates,
+        reason: home.resolution.needsClarification.reason,
+        candidates: home.resolution.needsClarification.candidates,
       };
-    }
-
-    if (originAirports && originAirports.length > 0) {
-      // The caller already decided, and we serve that decision verbatim for
-      // PRICING. The frontend fills this from frontend/lib/locationResolver.ts
-      // — a second implementation reading the browser hot set, not
-      // resolveOriginAirports. It matches this function's no-context answer
-      // because originAirportsBrowserParity.test.ts holds it to that over
-      // every hot-set key; it can still differ where trip context would
-      // change the answer, since the browser answers without the trip. The
-      // clarification above is informational and does not override it.
-      resolvedOriginAirports = originAirports;
-    } else if (resolution.airports.length > 0) {
-      resolvedOriginAirports = resolution.airports;
-    } else {
-      try {
-        // The HOME city — no trip context (see RunContext.homeIata).
-        const single = await ctx.homeIata(origin!);
-        resolvedOriginAirports = [single];
-      } catch {
-        logger.warn('Could not resolve origin IATA', { origin });
-      }
     }
   }
 
@@ -2725,7 +2734,6 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           resolvedOriginAirports,
           travelers,
           { outbound: outboundDate, ret: returnDate },
-          duffelLiveMode(),
         )
       : null;
   const homeLegCost = (city: string, reverse: boolean): Promise<number> =>
@@ -2832,7 +2840,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           .then(legCost),
       homeCosts,
       // Read before each round, when every search sent so far is in the ledger.
-      budget: { remaining: () => PLAN_SEARCH_BUDGET - ctx.searchLedger.size - reserved },
+      budget: { remaining: () => PLAN_SEARCH_BUDGET - interCitySearches(ctx) - reserved },
     });
     screenStats = { rounds: screen.rounds, budgetStop: screen.budgetStop, reserved };
     // Every leg and home flight of these is priced already: no new searches.
@@ -2922,8 +2930,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     }
   }
 
-  // Variant C: the work below searches once more a route-day whose answer had
-  // no priced train (RunRail.retry; see retryRailAfterRanking).
+  // The work below searches once more a route-day whose answer had no priced
+  // train (RunRail.retry; see retryRailAfterRanking).
   const realDayCtx = retryRailAfterRanking
     ? ctx.withTrainDate(undefined).withTrainSource({ id: 'retry', search: ctx.rail.retry })
     : ctx.withTrainDate(undefined);
@@ -3048,8 +3056,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           limit: 4,
           // Same airports the scoring priced: the trip decides which Lagos.
           tripCityNames: ctx.tripCityNames,
-          // The run's rail answers: no second search of a route-day (B), or
-          // its one retry (variant C).
+          // The run's rail answers, with the one retry the exact legs got —
+          // never another search of the same route-day.
           searchTrains: retryRailAfterRanking ? ctx.rail.retry : ctx.rail.search,
         });
         if (result.options.length > 0) {
@@ -3192,10 +3200,15 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // RunContext.searchLedger).
   const byPhase: Partial<Record<SearchPhase, number>> = {};
   for (const phase of ctx.searchLedger.values()) byPhase[phase] = (byPhase[phase] ?? 0) + 1;
+  const sentByPhase: Partial<Record<SearchPhase, number>> = {};
+  for (const phase of ctx.sentLedger.values()) sentByPhase[phase] = (sentByPhase[phase] ?? 0) + 1;
   logger.info('Optimize flight searches', {
     cities: cities.length,
     searches: ctx.searchLedger.size,
     byPhase,
+    // Of those, the ones that were not already in flights.ts' cache.
+    sent: ctx.sentLedger.size,
+    sentByPhase,
     ...(screenStats
       ? { exactRounds: screenStats.rounds, budgetStop: screenStats.budgetStop, reservedForHomeLegs: screenStats.reserved }
       : {}),
@@ -3207,7 +3220,8 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     firstAnswerMs,
     fullAnswerMs: Date.now() - runStarted,
     rail: railBoard.stats(),
-    ...(retryRailAfterRanking ? { variant: 'C' } : {}),
+    railRetry: retryRailAfterRanking,
+    rankingRail: quickRankingRail ? 'quick' : 'full',
   });
 
   const publicRoutes = topRoutes.map(toPublicRoute);
