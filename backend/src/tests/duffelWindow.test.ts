@@ -73,6 +73,36 @@ describe("Duffel's window", () => {
     expect(sentAt - started).toBeGreaterThanOrEqual(900);
   }, 10_000);
 
+  it('a burst bigger than the places left sends only that many, and the rest after the reset', async () => {
+    // One window, ending on a whole second (an HTTP date has no ms), with 2
+    // places left; the next one starts empty.
+    const resetAt = Math.ceil((Date.now() + 2_000) / 1000) * 1000;
+    mockDuffel.offerRequests.create.mockResolvedValueOnce(answer(2, resetAt - Date.now()));
+    await searchFlights({ origin: 'JFK', destination: 'CDG', date: '2031-01-14', travelers: 1 });
+
+    const sentAt: number[] = [];
+    let left = 2;
+    mockDuffel.offerRequests.create.mockImplementation(async () => {
+      sentAt.push(Date.now());
+      // Duffel's own count of the window this request landed in.
+      if (Date.now() >= resetAt) return answer(29 - (sentAt.length - 3), resetAt + 60_000 - Date.now());
+      left = Math.max(0, left - 1);
+      return answer(left, resetAt - Date.now());
+    });
+    const started = Date.now();
+    await Promise.all(
+      ['FCO', 'MAD', 'LIS', 'BCN'].map((destination) =>
+        searchFlights({ origin: 'JFK', destination, date: '2031-01-14', travelers: 1 }),
+      ),
+    );
+    mockDuffel.offerRequests.create.mockReset();
+    // Four sent, none refused: two at once, two once the window reset.
+    expect(sentAt).toHaveLength(4);
+    const early = sentAt.filter((t) => t - started < 500).length;
+    expect(early).toBe(2);
+    expect(sentAt.filter((t) => t >= resetAt)).toHaveLength(2);
+  }, 10_000);
+
   it('a window with room left sends at once', async () => {
     mockDuffel.offerRequests.create.mockResolvedValueOnce(answer(5, 30_000));
     await searchFlights({ origin: 'JFK', destination: 'CDG', date: '2031-01-12', travelers: 1 });

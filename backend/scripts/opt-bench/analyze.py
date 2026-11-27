@@ -55,7 +55,28 @@ def answer(resp):
         'savingsVsNaive': resp.get('savingsVsNaive'),
         'dateShift': (resp.get('dateShiftSuggestion') or {}).get('savings'),
         'dateShiftChecked': resp.get('dateShiftChecked'),
+        'totalMatchesCards': total_matches_cards(resp),
     }
+
+
+def total_matches_cards(resp):
+    """Does the headline total equal what the cards show (each leg's first
+    option, plus the home flights)?"""
+    br = resp['bestRoute']
+    shown = 0.0
+    for l in br['legs']:
+        opts = l.get('options') or []
+        if not opts:
+            # No card price (e.g. a day trip with no provider): only fine if
+            # the total did not count anything for it either.
+            if l.get('cost'):
+                return False
+            continue
+        shown += opts[0].get('price') or 0
+    for k in ('outboundLeg', 'returnLeg'):
+        if resp.get(k):
+            shown += resp[k].get('price') or 0
+    return abs(shown - br['totalCost']) < 0.01
 
 
 def analyze(result_path):
@@ -106,6 +127,7 @@ def analyze(result_path):
         'duffel429': sim429,
         'suggestions': len(sugg),
         'aaJourneySearches': len(gj),
+        'aaQuickSearches': sum(1 for x in gj if '[NON_STOP]' in x.get('summary', '')),
         'aaRouteDays': len(distinct_rd),
         'aaUnitsEst': UNITS_PER_ROUTE_DAY * len(distinct_rd),
         'aaNoTimetable': gj_empty,

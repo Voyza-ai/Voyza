@@ -2666,6 +2666,29 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   });
   const ctx = runCtx.withTrainDate(() => rankingTrainDay).withTrainSource(railBoard.source);
 
+  // The winner's FIRST leg is flown on the ranking day, whichever ordering
+  // wins, so every pair's full search on that day — and its one retry when it
+  // has no priced train — is work the plan will wait on anyway: start it now,
+  // behind the ranking's quick searches (the rail gate is first come, first
+  // served), into the run's rail memo, where the winner's real-day legs and
+  // their alternatives find it. It costs no timetable quota the quick search
+  // has not (the route-day's timetable is shared, measured 2026-11-27), and
+  // the plan before this searched every pair's full timetable on that day too.
+  if (quickRankingRail) {
+    const countryOfCity = (name: string) => cityMap.get(name)?.country ?? getCityCountry(name);
+    for (const [from, to] of adjacentPairs([...orderings, cities.map((c) => c.name)])) {
+      const full: SearchTrainsParams = {
+        origin: from,
+        destination: to,
+        date: rankingTrainDay,
+        travelers,
+        originCountry: countryOfCity(from),
+        destinationCountry: countryOfCity(to),
+      };
+      void (retryRailAfterRanking ? runCtx.rail.retry(full) : runCtx.rail.search(full));
+    }
+  }
+
   // Step 1: resolve IATA codes in parallel
   const iataCodes: Record<string, string> = {};
   await Promise.all(

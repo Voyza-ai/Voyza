@@ -104,7 +104,7 @@ function install() {
         norm = JSON.stringify({ q, v: b.variables || {} });
         const name = (q.match(/\{\s*(\w+)\s*\(/) || [])[1] || 'gql';
         op = `aa.${name}`;
-        summary = `${name} ${JSON.stringify(b.variables || {})}`;
+        summary = `${name} ${JSON.stringify(b.variables || {})}${q.includes('NON_STOP') ? ' [NON_STOP]' : ''}`;
         // party size is in the query text for getJourneyOffer
         const pax = (q.match(/\{type: ADULT\}/g) || []).length;
         if (name === 'getJourneyOffer') summary += ` pax=${pax}`;
@@ -221,7 +221,10 @@ function install() {
   let windowCount = 0;
   function duffelGate(now) {
     if (!DUFFEL_LIMIT) return null;
-    if (windowStart === null) windowStart = now - PHASE_MS;
+    // On a whole second, as Duffel's are (the wall-clock minute): the reset
+    // header is an HTTP date, with no milliseconds, so a window ending
+    // mid-second told the client a reset up to 1 s early.
+    if (windowStart === null) windowStart = Math.floor((now - PHASE_MS) / 1000) * 1000;
     while (now >= windowStart + 60_000) {
       windowStart += 60_000;
       windowCount = 0;

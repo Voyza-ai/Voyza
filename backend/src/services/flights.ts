@@ -103,6 +103,7 @@ async function withSearchSlot<T>(fn: () => Promise<T>): Promise<T> {
     // the pause out (or gives up, within its budget).
     const paused = duffelPausedUntil - Date.now();
     if (paused > 0) throw rateLimitedError(paused);
+    takeDuffelWindowPlace();
     return await fn();
   } finally {
     activeSearches--;
@@ -253,6 +254,27 @@ function noteDuffelWindow(headers: any): void {
   if (remaining <= 0 && delay > 0) {
     duffelPausedUntil = Math.max(duffelPausedUntil, resetAt);
   }
+}
+
+/**
+ * Count a request against the window Duffel last reported BEFORE sending it.
+ * Up to six searches go out at once (MAX_CONCURRENT_SEARCHES), and each
+ * answer's `ratelimit-remaining` only counts what Duffel had accepted by then,
+ * so a window with 3 places left used to take a burst of 6 and refuse 3 of
+ * them. Each send now takes a place from the last count (noteDuffelWindow
+ * keeps the lowest count it has seen for that window); once none is left,
+ * every search waits for the reset instead of being sent and refused.
+ * Before any answer — or once the window has reset — the count is unknown
+ * and searches go out as before; the next answer states the new window.
+ */
+function takeDuffelWindowPlace(): void {
+  const w = duffelWindowState();
+  if (!w) return;
+  if (w.remaining <= 0) {
+    duffelPausedUntil = Math.max(duffelPausedUntil, w.resetAt);
+    throw rateLimitedError(w.resetAt - Date.now());
+  }
+  w.remaining--;
 }
 
 function rateLimitedError(waitMs: number): Error {
