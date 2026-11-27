@@ -227,14 +227,33 @@ describe('optimize with the rail board', () => {
     expect(inTime.bestRoute.legs[0].comparison.trainOption?.price).toBe(50);
   });
 
-  it('ranking asks each pair once (the quick search); the winner\'s legs at most twice (one retry), even when every answer is empty', async () => {
-    setFlights();
-    mockedTrains.mockResolvedValue([]);
-    await optimize({ ...TRIP, railWaitMs: 20 });
-    const calls = mockedTrains.mock.calls.map(([p, opts]: any[]) => ({
+  const railCalls = () =>
+    mockedTrains.mock.calls.map(([p, opts]: any[]) => ({
       key: `${p.origin}>${p.destination}@${p.date}`,
       quick: opts?.quick === true,
     }));
+
+  it("ranking asks each pair once (the full search); every route-day at most twice (one retry), even when every answer is empty", async () => {
+    setFlights();
+    mockedTrains.mockResolvedValue([]);
+    await optimize({ ...TRIP, railWaitMs: 20 });
+    const calls = railCalls();
+    expect(calls.filter((c) => c.quick)).toEqual([]);
+    const full = calls.map((c) => c.key);
+    for (const pair of ['Aville>Bburg@2030-03-10', 'Bburg>Aville@2030-03-10']) expect(full).toContain(pair);
+    for (const key of new Set(full)) expect(full.filter((k) => k === key).length).toBeLessThanOrEqual(2);
+  });
+
+  it('OPT_RANKING_RAIL=quick (benchmark only): ranking asks each pair once with the lighter search', async () => {
+    setFlights();
+    mockedTrains.mockResolvedValue([]);
+    process.env.OPT_RANKING_RAIL = 'quick';
+    try {
+      await optimize({ ...TRIP, railWaitMs: 20 });
+    } finally {
+      delete process.env.OPT_RANKING_RAIL;
+    }
+    const calls = railCalls();
     const quick = calls.filter((c) => c.quick).map((c) => c.key);
     expect(quick.sort()).toEqual(['Aville>Bburg@2030-03-10', 'Bburg>Aville@2030-03-10']);
     const full = calls.filter((c) => !c.quick).map((c) => c.key);

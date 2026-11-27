@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Round 2: replay one trip on A and the new version (N) at several Duffel
 # window phases. N runs with the chat's pre-search 10 s and 25 s before the
-# plan, without it, and ranking on the full rail search.
+# plan, without it, and ranking on the lighter (B2, NON_STOP) rail search.
 #   batch2.sh <trip> ["0 20 40"]
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -21,5 +21,5 @@ for p in $PHASES; do
   run --version N --dir "$N_DIR" --port 4100 --phase "$p" --prewarm 25 &
   run --version N --dir "$N_DIR" --port 4200 --phase "$p"
   wait
-  run --version N --dir "$N_DIR" --port 4200 --phase "$p" --prewarm 10 --ranking-rail full
+  run --version N --dir "$N_DIR" --port 4200 --phase "$p" --prewarm 10 --ranking-rail quick
 done

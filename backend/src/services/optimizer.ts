@@ -2591,13 +2591,14 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
    */
   const retryRailAfterRanking = process.env.OPT_RAIL_RETRY !== '0';
   /**
-   * Ranking's rail: All Aboard's lighter search (direct trains, 2 fares per
-   * pair — searchTrains' `quick`), which answers a cold route-day in ~3 s
-   * against 8-25 s for the full one, at no extra quota once the route-day's
-   * timetable is fetched (measured 2026-11-27). OPT_RANKING_RAIL=full ranks
-   * on the full search, for the benchmark only.
+   * Ranking's rail is the full search. The lighter one (B2: direct trains, 2
+   * fares per pair — searchTrains' `quick`) answers its timetable in 1-3 s,
+   * but its fares take 9-23 s, so none was priced inside the 8 s ranking cap
+   * (T1 0 of 6 searches, T2 0 of 19, live 2026-11-27): it changed no answer and no
+   * time, and cost twice the All Aboard searches and fares.
+   * OPT_RANKING_RAIL=quick turns it on, for the benchmark only.
    */
-  const quickRankingRail = process.env.OPT_RANKING_RAIL !== 'full';
+  const quickRankingRail = process.env.OPT_RANKING_RAIL === 'quick';
 
   if (cities.length < 1) {
     throw new Error('Need at least 1 city to optimize');
@@ -2660,16 +2661,16 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     travelers,
     countryOf: (name) => cityMap.get(name)?.country ?? getCityCountry(name),
     waitMs: params.railWaitMs ?? RAIL_RANKING_WAIT_MS,
-    // The lighter search (see quickRankingRail). The winner's legs are still
-    // searched in full on their real days below.
+    // The full search, unless the benchmark asks for the lighter one (see
+    // quickRankingRail). The winner's legs are searched on their real days below.
     search: quickRankingRail ? runCtx.rail.quick : runCtx.rail.search,
   });
   const ctx = runCtx.withTrainDate(() => rankingTrainDay).withTrainSource(railBoard.source);
 
-  // The winner's FIRST leg is flown on the ranking day, whichever ordering
-  // wins, so every pair's full search on that day — and its one retry when it
-  // has no priced train — is work the plan will wait on anyway: start it now,
-  // behind the ranking's quick searches (the rail gate is first come, first
+  // With the lighter ranking search only (benchmark): the winner's FIRST leg
+  // is flown on the ranking day, whichever ordering wins, so every pair's full
+  // search on that day — and its one retry when it has no priced train — is
+  // work the plan will wait on anyway: start it now, behind the ranking's quick searches (the rail gate is first come, first
   // served), into the run's rail memo, where the winner's real-day legs and
   // their alternatives find it. It costs no timetable quota the quick search
   // has not (the route-day's timetable is shared, measured 2026-11-27), and
