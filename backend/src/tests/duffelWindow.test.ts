@@ -127,6 +127,31 @@ describe("Duffel's window", () => {
   });
 });
 
+describe("Duffel's window: searches sent before it was known", () => {
+  it('count against it: an answer from before them cannot give their places back', async () => {
+    // A fresh process: A and B go out with the window unknown. A's answer
+    // (Duffel's count when it accepted A: 29 left) lets C go; B's answer then
+    // says 28 — its count from before C. Three were sent: 27 are left.
+    const resetIn = 50_000;
+    const later = (ms: number, remaining: number) => async () => {
+      await sleep(ms);
+      return answer(remaining, resetIn);
+    };
+    mockDuffel.offerRequests.create
+      .mockImplementationOnce(later(50, 29))
+      .mockImplementationOnce(later(250, 28))
+      .mockImplementationOnce(later(400, 27));
+    const a = searchFlights({ origin: 'JFK', destination: 'CDG', date: '2031-02-05', travelers: 1 });
+    const b = searchFlights({ origin: 'JFK', destination: 'FCO', date: '2031-02-05', travelers: 1 });
+    await a;
+    const c = searchFlights({ origin: 'JFK', destination: 'MAD', date: '2031-02-05', travelers: 1 });
+    await b;
+    expect(duffelWindowState()).toMatchObject({ remaining: 27 });
+    await c;
+    expect(duffelWindowState()).toMatchObject({ remaining: 27 });
+  });
+});
+
 describe("Duffel's window: late answers", () => {
   it('an answer from the minute that just ended never replaces the one in force', async () => {
     mockDuffel.offerRequests.create.mockResolvedValueOnce(answer(20, 40_000));

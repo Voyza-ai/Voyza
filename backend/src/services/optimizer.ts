@@ -2440,7 +2440,7 @@ const prewarmed = new Map<string, number>();
  * party, so flights.ts' cache answers optimize() from them.
  *
  * They give way to every real plan (flights.ts searchFlightsInBackground):
- * their own two Duffel slots, nothing sent while a plan is searching or into
+ * their own four Duffel slots, nothing sent while a plan is searching or into
  * a nearly spent Duffel minute, no retries. A search not sent is searched by
  * the plan itself, as before.
  *

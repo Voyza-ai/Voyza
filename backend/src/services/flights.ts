@@ -232,6 +232,30 @@ let duffelPausedUntil = 0;
 export function resetDuffelRateLimitPause(): void {
   duffelPausedUntil = 0;
   duffelWindow = null;
+  ourSends.length = 0;
+}
+
+/**
+ * When this process sent each Duffel search, for the last two minutes. An
+ * answer's `ratelimit-remaining` is Duffel's count when it ACCEPTED that
+ * request; searches sent while the window was still unknown (a fresh
+ * process, or just after a reset) were never taken from a count, so an
+ * answer arriving after a later send overstated what was left by those —
+ * one search past the window, refused (T2 replay, 2026-11-27). Whatever
+ * Duffel says, a window cannot have more left than its limit less what this
+ * process itself sent into it.
+ */
+const ourSends: number[] = [];
+
+function noteOurSend(now: number): void {
+  ourSends.push(now);
+  while (ourSends.length > 0 && now - ourSends[0] > 120_000) ourSends.shift();
+}
+
+function sentSince(t: number): number {
+  let n = 0;
+  for (let i = ourSends.length - 1; i >= 0 && ourSends[i] >= t; i--) n++;
+  return n;
 }
 
 /**
@@ -274,9 +298,13 @@ function noteDuffelWindow(headers: any): void {
   if (held && resetAt < held.resetAt - 1000) return;
   // Answers can arrive out of order: keep the newest window's lowest count.
   if (held && held.resetAt >= resetAt - 1000 && held.remaining <= remaining) {
+    held.remaining = Math.min(held.remaining, held.limit - sentSince(held.resetAt - 60_000));
     return;
   }
-  duffelWindow = { limit: Number.isFinite(limit) ? limit : 30, remaining, resetAt, seenAt: Date.now() };
+  const windowLimit = Number.isFinite(limit) ? limit : 30;
+  // Fixed one-minute windows: this one started a minute before its reset.
+  const ours = windowLimit - sentSince(resetAt - 60_000);
+  duffelWindow = { limit: windowLimit, remaining: Math.min(remaining, ours), resetAt, seenAt: Date.now() };
   if (remaining <= 0 && delay > 0) {
     duffelPausedUntil = Math.max(duffelPausedUntil, resetAt);
   }
@@ -295,12 +323,14 @@ function noteDuffelWindow(headers: any): void {
  */
 function takeDuffelWindowPlace(): void {
   const w = duffelWindowState();
-  if (!w) return;
-  if (w.remaining <= 0) {
-    duffelPausedUntil = Math.max(duffelPausedUntil, w.resetAt);
-    throw rateLimitedError(w.resetAt - Date.now());
+  if (w) {
+    if (w.remaining <= 0) {
+      duffelPausedUntil = Math.max(duffelPausedUntil, w.resetAt);
+      throw rateLimitedError(w.resetAt - Date.now());
+    }
+    w.remaining--;
   }
-  w.remaining--;
+  noteOurSend(Date.now());
 }
 
 function rateLimitedError(waitMs: number): Error {
@@ -410,7 +440,9 @@ function cachedSearch(key: string, run: () => Promise<FlightOffer[]>): Promise<F
  * pre-search during the chat (optimizer.ts prewarmHomeFlights). They give way
  * to every real plan, which must never wait on one (review of
  * exp/optimizer-speed, 2026-11-27):
- *  - their own MAX_BACKGROUND_SEARCHES slots, never one of a plan's six;
+ *  - their own MAX_BACKGROUND_SEARCHES slots, never one of a plan's six
+ *    (4: a 5-city pre-search's ~20 searches in ~9 s, inside the chat's
+ *    10-25 s between "How many people?" and the plan);
  *  - not sent while a plan is searching (foregroundBusy) — the plan searches
  *    what it needs itself, and finds what was pre-searched in the cache;
  *  - not sent into a Duffel minute with BACKGROUND_WINDOW_RESERVE places or
@@ -419,7 +451,7 @@ function cachedSearch(key: string, run: () => Promise<FlightOffer[]>): Promise<F
  *  - no retries: a refused one is simply not pre-searched.
  * A search already cached or in flight is shared, as for anyone.
  */
-const MAX_BACKGROUND_SEARCHES = 2;
+const MAX_BACKGROUND_SEARCHES = 4;
 const BACKGROUND_WINDOW_RESERVE = 10;
 const BACKGROUND_MAX_WAIT_MS = 60_000;
 /** A plan that searched this recently is still working (between rounds, or waiting on rail). */
