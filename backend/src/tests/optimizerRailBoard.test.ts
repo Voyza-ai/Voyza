@@ -3,8 +3,9 @@
  * per route-day, and the two-phase answer.
  *
  *  - Every city pair's trains are searched once, up front, on the ranking
- *    day; ranking waits for them at most RAIL_RANKING_WAIT_MS and ranks a
- *    pair that has not answered on its flights.
+ *    day; ranking waits for every pair's first answer (a cap, railWaitMs /
+ *    OPT_RAIL_WAIT_MS, is for tests and the benchmark: a pair that has not
+ *    answered by then is ranked on its flights).
  *  - Inside one run, the first rail answer for a route-day is the run's
  *    answer, incomplete or not (variant C: one retry after the ranking).
  *  - onFirstAnswer gets the trip as soon as the ranking is decided; the
@@ -52,7 +53,7 @@ import { optimize, _railForTests, type OptimizeResult } from '../services/optimi
 import { searchFlights } from '../services/flights';
 import { searchTrains, type TrainOffer } from '../services/trains';
 
-const { createRailBoard, createRunRail } = _railForTests;
+const { createRailBoard, createRunRail, RAIL_RANKING_WAIT_MS } = _railForTests;
 const mockedFlights = searchFlights as jest.Mock;
 const mockedTrains = searchTrains as jest.Mock;
 
@@ -137,6 +138,17 @@ describe('createRailBoard', () => {
     const started = Date.now();
     await board.source.search({ origin: 'A', destination: 'B', date: base.day, travelers: 2 });
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('with no cap (Infinity) the snapshot waits for the last pair, however late', async () => {
+    const search = jest.fn(async (p: any) => {
+      await sleep(p.origin === 'B' ? 150 : 0);
+      return [train(p.origin, p.destination, p.date, p.origin === 'B' ? 40 : 70)];
+    });
+    const board = createRailBoard({ ...base, pairs: [['A', 'B'], ['B', 'A']], waitMs: Infinity, search });
+    const back = await board.source.search({ origin: 'B', destination: 'A', date: base.day, travelers: 2 });
+    expect(back.map((t) => t.price)).toEqual([40]);
+    expect(board.stats()).toMatchObject({ pairs: 2, inSnapshot: 2, settled: 2 });
   });
 
   it('another day, or a pair it does not hold, is searched as usual', async () => {
@@ -225,6 +237,44 @@ describe('optimize with the rail board', () => {
     const inTime = await optimize({ ...TRIP, railWaitMs: 2000 });
     expect(inTime.bestRoute.ordering).toEqual(['Aville', 'Bburg']);
     expect(inTime.bestRoute.legs[0].comparison.trainOption?.price).toBe(50);
+  });
+
+  it('by default ranking waits for every pair\'s first rail answer, however late: a train that answers is never ranked without', async () => {
+    // No cap by default (T3, 2026-11-27: an 8 s cap ranked without a train
+    // that answered at ~11 s, and the trip came out $59 dearer).
+    expect(RAIL_RANKING_WAIT_MS).toBe(Infinity);
+    setFlights();
+    mockedTrains.mockImplementation(async (p: any) => {
+      if (p.origin !== 'Aville') return [];
+      await sleep(400);
+      return [train(p.origin, p.destination, p.date, 50)];
+    });
+    const result = await optimize(TRIP);
+    expect(result.bestRoute.ordering).toEqual(['Aville', 'Bburg']);
+    expect(result.bestRoute.legs[0].comparison.trainOption?.price).toBe(50);
+  });
+
+  it('a ranking-day pair with no priced train is retried as soon as its first answer is in, not after ranking', async () => {
+    setFlights();
+    const calls: Array<{ key: string; at: number }> = [];
+    const started = Date.now();
+    // Home flights are slow (ranking ends late); the first rail answers are quick and empty.
+    mockedFlights.mockImplementation(async ({ origin, destination, date }: any) => {
+      await sleep(300);
+      if (origin === 'HMA' || destination === 'HMA') return [flight(origin, destination, date, 400)];
+      return [flight(origin, destination, date, origin === 'AVI' ? 300 : 200)];
+    });
+    mockedTrains.mockImplementation(async (p: any) => {
+      calls.push({ key: `${p.origin}>${p.destination}@${p.date}`, at: Date.now() - started });
+      return [];
+    });
+    await optimize({ ...TRIP });
+    for (const pair of ['Aville>Bburg@2030-03-10', 'Bburg>Aville@2030-03-10']) {
+      const asked = calls.filter((c) => c.key === pair);
+      expect(asked).toHaveLength(2);
+      // The retry went out before any flight answered.
+      expect(asked[1].at).toBeLessThan(250);
+    }
   });
 
   const railCalls = () =>

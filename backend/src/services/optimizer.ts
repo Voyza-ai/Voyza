@@ -415,26 +415,30 @@ function probeContext(
 
 /**
  * Longest ranking waits for rail, counted from when the rail board starts
- * (the top of optimize()). Every city pair's trains are searched once, up
- * front, on the ranking day (createRailBoard); a pair that has not answered
- * by then is ranked on its flights.
+ * (the top of optimize()): none — ranking waits for every city pair's FIRST
+ * rail answer, as the plan always did, so it ranks on every train the plan
+ * before this ranked on. Every pair is searched once, up front, all at once,
+ * on the ranking day (createRailBoard), so that wait is one round of rail
+ * (~16-20 s when a cold route answers [ERROR, UPSTREAM_UNAVAILABLE]) and it
+ * runs alongside the flight searches, not inside every round as it used to
+ * (production's 4-city plan: 177 s on 33 flight searches, 2026-11-24).
  *
- * Why a cap: ranking used to wait for each leg's train inside every round,
- * and a cold All Aboard route answers `[ERROR, UNKNOWN]` after ~16-24 s, or
- * is aborted at 25 s — production's 4-city plan took 177 s on 33 flight
- * searches (2026-11-24). Warm routes answer in 2-6 s, so 8 s still ranks
- * on the trains the provider has to hand.
+ * It was 8 s, which ranked T3 (5 cities from New York, replayed 2026-11-27)
+ * without the Berlin → Vienna train ($95.09) that answered at ~11 s: the
+ * plan picked an ordering $59 dearer than the plan before this. A train that
+ * answers is never ranked without. OPT_RAIL_WAIT_MS sets a cap, for the
+ * benchmark (backend/scripts/opt-bench) only.
  */
-const RAIL_RANKING_WAIT_MS = 8_000;
+const RAIL_RANKING_WAIT_MS = Infinity;
 
 /**
  * The trip's rail, searched once per ordered city pair on the ranking day,
  * all at once and before any flight — so ranking rounds wait on flights only.
  *
  * `source` is what ranking's compareLeg reads trains from (TrainSource): the
- * board's answers as they stood at the SNAPSHOT — RAIL_RANKING_WAIT_MS after
- * the board started, or as soon as every pair has answered, whichever is
- * first. One snapshot for the whole ranking: every ordering is ranked on the
+ * board's answers as they stood at the SNAPSHOT — as soon as every pair has
+ * answered (or, with a cap, RAIL_RANKING_WAIT_MS after the board started,
+ * if that is first). One snapshot for the whole ranking: every ordering is ranked on the
  * same trains, so two orderings never differ only by when their legs were
  * priced. A pair not in the snapshot is ranked on its flights.
  *
@@ -496,9 +500,14 @@ function createRailBoard(args: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const snapshot: Promise<Map<string, TrainOffer[]>> = Promise.race([
     Promise.all(pending),
-    new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, args.waitMs);
-    }),
+    // No cap (Infinity): only every pair's answer ends the wait.
+    ...(Number.isFinite(args.waitMs)
+      ? [
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, args.waitMs);
+          }),
+        ]
+      : []),
   ]).then(() => {
     clearTimeout(timer);
     snapshotMs = Date.now() - started;
@@ -2652,30 +2661,31 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   const orderings = candidateOrderings(cities, hasOrigin, cityMap);
 
   // Every city pair's trains, searched now, once, on the ranking day — before
-  // any flight — so ranking waits on flights, and on rail for at most
-  // RAIL_RANKING_WAIT_MS (createRailBoard). Ranking reads trains only from
-  // the board; the winner is re-priced on its real days below.
+  // any flight — so ranking's wait for rail (every pair's first answer,
+  // RAIL_RANKING_WAIT_MS) runs alongside its flight searches. Ranking reads
+  // trains only from the board; the winner is re-priced on its real days below.
+  const envRailWait = Number(process.env.OPT_RAIL_WAIT_MS);
   const railBoard = createRailBoard({
     pairs: adjacentPairs([...orderings, cities.map((c) => c.name)]),
     day: rankingTrainDay,
     travelers,
     countryOf: (name) => cityMap.get(name)?.country ?? getCityCountry(name),
-    waitMs: params.railWaitMs ?? RAIL_RANKING_WAIT_MS,
+    waitMs: params.railWaitMs ?? (envRailWait > 0 ? envRailWait : RAIL_RANKING_WAIT_MS),
     // The full search, unless the benchmark asks for the lighter one (see
     // quickRankingRail). The winner's legs are searched on their real days below.
     search: quickRankingRail ? runCtx.rail.quick : runCtx.rail.search,
   });
   const ctx = runCtx.withTrainDate(() => rankingTrainDay).withTrainSource(railBoard.source);
 
-  // With the lighter ranking search only (benchmark): the winner's FIRST leg
-  // is flown on the ranking day, whichever ordering wins, so every pair's full
-  // search on that day — and its one retry when it has no priced train — is
-  // work the plan will wait on anyway: start it now, behind the ranking's quick searches (the rail gate is first come, first
-  // served), into the run's rail memo, where the winner's real-day legs and
-  // their alternatives find it. It costs no timetable quota the quick search
-  // has not (the route-day's timetable is shared, measured 2026-11-27), and
-  // the plan before this searched every pair's full timetable on that day too.
-  if (quickRankingRail) {
+  // The winner's FIRST leg is flown on the ranking day, whichever ordering
+  // wins, so every pair's one retry on that day (when its first answer has no
+  // priced train, RunRail.retry) is work the plan would otherwise start only
+  // after ranking: start each as soon as its first answer is in, into the
+  // run's rail memo, where the winner's legs and their alternatives find it.
+  // A repeat search of a fetched route-day costs no timetable quota
+  // (measured 2026-11-27). With the lighter ranking search (benchmark) this
+  // also starts each pair's full search.
+  {
     const countryOfCity = (name: string) => cityMap.get(name)?.country ?? getCityCountry(name);
     for (const [from, to] of adjacentPairs([...orderings, cities.map((c) => c.name)])) {
       const full: SearchTrainsParams = {
