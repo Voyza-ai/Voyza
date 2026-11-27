@@ -1,6 +1,6 @@
 /**
- * Prototype B (exp/optimizer-speed): the rail board, the run's one rail call
- * per route-day, and the two-phase answer.
+ * Prototype B (exp/optimizer-speed): the rail board and the run's one rail
+ * call per route-day.
  *
  *  - Every city pair's trains are searched once, up front, on the ranking
  *    day; ranking waits for every pair's first answer (a cap, railWaitMs /
@@ -8,8 +8,6 @@
  *    answered by then is ranked on its flights).
  *  - Inside one run, the first rail answer for a route-day is the run's
  *    answer, incomplete or not (variant C: one retry after the ranking).
- *  - onFirstAnswer gets the trip as soon as the ranking is decided; the
- *    full answer follows with trains on their real days and alternatives.
  */
 
 jest.mock('../config/env', () => ({
@@ -49,7 +47,7 @@ jest.mock('../services/hotels', () => ({
   searchHotels: jest.fn(async () => []),
 }));
 
-import { optimize, _railForTests, type OptimizeResult } from '../services/optimizer';
+import { optimize, _railForTests } from '../services/optimizer';
 import { searchFlights } from '../services/flights';
 import { searchTrains, type TrainOffer } from '../services/trains';
 
@@ -120,13 +118,11 @@ describe('createRailBoard', () => {
     const [ab, ba] = await Promise.all([board.source.search(params), board.source.search(back)]);
     expect(ab.map((t) => t.price)).toEqual([50]);
     expect(ba).toEqual([]); // not in by the snapshot: flights only
-    expect(board.snapshotHad('A', 'B')).toBe(true);
-    expect(board.snapshotHad('B', 'A')).toBe(false);
+    expect(board.stats()).toMatchObject({ pairs: 2, inSnapshot: 1, settled: 1 });
 
-    // It still lands, for the winner's legs to take.
+    // It still lands (the winner's legs take it from the run's rail memo).
     slow.resolve([train('B', 'A', base.day, 40)]);
     await sleep(0);
-    expect(board.answerNow('B', 'A')?.map((t) => t.price)).toEqual([40]);
     // Ranking keeps reading the snapshot: one set of trains for every ordering.
     expect(await board.source.search(back)).toEqual([]);
     expect(board.stats()).toMatchObject({ pairs: 2, inSnapshot: 1, settled: 2 });
@@ -308,30 +304,5 @@ describe('optimize with the rail board', () => {
     expect(quick.sort()).toEqual(['Aville>Bburg@2030-03-10', 'Bburg>Aville@2030-03-10']);
     const full = calls.filter((c) => !c.quick).map((c) => c.key);
     for (const key of new Set(full)) expect(full.filter((k) => k === key).length).toBeLessThanOrEqual(2);
-  });
-
-  it('two-phase: the first answer comes at the ranking, provisional and without alternatives; the full one finishes it', async () => {
-    setFlights();
-    mockedTrains.mockImplementation(async (p: any) => [train(p.origin, p.destination, p.date, p.origin === 'Bburg' ? 260 : 280)]);
-    const events: string[] = [];
-    let first: OptimizeResult | undefined;
-    const full = await optimize({
-      ...TRIP,
-      railWaitMs: 20,
-      onFirstAnswer: (r) => {
-        events.push('first');
-        first = r;
-      },
-    });
-    events.push('full');
-    expect(events).toEqual(['first', 'full']);
-    expect(first!.provisional).toBe(true);
-    expect(first!.dateShiftChecked).toBe(false);
-    expect(first!.bestRoute.legs.every((l) => !l.options)).toBe(true);
-    expect(first!.bestRoute.ordering).toEqual(full.bestRoute.ordering);
-    expect(first!.outboundLeg?.price).toBe(full.outboundLeg?.price);
-    expect(full.provisional).toBeUndefined();
-    // A copy: finishing the full answer does not reach into the first.
-    expect(first!.bestRoute).not.toBe(full.bestRoute);
   });
 });

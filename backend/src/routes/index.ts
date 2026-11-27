@@ -20,8 +20,8 @@ import { requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
 import { compareLeg } from '../services/compareLeg';
 import { getCachedLegPrices } from '../services/legCache';
-import { optimize, prewarmHomeFlights, type OptimizeResult } from '../services/optimizer';
-import { PROGRESS_ID, readFinal, readProgress, startProgress, trackFinal } from '../services/optimizeProgress';
+import { optimize, prewarmHomeFlights } from '../services/optimizer';
+import { PROGRESS_ID, readProgress, startProgress } from '../services/optimizeProgress';
 import { getSupabase } from '../services/supabase';
 import { addDays, todayIso } from '../utils/dates';
 import { logger } from '../utils/logger';
@@ -124,12 +124,6 @@ const optimizeSchema = z.object({
   cityNights: z.record(z.string().min(1), z.number().int().positive().max(180)).optional(),
   /** Client-made id to poll GET /api/optimize/progress/:id with while this runs. */
   progressId: z.string().regex(PROGRESS_ID).optional(),
-  /**
-   * Prototype (exp/optimizer-speed): answer as soon as the ranking is decided
-   * (`provisional: true`, `finalPending: true`) and leave the full answer at
-   * GET /api/optimize/final/:progressId. Needs a progressId.
-   */
-  twoPhase: z.boolean().optional(),
 }).superRefine((input, ctx) => {
   // Inputs the optimizer used to accept and quietly turn into a broken trip.
   // Each is a 400 the planner already renders as an error message (zod →
@@ -281,28 +275,12 @@ router.post(
       // (`error` + `details`), with a sentence in `error`.
       throw new AppError(400, optimizeErrorMessage(parsed.error, req.body), parsed.error.flatten().fieldErrors);
     }
-    const { progressId, twoPhase, ...input } = parsed.data;
+    const { progressId, ...input } = parsed.data;
     // Normalize: strings become { name } objects
     const cities = input.cities.map((c) =>
       typeof c === 'string' ? { name: c } : c,
     );
     const onProgress = progressId ? startProgress(progressId) : undefined;
-    if (twoPhase && progressId) {
-      let sendFirst!: (first: OptimizeResult) => void;
-      const firstAnswer = new Promise<OptimizeResult>((resolve) => {
-        sendFirst = resolve;
-      });
-      const full = optimize({ ...input, cities, onProgress, onFirstAnswer: (first) => sendFirst(first) });
-      trackFinal(progressId, full);
-      void full.then(
-        () => onProgress?.({ stage: 'done' }),
-        () => onProgress?.({ stage: 'done' }),
-      );
-      // The full answer wins only when there is no first one (a failed run).
-      const first = await Promise.race([firstAnswer, full]);
-      res.json({ ...first, finalPending: first.provisional === true });
-      return;
-    }
     try {
       const result = await optimize({ ...input, cities, onProgress });
       res.json(result);
@@ -326,7 +304,7 @@ router.post(
     if (!parsed.success) {
       throw new AppError(400, optimizeErrorMessage(parsed.error, req.body), parsed.error.flatten().fieldErrors);
     }
-    const { progressId: _p, twoPhase: _t, budget: _b, ...input } = parsed.data;
+    const { progressId: _p, budget: _b, ...input } = parsed.data;
     if (!input.origin || !input.origin.trim()) {
       res.status(202).json({ prewarming: false });
       return;
@@ -351,25 +329,6 @@ router.get(
     if (!progress) throw new AppError(404, 'No progress for this id');
     res.set('Cache-Control', 'no-store');
     res.json(progress);
-  }),
-);
-
-// ─── GET /api/optimize/final/:id ─────────────────────────────
-// The full answer of a two-phase optimize (prototype): 202 while it runs,
-// 200 with the result, or the run's own error status.
-router.get(
-  '/optimize/final/:id',
-  asyncHandler(async (req, res) => {
-    const id = String(req.params.id);
-    const final = PROGRESS_ID.test(id) ? readFinal(id) : null;
-    if (!final) throw new AppError(404, 'No optimize result for this id');
-    res.set('Cache-Control', 'no-store');
-    if (final.state === 'pending') {
-      res.status(202).json({ pending: true });
-      return;
-    }
-    if (final.state === 'failed') throw new AppError(final.status, final.message);
-    res.json(final.result);
   }),
 );
 
