@@ -171,7 +171,7 @@ describe('createRunRail', () => {
     await expect(rail.search(params)).resolves.toEqual([]);
   });
 
-  it('variant C retries once, and only a route-day with no priced train', async () => {
+  it('retries once, and only a route-day with no priced train', async () => {
     const search = jest
       .fn()
       .mockResolvedValueOnce([train('Paris', 'Prague', params.date, null)])
@@ -182,7 +182,8 @@ describe('createRunRail', () => {
     expect(a[0].price).toBe(120);
     expect(b).toBe(a);
     expect(search).toHaveBeenCalledTimes(2);
-    expect(search.mock.calls[1][1]).toEqual({ ignoreNoAnswer: true });
+    // A plain second search: incomplete answers are never remembered (trains.ts).
+    expect(search.mock.calls[1]).toHaveLength(1);
 
     const priced = jest.fn(async () => [train('Paris', 'Prague', params.date, 99)]);
     const rail2 = createRunRail(priced as any);
@@ -226,12 +227,18 @@ describe('optimize with the rail board', () => {
     expect(inTime.bestRoute.legs[0].comparison.trainOption?.price).toBe(50);
   });
 
-  it('searches each pair\'s trains once in the run, even when the answer is empty', async () => {
+  it('ranking asks each pair once (the quick search); the winner\'s legs at most twice (one retry), even when every answer is empty', async () => {
     setFlights();
     mockedTrains.mockResolvedValue([]);
     await optimize({ ...TRIP, railWaitMs: 20 });
-    const keys = mockedTrains.mock.calls.map(([p]: any[]) => `${p.origin}>${p.destination}@${p.date}`);
-    expect(keys.length).toBe(new Set(keys).size);
+    const calls = mockedTrains.mock.calls.map(([p, opts]: any[]) => ({
+      key: `${p.origin}>${p.destination}@${p.date}`,
+      quick: opts?.quick === true,
+    }));
+    const quick = calls.filter((c) => c.quick).map((c) => c.key);
+    expect(quick.sort()).toEqual(['Aville>Bburg@2030-03-10', 'Bburg>Aville@2030-03-10']);
+    const full = calls.filter((c) => !c.quick).map((c) => c.key);
+    for (const key of new Set(full)) expect(full.filter((k) => k === key).length).toBeLessThanOrEqual(2);
   });
 
   it('two-phase: the first answer comes at the ranking, provisional and without alternatives; the full one finishes it', async () => {

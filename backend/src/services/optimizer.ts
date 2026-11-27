@@ -223,7 +223,9 @@ function createRunContext(tripCityNames: string[], report?: ProgressSink): RunCo
     const key = [params.origin, params.destination, params.date, params.travelers, params.cabinClass ?? 'economy'].join('|');
     if (!searchLedger.has(key)) {
       searchLedger.set(key, phase);
-      if (!isFlightSearchCached(params)) sentLedger.set(key, phase);
+      // (Guarded: tests that replace flights.ts may not provide it.)
+      const cached = typeof isFlightSearchCached === 'function' && isFlightSearchCached(params);
+      if (!cached) sentLedger.set(key, phase);
       report?.({ flightSearches: searchLedger.size });
     }
     return counted(params);
@@ -861,21 +863,24 @@ const SCREEN_LOWER_BOUND = (1 - MAX_DATE_SWING) / (1 + MAX_DATE_SWING);
 
 /**
  * Most INTER-CITY Duffel searches (screen + best-first) one 4-5 city plan may
- * send: one of Duffel's windows. Duffel answers every request with
- * `ratelimit-limit: 30` and a `ratelimit-reset` on the next wall-clock minute
- * (measured 2026-11-24): fixed one-minute windows of 30 per token, shared by
- * every user — not the ~45 this was first sized on.
+ * send. Home flights are outside it: every traveller airport is searched for
+ * every city and direction (searchHomeOffers), a fixed 2 × cities × airports
+ * that the planner pre-searches during the chat (prewarmHomeFlights).
  *
- * Home flights are outside it: every traveller airport is searched for every
- * city and direction (searchHomeOffers), a fixed 2 × cities × airports that
- * the planner pre-searches during the chat (prewarmHomeFlights), and that
- * flights.ts serves from its cache here. What is left for best-first is the
- * same as before or more: 5 cities 30 − 20 screen = 10 (was 42 − 10 home −
- * 20 screen − 4 reserved = 8 from New York), 4 cities 30 − 12 = 18 (was 18).
- *
- * When a window is spent (by the pre-search, this plan or anyone else on the
- * token), flights.ts stops sending until Duffel's reset (noteDuffelWindow)
- * rather than collecting 429s.
+ * Duffel's window is 30 requests per wall-clock minute per token, shared by
+ * every user (its `ratelimit-*` headers, 2026-11-24) — not the ~45 this was
+ * first sized on. Two jobs, kept apart:
+ *  - PACING the window is flights.ts': once an answer says the window is
+ *    spent, nothing more is sent until Duffel's reset (noteDuffelWindow), so a
+ *    plan waits for the next minute instead of collecting 429s.
+ *  - EXPLORATION is this budget, and it never gives best-first less than the
+ *    plan before it did: 42 − 10 home − 20 screen = 12 for 5 cities on Duffel's
+ *    live mode (one metro search per city and direction), 8-10 on the test
+ *    token. 32 − 20 screen = 12; 4 cities 32 − 12 = 20 (was 18). A cheaper
+ *    winner than before can come from comparing every home airport; a dearer
+ *    one must not come from searching less.
+ * So a budget-stopped 5-city plan can send 32 inter-city searches: at most 2
+ * past one window, and only after its home flights went in an earlier one.
  *
  * History: production's shipped screen sent 79 for one 5-city Chicago plan
  * (home 26, screen 20, exact 33 over 25 rounds; 54-89 s cold, 2026-11-02).
@@ -884,7 +889,7 @@ const SCREEN_LOWER_BOUND = (1 - MAX_DATE_SWING) / (1 + MAX_DATE_SWING);
  *
  * OPT_PLAN_BUDGET overrides it for the benchmark (backend/scripts/opt-bench).
  */
-const PLAN_SEARCH_BUDGET = Number(process.env.OPT_PLAN_BUDGET) > 0 ? Number(process.env.OPT_PLAN_BUDGET) : 30;
+const PLAN_SEARCH_BUDGET = Number(process.env.OPT_PLAN_BUDGET) > 0 ? Number(process.env.OPT_PLAN_BUDGET) : 32;
 
 /** Inter-city searches a run has asked for so far (what PLAN_SEARCH_BUDGET counts). */
 function interCitySearches(ctx: RunContext): number {

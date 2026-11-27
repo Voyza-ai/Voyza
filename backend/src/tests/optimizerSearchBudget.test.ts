@@ -1,24 +1,23 @@
 /**
- * A cold 4-5 city plan fits in ONE Duffel rate-limit window on production's
- * TEST token, not just on the fare model the screen was tuned on.
+ * A cold 4-5 city plan: every home airport compared, and the inter-city
+ * searches within ONE Duffel window — on production's TEST token, not just on
+ * the fare model the screen was tuned on.
  *
  * Production, 2026-11-02 (Porto, Seville, Valencia, Marseille, Turin from
  * Chicago ORD + MDW): 79 Duffel requests — home 26, screen 20, exact 33 over
- * 25 rounds — and 54-89 s cold. Duffel accepts ~45 a minute per token, so
- * every such plan stalled for most of a window. Two things the harness had
- * not modelled:
- *  - a CHI search in test mode answers only test-airline placeholders under
- *    "CHI" itself, so every city and direction fell back to ORD and MDW one
- *    by one (10 + 16 home searches instead of 10);
- *  - test-mode fares swing far more than ±30% between dates, so the screen's
- *    bound rarely closed and best-first ran its 24 rounds plus a sweep, one
- *    Duffel round trip each.
+ * 25 rounds — and 54-89 s cold. Test-mode fares swing far more than ±30%
+ * between dates, so the screen's bound rarely closed and best-first ran its
+ * 24 rounds plus a sweep, one Duffel round trip each.
  *
- * Now: home flights are ranked on ONE search per city and direction (the
- * traveller's first airport in test mode; the metro code in live mode), the
- * winner's own home flights search their remaining airports, best-first
- * prices up to 6 legs per round, and it stops at a hard request budget with
- * the best ordering it has fully priced.
+ * Duffel's window is 30 requests a wall-clock minute per token (its own
+ * headers, 2026-11-24). Now (exp/optimizer-speed, owner's rules 2026-11-27):
+ *  - home flights are ranked on EVERY one of the traveller's airports, each
+ *    searched for every city and direction (2 × cities × airports), never on
+ *    the first airport alone or a metro code — and the planner pre-searches
+ *    them during the chat;
+ *  - best-first prices up to 6 legs per round and stops at PLAN_SEARCH_BUDGET
+ *    inter-city searches (screen + best-first): 32, never less exploration
+ *    than before; flights.ts paces the window from Duffel's headers.
  */
 
 jest.mock('../config/env', () => ({
@@ -90,14 +89,18 @@ import { createFareModel, exhaustive, priceExactly, tripDates, type FareModel, t
 const mockedSearch = searchFlights as jest.Mock;
 const mockedInfo = logger.info as jest.Mock;
 
-/** One Duffel window is ~45 requests; the plan's own budget leaves margin. */
-const BUDGET = 42;
+/** Inter-city searches (screen + best-first) one plan may send (PLAN_SEARCH_BUDGET). */
+const BUDGET = 32;
 
 type Search = { origin: string; destination: string; date: string; travelers: number };
 let searched: Search[] = [];
 const keyOf = (s: Search) => `${s.origin}>${s.destination}@${s.date}#${s.travelers}`;
 const distinct = () => [...new Map(searched.map((s) => [keyOf(s), s])).values()];
 const ledger = () => mockedInfo.mock.calls.find(([m]) => m === 'Optimize flight searches')?.[1] as any;
+const HOME_CODES = ['ORD', 'MDW', 'CHI', 'JFK', 'LGA', 'EWR', 'NYC'];
+const isHome = (x: Search) => HOME_CODES.includes(x.origin) || HOME_CODES.includes(x.destination);
+/** The plan's inter-city searches: what PLAN_SEARCH_BUDGET counts. */
+const interCity = () => distinct().filter((x) => !isHome(x));
 
 function useFares(model: FareModel) {
   mockedSearch.mockImplementation(async (p: Search) => {
@@ -166,8 +169,9 @@ beforeEach(() => {
   (env as any).DUFFEL_ACCESS_TOKEN = 'duffel_test_jest';
 });
 
-describe('a cold 5-city plan on the test token fits one window', () => {
-  it.each([['CHI'], ['NYC']] as const)('from %s: at most 42 Duffel searches, every seed', async (home) => {
+describe('a cold 5-city plan on the test token: every home airport, inter-city within one window', () => {
+  it.each([['CHI'], ['NYC']] as const)('from %s: home flights from every airport, at most 32 inter-city searches, every seed', async (home) => {
+    const airports = HOMES[home].airports.length;
     for (let seed = 1; seed <= 8; seed++) {
       searched = [];
       mockedInfo.mockClear();
@@ -175,14 +179,14 @@ describe('a cold 5-city plan on the test token fits one window', () => {
 
       await run(spec(5, home));
 
-      // Before: 10 metro placeholders + 20-30 per-airport fallbacks + 20
-      // screen + exact ≈ 55-60 (production: 79).
-      expect(distinct().length).toBeLessThanOrEqual(BUDGET);
+      // Every city, both directions, every airport: 2 × 5 × airports.
+      expect(distinct().filter(isHome)).toHaveLength(2 * 5 * airports);
+      expect(interCity().length).toBeLessThanOrEqual(BUDGET);
       expect(ledger().searches).toBe(distinct().length);
     }
   }, 30000);
 
-  it('never searches the metro code on the test token: it only answers placeholders', async () => {
+  it('never searches the metro code: on the test token it only answers placeholders, and live it can leave an airport out', async () => {
     useFares(testModeModel(3, 'CHI'));
 
     await run(spec(5, 'CHI'));
@@ -191,8 +195,8 @@ describe('a cold 5-city plan on the test token fits one window', () => {
   }, 30000);
 });
 
-describe("home flights: ranked on the first airport, the winner's searched on the rest", () => {
-  it('ranking asks ORD once per city and direction; MDW only for the winner, and the card is the cheapest real fare', async () => {
+describe('home flights: every airport ranked, and the card is the cheapest real fare', () => {
+  it('ORD and MDW are both searched for every city and direction; the $10 test airline at MDW never wins', async () => {
     // MDW: the test airline only, and always cheaper than ORD.
     const s = spec(5, 'CHI');
     const model = testModeModel(5, 'CHI', { swingRange: undefined, swing: 0.3, legRange: [50, 225] });
@@ -206,23 +210,22 @@ describe("home flights: ranked on the first airport, the winner's searched on th
     const result = await run(s);
 
     const dates = tripDates(s);
-    const home = distinct().filter((x) => [x.origin, x.destination].some((c) => ['ORD', 'MDW', 'CHI'].includes(c)));
-    const ord = home.filter((x) => x.origin === 'ORD' || x.destination === 'ORD');
-    expect(ord.map(keyOf).sort()).toEqual(
-      [...FIVE.map((c) => `ORD>${mockCodes[c]}@${dates.outbound}#4`), ...FIVE.map((c) => `${mockCodes[c]}>ORD@${dates.ret}#4`)].sort(),
-    );
-    const [first, last] = [result.bestRoute.ordering[0], result.bestRoute.ordering[4]];
-    expect(home.filter((x) => !ord.includes(x)).map(keyOf).sort()).toEqual(
-      [`MDW>${mockCodes[first]}@${dates.outbound}#4`, `${mockCodes[last]}>MDW@${dates.ret}#4`].sort(),
-    );
-    // The $10 test airline never wins over a real fare.
+    const home = distinct().filter(isHome);
+    for (const airport of ['ORD', 'MDW']) {
+      expect(home.filter((x) => x.origin === airport || x.destination === airport).map(keyOf).sort()).toEqual(
+        [
+          ...FIVE.map((c) => `${airport}>${mockCodes[c]}@${dates.outbound}#4`),
+          ...FIVE.map((c) => `${mockCodes[c]}>${airport}@${dates.ret}#4`),
+        ].sort(),
+      );
+    }
     const exact = priceExactly(s, model, mockCodes, result.bestRoute.ordering);
     expect(result.outboundLeg).toMatchObject({ originAirport: 'ORD', price: exact.outbound!.price });
     expect(result.returnLeg).toMatchObject({ destAirport: 'ORD', price: exact.ret!.price });
     expect(result.outboundLeg?.operator).not.toBe('Duffel Airways');
   }, 30000);
 
-  it("a real fare at the winner's other airports is found: NYC, EWR cheaper than JFK", async () => {
+  it('EWR cheaper than JFK: ranking sees it, and the winner flies from it — no searches beyond the 30 home ones', async () => {
     const s = spec(5, 'NYC');
     // Every airport real (no test airline), EWR a quarter of the model, so always the cheapest.
     const base = createFareModel({
@@ -247,31 +250,26 @@ describe("home flights: ranked on the first airport, the winner's searched on th
     expect(exact.outbound!.airport).toBe('EWR');
     expect(result.outboundLeg).toMatchObject({ originAirport: 'EWR', price: exact.outbound!.price });
     expect(result.returnLeg).toMatchObject({ destAirport: exact.ret!.airport, price: exact.ret!.price });
-    // JFK for ranking (10), LGA and EWR for the winner's two flights (4).
-    const home = distinct().filter((x) => [x.origin, x.destination].some((c) => ['JFK', 'LGA', 'EWR', 'NYC'].includes(c)));
-    expect(home).toHaveLength(10 + 4);
+    expect(distinct().filter(isHome)).toHaveLength(30);
   }, 30000);
 });
 
 describe('a first airport with only the test airline', () => {
-  it('ranking searches the other airports too, and the card is the real fare', async () => {
-    // MDW listed first: ranking on its test-airline placeholders alone would
-    // rank every city on a made-up fare, so ORD is searched for each as well.
+  it('every airport is ranked anyway, and the card is the real fare', async () => {
     const s = { ...spec(5, 'CHI'), homeAirports: ['MDW', 'ORD'] };
     const model = testModeModel(21, 'CHI');
     useFares(model);
 
     const result = await run(s);
 
-    const home = distinct().filter((x) => [x.origin, x.destination].some((c) => ['ORD', 'MDW', 'CHI'].includes(c)));
+    const home = distinct().filter(isHome);
     expect(home.filter((x) => x.origin === 'MDW' || x.destination === 'MDW')).toHaveLength(10);
     expect(home.filter((x) => x.origin === 'ORD' || x.destination === 'ORD')).toHaveLength(10);
     expect(home).toHaveLength(20);
     const exact = priceExactly(s, model, mockCodes, result.bestRoute.ordering);
     expect(result.outboundLeg).toMatchObject({ originAirport: 'ORD', price: exact.outbound!.price });
     expect(result.returnLeg).toMatchObject({ destAirport: 'ORD', price: exact.ret!.price });
-    // Still one window: best-first gets what is left.
-    expect(distinct().length).toBeLessThanOrEqual(BUDGET);
+    expect(interCity().length).toBeLessThanOrEqual(BUDGET);
   }, 30000);
 });
 
@@ -325,7 +323,7 @@ describe('best-first under the budget', () => {
       expect(result.savingsVsNaive).toBeCloseTo(Math.max(0, typed.totalCost - chosen.totalCost), 6);
       // Never worse than the typed order.
       expect(chosen.rankCost).toBeLessThanOrEqual(typed.rankCost);
-      expect(distinct().length).toBeLessThanOrEqual(BUDGET);
+      expect(interCity().length).toBeLessThanOrEqual(BUDGET);
     }
     expect(stops).toBeGreaterThan(0);
   }, 30000);
@@ -369,7 +367,7 @@ describe('best-first under the budget', () => {
       if (exhaustive(s, model, mockCodes)[0].unpricedLegs > 0) continue;
       checked++;
       expect(result.bestRoute.legs.every((leg) => leg.cost !== Infinity)).toBe(true);
-      expect(distinct().length).toBeLessThanOrEqual(BUDGET);
+      expect(interCity().length).toBeLessThanOrEqual(BUDGET);
     }
     expect(checked).toBeGreaterThan(15);
   }, 30000);
@@ -394,7 +392,7 @@ describe('best-first under the budget', () => {
 
       if (ledger().budgetStop) continue;
       expect(result.bestRoute.ordering).toEqual(exhaustive(s, model, mockCodes)[0].ordering);
-      expect(distinct().length).toBeLessThanOrEqual(BUDGET);
+      expect(interCity().length).toBeLessThanOrEqual(BUDGET);
     }
   }, 30000);
 });

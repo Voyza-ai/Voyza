@@ -148,42 +148,18 @@ describe('searchTrains fan-out', () => {
     expect(offers[0][0].price).toBe(42);
   });
 
-  it('remembers a failed search as no rail answer: the next caller does not wait, one that opts out retries', async () => {
+  it('does not cache a failed search, so the next caller retries', async () => {
     // Every request fails → both providers return [] non-fatally. That is
-    // not "no trains on this route" and is not cached as the route's trains
-    // (All Aboard timing out on a cold search used to be, for 10 minutes).
-    // It IS remembered as "no rail answer" (noRailAnswer, 15 min): the next
-    // search answers at once instead of paying the same wait again. Work
-    // nobody waits on can still ask again (ignoreNoAnswer).
+    // not "no trains on this route": All Aboard timing out on a cold search
+    // used to be cached for 10 minutes, so every trip search in that window
+    // priced the route on flights only. The next caller must search again.
     mockFetch.mockRejectedValue(new Error('everything down'));
     const params = { origin: 'Oslo', destination: 'Bergen', date: '2026-10-01', travelers: 1 };
     await expect(searchTrains(params)).resolves.toEqual([]);
     await settle();
     const callsAfterFirst = mockFetch.mock.calls.length;
     await expect(searchTrains(params)).resolves.toEqual([]);
-    expect(mockFetch.mock.calls.length).toBe(callsAfterFirst);
-    await expect(searchTrains(params, { ignoreNoAnswer: true })).resolves.toEqual([]);
     expect(mockFetch.mock.calls.length).toBeGreaterThan(callsAfterFirst);
-  });
-
-  it('forgets a no-answer route-day after 15 minutes', async () => {
-    mockFetch.mockRejectedValue(new Error('everything down'));
-    const params = { origin: 'Oslo', destination: 'Trondheim', date: '2026-10-02', travelers: 1 };
-    const t0 = Date.now();
-    const now = jest.spyOn(Date, 'now').mockReturnValue(t0);
-    try {
-      await searchTrains(params);
-      await settle();
-      const calls = mockFetch.mock.calls.length;
-      now.mockReturnValue(t0 + 14 * 60_000);
-      await searchTrains(params);
-      expect(mockFetch.mock.calls.length).toBe(calls);
-      now.mockReturnValue(t0 + 16 * 60_000);
-      await searchTrains(params);
-      expect(mockFetch.mock.calls.length).toBeGreaterThan(calls);
-    } finally {
-      now.mockRestore();
-    }
   });
 
   it('retries a route whose first search timed out, and finds the train once All Aboard answers', async () => {
@@ -233,9 +209,7 @@ describe('searchTrains fan-out', () => {
     await expect(searchTrains(params)).resolves.toEqual([]);
     await settle();
     journeysFail = false;
-    // Remembered as no rail answer: answered at once, without asking.
-    await expect(searchTrains(params)).resolves.toEqual([]);
-    const second = await searchTrains(params, { ignoreNoAnswer: true });
+    const second = await searchTrains(params);
     expect(second).toHaveLength(1);
     expect(second[0].operator).toBe('ÖBB');
     expect(second[0].price).toBeCloseTo(56.05, 2);
@@ -273,12 +247,8 @@ describe('searchTrains fan-out', () => {
     expect(first[0].price).toBeNull(); // timetable row, unpriced
     await settle();
     pricingFails = false;
-    // No fare is no rail answer: remembered, with its timetable row.
-    expect((await searchTrains(params))[0].price).toBeNull();
-    const second = await searchTrains(params, { ignoreNoAnswer: true });
+    const second = await searchTrains(params);
     expect(second[0].price).toBe(30);
-    // And a priced answer replaces the memory for everyone.
-    expect((await searchTrains(params))[0].price).toBe(30);
   });
 
   it('a RATE_LIMITED answer is not "no trains": it is not cached, and the next search finds the train', async () => {
@@ -320,10 +290,7 @@ describe('searchTrains fan-out', () => {
     await expect(searchTrains(params)).resolves.toEqual([]);
     await settle();
     limited = false;
-    // Remembered as no rail answer — a rate-limited key is not asked again.
-    await expect(searchTrains(params)).resolves.toEqual([]);
-    expect(journeyCalls).toBe(1);
-    const second = await searchTrains(params, { ignoreNoAnswer: true });
+    const second = await searchTrains(params);
     expect(journeyCalls).toBe(2);
     expect(second).toHaveLength(1);
     expect(second[0].operator).toBe('SBB');
@@ -352,8 +319,81 @@ describe('searchTrains fan-out', () => {
     expect((await searchTrains(params))[0].price).toBeNull();
     await settle();
     limited = false;
-    expect((await searchTrains(params))[0].price).toBeNull(); // remembered
-    expect((await searchTrains(params, { ignoreNoAnswer: true }))[0].price).toBe(40);
+    expect((await searchTrains(params))[0].price).toBe(40);
+  });
+
+  it('a real "no route" is remembered for a day; an incomplete answer is not remembered at all', async () => {
+    let journeyCalls = 0;
+    let answer: 'none' | 'error' = 'none';
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ journeys: [] }) });
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        journeyCalls++;
+        if (answer === 'error') {
+          return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j0', status: 'ERROR', itinerary: [{ status: 'UNKNOWN', segments: null }] }] }));
+        }
+        return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j0', status: 'SUCCESS', itinerary: [{ status: 'NO_TIMETABLE', segments: null }] }] }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const t0 = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(t0);
+    try {
+      const noRoute = { origin: 'Faro', destination: 'Lagos', date: '2027-04-11', travelers: 1 };
+      await searchTrains(noRoute);
+      await settle();
+      // Past the 10-minute cache, inside the day: not asked again.
+      now.mockReturnValue(t0 + 3 * 60 * 60_000);
+      await expect(searchTrains(noRoute)).resolves.toEqual([]);
+      expect(journeyCalls).toBe(1);
+      // After the day: asked again.
+      now.mockReturnValue(t0 + 25 * 60 * 60_000);
+      await searchTrains(noRoute);
+      expect(journeyCalls).toBe(2);
+
+      // ERROR/UNKNOWN is not "no route": the very next search asks again.
+      answer = 'error';
+      const cold = { origin: 'Vienna', destination: 'Zagreb', date: '2027-04-11', travelers: 1 };
+      await searchTrains(cold);
+      await settle();
+      await searchTrains(cold);
+      expect(journeyCalls).toBe(4);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("the ranking's quick search has its own key: no direct train is not no route", async () => {
+    const queries: string[] = [];
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ journeys: [] }) });
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        queries.push(query.includes('NON_STOP') ? 'quick' : 'full');
+        if (query.includes('NON_STOP')) {
+          return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j0', status: 'SUCCESS', itinerary: [{ status: 'NO_TIMETABLE', segments: null }] }] }));
+        }
+        return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j1', status: 'SUCCESS', itinerary: [{ status: 'SUCCESS', segments: [{ origin: { name: 'A' }, destination: { name: 'B' }, departureAt: '2027-04-12T09:00', arrivalAt: '2027-04-12T13:00', operator: { name: 'Rail' } }] }] }] }));
+      }
+      if (query.includes('getJourneyOffer')) {
+        return Promise.resolve(gqlOk({ getJourneyOffer: { itinerary: [{ status: 'SUCCESS', offers: [{ id: 'o1', price: { amount: 5000, currency: 'USD' } }] }] } }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    const params = { origin: 'Prague', destination: 'Amsterdam', date: '2027-04-12', travelers: 1 };
+    await expect(searchTrains(params, { quick: true })).resolves.toEqual([]);
+    const full = await searchTrains(params);
+    expect(full[0].price).toBe(50);
+    expect(queries).toEqual(['quick', 'full']);
   });
 
   it('NO_TIMETABLE is a real answer and is cached', async () => {
