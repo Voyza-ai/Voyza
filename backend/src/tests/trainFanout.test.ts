@@ -39,6 +39,7 @@ const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 import { searchTrains, clearTrainSearchCache } from '../services/trains';
+import { addDays as addDaysIso } from '../utils/dates';
 import { getAllAboardLocationUid, clearLocationCache } from '../services/allaboard';
 
 const gqlOk = (data: any) => ({ ok: true, json: () => Promise.resolve({ data }) });
@@ -367,6 +368,42 @@ describe('searchTrains fan-out', () => {
       now.mockRestore();
     }
   });
+
+  it('the "no route" memory has a real cap: past 5,000 the oldest is forgotten first, the newest kept', async () => {
+    let journeyCalls = 0;
+    mockFetch.mockImplementation((url: string, init?: any) => {
+      if (!String(url).includes('allaboard.eu')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ journeys: [] }) });
+      const body = JSON.parse(init?.body ?? '{}');
+      const query: string = body.query ?? '';
+      if (query.includes('getLocations')) {
+        return Promise.resolve(gqlOk({ getLocations: [{ uid: `uid-${body.variables.q}`, name: body.variables.q }] }));
+      }
+      if (query.includes('getJourneys')) {
+        journeyCalls++;
+        return Promise.resolve(gqlOk({ getJourneys: [{ id: 'j0', status: 'SUCCESS', itinerary: [{ status: 'NO_TIMETABLE', segments: null }] }] }));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+    });
+    // NO_ROUTE_MAX_ENTRIES (trains.ts): 5,000.
+    const day = (i: number) => ({ origin: 'Faro', destination: 'Lagos', date: addDaysIso('2027-01-01', i), travelers: 1 });
+    const t0 = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(t0);
+    try {
+      for (let start = 0; start <= 5000; start += 500) {
+        await Promise.all(Array.from({ length: Math.min(500, 5001 - start) }, (_, k) => searchTrains(day(start + k))));
+        await settle();
+      }
+      expect(journeyCalls).toBe(5001);
+      // Past the 10-minute cache, inside the day.
+      now.mockReturnValue(t0 + 60 * 60_000);
+      await searchTrains(day(5000)); // the newest: still known, not asked
+      expect(journeyCalls).toBe(5001);
+      await searchTrains(day(0)); // the oldest: forgotten, asked again
+      expect(journeyCalls).toBe(5002);
+    } finally {
+      now.mockRestore();
+    }
+  }, 60_000);
 
   it("the ranking's quick search has its own key: no direct train is not no route", async () => {
     const queries: string[] = [];

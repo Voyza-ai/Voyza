@@ -1,6 +1,7 @@
 import { getDuffel } from './duffel';
 import { flightCo2FromOffer, type Co2Figure, type DoorToDoor } from './legFacts';
-import { currentDuffelRetryBudget } from './duffelBudget';
+import { currentDuffelRetryBudget, duffelCallCancelled } from './duffelBudget';
+import { AsyncLocalStorage } from 'async_hooks';
 import { getSupabase } from './supabase';
 import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
@@ -91,24 +92,42 @@ async function sleep(ms: number) {
 const MAX_CONCURRENT_SEARCHES = 6;
 let activeSearches = 0;
 const searchWaiters: Array<() => void> = [];
+/** When a plan's (foreground) search last started; see foregroundBusy. */
+let lastForegroundAt = 0;
 
 async function withSearchSlot<T>(fn: () => Promise<T>): Promise<T> {
-  while (activeSearches >= MAX_CONCURRENT_SEARCHES) {
-    await new Promise<void>((resolve) => searchWaiters.push(resolve));
+  // A background search (searchFlightsInBackground) has its own slot, taken
+  // before it got here: it never holds one of a plan's six.
+  const background = backgroundSearch.getStore() === true;
+  if (!background) {
+    while (activeSearches >= MAX_CONCURRENT_SEARCHES) {
+      await new Promise<void>((resolve) => searchWaiters.push(resolve));
+    }
+    activeSearches++;
+    lastForegroundAt = Date.now();
   }
-  activeSearches++;
   try {
-    // A call can queue here for a while; if Duffel rate-limited us in the
-    // meantime, don't spend a request finding that out. withRetry waits
-    // the pause out (or gives up, within its budget).
+    // A call can queue here for a while; if its caller gave up on it in the
+    // meantime (duffelBudget.ts withDuffelCancel), send nothing; if Duffel
+    // rate-limited us, don't spend a request finding that out. withRetry
+    // waits the pause out (or gives up, within its budget).
+    if (duffelCallCancelled()) throw cancelledError();
     const paused = duffelPausedUntil - Date.now();
     if (paused > 0) throw rateLimitedError(paused);
     takeDuffelWindowPlace();
     return await fn();
   } finally {
-    activeSearches--;
-    searchWaiters.shift()?.();
+    if (!background) {
+      activeSearches--;
+      searchWaiters.shift()?.();
+    }
   }
+}
+
+function cancelledError(): Error {
+  const err: any = new Error('Duffel search dropped: its caller stopped waiting for it');
+  err.cancelled = true;
+  return err;
 }
 
 /** Pull the HTTP status out of a DuffelError (or any HTTP-ish error). */
@@ -246,8 +265,15 @@ function noteDuffelWindow(headers: any): void {
   const delay = parseResetHeader(String(reset));
   if (delay == null) return;
   const resetAt = Date.now() + delay;
+  const held = duffelWindow && Date.now() < duffelWindow.resetAt ? duffelWindow : null;
+  // An answer that left before the minute turned and came back after it
+  // describes the window that just ended (spent, resetting now): never let it
+  // replace the one in force, or the plan loses the count of the current
+  // minute. Its reset is the held window's start, a minute before the held
+  // reset (whole seconds: an HTTP date has no milliseconds).
+  if (held && resetAt < held.resetAt - 1000) return;
   // Answers can arrive out of order: keep the newest window's lowest count.
-  if (duffelWindow && duffelWindow.resetAt >= resetAt - 1000 && duffelWindow.remaining <= remaining && Date.now() < duffelWindow.resetAt) {
+  if (held && held.resetAt >= resetAt - 1000 && held.remaining <= remaining) {
     return;
   }
   duffelWindow = { limit: Number.isFinite(limit) ? limit : 30, remaining, resetAt, seenAt: Date.now() };
@@ -290,9 +316,10 @@ function rateLimitedError(waitMs: number): Error {
  *  a leg and must ride out the same 429/5xx blips a search does. */
 export async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
   // A caller doing optional work may cap it lower (see duffelBudget.ts).
-  const budget = Math.min(MAX_TOTAL_RETRY_WAIT_MS, currentDuffelRetryBudget() ?? Infinity);
+  const budget = Math.min(MAX_TOTAL_RETRY_WAIT_MS, currentDuffelRetryBudget() ?? Infinity, retryOverride.getStore() ?? Infinity);
   let waited = 0;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (duffelCallCancelled()) throw cancelledError();
     // Honour a pause another call already learned about — before sending.
     const paused = duffelPausedUntil - Date.now();
     if (paused > 0) {
@@ -302,9 +329,12 @@ export async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promi
       await sleep(wait);
       waited += wait;
     }
+    // It may have slept through the pause; its caller may have left since.
+    if (duffelCallCancelled()) throw cancelledError();
     try {
       return await fn();
     } catch (err: any) {
+      if (err?.cancelled) throw err;
       noteDuffelWindow(err?.headers);
       const status = errorStatus(err);
       const retryable = status === 429 || status === 502 || status === 503 || status === 504;
@@ -373,6 +403,83 @@ function cachedSearch(key: string, run: () => Promise<FlightOffer[]>): Promise<F
     }
   }
   return promise;
+}
+
+/**
+ * Searches made for a plan that has not started yet — the planner's home
+ * pre-search during the chat (optimizer.ts prewarmHomeFlights). They give way
+ * to every real plan, which must never wait on one (review of
+ * exp/optimizer-speed, 2026-11-27):
+ *  - their own MAX_BACKGROUND_SEARCHES slots, never one of a plan's six;
+ *  - not sent while a plan is searching (foregroundBusy) — the plan searches
+ *    what it needs itself, and finds what was pre-searched in the cache;
+ *  - not sent into a Duffel minute with BACKGROUND_WINDOW_RESERVE places or
+ *    fewer left: they wait for the next minute, and are dropped if a plan
+ *    started meanwhile or BACKGROUND_MAX_WAIT_MS passed;
+ *  - no retries: a refused one is simply not pre-searched.
+ * A search already cached or in flight is shared, as for anyone.
+ */
+const MAX_BACKGROUND_SEARCHES = 2;
+const BACKGROUND_WINDOW_RESERVE = 10;
+const BACKGROUND_MAX_WAIT_MS = 60_000;
+/** A plan that searched this recently is still working (between rounds, or waiting on rail). */
+const FOREGROUND_QUIET_MS = 3_000;
+const backgroundSearch = new AsyncLocalStorage<boolean>();
+let activeBackground = 0;
+
+function foregroundBusy(): boolean {
+  return activeSearches > 0 || searchWaiters.length > 0 || Date.now() - lastForegroundAt < FOREGROUND_QUIET_MS;
+}
+
+/** Wait for a background turn; false when the search should not be sent at all. */
+async function backgroundTurn(): Promise<boolean> {
+  const deadline = Date.now() + BACKGROUND_MAX_WAIT_MS;
+  for (;;) {
+    if (foregroundBusy()) return false;
+    const now = Date.now();
+    const w = duffelWindowState();
+    const wait = Math.max(
+      duffelPausedUntil - now,
+      w && w.remaining <= BACKGROUND_WINDOW_RESERVE ? w.resetAt - now : 0,
+      activeBackground >= MAX_BACKGROUND_SEARCHES ? 50 : 0,
+    );
+    if (wait <= 0) {
+      activeBackground++;
+      return true;
+    }
+    if (now + wait > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, wait + Math.round(Math.random() * 250)));
+  }
+}
+
+/**
+ * searchFlights for work no plan is waiting on yet (see backgroundTurn):
+ * the offers, or null when it gave way and sent nothing.
+ */
+export async function searchFlightsInBackground(params: SearchFlightsParams): Promise<FlightOffer[] | null> {
+  if (sameAirportArea(params.origin, params.destination)) return [];
+  const key = searchKey(params);
+  const hit = searchCache.get(key);
+  if (hit && Date.now() - hit.at < SEARCH_CACHE_TTL_MS) return hit.promise;
+  if (!(await backgroundTurn())) return null;
+  try {
+    // Registered for sharing only now that it is sent: a plan asking for the
+    // same flight while this waited searched it itself.
+    return await backgroundSearch.run(true, () => cachedSearch(key, () => withNoRetries(() => searchFlightsUncached(params))));
+  } finally {
+    activeBackground--;
+  }
+}
+
+function withNoRetries<T>(fn: () => Promise<T>): Promise<T> {
+  return retryOverride.run(0, fn);
+}
+const retryOverride = new AsyncLocalStorage<number>();
+
+/** Tests only. */
+export function _resetBackgroundSearches(): void {
+  activeBackground = 0;
+  lastForegroundAt = 0;
 }
 
 function searchKey(params: SearchFlightsParams): string {

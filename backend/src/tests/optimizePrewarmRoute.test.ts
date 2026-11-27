@@ -77,6 +77,15 @@ describe('POST /api/optimize/prewarm', () => {
     expect(mockedPrewarm).not.toHaveBeenCalled();
   });
 
+  it('more destinations than the planner can send (30): refused, nothing searched', async () => {
+    const cities = Array.from({ length: 31 }, (_, i) => ({ name: `City ${i + 1}` }));
+    const res = await request(makeApp()).post('/api/optimize/prewarm').send(body({ cities, totalNights: 62 }));
+    expect(res.status).toBe(400);
+    expect(mockedPrewarm).not.toHaveBeenCalled();
+    const ok = await request(makeApp()).post('/api/optimize/prewarm').send(body({ cities: cities.slice(0, 30), totalNights: 60 }));
+    expect(ok.status).toBe(202);
+  });
+
   it('no home city: nothing to pre-search', async () => {
     const { origin: _o, originAirports: _a, ...rest } = body();
     const res = await request(makeApp()).post('/api/optimize/prewarm').send(rest);

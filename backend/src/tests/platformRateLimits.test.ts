@@ -237,6 +237,18 @@ describe('a flood is still refused', () => {
     expect((await send(ip, { method: 'POST', path: '/api/plan/converse', body: {} })).status).not.toBe(429);
   }, 60_000);
 
+  it('the pre-search cap: one trip and one edit of it per 5 minutes; the third is refused, and the plan itself is not', async () => {
+    // Each pre-search is up to 30 Duffel searches on a token that takes 30 a
+    // minute in all; 20 per 15 minutes was up to 600.
+    expect(RATE_LIMITS.prewarm).toBe(2);
+    const ip = '198.51.100.40';
+    const prewarms: Call[] = Array.from({ length: 3 }, () => ({ method: 'POST', path: '/api/optimize/prewarm' }));
+    const { refused } = await run(ip, prewarms);
+    expect(refused).toEqual(['#3 POST /api/optimize/prewarm']);
+    // Its own budget: the plan still goes through.
+    expect((await send(ip, { method: 'POST', path: '/api/optimize' })).status).toBe(400);
+  }, 60_000);
+
   it(`the general cap: call ${RATE_LIMITS.general + 1} in one window is refused`, async () => {
     expect(RATE_LIMITS.general).toBe(600);
     const calls: Call[] = Array.from({ length: RATE_LIMITS.general + 1 }, () => ({ method: 'GET', path: '/api/trips' }));

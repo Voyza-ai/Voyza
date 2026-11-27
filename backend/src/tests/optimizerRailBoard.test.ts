@@ -290,6 +290,33 @@ describe('optimize with the rail board', () => {
     for (const key of new Set(full)) expect(full.filter((k) => k === key).length).toBeLessThanOrEqual(2);
   });
 
+  it('with cityNights, a ranking-day retry only for a pair that can be the first leg on that day (any other is wasted)', async () => {
+    // The ranking day is the typed first city's (Aville, 2 nights): 03-10. A
+    // trip starting in Bburg (3 nights) or Cton (4) flies its first leg on
+    // 03-11 or 03-12, and every later leg later still, so a second answer for
+    // a Bburg or Cton pair on 03-10 is read by nobody.
+    mockedFlights.mockImplementation(async ({ origin, destination, date }: any) =>
+      origin === 'HMA' || destination === 'HMA' ? [flight(origin, destination, date, 400)] : [flight(origin, destination, date, 200)],
+    );
+    mockedTrains.mockResolvedValue([]);
+    await optimize({
+      cities: [{ name: 'Aville' }, { name: 'Bburg' }, { name: 'Cton' }],
+      startDate: '2030-03-08',
+      travelers: 2,
+      origin: 'Home',
+      originAirports: ['HMA'],
+      returnToHome: true,
+      totalNights: 9,
+      cityNights: { Aville: 2, Bburg: 3, Cton: 4 },
+    });
+    const onRankingDay = railCalls()
+      .map((c) => c.key)
+      .filter((k) => k.endsWith('@2030-03-10'));
+    const times = (pair: string) => onRankingDay.filter((k) => k === `${pair}@2030-03-10`).length;
+    for (const pair of ['Bburg>Aville', 'Bburg>Cton', 'Cton>Aville', 'Cton>Bburg']) expect(times(pair)).toBe(1);
+    for (const pair of ['Aville>Bburg', 'Aville>Cton']) expect(times(pair)).toBe(2);
+  });
+
   it('OPT_RANKING_RAIL=quick (benchmark only): ranking asks each pair once with the lighter search', async () => {
     setFlights();
     mockedTrains.mockResolvedValue([]);

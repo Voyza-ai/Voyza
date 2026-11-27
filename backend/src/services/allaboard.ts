@@ -57,6 +57,32 @@ const OFFER_TIMEOUT_MS = 30_000;
  * 10-minute cache when the answer was complete.
  */
 export const OFFER_CANDIDATES = 6;
+
+/**
+ * Most getJourneyOffer requests in flight at once, across every search: what
+ * the rail gate let through before exp/optimizer-speed (8 searches ×
+ * OFFER_CANDIDATES = 48). The gate now starts 24 searches at once
+ * (trains.ts), which could ask 144 fares together — near the burst All Aboard
+ * sheds, answering with no fare at all (trains.ts withTrainSearchSlot). The
+ * timetables still all go out at once; the fares queue here, each request's
+ * own timeout starting only when it is sent.
+ */
+export const MAX_CONCURRENT_OFFER_REQUESTS = 8 * OFFER_CANDIDATES;
+let activeOfferRequests = 0;
+const offerRequestWaiters: Array<() => void> = [];
+
+async function withOfferSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (activeOfferRequests >= MAX_CONCURRENT_OFFER_REQUESTS) {
+    await new Promise<void>((resolve) => offerRequestWaiters.push(resolve));
+  }
+  activeOfferRequests++;
+  try {
+    return await fn();
+  } finally {
+    activeOfferRequests--;
+    offerRequestWaiters.shift()?.();
+  }
+}
 /** Cap on unpriced schedule rows returned when pricing fails. */
 const MAX_UNPRICED = 3;
 
@@ -383,7 +409,7 @@ export async function searchAllAboardDetailed(
     await Promise.all(
       candidates.map(async (idx) => {
         try {
-          const offerData = await gql<{ getJourneyOffer: AaJourneyOffer }>(
+          const offerData = await withOfferSlot(() => gql<{ getJourneyOffer: AaJourneyOffer }>(
             `query($j: ID!) {
               getJourneyOffer(journey: $j, passengers: [${passengers}], currency: "USD") {
                 itinerary {
@@ -394,7 +420,7 @@ export async function searchAllAboardDetailed(
             { j: journeys[idx].id },
             session,
             OFFER_TIMEOUT_MS,
-          );
+          ));
           // `price.currency` was selected in the query above and typed on
           // AaOffer, but never read: the amount was taken as-is and then
           // stamped `currency: 'USD'` below, so a non-USD fare would be read

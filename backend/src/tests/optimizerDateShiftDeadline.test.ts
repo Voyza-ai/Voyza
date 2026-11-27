@@ -52,7 +52,7 @@ import { optimize } from '../services/optimizer';
 import { searchFlights } from '../services/flights';
 import { searchHotels } from '../services/hotels';
 import { searchTrains } from '../services/trains';
-import { currentDuffelRetryBudget } from '../services/duffelBudget';
+import { currentDuffelCancelCheck, currentDuffelRetryBudget } from '../services/duffelBudget';
 
 const mockedFlights = searchFlights as jest.Mock;
 const mockedHotels = searchHotels as jest.Mock;
@@ -188,6 +188,28 @@ describe('the date-shift probe never holds the plan (4+ cities: it does not run)
 });
 
 describe('1-3 city trips keep their probe', () => {
+  it('when the answer goes out, the probe\'s searches not yet sent are dropped (none waits for the next Duffel minute)', async () => {
+    const asked = fares(THREE_PLAN_DATES, 0, '2030-06-09');
+    const priced = mockedFlights.getMockImplementation()!;
+    // How each probe search could tell, later, that its caller had left.
+    const checks: Array<() => boolean> = [];
+    mockedFlights.mockImplementation(async (p: any) => {
+      if (!THREE_PLAN_DATES.includes(p.date)) {
+        const check = currentDuffelCancelCheck();
+        if (check) checks.push(check);
+      }
+      return priced(p);
+    });
+
+    const result = await optimize(THREE);
+
+    expect(result.dateShiftChecked).toBe(true);
+    const probeSearches = asked.filter((a) => !THREE_PLAN_DATES.includes(a.key.split('@')[1]));
+    expect(checks).toHaveLength(probeSearches.length);
+    // Answered: a probe search still waiting in flights.ts now sends nothing.
+    expect(checks.every((check) => check())).toBe(true);
+  }, 30000);
+
   it('a leg nobody can price: no probe, and none of its searches sent (it starts early only on a fully priced route)', async () => {
     // Alpha -> Bravo has no flight (and no train): the trip has a gap, so
     // there is no baseline to compare a shifted date with.

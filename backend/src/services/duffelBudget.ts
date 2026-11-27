@@ -27,3 +27,32 @@ export function withDuffelRetryBudget<T>(maxWaitMs: number, fn: () => Promise<T>
 export function currentDuffelRetryBudget(): number | undefined {
   return retryWaitBudget.getStore();
 }
+
+/**
+ * A caller's way to drop its Duffel searches that are not sent yet — for
+ * optional work the plan stops waiting for.
+ *
+ * The date-shift probe starts as soon as ranking has the ordering, and its
+ * searches may wait for the next Duffel minute (withDuffelRetryBudget). When
+ * the plan's answer went out first, nobody read them, yet they were still sent
+ * once the minute turned (~16 on a 3-city plan), into the window the next plan
+ * needs. flights.ts asks `duffelCallCancelled()` before every attempt and sends
+ * nothing once it says yes. A search another caller shares (flights.ts'
+ * in-flight dedupe) fails with it, as with a retry budget.
+ */
+const cancelCheck = new AsyncLocalStorage<() => boolean>();
+
+/** Run `fn` with its Duffel searches dropped, unsent, once `isCancelled()` turns true. */
+export function withDuffelCancel<T>(isCancelled: () => boolean, fn: () => Promise<T>): Promise<T> {
+  return cancelCheck.run(isCancelled, fn);
+}
+
+/** Whether the current call chain's Duffel searches have been given up on. */
+export function duffelCallCancelled(): boolean {
+  return cancelCheck.getStore()?.() ?? false;
+}
+
+/** The current call chain's cancel check, if any (tests read it after the chain is done). */
+export function currentDuffelCancelCheck(): (() => boolean) | undefined {
+  return cancelCheck.getStore();
+}

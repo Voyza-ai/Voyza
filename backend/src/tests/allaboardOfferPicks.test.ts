@@ -101,6 +101,46 @@ beforeEach(() => {
   clearLocationCache();
 });
 
+describe('All Aboard: fare requests in flight at once', () => {
+  it('never more than 8 searches could send before (48), however many searches run together', async () => {
+    // The rail gate (trains.ts) lets 24 searches run at once; six fares each
+    // would be 144 together, near the burst All Aboard sheds.
+    const journeys = journeysFor('2027-03-20', VIENNA_MUNICH);
+    let inFlight = 0;
+    let most = 0;
+    let fares = 0;
+    mockFetch.mockImplementation(async (_url: string, init: any) => {
+      const body = String(init?.body ?? '');
+      if (body.includes('getLocations')) {
+        const q = JSON.parse(body).variables.q;
+        return gqlOk({ getLocations: [{ uid: `uid-${q}`, name: q }] });
+      }
+      if (body.includes('getJourneys')) return gqlOk({ getJourneys: journeys });
+      if (body.includes('getJourneyOffer')) {
+        inFlight++;
+        fares++;
+        most = Math.max(most, inFlight);
+        await new Promise((r) => setTimeout(r, 30));
+        inFlight--;
+        return gqlOk({
+          getJourneyOffer: { itinerary: [{ status: 'SUCCESS', offers: [{ id: 'o', price: { amount: 10000, currency: 'USD' } }] }] },
+        });
+      }
+      return { ok: false, status: 500, json: () => Promise.resolve({}) };
+    });
+
+    const results = await Promise.all(
+      Array.from({ length: 24 }, (_, i) => searchAllAboardDetailed(params(`From ${i}`, `To ${i}`, '2027-03-20'))),
+    );
+
+    expect(fares).toBe(24 * OFFER_CANDIDATES);
+    // allaboard.ts MAX_CONCURRENT_OFFER_REQUESTS: 8 searches' worth.
+    expect(most).toBeLessThanOrEqual(8 * OFFER_CANDIDATES);
+    // Every fare still came back.
+    expect(results.every((r) => r.complete && r.offers.filter((o) => o.pricePerPerson != null).length === 6)).toBe(true);
+  });
+});
+
 describe('All Aboard: which journeys get priced', () => {
   it('Vienna → Munich: six daytime trains spread over the day, not the 05:38 and the 22:44 sleeper', async () => {
     serve(journeysFor('2027-03-20', VIENNA_MUNICH));

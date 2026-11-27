@@ -158,7 +158,7 @@ async function run(s: TripSpec & { origin: string }) {
     travelers: 4,
     origin: s.origin,
     originAirports: s.homeAirports,
-    returnToHome: true,
+    returnToHome: s.returnToHome ?? true,
     totalNights: s.totalNights,
   });
 }
@@ -274,6 +274,30 @@ describe('a first airport with only the test airline', () => {
 });
 
 describe('best-first under the budget', () => {
+  // The plan before this one spent 42 searches on a 4-5 city trip, home
+  // flights included: one per city that could start it and, on a round trip,
+  // one per city that could end it. A one-way 5-city trip left its screen and
+  // best-first 42 - 5 = 37 — more than 32 — and must not get fewer now.
+  it('never stops earlier than the plan before it: a one-way 5-city trip may send 37 inter-city searches', async () => {
+    let stops = 0;
+    let most = 0;
+    for (let seed = 1; seed <= 16; seed++) {
+      searched = [];
+      mockedInfo.mockClear();
+      const s = { ...spec(5, 'CHI'), returnToHome: false };
+      useFares(testModeModel(seed, 'CHI'));
+
+      await run(s);
+
+      expect(interCity().length).toBeLessThanOrEqual(42 - 5);
+      most = Math.max(most, interCity().length);
+      if (ledger().budgetStop) stops++;
+    }
+    // Some plan was stopped by the budget, and best-first went past 32 first.
+    expect(stops).toBeGreaterThan(0);
+    expect(most).toBeGreaterThan(BUDGET);
+  }, 60000);
+
   it('a round prices several legs at once, so a 5-city plan takes few rounds', async () => {
     (env as any).DUFFEL_ACCESS_TOKEN = 'duffel_live_jest';
     let rounds = 0;

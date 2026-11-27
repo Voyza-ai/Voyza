@@ -1,5 +1,5 @@
 import { compareLeg, LegComparison, type CompareLegParams } from './compareLeg';
-import { getIataCode, isFlightSearchCached, searchFlights, type IataLookupContext } from './flights';
+import { getIataCode, isFlightSearchCached, searchFlights, searchFlightsInBackground, type FlightOffer, type IataLookupContext } from './flights';
 import { isDuffelTestOffer, withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
@@ -8,7 +8,7 @@ import { resolveOriginAirports, type OriginCandidate } from './location/originAi
 import { sameAirportArea } from './location/sameAirportArea';
 import { NO_AIRLINE_SERVICE } from '../data/noAirlineService';
 import { addDays, clampToFuture, todayIso } from '../utils/dates';
-import { withDuffelRetryBudget } from './duffelBudget';
+import { withDuffelCancel, withDuffelRetryBudget } from './duffelBudget';
 import { AppError } from '../middleware/error';
 import { searchHotels, plannerHotelPick } from './hotels';
 import { searchTrains, type SearchTrainsParams, type TrainOffer } from './trains';
@@ -872,13 +872,17 @@ const SCREEN_LOWER_BOUND = (1 - MAX_DATE_SWING) / (1 + MAX_DATE_SWING);
  *    spent, nothing more is sent until Duffel's reset (noteDuffelWindow), so a
  *    plan waits for the next minute instead of collecting 429s.
  *  - EXPLORATION is this budget, and it never gives best-first less than the
- *    plan before it did: 42 − 10 home − 20 screen = 12 for 5 cities on Duffel's
- *    live mode (one metro search per city and direction), 8-10 on the test
- *    token. 32 − 20 screen = 12; 4 cities 32 − 12 = 20 (was 18). A cheaper
- *    winner than before can come from comparing every home airport; a dearer
- *    one must not come from searching less.
- * So a budget-stopped 5-city plan can send 32 inter-city searches: at most 2
- * past one window, and only after its home flights went in an earlier one.
+ *    plan before it did (interCityBudget): that plan's 42 counted its home
+ *    searches too, one per city that can start the trip and one per city that
+ *    can end it, so a one-way or 4-city trip left best-first more than 32
+ *    does — 4 cities 42 − 8 home − 12 screen = 22, one-way 42 − 4 − 12 = 26;
+ *    5 cities one-way 42 − 5 − 20 = 17, round trip 42 − 10 − 20 = 12. The
+ *    budget is the larger of 32 and that. A cheaper winner than before can
+ *    come from comparing every home airport; a dearer one must not come from
+ *    searching less.
+ * So a budget-stopped 5-city round trip can send 32 inter-city searches: at
+ * most 2 past one window, and only after its home flights went in an earlier
+ * one; a one-way or 4-city trip up to 38, paced into the next window.
  *
  * History: production's shipped screen sent 79 for one 5-city Chicago plan
  * (home 26, screen 20, exact 33 over 25 rounds; 54-89 s cold, 2026-11-02).
@@ -888,6 +892,23 @@ const SCREEN_LOWER_BOUND = (1 - MAX_DATE_SWING) / (1 + MAX_DATE_SWING);
  * OPT_PLAN_BUDGET overrides it for the benchmark (backend/scripts/opt-bench).
  */
 const PLAN_SEARCH_BUDGET = Number(process.env.OPT_PLAN_BUDGET) > 0 ? Number(process.env.OPT_PLAN_BUDGET) : 32;
+
+/** The plan before this one: every search of a 4-5 city plan, home flights included. */
+const BASE_PLAN_SEARCH_BUDGET = 42;
+
+/**
+ * The inter-city searches one 4-5 city plan may send (PLAN_SEARCH_BUDGET):
+ * never fewer than the plan before this one left best-first and its screen,
+ * which was BASE_PLAN_SEARCH_BUDGET less its home searches — at the least one
+ * per city that can start the trip and one per city that can end it.
+ * (Its reserve for the winner's other airports, on the test token, only
+ * lowered that further.) OPT_PLAN_BUDGET, the benchmark's override, is taken
+ * as it is.
+ */
+function interCityBudget(homeSearchesBefore: number): number {
+  if (Number(process.env.OPT_PLAN_BUDGET) > 0) return PLAN_SEARCH_BUDGET;
+  return Math.max(PLAN_SEARCH_BUDGET, BASE_PLAN_SEARCH_BUDGET - homeSearchesBefore);
+}
 
 /** Inter-city searches a run has asked for so far (what PLAN_SEARCH_BUDGET counts). */
 function interCitySearches(ctx: RunContext): number {
@@ -2399,6 +2420,8 @@ export type PrewarmParams = Pick<
 export type PrewarmOutcome = {
   /** Home-flight searches asked for (those already in flights.ts' cache cost nothing). */
   searches: number;
+  /** Of those, the ones that gave way to a plan or a nearly spent Duffel minute (flights.ts searchFlightsInBackground). */
+  skipped?: number;
   /** True when the same trip was pre-searched within PREWARM_TTL_MS: nothing was asked. */
   deduped: boolean;
 };
@@ -2408,11 +2431,18 @@ const PREWARM_TTL_MS = 10 * 60 * 1000;
 const prewarmed = new Map<string, number>();
 
 /**
- * Search, during the planner chat, the home flights the plan will need:
- * every city, both directions, from every one of the traveller's airports —
- * exactly the searches optimize() makes for them (searchHomeFlights on 1-3
- * cities, searchHomeOffers on 4-5), with the same airports, city codes,
- * dates and party, so flights.ts' cache answers optimize() from them.
+ * Search, during the planner chat, the home flights the plan will need: to
+ * every city that can start the trip and from every city that can end it
+ * (every city on 1-5 cities; the candidate orderings' ends on 6+, as the plan
+ * itself), from every one of the traveller's airports — exactly the searches
+ * optimize() makes for them (searchHomeFlights on 1-3 cities,
+ * searchHomeOffers on 4-5), with the same airports, city codes, dates and
+ * party, so flights.ts' cache answers optimize() from them.
+ *
+ * They give way to every real plan (flights.ts searchFlightsInBackground):
+ * their own two Duffel slots, nothing sent while a plan is searching or into
+ * a nearly spent Duffel minute, no retries. A search not sent is searched by
+ * the plan itself, as before.
  *
  * Why it can: home flights depend only on which city is first or last, the
  * two travel days and the party — not on the order of the cities — and the
@@ -2444,28 +2474,51 @@ export async function prewarmHomeFlights(params: PrewarmParams): Promise<Prewarm
   if (prewarmed.has(key)) return { searches: 0, deduped: true };
   prewarmed.set(key, now);
 
+  // The cities the plan prices home flights for: the candidate orderings'
+  // first cities (outbound) and last ones (return), and the typed order's,
+  // which savingsVsNaive prices.
+  const cityMap = new Map(cities.map((c) => [c.name, c]));
+  const orderings = candidateOrderings(cities, true, cityMap);
+  const firsts = new Set([cityNames[0], ...orderings.map((o) => o[0])]);
+  const lasts = new Set(returnToHome ? [cityNames[cityNames.length - 1], ...orderings.map((o) => o[o.length - 1])] : []);
+
   const started = Date.now();
-  const searches: Array<Promise<unknown>> = [];
+  const searches: Array<Promise<FlightOffer[] | null>> = [];
   await Promise.all(
-    cityNames.map(async (city) => {
-      let cityIata: string;
-      try {
-        cityIata = await ctx.iata(city);
-      } catch {
-        return; // optimize() will not price it either
-      }
-      for (const airport of airports) {
-        if (sameAirportArea(airport, cityIata)) continue;
-        searches.push(searchFlights({ origin: airport, destination: cityIata, date: outboundDate, travelers }).catch(() => []));
-        if (returnToHome) {
-          searches.push(searchFlights({ origin: cityIata, destination: airport, date: returnDate, travelers }).catch(() => []));
+    cityNames
+      .filter((city) => firsts.has(city) || lasts.has(city))
+      .map(async (city) => {
+        let cityIata: string;
+        try {
+          cityIata = await ctx.iata(city);
+        } catch {
+          return; // optimize() will not price it either
         }
-      }
-    }),
+        for (const airport of airports) {
+          if (sameAirportArea(airport, cityIata)) continue;
+          if (firsts.has(city)) {
+            searches.push(
+              searchFlightsInBackground({ origin: airport, destination: cityIata, date: outboundDate, travelers }).catch(() => []),
+            );
+          }
+          if (lasts.has(city)) {
+            searches.push(
+              searchFlightsInBackground({ origin: cityIata, destination: airport, date: returnDate, travelers }).catch(() => []),
+            );
+          }
+        }
+      }),
   );
-  await Promise.all(searches);
-  logger.info('Optimize prewarm', { cities: cities.length, airports: airports.length, searches: searches.length, ms: Date.now() - started });
-  return { searches: searches.length, deduped: false };
+  const answers = await Promise.all(searches);
+  const skipped = answers.filter((a) => a === null).length;
+  logger.info('Optimize prewarm', {
+    cities: cities.length,
+    airports: airports.length,
+    searches: searches.length,
+    skipped,
+    ms: Date.now() - started,
+  });
+  return { searches: searches.length, skipped, deduped: false };
 }
 
 /** Tests only. */
@@ -2551,6 +2604,17 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // any flight — so ranking's wait for rail (every pair's first answer,
   // RAIL_RANKING_WAIT_MS) runs alongside its flight searches. Ranking reads
   // trains only from the board; the winner is re-priced on its real days below.
+  //
+  // On a 4-5 city trip (the adaptive screen) a pair whose first answer had no
+  // priced train is asked once more (RunRail.retry) before ranking reads it.
+  // The plan before the board priced legs inside every best-first round, and
+  // a round that re-priced a pair on another day asked All Aboard again — an
+  // incomplete answer is not cached — and ranked on the train a cold route
+  // gives the second time. Reading first answers only, a 4-city trip whose
+  // cheap train came second ranked $150 dearer than before (2026-11-27,
+  // optimizerRailRetryRanking.test.ts). 1-3 and 6+ city trips price every
+  // ordering at once, one rail answer per pair, as they always did.
+  const adaptiveRanking = hasOrigin && cities.length >= 4 && cities.length <= 5;
   const envRailWait = Number(process.env.OPT_RAIL_WAIT_MS);
   const railBoard = createRailBoard({
     pairs: adjacentPairs([...orderings, cities.map((c) => c.name)]),
@@ -2560,21 +2624,31 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     waitMs: params.railWaitMs ?? (envRailWait > 0 ? envRailWait : RAIL_RANKING_WAIT_MS),
     // The full search, unless the benchmark asks for the lighter one (see
     // quickRankingRail). The winner's legs are searched on their real days below.
-    search: quickRankingRail ? runCtx.rail.quick : runCtx.rail.search,
+    search: quickRankingRail
+      ? runCtx.rail.quick
+      : adaptiveRanking && retryRailAfterRanking
+        ? runCtx.rail.retry
+        : runCtx.rail.search,
   });
   const ctx = runCtx.withTrainDate(() => rankingTrainDay).withTrainSource(railBoard.source);
 
-  // The winner's FIRST leg is flown on the ranking day, whichever ordering
-  // wins, so every pair's one retry on that day (when its first answer has no
-  // priced train, RunRail.retry) is work the plan would otherwise start only
-  // after ranking: start each as soon as its first answer is in, into the
-  // run's rail memo, where the winner's legs and their alternatives find it.
-  // A repeat search of a fetched route-day costs no timetable quota
-  // (measured 2026-11-27). With the lighter ranking search (benchmark) this
-  // also starts each pair's full search.
-  {
+  // The winner's FIRST leg is flown on the ranking day when its first city
+  // keeps the typed first city's nights (always, without cityNights), so
+  // that leg's one retry on that day (when its first answer has no priced
+  // train, RunRail.retry) is work the plan would otherwise start only after
+  // ranking: start it as soon as the first answer is in, into the run's rail
+  // memo, where the winner's legs and their alternatives find it. Only for
+  // pairs that can be such a first leg: any other pair's ranking-day answer
+  // is read by ranking alone, which on 1-3 and 6+ cities reads first answers
+  // (and on 4-5 cities the board retries already). A repeat search of a
+  // fetched route-day costs no timetable quota (measured 2026-11-27). With the
+  // lighter ranking search (benchmark) this also starts each one's full search.
+  if (quickRankingRail || !adaptiveRanking) {
     const countryOfCity = (name: string) => cityMap.get(name)?.country ?? getCityCountry(name);
-    for (const [from, to] of adjacentPairs([...orderings, cities.map((c) => c.name)])) {
+    const firstLegsOnRankingDay = adjacentPairs(
+      orderings.filter((o) => o.length > 1 && legDateAt(startDate, nightsFor(o), 0) === rankingTrainDay).map((o) => o.slice(0, 2)),
+    );
+    for (const [from, to] of firstLegsOnRankingDay) {
       const full: SearchTrainsParams = {
         origin: from,
         destination: to,
@@ -2732,10 +2806,11 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     let reserved = 0;
     // Home flights for every city that can start or end the trip (and the
     // typed order's ends, which savingsVsNaive prices), searched up front.
+    const firstCities = [...new Set([naiveOrdering[0], ...orderings.map((o) => o[0])])];
+    const lastCities = returnToHome ? [...new Set([naiveOrdering[lastIdx], ...orderings.map((o) => o[lastIdx])])] : [];
+    const budget = interCityBudget(homeKnown ? firstCities.length + lastCities.length : 0);
     const homeCosts = (async () => {
       if (!homeKnown) return () => [];
-      const firstCities = [...new Set([naiveOrdering[0], ...orderings.map((o) => o[0])])];
-      const lastCities = returnToHome ? [...new Set([naiveOrdering[lastIdx], ...orderings.map((o) => o[lastIdx])])] : [];
       const penalised = (cost: number) => (cost === Infinity ? UNAVAILABLE_HOME_LEG_PENALTY : cost);
       const [outbound, back] = await Promise.all([
         Promise.all(firstCities.map(async (c) => [c, penalised(await homeLegCost(c, false))] as const)),
@@ -2766,7 +2841,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
           .then(legCost),
       homeCosts,
       // Read before each round, when every search sent so far is in the ledger.
-      budget: { remaining: () => PLAN_SEARCH_BUDGET - interCitySearches(ctx) - reserved },
+      budget: { remaining: () => budget - interCitySearches(ctx) - reserved },
     });
     screenStats = { rounds: screen.rounds, budgetStop: screen.budgetStop, reserved };
     // Every leg and home flight of these is priced already: no new searches.
@@ -2863,7 +2938,10 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
         // still works, a little longer). An offset they can't price is simply
         // not offered.
         const retryWaitMs = rankedLegsPriced ? DATE_SHIFT_EARLY_RETRY_WAIT_MS : DATE_SHIFT_RETRY_WAIT_MS;
-        return await withDuffelRetryBudget(retryWaitMs, () =>
+        // Dropped, unsent, once the plan stops waiting for it (probeGate):
+        // a search waiting for the next Duffel minute is not sent after the
+        // answer has gone out.
+        return await withDuffelRetryBudget(retryWaitMs, () => withDuffelCancel(() => probeGate.abandoned, () =>
           findDateShiftSuggestion(
             bestOrdering,
             startDate,
@@ -2875,7 +2953,7 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
             probeCtx,
             dateShiftOutcome,
           ),
-        );
+        ));
       }
     } catch (err: any) {
       logger.warn('Date-shift probe failed (non-fatal)', { message: err?.message });
@@ -3064,8 +3142,11 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
     : undefined;
   clearTimeout(graceTimer);
   const probeTimedOut = probeResult === PROBE_TIMED_OUT;
+  // The answer goes out now: whatever the probe has not sent yet — a search
+  // queued behind the gate, or waiting in flights.ts for the next Duffel
+  // minute — never is (withDuffelCancel above).
+  const { inFlight, waiting } = probeGate.abandon();
   if (probeTimedOut) {
-    const { inFlight, waiting } = probeGate.abandon();
     logger.info('Date-shift probe given up: not done within the grace after the plan', {
       cities: cities.length,
       graceMs,

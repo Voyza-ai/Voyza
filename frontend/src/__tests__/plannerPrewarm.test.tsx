@@ -1,6 +1,6 @@
 import './mocks';
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 
 jest.mock('@/lib/prewarm', () => ({ prewarmOptimize: jest.fn() }));
 
@@ -63,5 +63,46 @@ it('waits for the party size', async () => {
   const { travelers: _t, ...noParty } = staged;
   startAutorun(noParty);
   await new Promise((r) => setTimeout(r, 100));
+  expect(mockedPrewarm).not.toHaveBeenCalled();
+});
+
+/**
+ * The follow-up flow (buildRemainingSteps) asks home, one-way/round-trip and
+ * the party BEFORE dates, and the AI can fill in the party at the destination
+ * step. The pre-search used to fire as soon as cities, home and party were
+ * known — on a made-up start date — and again for every later answer.
+ */
+it('the follow-up flow\'s order: nothing until dates and the trip length are answered, then once', async () => {
+  render(<PlanningChat />);
+  const answer = async (patch: Record<string, unknown>) => {
+    await act(async () => {
+      useTripStore.setState((st: any) => ({ answers: { ...st.answers, ...patch } }));
+    });
+    await new Promise((r) => setTimeout(r, 20));
+  };
+  // The AI's read of "Paris, Amsterdam and Berlin with my partner".
+  await answer({ destinations: ['Paris', 'Amsterdam', 'Berlin'], travelers: 2, planningMode: 'destination' });
+  await answer({ origin: 'New York', originAirports: ['JFK', 'EWR', 'LGA'] });
+  await answer({ returnToHome: true });
+  expect(mockedPrewarm).not.toHaveBeenCalled();
+  // "When are you thinking?" — a vague month: still no trip length.
+  await answer({ dateRange: { start: 'next month', end: '' } });
+  expect(mockedPrewarm).not.toHaveBeenCalled();
+  // "How many nights total?"
+  await answer({ nights: 7 });
+  expect(mockedPrewarm).toHaveBeenCalledTimes(1);
+  expect(mockedPrewarm.mock.calls[0][0]).toMatchObject({ travelers: 2, origin: 'New York', returnToHome: true, totalNights: 7 });
+  // Budget and notes change nothing the flights depend on: no second set.
+  await answer({ budget: 4000, extraNotes: 'no red-eyes' });
+  expect(mockedPrewarm).toHaveBeenCalledTimes(1);
+});
+
+it('one-way or round-trip is an answer the pre-search waits for, not a default', async () => {
+  const { returnToHome: _r, ...unanswered } = staged;
+  render(<PlanningChat />);
+  await act(async () => {
+    useTripStore.setState({ answers: { ...unanswered } as any });
+  });
+  await new Promise((r) => setTimeout(r, 50));
   expect(mockedPrewarm).not.toHaveBeenCalled();
 });

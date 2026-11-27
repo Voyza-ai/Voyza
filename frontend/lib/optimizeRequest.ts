@@ -41,6 +41,26 @@ export function totalNightsFor(answers: Pick<PlanningAnswers, 'nights' | 'dateRa
   return undefined;
 }
 
+/**
+ * Whether the chat has ANSWERED everything the home flights depend on, so a
+ * pre-search now asks for the flights the plan will ask for: the cities, the
+ * home city, the party, one-way or round-trip, the start date and the trip's
+ * length (nights, or a concrete end date). Not a default standing in for one:
+ * the follow-up flow asks home, one-way/round-trip and party BEFORE dates, and
+ * the AI can fill in the party at the destination step, so the pre-search
+ * used to fire on a made-up start date, then again for every later answer.
+ */
+export function prewarmReady(
+  answers: Pick<PlanningAnswers, 'destinations' | 'origin' | 'travelers' | 'returnToHome' | 'dateRange' | 'nights'>,
+): boolean {
+  if (!answers.destinations || answers.destinations.length === 0) return false;
+  if (!answers.origin || !answers.origin.trim()) return false;
+  if (typeof answers.travelers !== 'number' || answers.travelers < 1) return false;
+  if (typeof answers.returnToHome !== 'boolean') return false;
+  if (!answers.dateRange?.start || !answers.dateRange.start.trim()) return false;
+  return totalNightsFor(answers) !== undefined;
+}
+
 export function optimizeTripRequest(input: {
   destinations: string[];
   travelers: number;

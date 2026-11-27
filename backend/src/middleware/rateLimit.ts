@@ -54,7 +54,8 @@ export const RATE_LIMITS = {
   general: 600,
   expensive: 300,
   optimize: 40,
-  prewarm: 20,
+  /** Per PREWARM_WINDOW_MS, not per 15 minutes (prewarmLimiter). */
+  prewarm: 2,
   hotels: 120,
   canvasRole: 600,
   locations: 600,
@@ -210,16 +211,19 @@ export const optimizeLimiter = rateLimit({
  * POST /api/optimize/prewarm, on top of the expensive cap (prototype,
  * exp/optimizer-speed).
  *
- * The planner fires it once per trip, during the chat, and it searches every
- * home flight the plan will need: 2 × cities × home airports Duffel requests,
- * up to 30 (5 cities from New York) through the token every user shares. A
- * repeat of the same trip within 10 minutes asks nothing (optimizer.ts
- * prewarmHomeFlights). 20 is twice the heavy session's 10 plans — a trip
- * edited once before it is planned — and at most ~600 searches a window per
- * IP, against 40 optimizes' ~2,000.
+ * The planner fires it once per trip, during the chat, and it searches the
+ * home flights the plan will need: up to 30 Duffel requests (5 cities from
+ * New York, both ways; 6+ cities only the candidate orderings' ends) through
+ * the token every user shares, which takes 30 a minute in all. So one trip's
+ * worth, and one edit of it, every few minutes: 2 per PREWARM_WINDOW_MS, at
+ * most 60 searches per IP per 5 minutes — and those give way to every real
+ * plan (flights.ts searchFlightsInBackground). It was 20 per 15 minutes, up
+ * to 600 searches: more than the whole token gets. A repeat of the same trip
+ * within 10 minutes asks nothing (optimizer.ts prewarmHomeFlights).
  */
+export const PREWARM_WINDOW_MS = 5 * 60 * 1000;
 export const prewarmLimiter = rateLimit({
-  windowMs: WINDOW_MS,
+  windowMs: PREWARM_WINDOW_MS,
   max: RATE_LIMITS.prewarm,
   standardHeaders: true,
   legacyHeaders: false,

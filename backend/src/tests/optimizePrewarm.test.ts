@@ -33,18 +33,23 @@ const mockCodes: Record<string, string> = {
   Charlie: 'ZQC',
   Delta: 'ZQD',
   Echo: 'ZQE',
+  Foxtrot: 'ZQF',
+  Golf: 'ZQG',
   Chicago: 'CHI',
   'New York': 'NYC',
 };
 jest.mock('../services/flights', () => {
   const { AppError } = jest.requireActual('../middleware/error');
+  const searchFlights = jest.fn();
   return {
     getIataCode: jest.fn(async (name: string) => {
       const code = mockCodes[name];
       if (!code) throw new AppError(404, `No IATA code found for "${name}"`);
       return code;
     }),
-    searchFlights: jest.fn(),
+    searchFlights,
+    // The pre-search's path (flights.ts gives way to plans; not this file's subject).
+    searchFlightsInBackground: jest.fn((p: unknown) => searchFlights(p)),
   };
 });
 jest.mock('../services/trains', () => ({ searchTrains: jest.fn().mockResolvedValue([]) }));
@@ -110,7 +115,7 @@ describe('prewarmHomeFlights', () => {
 
     const outcome = await prewarmHomeFlights(t);
     const warmed = homeKeys(searched);
-    expect(outcome).toEqual({ searches: 2 * cities.length * airports.length, deduped: false });
+    expect(outcome).toMatchObject({ searches: 2 * cities.length * airports.length, skipped: 0, deduped: false });
     expect(warmed.size).toBe(2 * cities.length * airports.length);
 
     searched = [];
@@ -123,12 +128,35 @@ describe('prewarmHomeFlights', () => {
     expect(planned).toEqual(warmed);
   }, 30000);
 
+  it('7 cities: only the cities the plan prices home flights for — the candidate orderings\' ends — not all 7', async () => {
+    // Past 5 cities the plan scores a few country-grouped orderings
+    // (countryGroupedOrderings): here the typed order and its reverse, so
+    // home flights to and from Alpha and Golf only.
+    const cities = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf'];
+    const airports = ['JFK', 'EWR', 'LGA'];
+    useFares(airports);
+    const t = trip(cities, 'New York', airports);
+
+    const outcome = await prewarmHomeFlights(t);
+    const warmed = homeKeys(searched);
+    expect(outcome.searches).toBe(2 * 2 * airports.length);
+    const cityCodes = new Set([...warmed].map((k) => k.split('@')[0].split('>').find((c) => !HOME[c])));
+    expect(cityCodes).toEqual(new Set(['ZQA', 'ZQG']));
+
+    searched = [];
+    await optimize(t);
+    const planDays = new Set([t.startDate, addDays(t.startDate, t.totalNights)]);
+    const planned = new Set([...homeKeys(searched)].filter((k) => planDays.has(k.split('@')[1].split('#')[0])));
+    // Every one the plan asked for was pre-searched, and nothing else was.
+    expect(planned).toEqual(warmed);
+  }, 30000);
+
   it('a repeat of the same trip asks nothing; another party size asks again', async () => {
     useFares(['JFK', 'EWR']);
     const t = trip(['Alpha', 'Bravo'], 'New York', ['JFK', 'EWR']);
     await prewarmHomeFlights(t);
     const first = searched.length;
-    expect(await prewarmHomeFlights(t)).toEqual({ searches: 0, deduped: true });
+    expect(await prewarmHomeFlights(t)).toMatchObject({ searches: 0, deduped: true });
     expect(searched.length).toBe(first);
     expect((await prewarmHomeFlights({ ...t, travelers: 3 })).searches).toBe(8);
   });
@@ -142,7 +170,7 @@ describe('prewarmHomeFlights', () => {
 
   it('no home city: nothing to pre-search', async () => {
     useFares(['JFK']);
-    expect(await prewarmHomeFlights({ ...trip(['Alpha', 'Bravo'], '', []) })).toEqual({ searches: 0, deduped: false });
+    expect(await prewarmHomeFlights({ ...trip(['Alpha', 'Bravo'], '', []) })).toMatchObject({ searches: 0, deduped: false });
     expect(searched).toEqual([]);
   });
 });

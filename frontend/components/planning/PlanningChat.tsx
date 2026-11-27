@@ -16,7 +16,7 @@ import { parseDateInput, parseDateRangeInput } from '@/lib/parseDate';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { stagedCountry } from '@/lib/cityNights';
-import { optimizeTripRequest } from '@/lib/optimizeRequest';
+import { optimizeTripRequest, prewarmReady } from '@/lib/optimizeRequest';
 import { prewarmOptimize } from '@/lib/prewarm';
 import { vibesFromAnswer } from '@/lib/vibeMap';
 import { dedupeVibes, joinVibes, pillsAndText, splitVibeText, vibeBubbleText, vibeList } from '@/lib/vibes';
@@ -349,21 +349,19 @@ export default function PlanningChat() {
   const nextId = () => `msg-${++msgCounter.current}`;
 
   // Home-flight pre-search (prototype, exp/optimizer-speed). Once the chat
-  // knows the cities, home, dates, nights and party — after "How many
-  // people?", with budget and notes still to come — ask the backend to search
-  // every home flight the plan will need, so the plan finds them in its
-  // cache instead of spending its own time and Duffel window on them. The
-  // body is built exactly as the plan's (lib/optimizeRequest.ts); sent again
-  // only if the trip changes, and the backend skips a repeat anyway.
+  // has ANSWERED the cities, home, party, one-way/round-trip, start date and
+  // trip length (prewarmReady) — whichever order they were asked in — ask the
+  // backend to search the home flights the plan will need, so the plan finds
+  // them in its cache instead of spending its own time and Duffel window on
+  // them. The body is built exactly as the plan's (lib/optimizeRequest.ts);
+  // sent again only if the trip changes, and the backend skips a repeat.
   const prewarmedRef = useRef<string | null>(null);
   useEffect(() => {
+    if (!prewarmReady(answers)) return;
     const destinations = answers.destinations ?? [];
-    if (destinations.length === 0) return;
-    if (!answers.origin || !answers.origin.trim()) return;
-    if (typeof answers.travelers !== 'number' || answers.travelers < 1) return;
     const request = optimizeTripRequest({
       destinations,
-      travelers: answers.travelers,
+      travelers: answers.travelers as number,
       startRaw: answers.dateRange?.start,
       answers,
     });

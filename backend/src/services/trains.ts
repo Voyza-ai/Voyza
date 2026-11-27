@@ -541,8 +541,10 @@ function toPartyTotal(offer: ProviderTrainOffer, travelers: number): TrainOffer 
 // for a whole cold search (~16-25 s), so the pairs past the eighth could not
 // even start inside that wait. 24 starts a 5-city trip's 20 pairs at once —
 // still a bound, but the shedding burst described above was ~240 fare
-// requests; 24 searches is at most 72. OPT_TRAIN_SLOTS overrides it for the
-// benchmark harness (backend/scripts/opt-bench).
+// requests, and 24 searches × OFFER_CANDIDATES (6) is up to 144: so the fare
+// requests have their own cap, what 8 searches could send before — 48
+// (allaboard.ts MAX_CONCURRENT_OFFER_REQUESTS). OPT_TRAIN_SLOTS overrides the
+// search gate for the benchmark harness (backend/scripts/opt-bench).
 const MAX_CONCURRENT_TRAIN_SEARCHES = Number(process.env.OPT_TRAIN_SLOTS) > 0 ? Number(process.env.OPT_TRAIN_SLOTS) : 24;
 let activeTrainSearches = 0;
 const trainSearchWaiters: Array<() => void> = [];
@@ -586,10 +588,24 @@ const trainSearchCache = new Map<string, { at: number; promise: Promise<TrainOff
  * Paris -> Berlin on T2), so remembering it turned other users' plans
  * flights-only. (An earlier prototype did, for 15 minutes; replaced.)
  *
- * In memory, per process — a prototype (exp/optimizer-speed).
+ * In memory, per process — a prototype (exp/optimizer-speed) — and at most
+ * NO_ROUTE_MAX_ENTRIES of them: the oldest is forgotten first (a Map keeps
+ * insertion order, and an answer is re-inserted when it is learned again), so
+ * nothing scans the whole map. An expired one is dropped when it is read.
  */
 const NO_ROUTE_TTL_MS = 24 * 60 * 60 * 1000;
+export const NO_ROUTE_MAX_ENTRIES = 5000;
 const noRoute = new Map<string, number>();
+
+function rememberNoRoute(key: string): void {
+  noRoute.delete(key);
+  noRoute.set(key, Date.now());
+  while (noRoute.size > NO_ROUTE_MAX_ENTRIES) {
+    const oldest = noRoute.keys().next().value;
+    if (oldest === undefined) break;
+    noRoute.delete(oldest);
+  }
+}
 
 function cachedTrainSearch(
   key: string,
@@ -621,7 +637,7 @@ function cachedTrainSearch(
         evict();
         return;
       }
-      if (r.offers.length === 0) noRoute.set(key, Date.now());
+      if (r.offers.length === 0) rememberNoRoute(key);
       else noRoute.delete(key);
     },
     evict,
@@ -632,12 +648,6 @@ function cachedTrainSearch(
     const cutoff = Date.now() - TRAIN_SEARCH_CACHE_TTL_MS;
     for (const [k, v] of trainSearchCache) {
       if (v.at < cutoff) trainSearchCache.delete(k);
-    }
-  }
-  if (noRoute.size > 5000) {
-    const cutoff = Date.now() - NO_ROUTE_TTL_MS;
-    for (const [k, at] of noRoute) {
-      if (at < cutoff) noRoute.delete(k);
     }
   }
   return promise;

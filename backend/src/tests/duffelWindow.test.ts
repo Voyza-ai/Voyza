@@ -26,7 +26,15 @@ jest.mock('../services/duffel', () => {
 });
 jest.mock('../services/location/sameAirportArea', () => ({ sameAirportArea: () => false }));
 
-import { duffelWindowState, isFlightSearchCached, resetDuffelRateLimitPause, searchFlights } from '../services/flights';
+import {
+  _resetBackgroundSearches,
+  duffelWindowState,
+  isFlightSearchCached,
+  resetDuffelRateLimitPause,
+  searchFlights,
+  searchFlightsInBackground,
+} from '../services/flights';
+import { withDuffelCancel } from '../services/duffelBudget';
 
 const { __mockDuffel: mockDuffel } = require('../services/duffel');
 
@@ -46,8 +54,14 @@ const answer = (remaining: number, resetInMs: number) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockDuffel.offerRequests.create.mockReset();
   resetDuffelRateLimitPause();
+  _resetBackgroundSearches();
 });
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** A reset on a whole second, at least `ms` away (an HTTP date has no milliseconds). */
+const wholeSecondIn = (ms: number) => Math.ceil((Date.now() + ms) / 1000) * 1000;
 
 describe("Duffel's window", () => {
   it('remembers what the last answer said', async () => {
@@ -111,6 +125,94 @@ describe("Duffel's window", () => {
     await searchFlights({ origin: 'JFK', destination: 'MAD', date: '2031-01-12', travelers: 1 });
     expect(Date.now() - started).toBeLessThan(500);
   });
+});
+
+describe("Duffel's window: late answers", () => {
+  it('an answer from the minute that just ended never replaces the one in force', async () => {
+    mockDuffel.offerRequests.create.mockResolvedValueOnce(answer(20, 40_000));
+    await searchFlights({ origin: 'JFK', destination: 'CDG', date: '2031-02-01', travelers: 1 });
+    expect(duffelWindowState()).toMatchObject({ remaining: 20 });
+    // Sent before the minute turned, answered after: that minute is spent and
+    // its reset is now (a whole second, already past).
+    mockDuffel.offerRequests.create.mockResolvedValueOnce(answer(0, Math.floor(Date.now() / 1000) * 1000 - Date.now()));
+    await searchFlights({ origin: 'JFK', destination: 'FCO', date: '2031-02-01', travelers: 1 });
+    // Still the current minute: 20, less the place that search took.
+    expect(duffelWindowState()).toMatchObject({ remaining: 19 });
+  });
+});
+
+describe('a search its caller gave up on (withDuffelCancel)', () => {
+  it('waiting for the next Duffel minute, it is never sent once the caller has left', async () => {
+    const resetAt = wholeSecondIn(1_000);
+    mockDuffel.offerRequests.create.mockResolvedValueOnce(answer(0, resetAt - Date.now()));
+    await searchFlights({ origin: 'JFK', destination: 'CDG', date: '2031-02-02', travelers: 1 });
+    expect(mockDuffel.offerRequests.create).toHaveBeenCalledTimes(1);
+
+    let gaveUp = false;
+    const probe = withDuffelCancel(
+      () => gaveUp,
+      () => searchFlights({ origin: 'JFK', destination: 'MAD', date: '2031-02-02', travelers: 1 }),
+    );
+    await sleep(200);
+    gaveUp = true; // the plan's answer went out
+    await expect(probe).rejects.toBeTruthy();
+    await sleep(Math.max(0, resetAt - Date.now()) + 1_300);
+    expect(mockDuffel.offerRequests.create).toHaveBeenCalledTimes(1);
+  }, 10_000);
+});
+
+describe('background (pre-search) searches give way to plans', () => {
+  it('not sent into a nearly spent minute: it waits for the next one', async () => {
+    const resetAt = wholeSecondIn(1_000);
+    mockDuffel.offerRequests.create.mockResolvedValueOnce(answer(8, resetAt - Date.now()));
+    await searchFlights({ origin: 'JFK', destination: 'CDG', date: '2031-02-03', travelers: 1 });
+    _resetBackgroundSearches(); // that plan is long done
+
+    let sentAt = 0;
+    mockDuffel.offerRequests.create.mockImplementationOnce(async () => {
+      sentAt = Date.now();
+      return answer(29, 60_000);
+    });
+    const offers = await searchFlightsInBackground({ origin: 'JFK', destination: 'LIS', date: '2031-02-03', travelers: 1 });
+    expect(offers).toEqual([]);
+    expect(sentAt).toBeGreaterThanOrEqual(resetAt);
+  }, 10_000);
+
+  it('dropped, unsent, when a plan starts searching while it waits', async () => {
+    const resetAt = wholeSecondIn(1_000);
+    mockDuffel.offerRequests.create.mockResolvedValueOnce(answer(5, resetAt - Date.now()));
+    await searchFlights({ origin: 'JFK', destination: 'CDG', date: '2031-02-04', travelers: 1 });
+    _resetBackgroundSearches();
+
+    const pre = searchFlightsInBackground({ origin: 'JFK', destination: 'BCN', date: '2031-02-04', travelers: 1 });
+    await sleep(100);
+    // A plan searches meanwhile, and is still at it when the minute turns.
+    mockDuffel.offerRequests.create.mockImplementationOnce(async () => {
+      await sleep(2_500);
+      return answer(4, resetAt - Date.now());
+    });
+    const plan = searchFlights({ origin: 'JFK', destination: 'ATH', date: '2031-02-04', travelers: 1 });
+    expect(await pre).toBeNull();
+    await plan;
+    // The setup search and the plan's: the pre-search was never sent.
+    expect(mockDuffel.offerRequests.create).toHaveBeenCalledTimes(2);
+  }, 10_000);
+
+  it("never holds one of a plan's six slots", async () => {
+    const sentAt: number[] = [];
+    mockDuffel.offerRequests.create.mockImplementation(async () => {
+      sentAt.push(Date.now());
+      await sleep(400);
+      return answer(25, 50_000);
+    });
+    const pre = [1, 2].map((d) => searchFlightsInBackground({ origin: 'JFK', destination: 'OPO', date: `2031-02-1${d}`, travelers: 1 }));
+    await sleep(20);
+    const started = Date.now();
+    const plan = [1, 2, 3, 4, 5, 6].map((d) => searchFlights({ origin: 'JFK', destination: 'NAP', date: `2031-02-2${d}`, travelers: 1 }));
+    await Promise.all([...pre, ...plan]);
+    // All six of the plan's went out at once, beside the two pre-searches.
+    expect(sentAt.filter((t) => t >= started && t - started < 200)).toHaveLength(6);
+  }, 10_000);
 });
 
 describe('isFlightSearchCached', () => {

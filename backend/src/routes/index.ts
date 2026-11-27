@@ -291,6 +291,13 @@ router.post(
 );
 
 // ─── POST /api/optimize/prewarm ──────────────────────────────
+/**
+ * Most destinations a pre-search takes: what the planner can send (POST
+ * /api/plan accepts 30). Past 5 cities the plan prices home flights for a few
+ * candidate orderings' ends only, and so does the pre-search
+ * (optimizer.ts prewarmHomeFlights).
+ */
+export const PREWARM_MAX_CITIES = 30;
 // The planner's home-flight pre-search (prototype, exp/optimizer-speed): sent
 // during the chat, once the trip's cities, home, dates and party are known,
 // it searches every home flight the plan will need into the same cache
@@ -305,6 +312,10 @@ router.post(
       throw new AppError(400, optimizeErrorMessage(parsed.error, req.body), parsed.error.flatten().fieldErrors);
     }
     const { progressId: _p, budget: _b, ...input } = parsed.data;
+    // More destinations than the planner can send is not a trip to pre-search.
+    if (input.cities.length > PREWARM_MAX_CITIES) {
+      throw new AppError(400, `A pre-search takes at most ${PREWARM_MAX_CITIES} destinations.`);
+    }
     if (!input.origin || !input.origin.trim()) {
       res.status(202).json({ prewarming: false });
       return;
