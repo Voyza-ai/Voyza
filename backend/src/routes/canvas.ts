@@ -287,6 +287,343 @@ async function replaceTripGraph(
   }
 }
 
+/**
+ * The canvas save, as a function: enrich the state (placeholder picks, hotel
+ * lookups, leg compares), replace the trip's cities + transports, update the
+ * trips row, then the canvas session. POST /:tripId/save calls it after its
+ * owner check; the text bot calls it to save a YES (services/textbot/applier.ts),
+ * so a texted change is stored exactly like a website save. Returns savedAt.
+ * Throws AppError on any failure; nothing is reported saved that wasn't.
+ */
+export async function saveCanvasState(tripId: string, state: any, savedByUserId: string): Promise<string> {
+  const supabase = getSupabase();
+
+  // The party size every search below prices for. Hotel lookups already
+  // read it; the leg re-compare further down hard-coded 1, so on a
+  // 2-person trip a missing Rome → Florence leg came back as ONE fare
+  // ($40) inside a total where every other leg is a party total, and
+  // trips.total_cost undercounted it (measured: 640 where 680 is right).
+  // Same rule as every other route's schema: a positive integer, else 1.
+  const rawTravelers = state.trip?.travelers;
+  const travelers = Number.isInteger(rawTravelers) && rawTravelers > 0 ? rawTravelers : 1;
+
+  // ── Prepare ──────────────────────────────────────────────
+  // Everything that enriches the state — placeholder activities and
+  // restaurants, hotel lookups, flight-vs-train comparisons — runs BEFORE
+  // any write, so the session we persist and the rows we write to the
+  // trip tables are the same thing, and a failure here leaves the saved
+  // trip untouched.
+  if (state.cities && Array.isArray(state.cities)) {
+    // Auto-generate activities and restaurants for cities that have none
+    for (const city of state.cities) {
+      if ((!city.activities || city.activities.length === 0) && city.name) {
+        city.activities = [
+          `Explore ${city.name} old town`,
+          `Local food tour in ${city.name}`,
+          `${city.name} main museum`,
+          `Walking tour of ${city.name}`,
+          `${city.name} scenic viewpoint`,
+        ];
+      }
+      if ((!city.restaurants || city.restaurants.length === 0) && city.name) {
+        city.restaurants = [
+          { name: `${city.name} neighborhood trattoria`, cuisine: 'Local', priceRange: '$$' },
+          { name: `${city.name} casual lunch cafe`, cuisine: 'Cafe', priceRange: '$' },
+          { name: `${city.name} fine dining`, cuisine: 'International', priceRange: '$$$' },
+          { name: `${city.name} street food market`, cuisine: 'Street Food', priceRange: '$' },
+          { name: `${city.name} rooftop bar & grill`, cuisine: 'Bar & Grill', priceRange: '$$' },
+        ];
+      }
+    }
+
+    // Fetch hotels for cities that don't have any
+    const hotelPromises: Promise<void>[] = [];
+    for (const city of state.cities) {
+      const hasHotels = (Array.isArray(city.hotels) && city.hotels.length > 0)
+        || (city.hotel && city.hotel.name && city.hotel.name !== 'Select hotel' && city.hotel.pricePerNight > 0);
+      if (!hasHotels && city.name && city.dates?.arrival && city.dates?.departure) {
+        hotelPromises.push(
+          searchHotels({
+            city: city.name,
+            checkin: city.dates.arrival,
+            checkout: city.dates.departure,
+            adults: travelers,
+            // Was a hard-coded 1: six adults priced into one room. Two
+            // per room is the occupancy rule the hotel service applies
+            // when a caller gives none. Stated here rather than omitted
+            // because a service that predates that default still
+            // requires `rooms` (tsc fails without it) and would send
+            // Booking `room_number=undefined`. Same value either way;
+            // this line can go once the service default has landed.
+            rooms: Math.ceil(travelers / 2),
+          })
+            .then((results) => {
+              if (results.length > 0) {
+                // `priceSuspect`, `priceUnverified` and `reviewCount` are
+                // carried deliberately.
+                // Dropping them made the verdict die at this boundary: the
+                // flag could not survive the JSONB round trip, so nothing
+                // downstream could warn, and a re-rank would read every thin
+                // rating at face value. `searchHotels` already returns
+                // trusted rows first, so index 0 below is safe.
+                city.hotels = results.map((r) => ({
+                  name: r.name,
+                  rating: r.rating,
+                  pricePerNight: r.pricePerNight,
+                  area: '',
+                  bookingUrl: r.bookingUrl,
+                  reviewCount: r.reviewCount,
+                  priceSuspect: r.priceSuspect,
+                  ...(r.priceSuspect && r.priceSuspectReason ? { priceSuspectReason: r.priceSuspectReason } : {}),
+                  priceUnverified: r.priceUnverified,
+                  taxesPerNight: r.taxesPerNight,
+                }));
+                city.hotel = city.hotels[0];
+                city.selectedHotelIndex = 0;
+                console.log(`[canvas save] Found ${results.length} hotels for ${city.name}`);
+              }
+            })
+            .catch((err) => {
+              console.warn(`[canvas save] Hotel search failed for ${city.name}:`, err?.message);
+            })
+        );
+      }
+    }
+    if (hotelPromises.length > 0) {
+      await Promise.all(hotelPromises);
+    }
+
+    // For consecutive city pairs missing transport, auto-compare flights
+    // vs trains. This only needs city names and dates, so it runs up here
+    // and its result rides into the same save (it used to run between
+    // the city insert and the transport insert, which is why the trip
+    // tables and the session had to be written twice).
+    if (state.cities.length > 1) {
+      const comparePromises: Promise<void>[] = [];
+
+      for (let i = 0; i < state.cities.length - 1; i++) {
+        const t = state.cities[i].transportOut;
+        // Re-compare if: no transport, price is 0, or the destination changed
+        const currentTo = t?.to ?? '';
+        const expectedTo = state.cities[i + 1]?.name ?? '';
+        const needsCompare = !t || t.price <= 0 || (currentTo && expectedTo && currentTo.toLowerCase() !== expectedTo.toLowerCase());
+        if (needsCompare) {
+          const origin = state.cities[i].name;
+          const dest = state.cities[i + 1].name;
+          const date = state.cities[i].dates?.departure
+            || state.cities[i + 1].dates?.arrival
+            || new Date().toISOString().split('T')[0];
+          const idx = i;
+          comparePromises.push(
+            // compareLeg prices PARTY TOTALS for `travelers`, the unit
+            // every other leg on the trip is stored in.
+            compareLeg({ origin, destination: dest, date, travelers })
+              .then((result) => {
+                const best = result.recommendation === 'train' && result.trainOption
+                  ? { mode: 'train' as const, price: result.trainOption.price ?? 0, duration: result.trainOption.durationMinutes, operator: result.trainOption.operator ?? '' }
+                  : result.flightOption
+                    ? { mode: 'flight' as const, price: result.flightOption.price ?? 0, duration: result.flightOption.durationMinutes, operator: result.flightOption.carrier ?? '' }
+                    : null;
+                if (best) {
+                  state.cities[idx].transportOut = {
+                    mode: best.mode,
+                    price: best.price,
+                    duration: formatDurationMinutes(best.duration),
+                    operator: best.operator,
+                    from: origin,
+                    to: dest,
+                  };
+                }
+              })
+              .catch(() => {})
+          );
+        }
+      }
+
+      if (comparePromises.length > 0) {
+        await Promise.all(comparePromises);
+      }
+    }
+  }
+
+  // Apply canvas changes to live trip tables
+  if (state.cities && Array.isArray(state.cities)) {
+    const cityRows = state.cities.map((city: any, idx: number) => ({
+      trip_id: tripId,
+      name: city.name,
+      country: city.country ?? '',
+      arrival_date: city.dates?.arrival || null,
+      departure_date: city.dates?.departure || null,
+      color_index: city.colorIndex ?? idx,
+      position: idx,
+      // Legacy single hotel column + new ranked list so the user's
+      // picked hotel and their other 4 options both survive a save.
+      hotel: city.hotel ?? null,
+      hotels: Array.isArray(city.hotels) ? city.hotels : (city.hotel ? [city.hotel] : []),
+      selected_hotel_index: typeof city.selectedHotelIndex === 'number' ? city.selectedHotelIndex : 0,
+      custom_hotel: city.customHotel ?? null,
+      vibes: Array.isArray(city.vibes) ? city.vibes : [],
+      activities: city.activities ?? [],
+      restaurants: city.restaurants ?? [],
+      schedule: city.schedule ?? {},
+    }));
+
+    // Legs are keyed by city POSITION rather than id: the ids of the
+    // cities above don't exist until they're written, and
+    // replaceTripGraph resolves them on whichever path it takes.
+    const transportRows: Record<string, any>[] = [];
+    for (let i = 0; i < state.cities.length - 1; i++) {
+      const t = state.cities[i].transportOut;
+      if (t && t.price > 0) {
+        transportRows.push({
+          trip_id: tripId,
+          from_position: i,
+          to_position: i + 1,
+          mode: t.mode ?? 'flight',
+          operator: t.operator ?? '',
+          price: t.price ?? 0,
+          // parseDurationMinutes handles "3h 37m" → 217 etc. The old
+          // parseInt("3h 37m") returned 3, which is why durations
+          // on saved trips showed as single-digit minutes.
+          duration_minutes: parseDurationMinutes(t.duration),
+          depart_time: t.departTime ?? null,
+          arrive_time: t.arriveTime ?? null,
+          depart_date: t.departDate ?? null,
+          layovers: typeof t.layovers === 'number' ? t.layovers : null,
+          stops: typeof t.stops === 'number' ? t.stops : null,
+          currency: t.currency ?? 'USD',
+          carrier_code: t.carrierCode ?? null,
+          flight_number: t.flightNumber ?? t.trainNumber ?? null,
+          alternatives: Array.isArray(t.alternatives) ? t.alternatives : null,
+          booking_url: t.bookingUrl ?? null,
+        });
+      }
+    }
+
+    // Atomic where the DB function exists; ordered insert-then-delete
+    // where it doesn't. Throws on any failure — the response below is
+    // only ever reached by a save that actually landed.
+    await replaceTripGraph(tripId, cityRows, transportRows);
+  }
+
+  // Update trip metadata. The total the results header shows, so the trips
+  // list agrees with the trip it opens.
+  const totalCost = liveTripTotal(state.cities, state.trip?.origin);
+
+  const tripUpdate: Record<string, any> = {
+    // Keeps the owner's chosen name instead of overwriting it with a
+    // derived city chain — see resolveTripTitle.
+    title: resolveTripTitle(state.trip?.title, state.cities),
+    total_cost: totalCost,
+    updated_at: new Date().toISOString(),
+  };
+  // Persist home-anchor edits made on the canvas (city/airport changes
+  // on the home cards) so the results page and history — which read the
+  // trips table, not the canvas session — agree.
+  if (state.trip?.origin?.city) {
+    tripUpdate.origin_city = state.trip.origin.city;
+    tripUpdate.origin_airports = Array.isArray(state.trip.origin.airports)
+      ? state.trip.origin.airports
+      : [];
+    tripUpdate.return_to_home =
+      typeof state.trip.returnToHome === 'boolean' ? state.trip.returnToHome : true;
+    // Home legs can be re-searched on the canvas — persist them so the
+    // results flowchart shows the same flights.
+    tripUpdate.outbound_leg = state.trip.origin.outboundLeg ?? null;
+    tripUpdate.return_leg = state.trip.origin.returnLeg ?? null;
+    // Independent back-home overrides (open-jaw). Only written when the
+    // user actually customized the back-home card, so pre-migration DBs
+    // aren't touched by trips that never use the feature.
+    if (state.trip.origin.returnCity) {
+      tripUpdate.return_city = state.trip.origin.returnCity;
+    }
+    if (Array.isArray(state.trip.origin.returnAirports)) {
+      tripUpdate.return_airports = state.trip.origin.returnAirports;
+    }
+  }
+
+  let { error: tripUpdateError } = await supabase
+    .from('trips')
+    .update(tripUpdate)
+    .eq('id', tripId);
+
+  // Migration 003 not applied yet — retry without the return-anchor
+  // columns so the rest of the trip metadata still saves.
+  if (tripUpdateError && /return_(city|airports)/.test(tripUpdateError.message ?? '')) {
+    console.warn(
+      '[canvas save] return_city/return_airports columns missing — run supabase/migrations/003_return_home_anchor.sql',
+    );
+    delete tripUpdate.return_city;
+    delete tripUpdate.return_airports;
+    ({ error: tripUpdateError } = await supabase.from('trips').update(tripUpdate).eq('id', tripId));
+  }
+  // This error used to be dropped, so a save whose title, total and home
+  // legs never landed still answered { saved: true }.
+  if (tripUpdateError) {
+    throw new AppError(500, `Could not save the trip's details: ${tripUpdateError.message}`);
+  }
+
+  // ── Canvas session — written LAST ────────────────────────
+  // Only once the trip tables hold this state. It used to be written
+  // FIRST, so a save whose graph write then failed answered 500 while
+  // canvas_sessions already held the new state and the trip tables the
+  // old one. The canvas reloads from the session, so the "failed" save
+  // looked saved there and nowhere else (results, history, share links
+  // all read the trip tables). Collaborators' realtime listeners also
+  // fire on this write, so they now only ever see a state the trip
+  // tables agree with. If THIS write fails the session is one save
+  // behind, but every step above is a replace, so a retry converges.
+  const { data: existingSession } = await supabase
+    .from('canvas_sessions')
+    .select('id')
+    .eq('trip_id', tripId)
+    .order('saved_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (existingSession) {
+    // Update existing session
+    const { error: sessionError } = await supabase
+      .from('canvas_sessions')
+      .update({
+        state,
+        last_saved_by: savedByUserId,
+        saved_at: new Date().toISOString(),
+      })
+      .eq('id', existingSession.id);
+    if (sessionError) {
+      throw new AppError(500, `Could not save the canvas: ${sessionError.message}`);
+    }
+
+    // Clean up any duplicate sessions for this trip. Still best-effort:
+    // the session just written is the newest, which is the one the
+    // canvas loads, and the next save retries a leftover duplicate.
+    const { data: allSessions } = await supabase
+      .from('canvas_sessions')
+      .select('id')
+      .eq('trip_id', tripId)
+      .neq('id', existingSession.id);
+    if (allSessions && allSessions.length > 0) {
+      for (const s of allSessions) {
+        await supabase.from('canvas_sessions').delete().eq('id', s.id);
+      }
+    }
+  } else {
+    const { error: sessionError } = await supabase
+      .from('canvas_sessions')
+      .insert({
+        trip_id: tripId,
+        state,
+        last_saved_by: savedByUserId,
+        saved_at: new Date().toISOString(),
+      });
+    if (sessionError) {
+      throw new AppError(500, `Could not save the canvas: ${sessionError.message}`);
+    }
+  }
+  return new Date().toISOString();
+}
+
 // ─── POST /api/canvas/:tripId/save ──────────────────────────
 router.post(
   '/:tripId/save',
@@ -306,333 +643,8 @@ router.post(
     const { state } = req.body;
     if (!state) throw new AppError(400, 'Canvas state is required');
 
-    const supabase = getSupabase();
-
-    // The party size every search below prices for. Hotel lookups already
-    // read it; the leg re-compare further down hard-coded 1, so on a
-    // 2-person trip a missing Rome → Florence leg came back as ONE fare
-    // ($40) inside a total where every other leg is a party total, and
-    // trips.total_cost undercounted it (measured: 640 where 680 is right).
-    // Same rule as every other route's schema: a positive integer, else 1.
-    const rawTravelers = state.trip?.travelers;
-    const travelers = Number.isInteger(rawTravelers) && rawTravelers > 0 ? rawTravelers : 1;
-
-    // ── Prepare ──────────────────────────────────────────────
-    // Everything that enriches the state — placeholder activities and
-    // restaurants, hotel lookups, flight-vs-train comparisons — runs BEFORE
-    // any write, so the session we persist and the rows we write to the
-    // trip tables are the same thing, and a failure here leaves the saved
-    // trip untouched.
-    if (state.cities && Array.isArray(state.cities)) {
-      // Auto-generate activities and restaurants for cities that have none
-      for (const city of state.cities) {
-        if ((!city.activities || city.activities.length === 0) && city.name) {
-          city.activities = [
-            `Explore ${city.name} old town`,
-            `Local food tour in ${city.name}`,
-            `${city.name} main museum`,
-            `Walking tour of ${city.name}`,
-            `${city.name} scenic viewpoint`,
-          ];
-        }
-        if ((!city.restaurants || city.restaurants.length === 0) && city.name) {
-          city.restaurants = [
-            { name: `${city.name} neighborhood trattoria`, cuisine: 'Local', priceRange: '$$' },
-            { name: `${city.name} casual lunch cafe`, cuisine: 'Cafe', priceRange: '$' },
-            { name: `${city.name} fine dining`, cuisine: 'International', priceRange: '$$$' },
-            { name: `${city.name} street food market`, cuisine: 'Street Food', priceRange: '$' },
-            { name: `${city.name} rooftop bar & grill`, cuisine: 'Bar & Grill', priceRange: '$$' },
-          ];
-        }
-      }
-
-      // Fetch hotels for cities that don't have any
-      const hotelPromises: Promise<void>[] = [];
-      for (const city of state.cities) {
-        const hasHotels = (Array.isArray(city.hotels) && city.hotels.length > 0)
-          || (city.hotel && city.hotel.name && city.hotel.name !== 'Select hotel' && city.hotel.pricePerNight > 0);
-        if (!hasHotels && city.name && city.dates?.arrival && city.dates?.departure) {
-          hotelPromises.push(
-            searchHotels({
-              city: city.name,
-              checkin: city.dates.arrival,
-              checkout: city.dates.departure,
-              adults: travelers,
-              // Was a hard-coded 1: six adults priced into one room. Two
-              // per room is the occupancy rule the hotel service applies
-              // when a caller gives none. Stated here rather than omitted
-              // because a service that predates that default still
-              // requires `rooms` (tsc fails without it) and would send
-              // Booking `room_number=undefined`. Same value either way;
-              // this line can go once the service default has landed.
-              rooms: Math.ceil(travelers / 2),
-            })
-              .then((results) => {
-                if (results.length > 0) {
-                  // `priceSuspect`, `priceUnverified` and `reviewCount` are
-                  // carried deliberately.
-                  // Dropping them made the verdict die at this boundary: the
-                  // flag could not survive the JSONB round trip, so nothing
-                  // downstream could warn, and a re-rank would read every thin
-                  // rating at face value. `searchHotels` already returns
-                  // trusted rows first, so index 0 below is safe.
-                  city.hotels = results.map((r) => ({
-                    name: r.name,
-                    rating: r.rating,
-                    pricePerNight: r.pricePerNight,
-                    area: '',
-                    bookingUrl: r.bookingUrl,
-                    reviewCount: r.reviewCount,
-                    priceSuspect: r.priceSuspect,
-                    ...(r.priceSuspect && r.priceSuspectReason ? { priceSuspectReason: r.priceSuspectReason } : {}),
-                    priceUnverified: r.priceUnverified,
-                    taxesPerNight: r.taxesPerNight,
-                  }));
-                  city.hotel = city.hotels[0];
-                  city.selectedHotelIndex = 0;
-                  console.log(`[canvas save] Found ${results.length} hotels for ${city.name}`);
-                }
-              })
-              .catch((err) => {
-                console.warn(`[canvas save] Hotel search failed for ${city.name}:`, err?.message);
-              })
-          );
-        }
-      }
-      if (hotelPromises.length > 0) {
-        await Promise.all(hotelPromises);
-      }
-
-      // For consecutive city pairs missing transport, auto-compare flights
-      // vs trains. This only needs city names and dates, so it runs up here
-      // and its result rides into the same save (it used to run between
-      // the city insert and the transport insert, which is why the trip
-      // tables and the session had to be written twice).
-      if (state.cities.length > 1) {
-        const comparePromises: Promise<void>[] = [];
-
-        for (let i = 0; i < state.cities.length - 1; i++) {
-          const t = state.cities[i].transportOut;
-          // Re-compare if: no transport, price is 0, or the destination changed
-          const currentTo = t?.to ?? '';
-          const expectedTo = state.cities[i + 1]?.name ?? '';
-          const needsCompare = !t || t.price <= 0 || (currentTo && expectedTo && currentTo.toLowerCase() !== expectedTo.toLowerCase());
-          if (needsCompare) {
-            const origin = state.cities[i].name;
-            const dest = state.cities[i + 1].name;
-            const date = state.cities[i].dates?.departure
-              || state.cities[i + 1].dates?.arrival
-              || new Date().toISOString().split('T')[0];
-            const idx = i;
-            comparePromises.push(
-              // compareLeg prices PARTY TOTALS for `travelers`, the unit
-              // every other leg on the trip is stored in.
-              compareLeg({ origin, destination: dest, date, travelers })
-                .then((result) => {
-                  const best = result.recommendation === 'train' && result.trainOption
-                    ? { mode: 'train' as const, price: result.trainOption.price ?? 0, duration: result.trainOption.durationMinutes, operator: result.trainOption.operator ?? '' }
-                    : result.flightOption
-                      ? { mode: 'flight' as const, price: result.flightOption.price ?? 0, duration: result.flightOption.durationMinutes, operator: result.flightOption.carrier ?? '' }
-                      : null;
-                  if (best) {
-                    state.cities[idx].transportOut = {
-                      mode: best.mode,
-                      price: best.price,
-                      duration: formatDurationMinutes(best.duration),
-                      operator: best.operator,
-                      from: origin,
-                      to: dest,
-                    };
-                  }
-                })
-                .catch(() => {})
-            );
-          }
-        }
-
-        if (comparePromises.length > 0) {
-          await Promise.all(comparePromises);
-        }
-      }
-    }
-
-    // Apply canvas changes to live trip tables
-    if (state.cities && Array.isArray(state.cities)) {
-      const cityRows = state.cities.map((city: any, idx: number) => ({
-        trip_id: tripId,
-        name: city.name,
-        country: city.country ?? '',
-        arrival_date: city.dates?.arrival || null,
-        departure_date: city.dates?.departure || null,
-        color_index: city.colorIndex ?? idx,
-        position: idx,
-        // Legacy single hotel column + new ranked list so the user's
-        // picked hotel and their other 4 options both survive a save.
-        hotel: city.hotel ?? null,
-        hotels: Array.isArray(city.hotels) ? city.hotels : (city.hotel ? [city.hotel] : []),
-        selected_hotel_index: typeof city.selectedHotelIndex === 'number' ? city.selectedHotelIndex : 0,
-        custom_hotel: city.customHotel ?? null,
-        vibes: Array.isArray(city.vibes) ? city.vibes : [],
-        activities: city.activities ?? [],
-        restaurants: city.restaurants ?? [],
-        schedule: city.schedule ?? {},
-      }));
-
-      // Legs are keyed by city POSITION rather than id: the ids of the
-      // cities above don't exist until they're written, and
-      // replaceTripGraph resolves them on whichever path it takes.
-      const transportRows: Record<string, any>[] = [];
-      for (let i = 0; i < state.cities.length - 1; i++) {
-        const t = state.cities[i].transportOut;
-        if (t && t.price > 0) {
-          transportRows.push({
-            trip_id: tripId,
-            from_position: i,
-            to_position: i + 1,
-            mode: t.mode ?? 'flight',
-            operator: t.operator ?? '',
-            price: t.price ?? 0,
-            // parseDurationMinutes handles "3h 37m" → 217 etc. The old
-            // parseInt("3h 37m") returned 3, which is why durations
-            // on saved trips showed as single-digit minutes.
-            duration_minutes: parseDurationMinutes(t.duration),
-            depart_time: t.departTime ?? null,
-            arrive_time: t.arriveTime ?? null,
-            depart_date: t.departDate ?? null,
-            layovers: typeof t.layovers === 'number' ? t.layovers : null,
-            stops: typeof t.stops === 'number' ? t.stops : null,
-            currency: t.currency ?? 'USD',
-            carrier_code: t.carrierCode ?? null,
-            flight_number: t.flightNumber ?? t.trainNumber ?? null,
-            alternatives: Array.isArray(t.alternatives) ? t.alternatives : null,
-            booking_url: t.bookingUrl ?? null,
-          });
-        }
-      }
-
-      // Atomic where the DB function exists; ordered insert-then-delete
-      // where it doesn't. Throws on any failure — the response below is
-      // only ever reached by a save that actually landed.
-      await replaceTripGraph(tripId, cityRows, transportRows);
-    }
-
-    // Update trip metadata. The total the results header shows, so the trips
-    // list agrees with the trip it opens.
-    const totalCost = liveTripTotal(state.cities, state.trip?.origin);
-
-    const tripUpdate: Record<string, any> = {
-      // Keeps the owner's chosen name instead of overwriting it with a
-      // derived city chain — see resolveTripTitle.
-      title: resolveTripTitle(state.trip?.title, state.cities),
-      total_cost: totalCost,
-      updated_at: new Date().toISOString(),
-    };
-    // Persist home-anchor edits made on the canvas (city/airport changes
-    // on the home cards) so the results page and history — which read the
-    // trips table, not the canvas session — agree.
-    if (state.trip?.origin?.city) {
-      tripUpdate.origin_city = state.trip.origin.city;
-      tripUpdate.origin_airports = Array.isArray(state.trip.origin.airports)
-        ? state.trip.origin.airports
-        : [];
-      tripUpdate.return_to_home =
-        typeof state.trip.returnToHome === 'boolean' ? state.trip.returnToHome : true;
-      // Home legs can be re-searched on the canvas — persist them so the
-      // results flowchart shows the same flights.
-      tripUpdate.outbound_leg = state.trip.origin.outboundLeg ?? null;
-      tripUpdate.return_leg = state.trip.origin.returnLeg ?? null;
-      // Independent back-home overrides (open-jaw). Only written when the
-      // user actually customized the back-home card, so pre-migration DBs
-      // aren't touched by trips that never use the feature.
-      if (state.trip.origin.returnCity) {
-        tripUpdate.return_city = state.trip.origin.returnCity;
-      }
-      if (Array.isArray(state.trip.origin.returnAirports)) {
-        tripUpdate.return_airports = state.trip.origin.returnAirports;
-      }
-    }
-
-    let { error: tripUpdateError } = await supabase
-      .from('trips')
-      .update(tripUpdate)
-      .eq('id', tripId);
-
-    // Migration 003 not applied yet — retry without the return-anchor
-    // columns so the rest of the trip metadata still saves.
-    if (tripUpdateError && /return_(city|airports)/.test(tripUpdateError.message ?? '')) {
-      console.warn(
-        '[canvas save] return_city/return_airports columns missing — run supabase/migrations/003_return_home_anchor.sql',
-      );
-      delete tripUpdate.return_city;
-      delete tripUpdate.return_airports;
-      ({ error: tripUpdateError } = await supabase.from('trips').update(tripUpdate).eq('id', tripId));
-    }
-    // This error used to be dropped, so a save whose title, total and home
-    // legs never landed still answered { saved: true }.
-    if (tripUpdateError) {
-      throw new AppError(500, `Could not save the trip's details: ${tripUpdateError.message}`);
-    }
-
-    // ── Canvas session — written LAST ────────────────────────
-    // Only once the trip tables hold this state. It used to be written
-    // FIRST, so a save whose graph write then failed answered 500 while
-    // canvas_sessions already held the new state and the trip tables the
-    // old one. The canvas reloads from the session, so the "failed" save
-    // looked saved there and nowhere else (results, history, share links
-    // all read the trip tables). Collaborators' realtime listeners also
-    // fire on this write, so they now only ever see a state the trip
-    // tables agree with. If THIS write fails the session is one save
-    // behind, but every step above is a replace, so a retry converges.
-    const { data: existingSession } = await supabase
-      .from('canvas_sessions')
-      .select('id')
-      .eq('trip_id', tripId)
-      .order('saved_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (existingSession) {
-      // Update existing session
-      const { error: sessionError } = await supabase
-        .from('canvas_sessions')
-        .update({
-          state,
-          last_saved_by: user.id,
-          saved_at: new Date().toISOString(),
-        })
-        .eq('id', existingSession.id);
-      if (sessionError) {
-        throw new AppError(500, `Could not save the canvas: ${sessionError.message}`);
-      }
-
-      // Clean up any duplicate sessions for this trip. Still best-effort:
-      // the session just written is the newest, which is the one the
-      // canvas loads, and the next save retries a leftover duplicate.
-      const { data: allSessions } = await supabase
-        .from('canvas_sessions')
-        .select('id')
-        .eq('trip_id', tripId)
-        .neq('id', existingSession.id);
-      if (allSessions && allSessions.length > 0) {
-        for (const s of allSessions) {
-          await supabase.from('canvas_sessions').delete().eq('id', s.id);
-        }
-      }
-    } else {
-      const { error: sessionError } = await supabase
-        .from('canvas_sessions')
-        .insert({
-          trip_id: tripId,
-          state,
-          last_saved_by: user.id,
-          saved_at: new Date().toISOString(),
-        });
-      if (sessionError) {
-        throw new AppError(500, `Could not save the canvas: ${sessionError.message}`);
-      }
-    }
-
-    res.json({ saved: true, savedAt: new Date().toISOString() });
+    const savedAt = await saveCanvasState(tripId, state, user.id);
+    res.json({ saved: true, savedAt });
   }),
 );
 

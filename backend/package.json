@@ -2,7 +2,7 @@
   "name": "bluemurr-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "Voyza Express backend — flight/hotel aggregation, payments, and AI planning.",
+  "description": "Voyza Express backend \u2014 flight/hotel aggregation, payments, and AI planning.",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -13,7 +13,8 @@
     "build:location-data": "tsx scripts/build-location-data.ts",
     "build:location-hotset": "tsx scripts/build-location-hotset.ts",
     "lint": "echo 'add eslint later'",
-    "test": "jest"
+    "test": "jest",
+    "build:trip-edits": "node scripts/build-trip-edits.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
