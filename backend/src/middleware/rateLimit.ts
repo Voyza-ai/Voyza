@@ -57,6 +57,7 @@ export const RATE_LIMITS = {
   hotels: 120,
   canvasRole: 600,
   locations: 600,
+  optimizeProgress: 3000,
 } as const;
 
 /** `/api/canvas/<tripId>/role` — matched the way Express routes it: any case, optional trailing slash. */
@@ -69,6 +70,13 @@ function pathOf(req: Request): string {
 function isCanvasRolePoll(req: Request): boolean {
   // app.get() also answers HEAD, so canvasRoleLimiter sees both.
   return (req.method === 'GET' || req.method === 'HEAD') && CANVAS_ROLE_POLL.test(pathOf(req));
+}
+
+/** `/api/optimize/progress/<id>` — matched the way Express routes it: any case, optional trailing slash. */
+const OPTIMIZE_PROGRESS_POLL = /^\/api\/optimize\/progress\/[^/]+\/?$/i;
+
+function isOptimizeProgressPoll(req: Request): boolean {
+  return (req.method === 'GET' || req.method === 'HEAD') && OPTIMIZE_PROGRESS_POLL.test(pathOf(req));
 }
 
 /**
@@ -88,14 +96,16 @@ function isCanvasRolePoll(req: Request): boolean {
  *
  * The canvas role poll is excluded for the same reason from the other side: a
  * background timer the user never sees must not be what 429s the thing they
- * are doing. It is metered by canvasRoleLimiter instead.
+ * are doing. It is metered by canvasRoleLimiter instead. The optimize progress
+ * poll is the same kind of timer and is metered by optimizeProgressLimiter.
  */
 const UNMETERED_BY_GENERAL_LIMITER = ['/api/locations'];
 
 function meteredSeparately(req: Request): boolean {
   return (
     UNMETERED_BY_GENERAL_LIMITER.some((path) => (req.originalUrl || '').startsWith(path)) ||
-    isCanvasRolePoll(req)
+    isCanvasRolePoll(req) ||
+    isOptimizeProgressPoll(req)
   );
 }
 
@@ -159,6 +169,31 @@ export const canvasRoleLimiter = rateLimit({
 });
 
 /**
+ * GET /api/optimize/progress/:id — the planner's progress poll.
+ *
+ * PlanningChat asks every 700 ms for as long as optimize runs: about 80 polls
+ * for a 3-city plan (57 s) and 250 for a 4-city one (177 s), measured on
+ * production. It sat under the expensive cap (it is mounted under
+ * /api/optimize) and the general one, so a user who planned a few trips in one
+ * window spent the 300 expensive calls on polls alone, and the hotels,
+ * activities and restaurants that follow each plan came back 429 — which the
+ * frontend shows as a city with nothing in it.
+ *
+ * The poll is a read of an in-memory map: no database, no paid API. Its own
+ * budget, excluded from the general and expensive ones. 3000 a window is one
+ * tab polling for the whole 15 minutes (1,286) twice over, with room to spare —
+ * two people behind one NAT planning back to back.
+ */
+export const optimizeProgressLimiter = rateLimit({
+  windowMs: WINDOW_MS,
+  max: RATE_LIMITS.optimizeProgress,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip,
+  message: { error: 'Too many requests — please try again in a few minutes.' },
+});
+
+/**
  * Stricter limiter for routes that hit PAID external APIs (Anthropic, Duffel,
  * RapidAPI) or are expensive to run (route optimization). This is the
  * cost-abuse / brute-force guard — a scraper hammering these could otherwise
@@ -176,7 +211,8 @@ export const expensiveLimiter = rateLimit({
   max: RATE_LIMITS.expensive,
   standardHeaders: true,
   legacyHeaders: false,
-  skip,
+  // The progress poll shares the /api/optimize prefix but calls nothing paid.
+  skip: (req) => skip(req) || isOptimizeProgressPoll(req),
   message: { error: 'Too many requests to this resource — please slow down.' },
 });
 

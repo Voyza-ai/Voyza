@@ -331,7 +331,7 @@ describe('door-to-door facts on the compared options', () => {
   const train = (min: number) => ({
     id: 't1', price: 60, durationMinutes: min, operator: 'DB', trainType: 'ICE',
     departure: '', arrival: '', currency: 'USD', bookingUrl: null, limitedCoverage: false,
-    priceSource: { kind: 'live', provider: 'Deutsche Bahn' },
+    priceSource: { kind: 'live', provider: 'All Aboard' },
   });
 
   it('builds the flight total from its real airports and ranks speed on it', async () => {
@@ -352,7 +352,7 @@ describe('door-to-door facts on the compared options', () => {
     expect(r.trainOption!.co2).toMatchObject({ source: 'estimate' });
     expect(r.trainOption!.co2!.kg).toBeGreaterThan(0);
     // The provider's price source passes through untouched.
-    expect(r.trainOption!.priceSource).toEqual({ kind: 'live', provider: 'Deutsche Bahn' });
+    expect(r.trainOption!.priceSource).toEqual({ kind: 'live', provider: 'All Aboard' });
   });
 
   it('falls back to the flat allowance when an airport position is unknown', async () => {
