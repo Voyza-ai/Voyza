@@ -1,7 +1,9 @@
 import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
 import { stripOriginFiller } from './location/originPhrase';
 import { AppError } from '../middleware/error';
+import { guardHomeAnswers } from './homeAnswers';
 import { logger } from '../utils/logger';
+import { createMessage } from './aiUsage';
 
 /**
  * The conversational planning brain.
@@ -55,7 +57,16 @@ export type ConverseResult = {
     | 'ready'
     | 'redirect';
   quickReplies?: string[];
+  /**
+   * The one trip fact the reply's question asks for, so the page can offer
+   * the matching control (a calendar for dates, "Use my location" for
+   * origin). Absent when the reply asks nothing.
+   */
+  asking?: AskingField;
 };
+
+export const ASKING_FIELDS = ['destinations', 'dates', 'origin', 'travelers', 'returnToHome', 'budget', 'vibe', 'other'] as const;
+export type AskingField = (typeof ASKING_FIELDS)[number];
 
 const RESPOND_TOOL = {
   name: 'respond_to_traveler',
@@ -93,7 +104,11 @@ const RESPOND_TOOL = {
               required: ['country', 'cities'],
             },
           },
-          origin: { type: ['string', 'null'], description: 'Home/departure city, plain name. A US state or region ("New Jersey", "Long Island") is fine as written.' },
+          origin: {
+            type: ['string', 'null'],
+            description:
+              'The city they fly FROM to START the trip (where they live, or where they will be when it begins), plain name. A US state or region ("New Jersey", "Long Island") is fine as written. A city that is part of the route ("Paris to London, back to Paris, then Munich") is a STOP, not the origin, unless they said it is home.',
+          },
           dates: {
             type: ['object', 'null'],
             properties: {
@@ -111,7 +126,11 @@ const RESPOND_TOOL = {
           budget: { type: ['number', 'null'] },
           budgetPerPerson: { type: ['boolean', 'null'] },
           vibe: { type: ['string', 'null'] },
-          returnToHome: { type: ['boolean', 'null'] },
+          returnToHome: {
+            type: ['boolean', 'null'],
+            description:
+              'true ONLY if they said round-trip / return flight / back home; false ONLY if they said one-way. "Back to <a trip city>" in the middle of a route is NOT round-trip. Otherwise omit.',
+          },
           notes: {
             type: ['string', 'null'],
             description: 'Preferences that fit no other field (dietary, pace, accessibility…).',
@@ -123,6 +142,12 @@ const RESPOND_TOOL = {
         enum: ['ask', 'show_city_picker', 'show_vibe_picker', 'show_budget_slider', 'ready', 'redirect'],
         description:
           "What the UI should do: 'ask'=plain question; 'show_city_picker'=you provided countries[] and want them to pick cities; 'show_vibe_picker'=you are asking about trip vibe; 'show_budget_slider'=you are asking about budget; 'ready'=minimums met, show the recap; 'redirect'=message was off-topic.",
+      },
+      asking: {
+        type: 'string',
+        enum: [...ASKING_FIELDS],
+        description:
+          "The ONE trip fact your reply's question asks for: 'dates' when you ask when they travel, 'origin' when you ask where they fly FROM, and so on; 'other' for any other question. Omit when your reply asks nothing.",
       },
       quickReplies: {
         type: 'array',
@@ -153,16 +178,18 @@ CONVERSATION RULES
 - Ambiguous group size ("with 3 friends") → set travelersAmbiguous and ask which they meant.
 
 EXTRACTION RULES
-- destinations: specific cities only. A COUNTRY mention goes in countries[] with 4-6 popular cities, action 'show_city_picker'.
+- destinations: specific cities only. A COUNTRY mention goes in countries[] with 4-6 popular cities, action 'show_city_picker'. A city the route starts in or returns to mid-trip ("Paris to London, back to Paris, then Munich") is a stop: include it.
 - dates: resolve relative phrases ("next month", "this summer") to YYYY-MM-DD using today's date. Trip dates are always in the future: a date without a year ("Dec 10") means its next occurrence after today. Duration without a start ("10 days in June") → pick a sensible start in that window and say so.
 - travelers: TOTAL group size including the planner ("me and 3 friends" → 4).
-- budget: number + whether per-person; origin: their departure city; returnToHome: round-trip vs one-way if stated.
+- budget: number + whether per-person.
+- origin: where they fly FROM to start the trip. A route that begins in a city ("flying out of Paris to London…") does NOT tell you they live there — they may be flying in from elsewhere. Unless they said it's home ("I live in Paris", "we're based in Paris"), ASK: "Are you flying from Paris, or starting the trip there after flying in from somewhere else?" with quickReplies ["Yes, from Paris", "Flying in from somewhere else"]. If they fly in from elsewhere, ask where from.
+- returnToHome: only when they said round-trip / one-way / back home. Never infer it from a route; "back to Paris" mid-trip is a stop, not a return home.
 
 FLOW
-- Minimum to finish (ALL four required): ≥1 destination city, dates, travelers, AND origin (the city they're flying FROM). Origin is NOT optional — without it there's no departure point for the flight search, so ALWAYS ask "where are you flying from?" if it's still unknown, before you ever go 'ready'. Budget and vibe: worth ONE ask each; respect a skip ("no budget" → budget stays null, move on, never ask again — note the skip in notes as "budget: skipped" style).
+- Minimum to finish (ALL five required): ≥1 destination city, dates, travelers, origin (the city they're flying FROM), AND round-trip vs one-way. Origin is NOT optional — without it there's no departure point for the flight search, so ALWAYS ask "where are you flying from?" if it's still unknown, before you ever go 'ready'. Round-trip vs one-way is NOT optional either: if returnToHome is still unknown, ask "Are you flying back to <origin> at the end, or one-way?" with quickReplies ["Round-trip", "One-way"]. Budget and vibe: worth ONE ask each; respect a skip ("no budget" → budget stays null, move on, never ask again — note the skip in notes as "budget: skipped" style).
 - Non-null fields in KNOWN are settled facts the user already provided (possibly via UI controls rather than chat). NEVER re-ask for them, NEVER claim you don't have them, and NEVER return a different or empty value for them in updates — leave a field out (or null) unless THIS message changes it.
 - 'show_budget_slider' / 'show_vibe_picker' mean "I am ASKING for this field and it is still unknown". NEVER use them when the latest message already ANSWERS that field — "culture vibes" answers vibe: extract updates.vibe='culture' and move ON (never show the vibe picker back at them; same for a stated budget number and the slider).
-- After extracting, re-check completeness against KNOWN + your updates: if destinations, dates, travelers AND origin are all present and you've already covered (asked or been told) budget and vibe, the action is 'ready' — not another question. If origin is still missing, ask for it (action 'ask') no matter what else is done.
+- After extracting, re-check completeness against KNOWN + your updates: if destinations, dates, travelers, origin AND returnToHome are all present and you've already covered (asked or been told) budget and vibe, the action is 'ready' — not another question. If origin or returnToHome is still missing, ask for it (action 'ask') no matter what else is done.
 - When the minimums are met (including anything just provided), action 'ready' and a short wrap-up line like "That's everything I need — give it a look and hit Find my trip." The UI shows the recap; do NOT recite every detail yourself.
 - After 'ready', if they change something, apply the update and go 'ready' again (or ask, if the change opened a gap).
 
@@ -183,7 +210,7 @@ export async function converse(params: {
   const { message, history, known, userLocation } = params;
 
   try {
-    const response = await anthropic.messages.create({
+    const response = await createMessage(anthropic, 'plan_converse', {
       model: DEFAULT_MODEL,
       max_tokens: 700,
       system: systemPrompt(known, userLocation),
@@ -215,12 +242,21 @@ export async function converse(params: {
     // "from New Jersey" -> "New Jersey": the origin lookup reads this string.
     if (typeof updates.origin === 'string') updates.origin = stripOriginFiller(updates.origin) || null;
 
-    return {
-      reply: input.reply,
-      updates,
-      action: input.action,
-      quickReplies: Array.isArray(input.quickReplies) ? input.quickReplies.slice(0, 4) : undefined,
-    };
+    // Where they fly from and whether they fly back are asked, never
+    // guessed (homeAnswers.ts): the model read "flying out of Paris to
+    // London…" as home = Paris and invented one-way, and never asked.
+    return guardHomeAnswers({
+      message,
+      history,
+      known,
+      result: {
+        reply: input.reply,
+        updates,
+        action: input.action,
+        quickReplies: Array.isArray(input.quickReplies) ? input.quickReplies.slice(0, 4) : undefined,
+        ...((ASKING_FIELDS as readonly string[]).includes(input.asking) ? { asking: input.asking as AskingField } : {}),
+      },
+    });
   } catch (err: any) {
     if (err instanceof AppError) throw err;
     logger.error('converse: AI call failed', {

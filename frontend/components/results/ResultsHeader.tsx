@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Users, TrendingDown, Sparkles, PenSquare, MessageSquare, ChevronDown, CheckCircle2 } from 'lucide-react';
+import { Calendar, Users, TrendingDown, Sparkles, Share2, ChevronDown, CheckCircle2, Send, Copy, Eye } from 'lucide-react';
 import { Trip } from '@/lib/types';
 import { liveTripTotal } from '@/lib/tripTotals';
+import { vibeList } from '@/lib/vibes';
+import { waysToSave, type SaveOption } from '@/lib/waysToSave';
 import { tripSpan } from '@/lib/tripSpan';
 import { useCountUp } from '@/lib/useCountUp';
 import {
@@ -19,6 +21,10 @@ import { useTripStore, tripPicksSettled } from '@/store/tripStore';
 import LoginModal from '@/components/shared/LoginModal';
 import TripNameEditor from '@/components/shared/TripNameEditor';
 import { updateTrip } from '@/lib/api';
+import { useLeaveGuardSave } from '@/lib/leaveGuard';
+import CollaboratorAvatars from './CollaboratorAvatars';
+import { tripPriceCaveats } from '@/lib/hotelPriceTrust';
+import type { TripCollaboration } from '@/hooks/useTripCollaboration';
 
 type ResultsHeaderProps = {
   trip: Trip;
@@ -29,7 +35,29 @@ type ResultsHeaderProps = {
    * Canvas) always use `trip`. Defaults to `trip`.
    */
   pricedTrip?: Trip;
+  /** The shared-trip layer (roles, presence). Absent in isolated renders. */
+  collab?: TripCollaboration;
+  /** Open the share dialog — called once the trip is saved and signed in. */
+  onOpenShare?: () => void;
+  /** Bumped by the page when membership may have changed (avatars refetch). */
+  membersKey?: number;
+  /** This person can change the trip: the savings menu's switches apply. */
+  canEdit?: boolean;
+  /** Opened from a view-only share link without an account: no Share. */
+  publicView?: boolean;
 };
+
+/**
+ * A route name shortened for the header: past three cities, the first three
+ * and "+N more" ("Lisbon → Porto → Madrid + 4 more"). Only route-style names
+ * (cities joined by arrows) are shortened; a name someone typed is shown as
+ * typed. Display only — the saved name is untouched.
+ */
+export function shortRouteTitle(title: string): string {
+  const parts = title.split(' → ').map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 3) return title;
+  return `${parts.slice(0, 3).join(' → ')} + ${parts.length - 3} more`;
+}
 
 const formatDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
@@ -37,7 +65,7 @@ const formatDate = (iso: string) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) {
+export default function ResultsHeader({ trip, pricedTrip, collab, onOpenShare, membersKey = 0, canEdit = true, publicView = false }: ResultsHeaderProps) {
   const shown = pricedTrip ?? trip;
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
@@ -71,10 +99,10 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
     }
   };
 
-  // Captures the current "Edit in Canvas" request so it can be resumed after
+  // Captures the current Share (or Save) request so it can be resumed after
   // sign-in — including across the Google OAuth full-page redirect, which
-  // wipes in-memory trip state.
-  const buildCanvasIntent = (t: Trip = trip): CanvasIntent => ({
+  // wipes in-memory trip state. A trip has to be saved before it can be shared.
+  const buildShareIntent = (t: Trip = trip, openShare = true): CanvasIntent => ({
     savedId: alreadySaved ? t.id ?? null : null,
     // Pass the whole trip through so new fields (budget, vibe,
     // dateShiftSuggestion, etc.) flow to the backend.
@@ -82,89 +110,98 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
     origin: t.origin
       ? { origin: t.origin, returnToHome: t.returnToHome ?? true }
       : null,
-    // Current cities (including any AI-chat edits) so the canvas reflects them.
-    syncCities: t.cities,
+    destination: 'results',
+    openShare,
   });
 
   // The trip to save: the store's, which is this one plus anything that
   // landed since this render (the AI picks, while waiting for them below).
   const latestTrip = (): Trip => useTripStore.getState().currentTrip ?? trip;
 
-  const handleEditInCanvas = async () => {
+  /**
+   * Save the trip if it isn't yet (it gets an id and a shareable address),
+   * then open the share dialog (Share) or not (the leave dialog's Save trip).
+   * The save waits for the trip's AI picks (activities, restaurants) — saved
+   * without them, the save would fill each city with generic placeholders
+   * ("Explore Paris old town").
+   */
+  const saveThisTrip = async (thenShare: boolean) => {
+    if (alreadySaved) {
+      if (thenShare) onOpenShare?.();
+      return;
+    }
+    setSaving(true);
+    try {
+      await tripPicksSettled();
+      const tripId = await resolveCanvasTripId(buildShareIntent(latestTrip(), thenShare));
+      clearCanvasIntent();
+      if (!tripId) return;
+      setTrip({ ...latestTrip(), id: tripId });
+      // The trip now has an address: put it in the URL (bookmarkable, and
+      // the page's shared-trip layer switches on for it).
+      router.replace(`/results?tripId=${tripId}`);
+      if (thenShare) onOpenShare?.();
+    } catch {
+      collab?.showToast('Could not save this trip — try again', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** What the sign-in below was asked for: Share, or the leave dialog's Save trip. */
+  const afterSignIn = useRef<'share' | 'save'>('share');
+  const requestSave = (thenShare: boolean) => {
     if (!user) {
       // Persist the intent so it survives the OAuth redirect, then prompt
       // sign-in. The callback page (Google) or onSuccess below (password)
       // resumes it.
-      stashCanvasIntent(buildCanvasIntent());
+      afterSignIn.current = thenShare ? 'share' : 'save';
+      stashCanvasIntent(buildShareIntent(trip, thenShare));
       setShowLoginModal(true);
       // The trip's AI picks may still be on their way. Signing in takes
       // longer than they do, so once they land the stashed trip is brought
       // up to date — unless the sign-in already used it.
       tripPicksSettled().then((waited) => {
-        if (waited && readCanvasIntent()) stashCanvasIntent(buildCanvasIntent(latestTrip()));
+        if (waited && readCanvasIntent()) stashCanvasIntent(buildShareIntent(latestTrip(), thenShare));
       });
       return;
     }
+    saveThisTrip(thenShare);
+  };
+  const handleShare = () => requestSave(true);
 
-    // Already authenticated — save if needed and open canvas in a new tab.
-    setSaving(true);
-    try {
-      // /results opens before the trip's AI picks (activities, restaurants)
-      // are in. Saved without them, the canvas would open with none and its
-      // save would fill each city with generic placeholders ("Explore Paris
-      // old town"), so the save waits for them, on this button's own
-      // "Saving..." state. Every pick request settles, so the wait ends.
-      const waited = await tripPicksSettled();
-      const current = waited ? latestTrip() : trip;
-      const tripId = await resolveCanvasTripId(buildCanvasIntent(current));
-      if (!tripId) return;
-
-      if (!alreadySaved) {
-        setTrip({ ...latestTrip(), id: tripId });
-        // Update the browser URL so the trip is bookmarkable
-        if (typeof window !== 'undefined') {
-          const url = new URL(window.location.href);
-          url.searchParams.set('tripId', tripId);
-          window.history.replaceState({}, '', url.toString());
-        }
-      }
-      // A wait for the picks can outlast the click's allowance to open a
-      // tab, and a blocked window.open opens nothing at all — so after one,
-      // the canvas opens in this tab, as it does after an in-place sign-in.
-      if (waited) router.push(`/canvas/${tripId}`);
-      else window.open(`/canvas/${tripId}`, '_blank');
-    } catch {
-      // handle error silently
-    } finally {
-      setSaving(false);
-    }
+  // Email/password sign-in completes in-place (no redirect): carry on.
+  const handleLoginSuccess = () => {
+    saveThisTrip(afterSignIn.current === 'share');
   };
 
-  // Email/password sign-in completes in-place (no redirect), so the trip is
-  // still in memory. Resume straight into canvas in the same tab — opening a
-  // new tab here would be blocked since the user gesture was consumed by the
-  // async sign-in.
-  const handleLoginSuccess = async () => {
-    setSaving(true);
-    try {
-      // Saved with its AI picks, as above.
-      await tripPicksSettled();
-      const tripId = await resolveCanvasTripId(buildCanvasIntent(latestTrip()));
-      clearCanvasIntent();
-      if (!tripId) return;
-      if (!alreadySaved) setTrip({ ...latestTrip(), id: tripId });
-      router.push(`/canvas/${tripId}`);
-    } catch {
-      // handle error silently
-    } finally {
-      setSaving(false);
-    }
-  };
+  // What this person may do on a shared trip. An unsaved trip, or one whose
+  // role is still loading, is the signed-in person's own.
+  const role = publicView ? 'viewer' : collab?.active ? collab.role : 'owner';
+  const canShare = role === 'owner' || role === 'editor';
+
+  // "Save trip" in the leave dialog, for a trip never saved: the Share
+  // button's save (sign-in first when signed out), without the share dialog.
+  useLeaveGuardSave(!alreadySaved && canShare && !saving ? () => requestSave(false) : null);
+  const canRename = !collab?.active || role === 'owner';
   // The TRIP's span — from the day the outbound leaves home — not the first
   // city's stay, which starts the day an overnight outbound lands.
   const { start: startDate, end: endDate, nights: totalNights } = tripSpan(shown);
 
   const liveTotal = liveTripTotal(shown);
+  // Hotel prices in that total we can't stand behind (lib/hotelPriceTrust.ts).
+  // They stay IN the total — an unchecked price is most likely real, and a
+  // total without the stay would be wrong for certain — and are named here.
+  const caveats = tripPriceCaveats(shown);
+  const caveatCount = caveats.suspect.length + caveats.unverified.length;
+  const caveatText =
+    caveats.suspect.length > 0
+      ? `incl. ${caveats.suspect.length === 1 ? 'a hotel price that looks off' : `${caveats.suspect.length} hotel prices that look off`}`
+      : `incl. ${caveats.unverified.length === 1 ? '1 unchecked hotel price' : `${caveats.unverified.length} unchecked hotel prices`}`;
+  const caveatTitle = [
+    caveats.suspect.length > 0 ? `Looks off: ${caveats.suspect.join(', ')}` : '',
+    caveats.unverified.length > 0 ? `Couldn't be checked against other hotels: ${caveats.unverified.join(', ')}` : '',
+  ].filter(Boolean).join('. ') + '. Open the city to see why.';
   const travelers = Math.max(1, trip.travelers);
   // Savings tracks the delta vs the original baseline (totalCost - savings was the
   // pre-optimized baseline). When the user picks a more expensive hotel the
@@ -210,6 +247,16 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
     if (!s) return [];
     return s.options && s.options.length > 0 ? s.options : [s];
   })();
+  // Cheaper hotels / legs / flights the trip already holds prices for. On
+  // the live trip: its indexes are what the switches apply to.
+  const saveOptions = useMemo(() => waysToSave(trip), [trip]);
+  const applySaveOption = (opt: SaveOption) => {
+    const st = useTripStore.getState();
+    const a = opt.action;
+    if (a.kind === 'hotel') st.setSelectedHotel(a.cityIndex, a.hotelIndex);
+    else if (a.kind === 'leg') st.setTransportOut(a.cityIndex, a.altIndex);
+    else st.setHomeLegAlternative(a.direction, a.altIndex);
+  };
   const [shiftMenuOpen, setShiftMenuOpen] = useState(false);
   const shiftMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -269,6 +316,11 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
       }
     })();
 
+    // The vibes, from the answers when this session planned the trip, else
+    // from the saved trip ("Culture, Food" — or an older trip's single
+    // "Culture"), read back as the list the planner shows.
+    const vibes = vibeList(a.vibe ? a : { vibe: trip.vibe });
+
     const staged = {
       destinations: a.destinations?.length
         ? a.destinations
@@ -285,7 +337,8 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
       planningMode: 'destination' as const,
       budget: a.budget,
       budgetPerPerson: a.budgetPerPerson,
-      vibe: a.vibe,
+      vibe: a.vibe ?? (trip.vibe || undefined),
+      vibes: vibes.length > 0 ? vibes : undefined,
     };
 
     // Stage in the store AND snapshot to sessionStorage: the /plan page
@@ -330,234 +383,353 @@ export default function ResultsHeader({ trip, pricedTrip }: ResultsHeaderProps) 
 
   return (
     <div className="px-4 pt-3 pb-0">
-      {/* No flex-wrap here: long AI-built route titles ("Berlin → Florence →
-          Barcelona → Madrid") used to widen the left block until the price
-          pills + buttons wrapped onto a second row, breaking the header
-          alignment. Instead the left column shrinks (flex-1 + min-w-0) and
-          the title truncates within it, so the right cluster stays pinned
-          top-right, aligned with the meta row. */}
+      {/* Left: meta, then the title with who's on the trip. Right: the
+          price view switch, the trip's price boxes, and Share. The left column shrinks
+          (flex-1 + min-w-0) so a long route title truncates instead of
+          pushing the right cluster onto a second row. */}
       <div className="flex items-start justify-between gap-4">
-        {/* Left: meta + title stacked tight */}
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3 flex-wrap text-xs mb-0.5">
+          {/* One line. With a collaborator's buttons on the right the row is
+              short of room: wrapping left "3 stops" alone on a second line,
+              and clipping cut it to "3". Each fact is one unit (its dot
+              included); a unit that doesn't fit drops to a second line that
+              the fixed height hides, so it disappears whole. */}
+          <div className="flex items-center gap-x-3 flex-wrap h-[18px] overflow-hidden whitespace-nowrap text-xs mb-0.5">
             <div className="flex items-center gap-2 text-[#2e6bc4] uppercase tracking-[0.18em] font-medium">
               <Sparkles size={12} />
               <span>Optimized itinerary</span>
             </div>
-            <span className="text-gray-300">·</span>
             <div className="flex items-center gap-1.5 text-gray-600">
+              <span className="text-gray-300 mr-1.5">·</span>
               <Calendar size={12} />
               <span>
                 {startDate && formatDate(startDate)} – {endDate && formatDate(endDate)}
               </span>
               <span className="text-gray-500">· {totalNights} nights</span>
             </div>
-            <span className="text-gray-400">·</span>
             <div className="flex items-center gap-1.5 text-gray-600">
+              <span className="text-gray-400 mr-1.5">·</span>
               <Users size={12} />
               <span>
                 {trip.travelers} {trip.travelers === 1 ? 'traveler' : 'travelers'}
               </span>
             </div>
-            <span className="text-gray-400">·</span>
-            <span className="text-gray-500">
+            <div className="flex items-center text-gray-500">
+              <span className="text-gray-400 mr-3">·</span>
               {trip.cities.length} {trip.cities.length === 1 ? 'stop' : 'stops'}
-            </span>
+            </div>
           </div>
-          <TripNameEditor
-            value={trip.title ?? ''}
-            canRename
-            onRename={handleRename}
-            placeholder="Name this trip"
-            className="text-[22px] leading-tight font-semibold text-gray-900"
-            inputClassName="text-[22px] leading-tight font-semibold text-gray-900 w-[380px] max-w-full"
-          />
+          {/* The trip's name, then who is on it. */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="min-w-0">
+            <TripNameEditor
+              value={trip.title ?? ''}
+              canRename={canRename}
+              onRename={handleRename}
+              onDenied={() => collab?.showToast('Only the trip owner can rename this trip', 'info')}
+              placeholder="Name this trip"
+              displayValue={shortRouteTitle(trip.title ?? '')}
+              className="text-[22px] leading-tight font-semibold text-gray-900"
+              inputClassName="text-[22px] leading-tight font-semibold text-gray-900 w-[380px] max-w-full"
+            />
+            </div>
+            {collab?.active && trip.id && (
+              <div className="flex-shrink-0">
+              <CollaboratorAvatars
+                tripId={trip.id}
+                presence={collab.presence}
+                selfId={collab.self?.id ?? null}
+                refreshKey={membersKey}
+                onClick={canShare ? handleShare : undefined}
+              />
+              </div>
+            )}
+          </div>
           {renameError && (
             <p className="text-[11px] mt-0.5" style={{ color: '#dc2626' }}>
               {renameError}
             </p>
           )}
+
         </div>
 
-        {/* Right: toggle stacked above cost cards + save button. Never
-            wraps below the title — the row above is no-wrap by design. */}
-        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-          {/* Total / Per-person pill toggle — sits above the cards so it doesn't widen the row */}
-          {showToggle && (
-            <div
-              className="flex items-center p-0.5 rounded-full border bg-white/80"
-              style={{ borderColor: 'rgba(79,142,247,0.25)' }}
-              role="tablist"
-              aria-label="Price view"
-            >
+        {/* Right: collaborators + Share (and, for collaborators, their own
+            actions). Share replaces "Edit in Canvas": the results page is
+            the canvas now. */}
+        <div className="flex items-center gap-2.5 flex-shrink-0 pt-1">
+          {/* Prices, then Share — together on the right, under the account
+              corner, so the left keeps the trip's name and facts. */}
+            {/* Savings — clickable when date-shift options exist: opens a
+                menu of alternative start dates with their real, re-priced
+                savings (the optimizer scored each shifted date already). */}
+            {showPriceBox && (
+            <div className="relative" ref={shiftMenuRef}>
               <button
-                role="tab"
-                aria-selected={priceMode === 'total'}
-                onClick={() => setPriceMode('total')}
-                className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                type="button"
+                onClick={() => setShiftMenuOpen((v) => !v)}
+                aria-expanded={shiftMenuOpen}
+                aria-haspopup="dialog"
+                title="See ways to save on this trip"
+                className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px] text-left transition-all cursor-pointer hover:brightness-95"
                 style={{
-                  background: priceMode === 'total' ? '#4f8ef7' : 'transparent',
-                  color: priceMode === 'total' ? '#ffffff' : '#4f8ef7',
+                  background: 'linear-gradient(180deg, rgba(52,211,153,0.08) 0%, rgba(52,211,153,0.02) 100%)',
+                  borderColor: 'rgba(52,211,153,0.25)',
                 }}
               >
-                Total
+                <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
+                  {nothingToSave ? <CheckCircle2 size={9} /> : <TrendingDown size={9} />}
+                  <span>{nothingToSave ? 'Price check' : 'You can save'}</span>
+                  {(
+                    <ChevronDown
+                      size={9}
+                      className={`transition-transform ${shiftMenuOpen ? 'rotate-180' : ''}`}
+                    />
+                  )}
+                </div>
+                <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
+                  {nothingToSave ? 'Best price' : `$${animatedSavings.toLocaleString()}`}
+                </div>
+                <div className="text-[#22c088]/50 text-[9px]">
+                  {nothingToSave
+                    ? 'for these dates'
+                    : shiftIsBest
+                      ? `by starting ${shiftDateNice}`
+                      : // The optimizer's baseline (savingsVsNaive) is the
+                        // order the traveller typed — as the AI chat says it.
+                        'vs your original city order'}
+                </div>
               </button>
-              <button
-                role="tab"
-                aria-selected={priceMode === 'perPerson'}
-                onClick={() => setPriceMode('perPerson')}
-                className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
-                style={{
-                  background: priceMode === 'perPerson' ? '#4f8ef7' : 'transparent',
-                  color: priceMode === 'perPerson' ? '#ffffff' : '#4f8ef7',
-                }}
-              >
-                Per person
-              </button>
-            </div>
-          )}
 
-          <div className="flex items-center gap-2">
-          {/* Total cost */}
-          <div
-            className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
-            style={{
-              background: 'linear-gradient(180deg, rgba(79,142,247,0.12) 0%, rgba(79,142,247,0.04) 100%)',
-              borderColor: 'rgba(79,142,247,0.30)',
-            }}
-          >
-            <div className="text-[#4f8ef7]/70 text-[9px] uppercase tracking-wider">
-              {priceMode === 'total' ? 'Total trip' : 'Per person'}
+              {shiftMenuOpen && (
+                <div
+                  role="dialog"
+                  aria-label="Ways to save"
+                  className="absolute right-0 top-full mt-2 w-[300px] max-h-[70vh] overflow-y-auto bg-white border rounded-xl shadow-lg z-50"
+                  style={{ borderColor: 'rgba(52,211,153,0.35)' }}
+                >
+                  <div className="px-3 pt-2.5 pb-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
+                    Ways to save
+                  </div>
+                  {!shiftIsBest && liveSavings > 0 && (
+                    <div className="px-3 pb-2 flex items-start gap-1.5 text-[11px] text-gray-500">
+                      <CheckCircle2 size={12} className="text-[#22c088] mt-px flex-shrink-0" />
+                      <span>
+                        Already saving $
+                        {(priceMode === 'total' ? liveSavings : Math.round(liveSavings / travelers)).toLocaleString()}{' '}
+                        by visiting your cities in this order.
+                      </span>
+                    </div>
+                  )}
+                  {saveOptions.map((opt) => {
+                    const amt = priceMode === 'total' ? opt.savings : Math.round(opt.savings / travelers);
+                    const body = (
+                      <>
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-medium text-gray-800 truncate">{opt.title}</div>
+                          <div className="text-[10px] text-gray-500 truncate">{opt.detail}</div>
+                        </div>
+                        <div className="text-[#22c088] text-[13px] font-semibold tabular-nums flex-shrink-0">
+                          save ${amt.toLocaleString()}
+                        </div>
+                      </>
+                    );
+                    const cls = 'w-full px-3 py-2 border-t border-gray-100 flex items-center justify-between gap-2 text-left';
+                    return canEdit ? (
+                      <button
+                        type="button"
+                        key={opt.id}
+                        data-testid="save-option"
+                        onClick={() => {
+                          applySaveOption(opt);
+                          setShiftMenuOpen(false);
+                        }}
+                        title="Switch to this"
+                        className={`${cls} transition-colors hover:bg-emerald-50/60 cursor-pointer`}
+                      >
+                        {body}
+                      </button>
+                    ) : (
+                      <div key={opt.id} data-testid="save-option" className={cls}>
+                        {body}
+                      </div>
+                    );
+                  })}
+                  {saveOptions.length === 0 && shiftOptions.length === 0 && (
+                    <div className="px-3 py-2 border-t border-gray-100 text-[11px] text-gray-500">
+                      No cheaper hotel, train or flight on this trip right now — you already have the lowest prices we found.
+                    </div>
+                  )}
+                  {shiftOptions.length > 0 && (
+                  <>
+                  <div className="px-3 pt-2.5 pb-1.5 border-t border-gray-100 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
+                    Cheaper start dates
+                  </div>
+                  {shiftOptions.map((opt) => {
+                    const optSavings =
+                      priceMode === 'total'
+                        ? Math.round(opt.savings)
+                        : Math.round(opt.savings / travelers);
+                    return (
+                      <button
+                        type="button"
+                        key={opt.dayOffset}
+                        onClick={() => applyDateShift(opt)}
+                        title="Replan this trip starting on this date"
+                        className="w-full px-3 py-2 border-t border-gray-100 flex items-center justify-between gap-2 text-left transition-colors hover:bg-emerald-50/60 cursor-pointer"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-medium text-gray-800">
+                            {offsetLabel(opt.dayOffset)}
+                          </div>
+                          <div className="text-[10px] text-gray-500">
+                            starts {niceFullDate(opt.newStartDate)}
+                          </div>
+                        </div>
+                        <div className="text-[#22c088] text-[13px] font-semibold tabular-nums flex-shrink-0">
+                          save ${optSavings.toLocaleString()}
+                        </div>
+                      </button>
+                    );
+                  })}
+                  <div className="px-3 py-2 border-t border-gray-100 text-[10px] text-gray-400">
+                    Picking a date replans your trip with live prices — the
+                    final savings can differ slightly.
+                  </div>
+                  </>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
-              ${animatedTotal.toLocaleString()}
-            </div>
-            {showToggle && (
-              <div className="text-[#4f8ef7]/55 text-[9px]">
-                ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
-              </div>
             )}
-          </div>
-
-          {/* Savings — clickable when date-shift options exist: opens a
-              menu of alternative start dates with their real, re-priced
-              savings (the optimizer scored each shifted date already). */}
-          {showPriceBox && (
-          <div className="relative" ref={shiftMenuRef}>
-            <button
-              type="button"
-              onClick={() => shiftOptions.length > 0 && setShiftMenuOpen((v) => !v)}
-              disabled={shiftOptions.length === 0}
-              title={
-                shiftOptions.length > 0
-                  ? 'See which start dates would save you money'
-                  : undefined
-              }
-              className={`flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px] text-left transition-all ${
-                shiftOptions.length > 0 ? 'cursor-pointer hover:brightness-95' : 'cursor-default'
-              }`}
+            {/* Total cost */}
+            <div
+              className="flex flex-col justify-center px-3 py-1.5 rounded-xl border min-w-[110px]"
               style={{
-                background: 'linear-gradient(180deg, rgba(52,211,153,0.08) 0%, rgba(52,211,153,0.02) 100%)',
-                borderColor: 'rgba(52,211,153,0.25)',
+                background: 'linear-gradient(180deg, rgba(79,142,247,0.12) 0%, rgba(79,142,247,0.04) 100%)',
+                borderColor: 'rgba(79,142,247,0.30)',
               }}
             >
-              <div className="flex items-center gap-1 text-[#22c088]/70 text-[9px] uppercase tracking-wider">
-                {nothingToSave ? <CheckCircle2 size={9} /> : <TrendingDown size={9} />}
-                <span>{nothingToSave ? 'Price check' : 'You can save'}</span>
-                {shiftOptions.length > 0 && (
-                  <ChevronDown
-                    size={9}
-                    className={`transition-transform ${shiftMenuOpen ? 'rotate-180' : ''}`}
-                  />
-                )}
+              <div className="text-[#4f8ef7]/70 text-[9px] uppercase tracking-wider">
+                {priceMode === 'total' ? 'Total trip' : 'Per person'}
               </div>
-              <div className="text-[#22c088] text-lg font-semibold leading-tight tabular-nums">
-                {nothingToSave ? 'Best price' : `$${animatedSavings.toLocaleString()}`}
+              <div className="text-[#4f8ef7] text-lg font-semibold leading-tight tabular-nums">
+                ${animatedTotal.toLocaleString()}
               </div>
-              <div className="text-[#22c088]/50 text-[9px]">
-                {nothingToSave
-                  ? 'for these dates'
-                  : shiftIsBest
-                    ? `by starting ${shiftDateNice}`
-                    : // The optimizer's baseline (savingsVsNaive) is the
-                      // order the traveller typed — as the AI chat says it.
-                      'vs your original city order'}
-              </div>
-            </button>
-
-            {shiftMenuOpen && shiftOptions.length > 0 && (
+              {/* Three lines, like the Price check box beside it: a price
+                  caveat takes the third line — the other figure is one
+                  click away on the switch next to this box. */}
+              {caveatCount > 0 ? (
+                <div
+                  data-testid="total-price-caveat"
+                  title={caveatTitle}
+                  className="text-[#4f8ef7]/70 text-[9px] underline decoration-dashed underline-offset-2 cursor-help whitespace-nowrap"
+                >
+                  {caveatText}
+                </div>
+              ) : (
+                showToggle && (
+                  <div className="text-[#4f8ef7]/55 text-[9px]">
+                    ${altTotal.toLocaleString()} {priceMode === 'total' ? '/person' : 'total'}
+                  </div>
+                )
+              )}
+            </div>
+            {showToggle && (
               <div
-                className="absolute right-0 top-full mt-2 w-[264px] bg-white border rounded-xl shadow-lg z-50 overflow-hidden"
-                style={{ borderColor: 'rgba(52,211,153,0.35)' }}
+                className="flex items-center p-0.5 rounded-full border bg-white/80"
+                style={{ borderColor: 'rgba(79,142,247,0.25)' }}
+                role="tablist"
+                aria-label="Price view"
               >
-                <div className="px-3 pt-2.5 pb-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
-                  Cheaper start dates
-                </div>
-                {shiftOptions.map((opt) => {
-                  const optSavings =
-                    priceMode === 'total'
-                      ? Math.round(opt.savings)
-                      : Math.round(opt.savings / travelers);
-                  return (
-                    <button
-                      type="button"
-                      key={opt.dayOffset}
-                      onClick={() => applyDateShift(opt)}
-                      title="Replan this trip starting on this date"
-                      className="w-full px-3 py-2 border-t border-gray-100 flex items-center justify-between gap-2 text-left transition-colors hover:bg-emerald-50/60 cursor-pointer"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-[12px] font-medium text-gray-800">
-                          {offsetLabel(opt.dayOffset)}
-                        </div>
-                        <div className="text-[10px] text-gray-500">
-                          starts {niceFullDate(opt.newStartDate)}
-                        </div>
-                      </div>
-                      <div className="text-[#22c088] text-[13px] font-semibold tabular-nums flex-shrink-0">
-                        save ${optSavings.toLocaleString()}
-                      </div>
-                    </button>
-                  );
-                })}
-                <div className="px-3 py-2 border-t border-gray-100 text-[10px] text-gray-400">
-                  Picking a date replans your trip with live prices — the
-                  final savings can differ slightly.
-                </div>
+                <button
+                  role="tab"
+                  aria-selected={priceMode === 'total'}
+                  onClick={() => setPriceMode('total')}
+                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                  style={{
+                    background: priceMode === 'total' ? '#4f8ef7' : 'transparent',
+                    color: priceMode === 'total' ? '#ffffff' : '#4f8ef7',
+                  }}
+                >
+                  Total
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={priceMode === 'perPerson'}
+                  onClick={() => setPriceMode('perPerson')}
+                  className="px-2 py-0.5 text-[9px] font-medium rounded-full transition-colors"
+                  style={{
+                    background: priceMode === 'perPerson' ? '#4f8ef7' : 'transparent',
+                    color: priceMode === 'perPerson' ? '#ffffff' : '#4f8ef7',
+                  }}
+                >
+                  Per person
+                </button>
               </div>
             )}
-          </div>
-          )}
 
-          {/* Edit in Canvas — saves the trip first if needed and then
-              opens the canvas. Replaces the standalone Save Trip button
-              per the backend_gohiltalla UI consolidation: one button
-              does both, branching internally on whether the trip is
-              already persisted (`alreadySaved`). The save-only state of
-              the previous button (Saved checkmark, etc.) is rolled into
-              `handleEditInCanvas`'s flow. */}
-          {/* Adjust trip — reopens the planning chat with everything
-              filled in (resume=1 keeps the conversation + answers) so the
-              user can change anything and search again. */}
-          <button
-            onClick={() => router.push('/plan?resume=1')}
-            title="Reopen the planning chat with your trip loaded — change anything and search again"
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-blue-50"
-            style={{ color: '#2e6bc4', borderColor: '#2e6bc4' }}
-          >
-            <MessageSquare size={13} />
-            Adjust trip
-          </button>
+          {/* The actions, a step apart from the prices: secondary ones
+              first, the main one last — where Share sits for the owner. */}
+          <div className="flex items-center gap-2 ml-3 pl-4 border-l border-gray-200 self-stretch">
+            {role === 'viewer' && (
+              <span
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] text-gray-500 bg-white/80 border border-gray-200"
+                title="The owner shared this trip with you to view"
+              >
+                <Eye size={11} />
+                View only
+              </span>
+            )}
 
-          <button
-            onClick={handleEditInCanvas}
-            disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
-            style={{ background: '#2563eb', borderColor: '#2563eb' }}
-          >
-            <PenSquare size={13} />
-            {saving ? 'Saving...' : 'Edit in Canvas'}
-          </button>
+            {(role === 'editor' || role === 'suggester') && (
+              <button
+                onClick={collab?.saveCopy}
+                disabled={collab?.busy}
+                title="Save the trip as it is now to your own trips — the shared trip is untouched"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-blue-50 disabled:opacity-40"
+                style={{ color: '#2563eb', borderColor: '#2563eb', background: '#ffffff' }}
+              >
+                <Copy size={13} />
+                Save a copy
+              </button>
+            )}
+
+            {role === 'suggester' && collab?.hasLocalChanges && (
+              <>
+                <button
+                  onClick={collab.discard}
+                  disabled={collab.busy}
+                  title="Throw away your changes"
+                  className="flex items-center px-3.5 py-2 rounded-xl border text-[12px] font-medium transition-all hover:bg-red-50 disabled:opacity-40"
+                  style={{ color: '#dc2626', borderColor: '#dc2626', background: '#ffffff' }}
+                >
+                  Discard
+                </button>
+                <button
+                  onClick={collab.propose}
+                  disabled={collab.busy}
+                  title="Your changes go to the owner for approval"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
+                  style={{ background: '#2563eb' }}
+                >
+                  <Send size={13} />
+                  {collab.busy ? 'Sending…' : 'Propose changes'}
+                </button>
+              </>
+            )}
+
+            {canShare && (
+              <button
+                onClick={handleShare}
+                disabled={saving}
+                data-testid="share-button"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-[12px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-60"
+                style={{ background: '#2563eb', borderColor: '#2563eb' }}
+              >
+                <Share2 size={13} />
+                {saving ? 'Saving...' : 'Share'}
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -5,6 +5,8 @@ import { logger } from '../utils/logger';
 import { getStaticIata } from '../data/cityAirports';
 import { resolveDestinationIata } from './location/destinationAirport';
 import { sameAirportArea } from './location/sameAirportArea';
+import { flightDoorToDoor, trainCo2, trainDoorToDoor as trainDoorToDoorFacts } from './legFacts';
+import { cheapestSensible } from './longJourney';
 
 /**
  * Both options are priced as PARTY TOTALS for `travelers` — Duffel quotes
@@ -23,6 +25,11 @@ export type LegComparison = {
   timeDifference: number;
 };
 
+/**
+ * Flat allowance for getting to and through airports, used only when a
+ * flight's door-to-door total can't be built from its airports' positions
+ * (legFacts.flightDoorToDoor) — e.g. an airport missing from OurAirports.
+ */
 const AIRPORT_OVERHEAD_MINUTES = 180;
 
 /**
@@ -77,6 +84,18 @@ export type CompareLegParams = {
 export type CompareLegDeps = {
   getIataCode?: (cityName: string, context?: IataLookupContext) => Promise<string>;
   searchFlights?: typeof searchFlights;
+  /**
+   * Search the leg's TRAINS on this day instead of `params.date`. The
+   * optimizer's ranking passes one day for every leg: a rail timetable search
+   * costs ~11 of All Aboard's 500 hourly quota units per new route-and-day
+   * (measured 2026-11-19; repeats and city lookups are free), and pricing each
+   * city pair on every day an ordering could put it spent ~95 units on one
+   * 3-city trip. Rail fares barely move from one day to the next, and the
+   * ranking only needs a price — the winning route is re-priced on its real
+   * days before anything is shown. A train found this way carries the other
+   * day's times, so it is NOT written to leg_price_cache under `params.date`.
+   */
+  trainDate?: string;
 };
 
 export async function compareLeg(
@@ -86,6 +105,9 @@ export async function compareLeg(
   const { origin, destination, date, travelers, originCountry, destinationCountry } = params;
   const resolveIata = deps.getIataCode ?? getIataCode;
   const findFlights = deps.searchFlights ?? searchFlights;
+  const trainDate = deps.trainDate ?? date;
+  // Only a train searched on the leg's own day may be cached as that day's.
+  const trainOnOwnDay = trainDate === date;
   const tripNames = params.tripCityNames ?? [];
   const dependsOnTrip = (name: string): boolean =>
     tripNames.length > 0 &&
@@ -189,10 +211,12 @@ export async function compareLeg(
         })(),
     cachedTrain
       ? Promise.resolve(null)
-      : searchTrains({ origin, destination, date, travelers, originCountry, destinationCountry }).catch(() => []),
+      : searchTrains({ origin, destination, date: trainDate, travelers, originCountry, destinationCountry }).catch(() => []),
   ]);
 
-  // Pick cheapest flight
+  // Pick the cheapest flight that isn't a long journey (longJourney.ts).
+  // Plain cheapest priced Prague → Vienna as a 22h 50m itinerary at $301
+  // over the 55m nonstop at $368, and ranked routes on that fare.
   let bestFlight: FlightOffer | null = null;
   if (cachedFlight) {
     // Cache doesn't store bookingUrl, so send to Google Flights pre-filled.
@@ -213,7 +237,7 @@ export async function compareLeg(
       raw: {},
     };
   } else if (flightsResult && flightsResult.length > 0) {
-    bestFlight = flightsResult.reduce((a, b) => (a.price < b.price ? a : b));
+    bestFlight = cheapestSensible(flightsResult) ?? null;
   }
 
   // Pick cheapest train
@@ -237,14 +261,39 @@ export async function compareLeg(
       trainType: '',
       bookingUrl: null,
       limitedCoverage: false,
+      // A live fare from an earlier search; the row doesn't say which provider.
+      ...(cachedTrain.price != null ? { priceSource: { kind: 'cached' as const } } : {}),
     };
   } else if (trainsResult && Array.isArray(trainsResult) && trainsResult.length > 0) {
-    const withPrice = trainsResult.filter((t) => t.price !== null);
-    if (withPrice.length > 0) {
-      bestTrain = withPrice.reduce((a, b) => (a.price! < b.price! ? a : b));
-    } else {
-      bestTrain = trainsResult[0]; // take first even without price
-    }
+    // The cheapest train that isn't a long journey against the fastest TRAIN
+    // (longJourney.ts) — unpriced only when no sensible train has a price.
+    // Plain cheapest priced Munich → Prague (2027-03-19) as All Aboard's
+    // 23:09 → 14:21 two days later, 39h 12m at $76.60, over the 5h 37m
+    // Länderbahn train it had no fare for; the trip showed the 39h train.
+    bestTrain = cheapestSensible(trainsResult) ?? null;
+  }
+
+  // Door-to-door facts for the card: time city centre to city centre, and
+  // CO₂. A flight's total needs its airports — the offer's own, else the
+  // codes this leg resolved to (a cached row has none of its own).
+  const fromRef = { city: origin, country: originCountry };
+  const toRef = { city: destination, country: destinationCountry };
+  // Only facts we could build are attached — no `null` keys on the wire.
+  if (bestFlight) {
+    const resolved = Array.isArray(airports) ? airports : null;
+    const doorToDoor = flightDoorToDoor({
+      from: fromRef,
+      to: toRef,
+      originAirport: bestFlight.originAirport ?? resolved?.[0],
+      destinationAirport: bestFlight.destinationAirport ?? resolved?.[1],
+      flightMinutes: knownDuration(bestFlight.durationMinutes),
+    });
+    if (doorToDoor) bestFlight = { ...bestFlight, doorToDoor };
+  }
+  if (bestTrain) {
+    const doorToDoor = trainDoorToDoorFacts(knownDuration(bestTrain.durationMinutes));
+    const co2 = trainCo2(fromRef, toRef, travelers);
+    bestTrain = { ...bestTrain, ...(doorToDoor ? { doorToDoor } : {}), ...(co2 ? { co2 } : {}) };
   }
 
   // Door-to-door times. An unknown duration stays Infinity rather than
@@ -254,8 +303,12 @@ export async function compareLeg(
   const flightMinutes = bestFlight ? knownDuration(bestFlight.durationMinutes) : null;
   const trainMinutes = bestTrain ? knownDuration(bestTrain.durationMinutes) : null;
 
-  const flightDoorToDoor =
-    flightMinutes != null ? flightMinutes + AIRPORT_OVERHEAD_MINUTES : Infinity;
+  // The same total the card shows when we could build one; the flat
+  // allowance when an airport's position is unknown.
+  const flightDoorToDoorMinutes =
+    flightMinutes == null
+      ? Infinity
+      : bestFlight?.doorToDoor?.totalMinutes ?? flightMinutes + AIRPORT_OVERHEAD_MINUTES;
   const trainDoorToDoor = trainMinutes != null ? trainMinutes : Infinity;
   const durationsComparable = flightMinutes != null && trainMinutes != null;
 
@@ -288,8 +341,8 @@ export async function compareLeg(
     // missing on either side this stays 'unavailable' — the honest answer,
     // and the UI simply renders no "fastest" badge.
     if (!durationsComparable) fastest = 'unavailable';
-    else if (flightDoorToDoor < trainDoorToDoor) fastest = 'flight';
-    else if (trainDoorToDoor < flightDoorToDoor) fastest = 'train';
+    else if (flightDoorToDoorMinutes < trainDoorToDoor) fastest = 'flight';
+    else if (trainDoorToDoor < flightDoorToDoorMinutes) fastest = 'train';
     else fastest = 'same';
   } else if (bestFlight) {
     fastest = 'flight';
@@ -355,7 +408,7 @@ export async function compareLeg(
       expires_at: expiresAt,
     });
   }
-  if (bestTrain && !cachedTrain) {
+  if (bestTrain && !cachedTrain && trainOnOwnDay) {
     cacheRows.push({
       origin: origin.toLowerCase(),
       destination: destination.toLowerCase(),
@@ -419,7 +472,7 @@ export async function compareLeg(
     // 0 when there's nothing real to subtract. Infinity/NaN here used to
     // serialize to JSON `null` against a `number` field on the client.
     timeDifference: durationsComparable
-      ? Math.abs(flightDoorToDoor - trainDoorToDoor)
+      ? Math.abs(flightDoorToDoorMinutes - trainDoorToDoor)
       : 0,
   };
 }

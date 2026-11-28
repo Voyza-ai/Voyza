@@ -241,7 +241,7 @@ function HistoryPageInner() {
   };
 
   const openOwned = (trip: TripSummary) => router.push(`/results?tripId=${trip.id}`);
-  const openShared = (trip: TripSummary) => router.push(`/canvas/${trip.id}`);
+  const openShared = (trip: TripSummary) => router.push(`/results?tripId=${trip.id}`);
 
   const nothingAtAll = !loading && !error && trips.length === 0 && shared.length === 0;
 

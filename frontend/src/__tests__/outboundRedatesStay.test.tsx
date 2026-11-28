@@ -3,9 +3,8 @@ import React from 'react';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { useTripStore } from '@/store/tripStore';
 import { buildCity, buildTrip } from './fixtures';
-import { fetchHomeLegs, searchHotels, getCanvasSession, getCanvasSuggestions } from '@/lib/api';
+import { fetchHomeLegs, searchHotels } from '@/lib/api';
 import ResultsPage from '@/app/results/page';
-import CanvasPage from '@/app/canvas/[tripId]/page';
 import type { HomeLeg, Trip } from '@/lib/types';
 
 /**
@@ -20,7 +19,8 @@ import type { HomeLeg, Trip } from '@/lib/types';
  *      overnight trip was searched a day late: harness, Portland → "Portland,
  *      Maine": home-legs startDate 2027-01-11 and the header fell to
  *      "Jan 11 – Jan 17 · 6 nights";
- *  (b) a new home city / airports on the canvas home card — the same search;
+ *  (b) a new home city / airports on the home card (results page, which
+ *      took over the canvas's home-card editor) — the same search;
  *  (c) an outbound alternative that lands on another day.
  *
  * The fix searches from the trip's start with the first stay's departure, takes
@@ -30,8 +30,6 @@ import type { HomeLeg, Trip } from '@/lib/types';
 
 const mockedFetchHomeLegs = fetchHomeLegs as jest.MockedFunction<typeof fetchHomeLegs>;
 const mockedSearchHotels = searchHotels as jest.MockedFunction<typeof searchHotels>;
-const mockedGetSession = getCanvasSession as jest.MockedFunction<typeof getCanvasSession>;
-const mockedGetSuggestions = getCanvasSuggestions as jest.MockedFunction<typeof getCanvasSuggestions>;
 
 const leg = (over: Partial<HomeLeg>): HomeLeg => ({
   originAirport: 'JFK',
@@ -208,19 +206,14 @@ describe('(c) an outbound alternative that lands on another day', () => {
   });
 });
 
-describe('(b) a new home city on the canvas home card', () => {
-  function openCanvas(origin: any, parisArrival: string) {
-    const c = trip(parisArrival, origin).cities;
-    mockedGetSession.mockResolvedValue({
-      session: { state: { trip: { title: 'Owner trip', travelers: 6, origin, returnToHome: true }, cities: c } },
-      role: 'owner',
-    } as any);
-    mockedGetSuggestions.mockResolvedValue({ suggestions: [] } as any);
-    render(<CanvasPage />);
+describe('(b) a new home city on the home card', () => {
+  function openTrip(origin: any, parisArrival: string) {
+    useTripStore.setState({ currentTrip: trip(parisArrival, origin) });
+    render(<ResultsPage />);
   }
 
   async function changeHomeTo(city: string) {
-    fireEvent.click(await screen.findByTitle('Edit home card'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change home airports' }));
     fireEvent.change(screen.getByPlaceholderText('e.g. New York'), { target: { value: city } });
     await act(async () => {
       fireEvent.click(screen.getByText('Apply'));
@@ -228,38 +221,37 @@ describe('(b) a new home city on the canvas home card', () => {
   }
 
   it('New York (overnight) → London (same day): searched from Jan 10, Paris gains Jan 10, its hotels re-searched', async () => {
-    openCanvas({ city: 'New York', airports: ['JFK'], outboundLeg: OVERNIGHT(), returnLeg: BACK() }, '2027-01-11');
+    openTrip({ city: 'New York', airports: ['JFK'], outboundLeg: OVERNIGHT(), returnLeg: BACK() }, '2027-01-11');
     mockedFetchHomeLegs.mockResolvedValue({
       outboundLeg: SAME_DAY({ originAirport: 'LHR', departTime: '09:20', arriveTime: '11:38', price: 480 }),
       returnLeg: null,
       firstCityArrival: '2027-01-10',
     } as any);
-    await screen.findByText(/Jan 11 → Jan 13/);
     await changeHomeTo('London');
 
     await waitFor(() => expect(mockedFetchHomeLegs).toHaveBeenCalled());
     const p = mockedFetchHomeLegs.mock.calls[0][0] as any;
-    // Before: startDate 2027-01-11 and no firstCityDeparture.
     expect(p.startDate).toBe('2027-01-10');
     expect(p.firstCityDeparture).toBe('2027-01-13');
-    await screen.findByText(/Jan 10 → Jan 13/);
+    expect(p.outbound).toBe(true);
+    await waitFor(() => expect(paris().dates.arrival).toBe('2027-01-10'));
+    expect(useTripStore.getState().currentTrip!.origin!.city).toBe('London');
     await waitFor(() =>
       expect(hotelSearchesFor('Paris')).toContainEqual({ city: 'Paris', checkin: '2027-01-10', checkout: '2027-01-13', adults: 6 }),
     );
   });
 
   it('London (same day) → New York (overnight): Paris starts on Jan 11', async () => {
-    openCanvas(
+    openTrip(
       { city: 'London', airports: ['LHR'], outboundLeg: SAME_DAY({ originAirport: 'LHR' }), returnLeg: BACK() },
       '2027-01-10',
     );
     mockedFetchHomeLegs.mockResolvedValue({ outboundLeg: OVERNIGHT(), returnLeg: null, firstCityArrival: '2027-01-11' } as any);
-    await screen.findByText(/Jan 10 → Jan 13/);
     await changeHomeTo('New York');
 
     await waitFor(() => expect(mockedFetchHomeLegs).toHaveBeenCalled());
     expect((mockedFetchHomeLegs.mock.calls[0][0] as any).startDate).toBe('2027-01-10');
-    await screen.findByText(/Jan 11 → Jan 13/);
+    await waitFor(() => expect(paris().dates.arrival).toBe('2027-01-11'));
     await waitFor(() =>
       expect(hotelSearchesFor('Paris')).toContainEqual({ city: 'Paris', checkin: '2027-01-11', checkout: '2027-01-13', adults: 6 }),
     );

@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 import { readCanvasIntent, clearCanvasIntent, resolveCanvasTripId } from '@/lib/canvasHandoff';
 import { canvasIntentWithPicks } from '@/store/tripStore';
+import { safeReturnPath } from '@/lib/authEmail';
 import { Suspense } from 'react';
 
 export default function AuthCallbackPage() {
@@ -60,10 +61,10 @@ function AuthCallbackInner() {
           .then((intent) => resolveCanvasTripId(intent))
           .then((tripId) => {
             if (!tripId) return router.push('/history');
+            // Canvas is now the results page itself; a Share click that
+            // needed sign-in opens the share dialog there.
             router.push(
-              canvasIntent.destination === 'results'
-                ? `/results?tripId=${tripId}`
-                : `/canvas/${tripId}`,
+              `/results?tripId=${tripId}${canvasIntent.openShare ? '&openShare=1' : ''}`,
             );
           })
           .catch(() => router.push('/history'));
@@ -74,6 +75,16 @@ function AuthCallbackInner() {
       // three front doors (Browse / Describe / View or edit trips), not one of
       // them picked for them.
       let returnTo = '/main';
+      // An email-confirmation link carries its destination in ?next= (the
+      // link opens in a new tab, which has none of this tab's sessionStorage).
+      const next = safeReturnPath(searchParams.get('next'));
+      if (next) {
+        try {
+          sessionStorage.removeItem('voyza.oauth_return_to');
+        } catch {}
+        router.push(next);
+        return;
+      }
       try {
         const saved = sessionStorage.getItem('voyza.oauth_return_to');
         // StrictMode double-invokes this effect in dev, so the second run finds this already removed and a deep-link sign-in lands on /main locally; a production build correctly returns to the trip.

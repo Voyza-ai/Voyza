@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, type ComponentProps } from 'react';
+import SearchProgress from './SearchProgress';
+import type { SearchProgressState } from '@/lib/searchProgress';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
@@ -23,8 +25,11 @@ import { useTripStore } from '@/store/tripStore';
 import { humanDay, humanDayRange } from '@/lib/dateHelpers';
 import VibePills from './VibePills';
 import BudgetPicker from './BudgetPicker';
+import DateRangeCalendar from './DateRangeCalendar';
+import { askingFrom } from '@/lib/planAsking';
 import TripSummaryCard from './TripSummaryCard';
 import { CHAT_EDIT_PREFILL } from '@/lib/tripSummary';
+import { dedupeVibes, joinVibes, splitVibeText, vibeBubbleText, vibeList, vibePhrase } from '@/lib/vibes';
 
 type ChatMsg = {
   id: string;
@@ -34,7 +39,7 @@ type ChatMsg = {
   failed?: 'network' | 'assistant';
 };
 
-type Widget = 'city_picker' | 'vibe' | 'budget' | null;
+type Widget = 'city_picker' | 'vibe' | 'budget' | 'dates' | 'origin' | null;
 
 type ConversationalPlannerProps = {
   /** First message to send automatically (landing-page hero seed). */
@@ -43,6 +48,9 @@ type ConversationalPlannerProps = {
   onFindTrip: () => void;
   findTripLoading: boolean;
   findTripStatus: string;
+  /** The running search, step by step; the plain status line when absent. */
+  searchProgress?: SearchProgressState | null;
+  searchFallback?: ComponentProps<typeof SearchProgress>['fallback'];
   findTripError: string | null;
   /** Escape hatch when the AI is repeatedly down. */
   onSwitchToGuided: () => void;
@@ -65,6 +73,8 @@ export default function ConversationalPlanner({
   onFindTrip,
   findTripLoading,
   findTripStatus,
+  searchProgress,
+  searchFallback,
   findTripError,
   onSwitchToGuided,
 }: ConversationalPlannerProps) {
@@ -84,6 +94,14 @@ export default function ConversationalPlanner({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [widget, setWidget] = useState<Widget>(null);
+  // The dates question offers the calendar; it opens only when asked for,
+  // so typing the dates stays just as easy.
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  useEffect(() => {
+    if (widget !== 'dates') setCalendarOpen(false);
+  }, [widget]);
+  // The vibe widget's picked pills, before Continue.
+  const [vibeDraft, setVibeDraft] = useState<string[]>([]);
   const [showRecap, setShowRecap] = useState(false);
   const [quickReplies, setQuickReplies] = useState<string[]>([]);
   const [failCount, setFailCount] = useState(0);
@@ -112,7 +130,7 @@ export default function ConversationalPlanner({
 
   useEffect(() => {
     scrollRef.current?.scrollTo?.({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, isTyping, widget, showRecap]);
+  }, [messages, isTyping, widget, showRecap, calendarOpen]);
 
   /** Known-state snapshot the backend uses to avoid re-asking. */
   const knownState = useCallback(() => {
@@ -146,7 +164,13 @@ export default function ConversationalPlanner({
       if (u.budget !== undefined && u.budget !== null) setAnswer('budget', u.budget);
       if (u.budgetPerPerson !== undefined && u.budgetPerPerson !== null)
         setAnswer('budgetPerPerson', u.budgetPerPerson);
-      if (isSet(u.vibe)) setAnswer('vibe', u.vibe);
+      if (isSet(u.vibe)) {
+        // "a beach and food trip" → Beach + Food when the words are vibes we
+        // know; anything else stays one vibe, as said.
+        const vibes = splitVibeText(u.vibe);
+        setAnswer('vibes', vibes);
+        setAnswer('vibe', joinVibes(vibes));
+      }
       if (u.returnToHome !== undefined && u.returnToHome !== null)
         setAnswer('returnToHome', u.returnToHome);
       if (isSet(u.notes)) setAnswer('extraNotes', u.notes);
@@ -188,7 +212,8 @@ export default function ConversationalPlanner({
         a.dateRange?.start &&
         a.dateRange?.end &&
         a.travelers &&
-        a.origin, // where they're flying FROM — required for the flight search
+        a.origin && // where they're flying FROM — required for the flight search
+        typeof a.returnToHome === 'boolean', // round-trip vs one-way — asked, never assumed
     );
   }, []);
 
@@ -249,6 +274,12 @@ export default function ConversationalPlanner({
           setWidget('vibe');
         } else if (result.action === 'show_budget_slider' && a.budget == null) {
           setWidget('budget');
+        } else if (result.action === 'ask' && askingFrom(result.reply, result.asking) === 'dates' && !a.dateRange?.start) {
+          // "When are you thinking of going?" → a calendar to answer it with.
+          setWidget('dates');
+        } else if (result.action === 'ask' && askingFrom(result.reply, result.asking) === 'origin' && !a.origin) {
+          // "Where are you flying from?" → "Use my location".
+          setWidget('origin');
         } else if (meetsMinimums() && (result.action === 'ready' || result.action === 'show_vibe_picker' || result.action === 'show_budget_slider')) {
           // Suppressed a redundant widget (or genuine ready) with a complete
           // plan on the table → recap.
@@ -389,8 +420,10 @@ export default function ConversationalPlanner({
         : 'No limit set',
     },
     { icon: Home, label: 'From', value: a.origin ?? 'Not set' },
-    { icon: Sparkles, label: 'Vibe', value: a.vibe ?? 'Open' },
+    { icon: Sparkles, label: 'Vibe', value: vibeList(a).length > 0 ? vibePhrase(vibeList(a)) : 'Open' },
   ];
+
+  const lastMessageId = messages[messages.length - 1]?.id;
 
   return (
     <>
@@ -410,18 +443,65 @@ export default function ConversationalPlanner({
                 <div
                   className={`max-w-[80%] px-5 py-3.5 text-[17px] leading-relaxed rounded-2xl ${
                     msg.role === 'user'
-                      ? 'bg-[#4f8ef7] text-white rounded-br-md'
-                      : 'text-white/90 rounded-bl-md'
+                      ? 'bg-[#2563eb] text-white rounded-br-md'
+                      : 'text-gray-800 rounded-bl-md'
                   }`}
-                  style={msg.role === 'assistant' ? { background: 'rgba(255,255,255,0.05)' } : undefined}
+                  style={msg.role === 'assistant' ? { background: '#ffffff', boxShadow: 'inset 0 0 0 1px #e5e7eb' } : undefined}
                 >
                   {msg.content}
                 </div>
 
+                {/* Dates: "Open calendar" right under the question that asks
+                    for them; typing the dates works just the same. */}
+                {msg.role === 'assistant' && msg.id === lastMessageId && widget === 'dates' && !isTyping && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarOpen((o) => !o)}
+                      aria-expanded={calendarOpen}
+                      className="mt-2.5 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all"
+                      style={{ background: '#eff6ff' }}
+                    >
+                      <Calendar size={13} />
+                      {calendarOpen ? 'Close calendar' : 'Open calendar'}
+                    </button>
+                    {calendarOpen && (
+                      <div className="mt-3 w-full">
+                        <DateRangeCalendar
+                          onSelect={(start, end) => {
+                            // Stored as picked, whatever the AI makes of the sentence.
+                            setAnswer('dateRange', { start, end });
+                            setWidget(null);
+                            send(humanDayRange(start, end));
+                          }}
+                          onFlexible={() => {
+                            setWidget(null);
+                            send("I'm flexible on dates");
+                          }}
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Location offer: right under "Where are you flying from?" */}
+                {msg.role === 'assistant' && msg.id === lastMessageId && widget === 'origin' && !answers.origin && !isTyping && (
+                  <button
+                    type="button"
+                    onClick={handleUseMyLocation}
+                    disabled={locating}
+                    className="mt-2.5 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#2563eb]/30 text-[#2563eb] hover:text-[#1d4ed8] hover:border-[#2563eb]/60 transition-all"
+                    style={{ background: '#eff6ff' }}
+                  >
+                    {locating ? <Loader2 size={13} className="animate-spin" /> : <LocateFixed size={13} />}
+                    {locating ? 'Finding your nearest airport…' : 'Use my location'}
+                  </button>
+                )}
+
                 {/* Failed send → honest reason + Retry */}
                 {msg.failed && (
                   <div className="flex items-center gap-3 mt-2">
-                    <span className="flex items-center gap-1.5 text-[13px] text-red-300/80">
+                    <span className="flex items-center gap-1.5 text-[13px] text-red-600">
                       <WifiOff size={13} />
                       {msg.failed === 'network'
                         ? "Can't reach the server"
@@ -430,7 +510,7 @@ export default function ConversationalPlanner({
                     <button
                       onClick={() => send(msg.content, { retryOfId: msg.id })}
                       className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[13px] font-medium text-white transition-all hover:brightness-110"
-                      style={{ background: '#4f8ef7' }}
+                      style={{ background: '#2563eb' }}
                     >
                       <RotateCcw size={12} />
                       Retry
@@ -443,12 +523,12 @@ export default function ConversationalPlanner({
 
           {/* Typing */}
           {isTyping && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 text-white/40 text-[15px]">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 text-gray-500 text-[15px]">
               <span className="flex gap-1">
                 {[0, 1, 2].map((i) => (
                   <motion.span
                     key={i}
-                    className="w-1.5 h-1.5 rounded-full bg-white/40"
+                    className="w-1.5 h-1.5 rounded-full bg-gray-400"
                     animate={{ opacity: [0.3, 1, 0.3] }}
                     transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
                   />
@@ -463,8 +543,8 @@ export default function ConversationalPlanner({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               onClick={onSwitchToGuided}
-              className="self-center flex items-center gap-2 px-4 py-2 rounded-xl border border-white/15 text-white/70 hover:text-white text-[14px] transition-all"
-              style={{ background: 'rgba(255,255,255,0.05)' }}
+              className="self-center flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 text-gray-700 hover:text-gray-900 text-[14px] transition-all"
+              style={{ background: '#ffffff' }}
             >
               <ListChecks size={15} />
               The assistant keeps failing — continue with guided questions instead
@@ -476,7 +556,7 @@ export default function ConversationalPlanner({
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-4">
               {cityPicker.countries.map((c) => (
                 <div key={c.country} className="flex flex-col gap-2">
-                  <span className="text-white/50 text-[14px]">{c.country}</span>
+                  <span className="text-gray-600 text-[14px]">{c.country}</span>
                   <div className="flex flex-wrap gap-2">
                     {[...c.cities, ...(cityPicker.selected[c.country] ?? []).filter((x) => !c.cities.includes(x))].map(
                       (city) => {
@@ -499,10 +579,10 @@ export default function ConversationalPlanner({
                             }
                             className={`px-4 py-2 rounded-full text-[15px] border transition-all hover:scale-[1.04] ${
                               on
-                                ? 'bg-[#4f8ef7] border-[#4f8ef7] text-white'
-                                : 'border-white/15 text-white/70 hover:border-[#4f8ef7]/50'
+                                ? 'bg-[#2563eb] border-[#2563eb] text-white'
+                                : 'border-gray-200 text-gray-700 hover:border-[#2563eb]/50'
                             }`}
-                            style={!on ? { background: 'rgba(255,255,255,0.04)' } : undefined}
+                            style={!on ? { background: '#ffffff' } : undefined}
                           >
                             {on && <Check size={13} className="inline mr-1.5 -mt-0.5" />}
                             {city}
@@ -534,7 +614,7 @@ export default function ConversationalPlanner({
                           });
                         }}
                         placeholder="Type another city…"
-                        className="px-3.5 py-2 rounded-full text-[14px] bg-transparent border border-dashed border-white/20 text-white/80 placeholder-white/25 outline-none focus:border-[#4f8ef7]/60 w-[170px]"
+                        className="px-3.5 py-2 rounded-full text-[14px] bg-white border border-dashed border-gray-300 text-gray-800 placeholder-gray-500 outline-none focus:border-[#2563eb]/60 w-[170px]"
                       />
                     </div>
                   </div>
@@ -544,7 +624,7 @@ export default function ConversationalPlanner({
                 onClick={submitCityPicker}
                 disabled={Object.values(cityPicker.selected).flat().length === 0}
                 className="self-start flex items-center gap-2 px-5 py-2.5 rounded-xl text-[15px] font-medium text-white transition-all hover:brightness-110 disabled:opacity-40"
-                style={{ background: '#4f8ef7' }}
+                style={{ background: '#2563eb' }}
               >
                 <Plus size={15} />
                 Add these cities
@@ -555,9 +635,17 @@ export default function ConversationalPlanner({
           {/* ── Vibe widget ── */}
           {widget === 'vibe' && (
             <VibePills
-              onSelect={(v) => {
+              selected={vibeDraft}
+              onChange={setVibeDraft}
+              onContinue={() => {
+                const picked = dedupeVibes(vibeDraft);
+                if (picked.length === 0) return;
+                // Stored as picked, whatever the AI makes of the sentence.
+                setAnswer('vibes', picked);
+                setAnswer('vibe', joinVibes(picked));
                 setWidget(null);
-                send(`${v} vibes`);
+                setVibeDraft([]);
+                send(`${vibeBubbleText(picked)} vibes`);
               }}
             />
           )}
@@ -581,10 +669,10 @@ export default function ConversationalPlanner({
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-[#4f8ef7]/30 p-5 flex flex-col gap-3"
-              style={{ background: 'rgba(79,142,247,0.07)' }}
+              className="rounded-2xl border border-[#2563eb]/25 p-5 flex flex-col gap-3"
+              style={{ background: '#eef3fb' }}
             >
-              <span className="text-white/50 text-[12px] uppercase tracking-[0.18em] font-medium">
+              <span className="text-gray-600 text-[12px] uppercase tracking-[0.18em] font-medium">
                 Your trip so far
               </span>
               <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
@@ -592,10 +680,10 @@ export default function ConversationalPlanner({
                   const Icon = row.icon;
                   return (
                     <div key={row.label} className="flex items-start gap-2.5">
-                      <Icon size={14} className="text-[#4f8ef7] mt-1 flex-shrink-0" />
+                      <Icon size={14} className="text-[#2563eb] mt-1 flex-shrink-0" />
                       <div className="min-w-0">
-                        <div className="text-white/35 text-[11px]">{row.label}</div>
-                        <div className="text-white/90 text-[14px] truncate" title={row.value}>
+                        <div className="text-gray-600 text-[11px]">{row.label}</div>
+                        <div className="text-gray-900 text-[14px] truncate" title={row.value}>
                           {row.value}
                         </div>
                       </div>
@@ -604,13 +692,13 @@ export default function ConversationalPlanner({
                 })}
               </div>
               <div className="flex items-center justify-between mt-1">
-                <span className="text-white/35 text-[13px]">
+                <span className="text-gray-600 text-[13px]">
                   Want to change anything? Just say it.
                 </span>
                 <button
                   onClick={onFindTrip}
                   className="px-6 py-2.5 rounded-xl text-[15px] font-semibold text-white transition-all hover:brightness-110 hover:scale-[1.02] active:scale-[0.98]"
-                  style={{ background: '#4f8ef7' }}
+                  style={{ background: '#2563eb' }}
                 >
                   Find my trip →
                 </button>
@@ -619,10 +707,13 @@ export default function ConversationalPlanner({
           )}
 
           {/* Find-trip progress / error (same pipeline as before) */}
-          {findTripLoading && (
-            <div className="flex items-center gap-3 text-white/60 text-[15px]">
+          {findTripLoading && searchProgress && (
+            <SearchProgress progress={searchProgress} fallback={searchFallback} />
+          )}
+          {findTripLoading && !searchProgress && (
+            <div className="flex items-center gap-3 text-gray-600 text-[15px]">
               <motion.div
-                className="w-4 h-4 border-2 border-[#4f8ef7] border-t-transparent rounded-full"
+                className="w-4 h-4 border-2 border-[#2563eb] border-t-transparent rounded-full"
                 animate={{ rotate: 360 }}
                 transition={{ duration: 0.9, repeat: Infinity, ease: 'linear' }}
               />
@@ -630,7 +721,7 @@ export default function ConversationalPlanner({
             </div>
           )}
           {findTripError && (
-            <div className="text-red-300/90 text-[14px]">{findTripError}</div>
+            <div className="text-red-600 text-[14px]">{findTripError}</div>
           )}
         </div>
       </div>
@@ -658,32 +749,14 @@ export default function ConversationalPlanner({
               editable={() => !isTyping}
             />
           )}
-          {/* Location offer — visible until an origin is known */}
-          {!answers.origin && !isTyping && (
-            <div className="flex">
-              <button
-                onClick={handleUseMyLocation}
-                disabled={locating}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13.5px] border border-[#4f8ef7]/30 text-[#9db9f0] hover:text-white hover:border-[#4f8ef7]/60 transition-all disabled:opacity-60"
-                style={{ background: 'rgba(79,142,247,0.08)' }}
-              >
-                {locating ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <LocateFixed size={13} />
-                )}
-                {locating ? 'Finding your nearest airport…' : 'Use my location'}
-              </button>
-            </div>
-          )}
           {quickReplies.length > 0 && !isTyping && (
             <div className="flex flex-wrap gap-2">
               {quickReplies.map((q) => (
                 <button
                   key={q}
                   onClick={() => send(q)}
-                  className="px-3.5 py-1.5 rounded-full text-[13.5px] border border-white/15 text-white/70 hover:text-white hover:border-[#4f8ef7]/50 transition-all"
-                  style={{ background: 'rgba(255,255,255,0.04)' }}
+                  className="px-3.5 py-1.5 rounded-full text-[13.5px] border border-gray-200 text-gray-700 hover:text-gray-900 hover:border-[#2563eb]/50 transition-all"
+                  style={{ background: '#ffffff' }}
                 >
                   {q}
                 </button>
@@ -695,6 +768,16 @@ export default function ConversationalPlanner({
               e.preventDefault();
               const v = input;
               setInput('');
+              // Pills picked and then something typed: the picks go with it
+              // rather than vanishing with the widget.
+              const picked = widget === 'vibe' ? dedupeVibes(vibeDraft) : [];
+              if (picked.length > 0 && v.trim()) {
+                setAnswer('vibes', picked);
+                setAnswer('vibe', joinVibes(picked));
+                setVibeDraft([]);
+                send(`${vibeBubbleText(picked)} vibes. ${v.trim()}`);
+                return;
+              }
               send(v);
             }}
             className="flex items-center gap-2"
@@ -704,7 +787,7 @@ export default function ConversationalPlanner({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Say anything — destinations, dates, changes of heart…"
-              className="flex-1 min-w-0 px-5 py-3.5 rounded-2xl text-[16px] bg-transparent border border-white/15 text-white placeholder-white/25 outline-none focus:border-[#4f8ef7]/60 transition-colors"
+              className="flex-1 min-w-0 px-5 py-3.5 rounded-2xl text-[16px] bg-white border border-gray-200 text-gray-900 placeholder-gray-500 outline-none focus:border-[#2563eb]/60 transition-colors"
               disabled={isTyping}
             />
             <button
@@ -712,7 +795,7 @@ export default function ConversationalPlanner({
               disabled={!input.trim() || isTyping}
               aria-label="Send message"
               className="p-3.5 rounded-2xl text-white transition-all hover:brightness-110 disabled:opacity-30"
-              style={{ background: '#4f8ef7' }}
+              style={{ background: '#2563eb' }}
             >
               <Send size={18} />
             </button>

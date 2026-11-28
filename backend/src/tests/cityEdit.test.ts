@@ -51,6 +51,14 @@ const mockBuildHomeLeg = jest.fn();
 jest.mock('../services/optimizer', () => ({
   ...jest.requireActual('../services/optimizer'),
   buildHomeLeg: (p: any) => mockBuildHomeLeg(p),
+  // City edits pick from every home-flight option (services/legPreference.ts):
+  // the same flights, main first.
+  searchHomeLegOptions: async (p: any) => {
+    const l = await mockBuildHomeLeg(p);
+    if (!l) return [];
+    const { alternatives, ...main } = l;
+    return [main, ...(alternatives ?? [])];
+  },
 }));
 
 import planRouter from '../routes/plan';
@@ -139,32 +147,55 @@ describe('planCityEdit — dates and what has to be re-priced', () => {
     expect(r.plan.ret).toBe(false);
   });
 
-  it('remove gives the nights to the previous city, so the trip ends on the same day', () => {
+  it('remove shortens the trip: later cities move earlier by its nights, and the flight home with them', () => {
     const r = planCityEdit(stops(), { kind: 'remove', city: 'florence' });
     if (!r.ok) throw new Error(r.reason);
-    expect(r.plan.after.map((s) => [s.name, s.arrival, s.departure])).toEqual([
-      ['Rome', '2026-12-08', '2026-12-12'],
-      ['Venice', '2026-12-12', '2026-12-14'],
+    expect(r.plan.after.map((s) => [s.name, s.arrival, s.departure, s.status])).toEqual([
+      ['Rome', '2026-12-08', '2026-12-10', 'kept'],
+      ['Venice', '2026-12-10', '2026-12-12', 'moved'],
     ]);
-    expect(r.plan.hotels).toEqual([0]);
+    expect(r.plan.hotels).toEqual([1]);
     expect(r.plan.legs).toEqual([0]);
     expect(r.plan.removed).toEqual(['Florence']);
-    expect(r.plan.note).toContain("Rome keeps Florence's 2 nights");
+    expect(r.plan.outbound).toBe(false);
+    expect(r.plan.ret).toBe(true);
+    expect(r.plan.note).toContain('2 days shorter');
+    expect(r.plan.note).toContain('Venice moves 2 days earlier');
   });
 
-  it('removing the first city gives its nights to the next and re-searches the outbound', () => {
+  it('add then remove gives back the trip you had (production: Munich kept Salzburg\'s 2 nights)', () => {
+    const added = planCityEdit(stops(), { kind: 'add', city: 'Bologna', afterCity: 'Rome', nights: 2 });
+    if (!added.ok) throw new Error(added.reason);
+    const back = planCityEdit(added.plan.after, { kind: 'remove', city: 'Bologna' });
+    if (!back.ok) throw new Error(back.reason);
+    expect(back.plan.after.map((s) => [s.name, s.arrival, s.departure])).toEqual(
+      stops().map((s) => [s.name, s.arrival, s.departure]),
+    );
+  });
+
+  it('removing the first city: the next one opens the trip on its first day, and the outbound is re-searched', () => {
     const r = planCityEdit(stops(), { kind: 'remove', city: 'Rome' });
     if (!r.ok) throw new Error(r.reason);
-    expect(r.plan.after[0]).toMatchObject({ name: 'Florence', arrival: '2026-12-08', departure: '2026-12-12' });
+    expect(r.plan.after.map((s) => [s.name, s.arrival, s.departure])).toEqual([
+      ['Florence', '2026-12-08', '2026-12-10'],
+      ['Venice', '2026-12-10', '2026-12-12'],
+    ]);
     expect(r.plan.outbound).toBe(true);
-    expect(r.plan.legs).toEqual([]);
+    expect(r.plan.hotels).toEqual([0, 1]);
+    expect(r.plan.legs).toEqual([0]);
   });
 
-  it('removing the last city re-searches the flight home from the new last city', () => {
+  it('removing the last city: you fly home from the new last city, earlier', () => {
     const r = planCityEdit(stops(), { kind: 'remove', city: 'Venice' });
     if (!r.ok) throw new Error(r.reason);
-    expect(r.plan.after[1]).toMatchObject({ name: 'Florence', departure: '2026-12-14' });
+    expect(r.plan.after.map((s) => [s.name, s.arrival, s.departure, s.status])).toEqual([
+      ['Rome', '2026-12-08', '2026-12-10', 'kept'],
+      ['Florence', '2026-12-10', '2026-12-12', 'kept'],
+    ]);
+    expect(r.plan.hotels).toEqual([]);
+    expect(r.plan.legs).toEqual([]);
     expect(r.plan.ret).toBe(true);
+    expect(r.plan.note).toContain('ends 2 days earlier');
   });
 
   it('refuses to remove the only city', () => {
@@ -260,8 +291,8 @@ describe('checkCityName', () => {
 
 describe('cityEditOpFromTool', () => {
   it('maps each tool and rejects a missing city', () => {
-    expect(cityEditOpFromTool('add_city', { city: 'Nice', afterCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: 'Rome', beforeCity: null, nights: null });
-    expect(cityEditOpFromTool('add_city', { city: 'Nice', beforeCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: null, beforeCity: 'Rome', nights: null });
+    expect(cityEditOpFromTool('add_city', { city: 'Nice', afterCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: 'Rome', beforeCity: null, nights: null, userSaidWhere: false });
+    expect(cityEditOpFromTool('add_city', { city: 'Nice', beforeCity: 'Rome' })).toEqual({ kind: 'add', city: 'Nice', afterCity: null, beforeCity: 'Rome', nights: null, userSaidWhere: false });
     expect(cityEditOpFromTool('remove_city', { city: 'Nice' })).toEqual({ kind: 'remove', city: 'Nice' });
     expect(cityEditOpFromTool('replace_city', { old: 'Rome', new: 'Naples' })).toEqual({ kind: 'replace', oldCity: 'Rome', newCity: 'Naples' });
     expect(cityEditOpFromTool('replace_city', { old: 'Rome' })).toBeNull();
@@ -299,18 +330,21 @@ describe('POST /api/plan/chat — city edit tools', () => {
     expect(res.body.reply).not.toContain('x.');
   });
 
-  it('remove_city proposes the shorter trip with the new leg priced', async () => {
+  it('remove_city proposes the shorter trip with the new leg, the moved hotel and the earlier flight home priced', async () => {
     const res = await chat(app, 'remove_city', { city: 'Florence', explanation: 'x' });
     expect(res.body.type).toBe('proposal');
     const p = res.body.proposal;
     expect(p.after.map((s: any) => [s.name, s.arrival, s.departure])).toEqual([
-      ['Rome', '2026-12-08', '2026-12-12'],
-      ['Venice', '2026-12-12', '2026-12-14'],
+      ['Rome', '2026-12-08', '2026-12-10'],
+      ['Venice', '2026-12-10', '2026-12-12'],
     ]);
     expect(p.removed).toEqual(['Florence']);
     expect(p.legs).toHaveLength(1);
-    expect(p.legs[0]).toMatchObject({ from: 'Rome', to: 'Venice', date: '2026-12-12' });
-    expect(mockBuildHomeLeg).not.toHaveBeenCalled();
+    expect(p.legs[0]).toMatchObject({ from: 'Rome', to: 'Venice', date: '2026-12-10' });
+    expect(mockBuildHomeLeg).toHaveBeenCalledTimes(1);
+    expect(mockBuildHomeLeg.mock.calls[0][0]).toMatchObject({ destinationCity: 'Venice', date: '2026-12-12', reverse: true });
+    expect(p.returnLeg.departDate).toBe('2026-12-12');
+    expect(p.outboundLeg).toBeUndefined();
     expect(res.body.reply).toContain('without Florence');
   });
 

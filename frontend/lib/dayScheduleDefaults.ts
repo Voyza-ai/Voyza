@@ -1,6 +1,8 @@
-import { City, Trip, ScheduledEvent, Transport, HomeLeg, UnscheduledItem } from './types';
+import { City, Trip, ScheduledEvent, Transport, UnscheduledItem } from './types';
 import { parseLocal, toIso } from './dateHelpers';
 import { homeDepartureDay } from './tripSpan';
+import { cityFlightCodeLocally } from './locationResolver';
+import { homeLegToTransport, durationMinutes, arrivesNextDay, nextIsoDay } from './cityLegs';
 // `import type` only — keeps the fetch layer in lib/api out of this
 // module's runtime graph while still typing the AI's suggestion shapes.
 import type { ActivitySuggestion, RestaurantSuggestion } from './api';
@@ -40,7 +42,46 @@ const POST_ARRIVAL_CUSHION = 60;
 
 /** Strip station/platform suffixes for cleaner one-line titles. */
 const shortStation = (s?: string) =>
-  s ? s.split(',')[0].split('—')[0].split('–')[0].trim() : '';
+  s ? s.split(',')[0].split('—')[0].split('–')[0].split('·')[0].trim() : '';
+
+/**
+ * The code a city's flights are listed under, for travel-block titles
+ * ("Flight PAR → LON"). The trip's own home flights carry it for the first
+ * and last cities — the code the backend searched every leg there with — and
+ * the location hot set has it for the rest it knows. Null otherwise; the
+ * caller names the city instead.
+ */
+export function cityFlightCode(trip: Pick<Trip, 'cities' | 'origin'>, cityIndex: number): string | null {
+  const city = trip.cities[cityIndex];
+  if (!city) return null;
+  const last = trip.cities.length - 1;
+  if (cityIndex === 0 && trip.origin?.outboundLeg?.destAirport) return trip.origin.outboundLeg.destAirport;
+  if (cityIndex === last && trip.origin?.returnLeg?.originAirport) return trip.origin.returnLeg.originAirport;
+  return cityFlightCodeLocally(city.name, city.country);
+}
+
+/**
+ * One end of a leg as a travel block names it: the station or airport the leg
+ * itself carries, else (a flight) the city's flight code, else the city's
+ * name. Never "the airport" — that placeholder is what an inter-city flight
+ * read as, because those legs carry no airport of their own.
+ */
+const legEnd = (
+  station: string | undefined,
+  mode: Transport['mode'],
+  trip: Pick<Trip, 'cities' | 'origin'>,
+  cityIndex: number,
+  fallbackName: string | undefined,
+): string =>
+  shortStation(station) ||
+  (mode === 'flight' ? cityFlightCode(trip, cityIndex) : null) ||
+  trip.cities[cityIndex]?.name ||
+  fallbackName ||
+  (mode === 'flight' ? 'the airport' : 'the station');
+
+const travelWord = (mode: Transport['mode']) => (mode === 'flight' ? 'Flight' : mode === 'train' ? 'Train' : 'Bus');
+
+export { durationMinutes } from './cityLegs';
 
 const timeToMinutes = (t: string): number => {
   const [h, m] = t.split(':').map(Number);
@@ -55,28 +96,6 @@ const minutesToTime = (mins: number): string => {
 
 let _idCounter = 0;
 const newId = () => `evt-${Date.now()}-${++_idCounter}`;
-
-/**
- * Adapt a `HomeLeg` (the home-anchor flight shape) into a `Transport`-
- * shaped object so the rest of `buildDefaultSchedule` can read it
- * uniformly. The HomeLeg has `originAirport` / `destAirport` IATA codes
- * but no full station strings — we map IATA into `fromStation` /
- * `toStation` so the "Head to {airport}" titles still read sensibly.
- */
-const homeLegToTransport = (leg: HomeLeg | null | undefined): Transport | null => {
-  if (!leg) return null;
-  return {
-    mode: 'flight',
-    operator: leg.operator ?? '',
-    duration: '',
-    price: leg.price ?? 0,
-    departTime: leg.departTime ?? undefined,
-    arriveTime: leg.arriveTime ?? undefined,
-    departDate: leg.departDate ?? undefined,
-    fromStation: leg.originAirport ?? undefined,
-    toStation: leg.destAirport ?? undefined,
-  };
-};
 
 /**
  * Per-day result of resolving a city's transport context.
@@ -98,6 +117,15 @@ export type DayTransportContext = {
   events: ScheduledEvent[];
   windowStart: number;
   windowEnd: number;
+  /**
+   * What `events` occupy, in minutes, for planning around them. Usually each
+   * block's start–end; a leg that lands at an earlier clock time than it left
+   * on the SAME day (Paris 10:50 → London 10:48: a short flight into an
+   * earlier time zone) occupies its flight time after departure. Read as
+   * start–end, that block wrapped to midnight like an overnight flight and the
+   * day after a morning arrival was left with nothing on it.
+   */
+  busy: Array<[number, number]>;
   /**
    * True on the HOME departure day of an overnight outbound — the day the
    * traveller leaves home, before the first stay begins. `events` is the
@@ -125,11 +153,19 @@ export function buildDayTransportContext(
   cityIndex: number,
 ): DayTransportContext {
   const events: ScheduledEvent[] = [];
+  const busy: Array<[number, number]> = [];
   let windowStart = 0;
   let windowEnd = 24 * 60;
   const isArrival = city.dates.arrival === date;
   const isDeparture = city.dates.departure === date;
   const lastIndex = trip.cities.length - 1;
+  const homeName = trip.origin?.city || undefined;
+  const push = (e: ScheduledEvent, range?: [number, number]) => {
+    events.push(e);
+    const s = timeToMinutes(e.startTime);
+    const end = timeToMinutes(e.endTime);
+    busy.push(range ?? [s, end < s ? 24 * 60 : end]);
+  };
 
   // The home departure day of an overnight outbound (JFK 19:25 Jan 10 →
   // Paris 12:10 Jan 11). The first stay starts the day the flight LANDS, so
@@ -141,9 +177,9 @@ export function buildDayTransportContext(
     const t = homeLegToTransport(trip.origin?.outboundLeg);
     if (t?.departTime) {
       const departMins = timeToMinutes(t.departTime);
-      const fromShort = shortStation(t.fromStation) || 'the airport';
-      const toShort = shortStation(t.toStation) || city.name;
-      events.push({
+      const fromShort = shortStation(t.fromStation) || homeName || 'home';
+      const toShort = legEnd(t.toStation, 'flight', trip, 0, city.name);
+      push({
         id: newId(),
         title: `Head to ${fromShort}`,
         startTime: minutesToTime(Math.max(0, departMins - (BUFFER_MIN[t.mode] ?? 60))),
@@ -153,7 +189,7 @@ export function buildDayTransportContext(
         autoRole: 'in-head',
         notes: 'Allow 2h for check-in & security',
       });
-      events.push({
+      push({
         id: newId(),
         title: `Flight ${fromShort} → ${toShort}`,
         startTime: t.departTime,
@@ -164,7 +200,7 @@ export function buildDayTransportContext(
         notes: t.duration || undefined,
       });
     }
-    return { events, windowStart: 24 * 60, windowEnd: 0, homeSideOnly: true };
+    return { events, busy, windowStart: 24 * 60, windowEnd: 0, homeSideOnly: true };
   }
 
   // Resolve the effective inbound transport. For cities[0] (the first
@@ -172,21 +208,23 @@ export function buildDayTransportContext(
   // here — try that first, fall back to city.transportIn for legacy trips
   // that pre-date the home anchor work.
   let effectiveIn: Transport | null = null;
+  let inFromHome = false;
   if (cityIndex === 0) {
-    effectiveIn =
-      homeLegToTransport(trip.origin?.outboundLeg) ??
-      (city.transportIn?.arriveTime ? city.transportIn : null);
-  } else if (city.transportIn?.arriveTime) {
+    const home = homeLegToTransport(trip.origin?.outboundLeg);
+    inFromHome = !!home;
+    effectiveIn = home ?? (city.transportIn?.arriveTime ? city.transportIn : null);
+  } else if (city.transportIn?.arriveTime && !city.transportIn.unavailable) {
     effectiveIn = city.transportIn;
   }
 
   // Same for outbound: cities[last] uses the home return leg.
   let effectiveOut: Transport | null = null;
+  let outToHome = false;
   if (cityIndex === lastIndex) {
-    effectiveOut =
-      homeLegToTransport(trip.origin?.returnLeg) ??
-      (city.transportOut?.departTime ? city.transportOut : null);
-  } else if (city.transportOut?.departTime) {
+    const home = homeLegToTransport(trip.origin?.returnLeg);
+    outToHome = !!home;
+    effectiveOut = home ?? (city.transportOut?.departTime ? city.transportOut : null);
+  } else if (city.transportOut?.departTime && !city.transportOut.unavailable) {
     effectiveOut = city.transportOut;
   }
 
@@ -195,14 +233,39 @@ export function buildDayTransportContext(
   // day. For an overnight home flight (departDate one day before arrival)
   // those two blocks belong on the home card day (Phase 2) — only the
   // "Arrive at" marker renders here.
+  // An inter-city leg that arrives after midnight (Prague 16:36 → Budapest
+  // 00:29). Its travel day is still the city's first date — the traveller
+  // heads to the station and boards then — but they reach the city the next
+  // day: the "Arrive at" marker belongs on that day, and nothing in the
+  // city can be planned on the travel day itself. Before, the marker sat at
+  // 00:29 at the TOP of the travel day and activities in the new city opened
+  // from ~01:30 that morning, while the traveller was still in the old one.
+  const overnightIn = cityIndex > 0 && !inFromHome && arrivesNextDay(effectiveIn);
+  if (overnightIn && effectiveIn?.arriveTime && date === nextIsoDay(city.dates.arrival)) {
+    const t = effectiveIn;
+    const arrMins = timeToMinutes(t.arriveTime!);
+    const toShort = legEnd(t.toStation, t.mode, trip, cityIndex, city.name);
+    push({
+      id: newId(),
+      title: `Arrive at ${toShort}`,
+      startTime: t.arriveTime!,
+      endTime: minutesToTime(Math.min(arrMins + 15, 24 * 60)),
+      category: 'transport',
+      auto: true,
+      autoRole: 'in-arrive',
+    });
+    windowStart = Math.min(arrMins + POST_ARRIVAL_CUSHION, 24 * 60);
+  }
+
   if (isArrival && effectiveIn?.arriveTime) {
     const t = effectiveIn;
     const arrMins = timeToMinutes(t.arriveTime!);
     const departMins = t.departTime ? timeToMinutes(t.departTime) : null;
     const buffer = BUFFER_MIN[t.mode] ?? 60;
-    const fromShort =
-      shortStation(t.fromStation) || (t.mode === 'flight' ? 'the airport' : 'the station');
-    const toShort = shortStation(t.toStation) || city.name;
+    const fromShort = inFromHome
+      ? shortStation(t.fromStation) || homeName || 'home'
+      : legEnd(t.fromStation, t.mode, trip, cityIndex - 1, t.from);
+    const toShort = legEnd(t.toStation, t.mode, trip, cityIndex, city.name);
 
     // For the home outbound, only render head-to + flight when the
     // departDate is the same day as the arrival. Inter-city legs are
@@ -212,9 +275,13 @@ export function buildDayTransportContext(
         ? trip.origin?.outboundLeg?.departDate === date
         : true;
 
+    // Where the traveller is free again. Normally the landing time; for a leg
+    // that lands at an earlier clock time than it left (a short hop into an
+    // earlier time zone) the flight itself runs on past the landing time.
+    let travelEnd = arrMins;
     if (sameDayDeparture && departMins !== null) {
       const headStart = Math.max(0, departMins - buffer);
-      events.push({
+      push({
         id: newId(),
         title: `Head to ${fromShort}`,
         startTime: minutesToTime(headStart),
@@ -224,31 +291,45 @@ export function buildDayTransportContext(
         autoRole: 'in-head',
         notes: t.mode === 'flight' ? 'Allow 2h for check-in & security' : undefined,
       });
-      events.push({
-        id: newId(),
-        title: `${t.mode === 'flight' ? 'Flight' : t.mode === 'train' ? 'Train' : 'Bus'} ${fromShort} → ${toShort}`,
-        startTime: t.departTime!,
-        endTime: t.arriveTime!,
-        category: 'transport',
-        auto: true,
-        autoRole: 'in-travel',
-        notes: t.duration || undefined,
-      });
+      const dur = durationMinutes(t.duration);
+      // Lands "before" it left, the same day: a time-zone change, not an
+      // overnight. Occupies its flight time, not the rest of the day.
+      const sameDayEarlier = arrMins < departMins && dur !== null && departMins + dur < 24 * 60;
+      if (sameDayEarlier) travelEnd = departMins + dur;
+      push(
+        {
+          id: newId(),
+          title: `${travelWord(t.mode)} ${fromShort} → ${toShort}`,
+          startTime: t.departTime!,
+          endTime: t.arriveTime!,
+          category: 'transport',
+          auto: true,
+          autoRole: 'in-travel',
+          notes: t.duration || undefined,
+        },
+        sameDayEarlier ? [departMins, departMins + dur!] : undefined,
+      );
     }
 
-    events.push({
-      id: newId(),
-      title: `Arrive at ${toShort}`,
-      startTime: t.arriveTime!,
-      endTime: minutesToTime(Math.min(arrMins + 15, 24 * 60)),
-      category: 'transport',
-      auto: true,
-      autoRole: 'in-arrive',
-    });
+    if (overnightIn) {
+      // Arrives tomorrow (see overnightIn): the marker is on that day, and
+      // this one has no time left in the new city.
+      windowStart = 24 * 60;
+    } else {
+      push({
+        id: newId(),
+        title: `Arrive at ${toShort}`,
+        startTime: t.arriveTime!,
+        endTime: minutesToTime(Math.min(arrMins + 15, 24 * 60)),
+        category: 'transport',
+        auto: true,
+        autoRole: 'in-arrive',
+      });
 
-    // No activities/restaurants until the user has actually landed and
-    // cleared the airport.
-    windowStart = Math.min(arrMins + POST_ARRIVAL_CUSHION, 24 * 60);
+      // No activities/restaurants until the user has actually landed and
+      // cleared the airport.
+      windowStart = Math.min(Math.max(arrMins + POST_ARRIVAL_CUSHION, travelEnd + SLOT_BUFFER_MIN), 24 * 60);
+    }
   }
 
   // Outbound — two blocks ("Head to" + actual travel). Symmetric to the
@@ -259,12 +340,13 @@ export function buildDayTransportContext(
     const t = effectiveOut;
     const depMins = timeToMinutes(t.departTime!);
     const buffer = BUFFER_MIN[t.mode] ?? 60;
-    const fromShort =
-      shortStation(t.fromStation) || (t.mode === 'flight' ? 'the airport' : 'the station');
-    const toShort = shortStation(t.toStation) || (t.to ?? 'destination');
+    const fromShort = legEnd(t.fromStation, t.mode, trip, cityIndex, city.name);
+    const toShort = outToHome
+      ? shortStation(t.toStation) || trip.origin?.returnCity || homeName || 'home'
+      : legEnd(t.toStation, t.mode, trip, cityIndex + 1, t.to ?? 'destination');
     const headStart = Math.max(0, depMins - buffer);
 
-    events.push({
+    push({
       id: newId(),
       title: `Head to ${fromShort}`,
       startTime: minutesToTime(headStart),
@@ -276,9 +358,9 @@ export function buildDayTransportContext(
     });
 
     const endTime = t.arriveTime ?? minutesToTime(Math.min(depMins + 60, 24 * 60));
-    events.push({
+    push({
       id: newId(),
-      title: `${t.mode === 'flight' ? 'Flight' : t.mode === 'train' ? 'Train' : 'Bus'} ${fromShort} → ${toShort}`,
+      title: `${travelWord(t.mode)} ${fromShort} → ${toShort}`,
       startTime: t.departTime!,
       endTime,
       category: 'transport',
@@ -291,8 +373,13 @@ export function buildDayTransportContext(
     windowEnd = Math.max(0, headStart);
   }
 
-  events.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-  return { events, windowStart, windowEnd };
+  const order = events.map((e, i) => i).sort((a, b) => timeToMinutes(events[a].startTime) - timeToMinutes(events[b].startTime));
+  return {
+    events: order.map((i) => events[i]),
+    busy: order.map((i) => busy[i]),
+    windowStart,
+    windowEnd,
+  };
 }
 
 /* ──────────────────────────── Day planning ──────────────────────────── */
@@ -375,6 +462,53 @@ export const ACTIVITY_FALLBACK_MIN = {
   afternoon: 3 * 60,
   evening: 2 * 60,
 } as const;
+
+/**
+ * Latest a morning or afternoon stop may end — a sight of the day is not put
+ * at night (live: a walking tour at 20:15 on an arrival day, a market at
+ * 20:31). One longer than the afternoon allows may still run from its
+ * earliest start. Evening stops run to the end of the day.
+ */
+export const DAYTIME_END_MIN = 19 * 60 + 30;
+
+/** Latest end for a stop of `slot` that needs `durationMin`, inside a day ending at `dayEnd`. */
+export function slotLatestEnd(slot: 'morning' | 'afternoon' | 'evening', durationMin: number, dayEnd: number): number {
+  if (slot === 'evening') return dayEnd;
+  return Math.min(dayEnd, Math.max(DAYTIME_END_MIN, ACTIVITY_EARLIEST_MIN[slot] + durationMin));
+}
+
+/** "Dinner at L'Ami Jean", "Supper club": an outing that is the evening's meal by its name. */
+export const namesDinner = (name: string): boolean => /\b(dinner|supper)\b/i.test(name);
+
+/**
+ * A pick that suits breakfast: one the AI gave as breakfast, or an inexpensive
+ * café, bakery, crêperie or market it gave as "any" meal. A sit-down
+ * restaurant is not breakfast (live: Le Comptoir du Relais and Septime at
+ * 08:00).
+ */
+export function suitsBreakfast(r: Pick<RestaurantSuggestion, 'name' | 'cuisine' | 'priceRange' | 'mealType'>): boolean {
+  if (r.mealType === 'breakfast') return true;
+  if (r.mealType !== 'any' || (r.priceRange !== '$' && r.priceRange !== '$$')) return false;
+  return /caf[eé]|coffee|bakery|boulangerie|p[aâ]tisserie|brunch|breakfast|cr[eê]pe|bagel|croissant|\bdeli\b|\bdiner\b|market/i.test(`${r.name} ${r.cuisine}`);
+}
+
+const spotKey = (name: string) =>
+  name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’‘]/g, "'")
+    .trim()
+    .toLowerCase();
+
+/**
+ * Whether restaurant `name` is already one of the activities — "Dinner at
+ * L'Ami Jean" next to L'Ami Jean, "Marché des Enfants Rouges food stalls"
+ * next to the market — so it is not planned a second time as a meal.
+ */
+export function restaurantInActivities(name: string, activityNames: string[]): boolean {
+  const k = spotKey(name);
+  return k.length >= 4 && activityNames.some((a) => spotKey(a).includes(k));
+}
 
 /** One thing the planner is asked to place. Its duration is never reduced. */
 export type PlanItem = {
@@ -698,18 +832,17 @@ export function buildDefaultSchedule(
 
   const dayStart = Math.max(DAY_OPEN_MIN, ctx.windowStart);
   const dayEnd = Math.min(DAY_CLOSE_MIN, ctx.windowEnd);
-  const busyRanges = ctx.events.map(
-    (e): [number, number] => [timeToMinutes(e.startTime), timeToMinutes(e.endTime)],
-  );
+  const busyRanges = ctx.busy;
 
   const makers = new Map<string, (startMin: number, endMin: number) => ScheduledEvent>();
 
-  // Curated activities keep the 09:00–21:00 daytime window this path has
-  // always used; only the truncation is gone.
+  // Curated activities keep to the daytime, from 09:00; only the truncation
+  // is gone. "Dinner at …" is not a daytime activity: it is the dinner.
   const activityOpen = Math.max(dayStart, 9 * 60);
-  const activityClose = Math.min(dayEnd, 21 * 60);
+  const activityClose = Math.min(dayEnd, DAYTIME_END_MIN);
+  const outing = city.activities.find(namesDinner);
 
-  const sequence: PlanItem[] = city.activities.map((a, i) => {
+  const sequence: PlanItem[] = city.activities.filter((a) => !namesDinner(a)).map((a, i) => {
     const key = `activity-${i}`;
     makers.set(key, (startMin, endMin) => ({
       id: newId(),
@@ -727,9 +860,12 @@ export function buildDefaultSchedule(
   });
 
   // First curated restaurant is lunch, second is dinner — same intent as
-  // before, but each now lands anywhere inside its window.
+  // before, but each now lands anywhere inside its window. A restaurant an
+  // activity already is ("Dinner at L'Ami Jean") is not a meal as well, and
+  // a "Dinner at …" outing takes the dinner.
   const mealWindows = [MEAL_WINDOWS.lunch, MEAL_WINDOWS.dinner];
-  const flexible: PlanItem[] = city.restaurants.slice(0, 2).map((r, i) => {
+  const spots = city.restaurants.filter((r) => !restaurantInActivities(r.name, city.activities)).slice(0, outing ? 1 : 2);
+  const flexible: PlanItem[] = spots.map((r, i) => {
     const key = `restaurant-${i}`;
     const window = mealWindows[i];
     makers.set(key, (startMin, endMin) => ({
@@ -749,6 +885,23 @@ export function buildDefaultSchedule(
       idealStart: window.ideal,
     };
   });
+
+  if (outing) {
+    makers.set('outing', (startMin, endMin) => ({
+      id: newId(),
+      title: outing,
+      startTime: minutesToTime(startMin),
+      endTime: minutesToTime(endMin),
+      category: 'restaurant',
+    }));
+    flexible.push({
+      key: 'outing',
+      durationMin: MEAL_DURATION_MIN.dinner,
+      earliestStart: MEAL_WINDOWS.dinner.open,
+      latestEnd: Math.min(dayEnd, DAY_CLOSE_MIN),
+      idealStart: MEAL_WINDOWS.dinner.ideal,
+    });
+  }
 
   const plan = planDay({ dayStart, dayEnd, busyRanges, sequence, flexible });
 
@@ -849,18 +1002,25 @@ export function buildCityScheduleFromSuggestions(
   const dayCount = isLastCity ? stayDays + 1 : stayDays;
 
   type ActBucket = 'morning' | 'afternoon' | 'evening';
+  // "Dinner at …" is an evening whatever time of day it came with (a re-plan
+  // offers curated names as afternoons).
+  const timeOf = (s: ActivitySuggestion): ActBucket => (namesDinner(s.name) ? 'evening' : s.timeOfDay);
   const actBuckets: Record<ActBucket, ActivitySuggestion[]> = {
-    morning: activities.filter((s) => s.timeOfDay === 'morning'),
-    afternoon: activities.filter((s) => s.timeOfDay === 'afternoon'),
-    evening: activities.filter((s) => s.timeOfDay === 'evening'),
+    morning: activities.filter((s) => timeOf(s) === 'morning'),
+    afternoon: activities.filter((s) => timeOf(s) === 'afternoon'),
+    evening: activities.filter((s) => timeOf(s) === 'evening'),
   };
 
+  // A restaurant one of the activities already is ("Dinner at L'Ami Jean")
+  // is not planned again as a meal.
+  const activityNames = activities.map((a) => a.name);
+  const meals = restaurants.filter((r) => !restaurantInActivities(r.name, activityNames));
   type RestBucket = 'breakfast' | 'lunch' | 'dinner' | 'any';
   const restBuckets: Record<RestBucket, RestaurantSuggestion[]> = {
-    breakfast: restaurants.filter((r) => r.mealType === 'breakfast'),
-    lunch: restaurants.filter((r) => r.mealType === 'lunch'),
-    dinner: restaurants.filter((r) => r.mealType === 'dinner'),
-    any: restaurants.filter((r) => r.mealType === 'any'),
+    breakfast: meals.filter((r) => r.mealType === 'breakfast'),
+    lunch: meals.filter((r) => r.mealType === 'lunch'),
+    dinner: meals.filter((r) => r.mealType === 'dinner'),
+    any: meals.filter((r) => r.mealType === 'any'),
   };
 
   /**
@@ -872,10 +1032,12 @@ export function buildCityScheduleFromSuggestions(
     preferred: Exclude<RestBucket, 'any'>,
     near: Located | null = null,
   ): { suggestion: RestaurantSuggestion; bucket: RestBucket } | undefined => {
+    // Breakfast takes an "any" pick only when it suits breakfast.
+    const anyFits = (r: RestaurantSuggestion) => preferred !== 'breakfast' || suitsBreakfast(r);
     if (hasCoords(near)) {
       const pool: Array<{ suggestion: RestaurantSuggestion; bucket: RestBucket }> = [
         ...restBuckets[preferred].map((r) => ({ suggestion: r, bucket: preferred as RestBucket })),
-        ...restBuckets.any.map((r) => ({ suggestion: r, bucket: 'any' as RestBucket })),
+        ...restBuckets.any.filter(anyFits).map((r) => ({ suggestion: r, bucket: 'any' as RestBucket })),
       ];
       const at = nearestIndex(near, pool.map((c) => c.suggestion));
       if (at >= 0) {
@@ -887,8 +1049,8 @@ export function buildCityScheduleFromSuggestions(
     }
     const fromPreferred = restBuckets[preferred].shift();
     if (fromPreferred) return { suggestion: fromPreferred, bucket: preferred };
-    const fromAny = restBuckets.any.shift();
-    if (fromAny) return { suggestion: fromAny, bucket: 'any' };
+    const at = restBuckets.any.findIndex(anyFits);
+    if (at >= 0) return { suggestion: restBuckets.any.splice(at, 1)[0], bucket: 'any' };
     return undefined;
   };
 
@@ -937,9 +1099,7 @@ export function buildCityScheduleFromSuggestions(
 
     const dayStart = Math.max(DAY_OPEN_MIN, transportCtx.windowStart);
     const dayEnd = Math.min(DAY_CLOSE_MIN, transportCtx.windowEnd);
-    const busyRanges = transportCtx.events.map(
-      (e): [number, number] => [timeToMinutes(e.startTime), timeToMinutes(e.endTime)],
-    );
+    const busyRanges = transportCtx.busy;
 
     const makers = new Map<string, (startMin: number, endMin: number) => ScheduledEvent>();
     /** Everything handed to the planner this day, so drops can be put back. */
@@ -971,7 +1131,10 @@ export function buildCityScheduleFromSuggestions(
     advance(afternoon);
     const evening = takeActivity('evening', anchor);
     advance(evening);
-    const dinner = takeRestaurant('dinner', anchor);
+    // An evening food outing — a food tour, "Dinner at …" — IS the day's
+    // dinner (live: The Ledbury at 18:00, then a food tour at 20:45).
+    const eveningMeal = !!evening && (evening.category === 'food' || namesDinner(evening.name));
+    const dinner = eveningMeal ? undefined : takeRestaurant('dinner', anchor);
     const chosenActivities: Record<ActBucket, ActivitySuggestion | undefined> = { morning, afternoon, evening };
     const chosenMeals: Record<'breakfast' | 'lunch' | 'dinner', ReturnType<typeof takeRestaurant>> = {
       breakfast,
@@ -992,19 +1155,20 @@ export function buildCityScheduleFromSuggestions(
         startTime: minutesToTime(startMin),
         endTime: minutesToTime(endMin),
         category:
-          suggestion.category === 'food' || suggestion.category === 'nightlife'
+          suggestion.category === 'food' || suggestion.category === 'nightlife' || namesDinner(suggestion.name)
             ? 'restaurant'
             : 'activity',
         notes: suggestion.reason,
         ...coordsOf(suggestion),
       }));
+      const durationMin = Number.isFinite(suggestion.durationHours)
+        ? plannedDuration(suggestion.durationHours * 60)
+        : ACTIVITY_FALLBACK_MIN[bucket];
       sequence.push({
         key,
-        durationMin: Number.isFinite(suggestion.durationHours)
-          ? plannedDuration(suggestion.durationHours * 60)
-          : ACTIVITY_FALLBACK_MIN[bucket],
+        durationMin,
         earliestStart: ACTIVITY_EARLIEST_MIN[bucket],
-        latestEnd: dayEnd,
+        latestEnd: slotLatestEnd(bucket, durationMin, dayEnd),
       });
     });
 

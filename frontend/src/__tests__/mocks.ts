@@ -2,10 +2,11 @@
 
 // Mock next/navigation
 export const mockPush = jest.fn();
+export const mockReplace = jest.fn();
 export const mockSearchParams = new URLSearchParams();
 
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush, replace: jest.fn(), back: jest.fn() }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace, back: jest.fn() }),
   useSearchParams: () => mockSearchParams,
   useParams: () => ({ tripId: 'trip-test-123' }),
   usePathname: () => '/test',
@@ -53,7 +54,7 @@ jest.mock('framer-motion', () => {
     const { axis, ...domProps } = rest;
     return React.createElement(Tag, { ...domProps, ref }, children);
   });
-  const ReorderItem = React.forwardRef(({ children, as: Tag = 'div', value, dragListener, whileDrag, ...rest }: any, ref: any) => {
+  const ReorderItem = React.forwardRef(({ children, as: Tag = 'div', value, dragListener, dragControls, drag, onDragEnd, whileDrag, variants, ...rest }: any, ref: any) => {
     const { transition, ...domProps } = rest;
     return React.createElement(Tag, { ...domProps, ref }, children);
   });
@@ -63,7 +64,11 @@ jest.mock('framer-motion', () => {
     AnimatePresence: ({ children }: any) => children,
     Reorder: { Group: ReorderGroup, Item: ReorderItem },
     useAnimation: () => ({ start: jest.fn() }),
+    // Animations finish at once, so code awaiting one carries straight on.
+    useAnimationControls: () => ({ start: jest.fn(() => Promise.resolve()), set: jest.fn(), stop: jest.fn() }),
+    useReducedMotion: () => false,
     useMotionValue: (val: number) => ({ get: () => val, set: jest.fn() }),
+    useDragControls: () => ({ start: jest.fn() }),
   };
 });
 
@@ -114,6 +119,9 @@ jest.mock('@/hooks/useCanvasRealtime', () => ({
     broadcastRoleChange: jest.fn(),
     cursorEvent: null,
     broadcastCursor: jest.fn(),
+    suggestionsTick: 0,
+    suggestionDecision: null,
+    broadcastSuggestionsChanged: jest.fn(),
   }),
 }));
 
@@ -121,8 +129,10 @@ jest.mock('@/hooks/useCanvasRealtime', () => ({
 jest.mock('@/lib/api', () => ({
   searchFlights: jest.fn().mockResolvedValue([]),
   searchHotels: jest.fn().mockResolvedValue([]),
+  fetchHotelPhotos: jest.fn().mockResolvedValue([]),
   searchTrains: jest.fn().mockResolvedValue([]),
   optimizeTrip: jest.fn().mockResolvedValue(null),
+  getOptimizeProgress: jest.fn().mockResolvedValue(null),
   compareLeg: jest.fn().mockResolvedValue(null),
   suggestDestinations: jest.fn().mockResolvedValue([]),
   getShareLink: jest.fn().mockResolvedValue({ mode: 'view', token: 'tok', url: 'https://voyza.test/canvas/trip-1?share=tok' }),
@@ -138,6 +148,7 @@ jest.mock('@/lib/api', () => ({
   reviseDestinations: jest.fn().mockResolvedValue({ type: 'answer', reply: '', aboutDestinations: false }),
   editPlan: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
   planChat: jest.fn().mockResolvedValue({ type: 'answer', reply: 'Done' }),
+  fetchTripWeather: jest.fn().mockResolvedValue(null),
   planChatSuggestions: jest.fn().mockResolvedValue({
     suggestions: ['Why this order of cities?', 'Make Barcelona cheaper', 'Pin Rome to dates', 'Add a day'],
   }),
@@ -150,6 +161,9 @@ jest.mock('@/lib/api', () => ({
   saveTrip: jest.fn().mockResolvedValue({ tripId: 'trip-123', trip: {} }),
   getTrips: jest.fn().mockResolvedValue({ trips: [] }),
   getTrip: jest.fn().mockResolvedValue({ trip: {} }),
+  fetchRailDemand: jest.fn().mockResolvedValue({ tripsWithLegs: 0, tripsWithTrain: 0, percent: null, asOf: '' }),
+  // A view-only share link opened signed out; by default the link isn't one.
+  fetchSharedTrip: jest.fn().mockRejectedValue(Object.assign(new Error('not view-only'), { status: 404 })),
   deleteTrip: jest.fn().mockResolvedValue({ success: true }),
   getNotifications: jest.fn().mockResolvedValue({ notifications: [], unreadCount: 0 }),
   markNotificationRead: jest.fn().mockResolvedValue({ notification: {} }),

@@ -177,7 +177,9 @@ describe('geo-aware day scheduling', () => {
     // Golden output captured from the scheduler on origin/dev before this
     // change, for the same picks over a three-night stay.
     const acts = [act('A', 'morning', undefined, 3), act('B', 'afternoon', undefined, 4), act('C', 'afternoon', undefined, 2), act('D', 'evening', undefined, 2), act('E', 'morning', undefined, 4), act('F', 'evening', undefined, 1)];
-    const rests = [meal('L1', 'lunch'), meal('L2', 'lunch'), meal('D1', 'dinner'), meal('X', 'any'), meal('B1', 'breakfast')];
+    // X is a café: an "any" pick fills breakfast only when it suits one
+    // (scheduleMealQuirks.test.ts), and this golden has X at breakfast.
+    const rests = [meal('L1', 'lunch'), meal('L2', 'lunch'), meal('D1', 'dinner'), { ...meal('X', 'any'), cuisine: 'Café' }, meal('B1', 'breakfast')];
     const city = cityOf({ dates: { arrival: '2026-06-15', departure: '2026-06-18' } });
     const res = buildCityScheduleFromSuggestions(acts, rests, city, 0, tripOf(city));
     const shape = Object.entries(res.schedule).map(([d, es]) => [d, es.map((e) => [titles([e])[0], e.startTime, e.endTime])]);

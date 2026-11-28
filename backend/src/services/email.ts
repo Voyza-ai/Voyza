@@ -91,6 +91,9 @@ function shell(title: string, bodyHtml: string, unsubscribeUrl?: string): string
   </div></body></html>`;
 }
 
+const esc = (v: string) =>
+  v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 const btn = (href: string, label: string) =>
   `<a href="${href}" style="display:inline-block;margin-top:12px;padding:10px 18px;background:${BLUE};color:#fff;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600">${label}</a>`;
 
@@ -140,18 +143,37 @@ export const emailTemplates = {
     };
   },
 
-  canvasInvite(inviterEmail: string | null, tripTitle: string | null, role: string, link: string, unsubscribeUrl?: string) {
-    const who = inviterEmail ?? 'A BlueMurr user';
-    const trip = tripTitle ? `"${tripTitle}"` : 'a trip';
+  canvasInvite(
+    inviterEmail: string | null,
+    tripTitle: string | null,
+    role: string,
+    link: string,
+    unsubscribeUrl?: string,
+    inviterName?: string | null,
+  ) {
+    // The trip title and the inviter's name are user-typed: escaped, or a
+    // title like "<a href=…>" would become a link in someone else's inbox.
+    const name = inviterName?.trim() ? esc(inviterName.trim()) : null;
+    const who = name ?? (inviterEmail ? esc(inviterEmail) : 'A BlueMurr user');
+    const whoPlain = inviterName?.trim() || inviterEmail || 'A BlueMurr user';
+    const trip = tripTitle ? `<strong>${esc(tripTitle)}</strong>` : 'a trip';
+    const tripPlain = tripTitle ? `"${tripTitle}"` : 'a trip';
+    const what: Record<string, string> = {
+      editor: 'As an editor you can change the trip with them: add or move cities, swap transport, and plan the days.',
+      suggester: "As a suggester you can propose changes, and they decide what goes in.",
+      viewer: 'You can view the itinerary and follow along as it changes.',
+    };
+    const roleWord = role === 'editor' ? 'an editor' : role === 'suggester' ? 'a suggester' : 'a viewer';
     return {
-      subject: `${who} invited you to plan ${trip} on BlueMurr`,
+      subject: `${whoPlain} invited you to ${tripPlain} on BlueMurr`,
       html: shell(
-        "You're invited to plan a trip",
-        `<p><strong>${who}</strong> invited you to collaborate on ${trip} as
-         <strong>${role}</strong>.</p>
-         <p>Open the trip canvas to join — you can edit, suggest, and plan
-         together in real time.</p>
-         ${btn(link, 'Open the trip')}`,
+        "You're invited to a trip",
+        `<p><strong>${who}</strong>${name && inviterEmail ? ` (${esc(inviterEmail)})` : ''} invited you to
+         ${trip} as ${roleWord}.</p>
+         <p>${what[role] ?? what.viewer}</p>
+         ${btn(link, 'Open the trip')}
+         <p style="margin-top:16px;font-size:12px;color:#6b7280">New to BlueMurr? You'll be asked to
+         sign in or create a free account first, then the trip opens.</p>`,
         unsubscribeUrl,
       ),
     };

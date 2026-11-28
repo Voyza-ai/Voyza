@@ -557,6 +557,52 @@ export function originAirportsForCity(
   return originAirportsLocally(query, max, context);
 }
 
+/** Hot-set place id → the codes that point at it (its airports and, for a metro, its city code). */
+let codesByPlace: Map<string, string[]> | null = null;
+
+/**
+ * The code a flight to or from `name` is listed under, from the hot set alone:
+ * the metro code where the city has one (LON, PAR, TYO — the code its flights
+ * are searched with), else its leading airport (BCN, AMS). `country` (a name
+ * or ISO code) picks between same-named places — Paris, France over Paris,
+ * Texas. Null when the hot set does not know the city; it ships ~390 places,
+ * so a caller needs its own fallback.
+ *
+ * A metro code is told from an airport by the data: it points at the place
+ * but is not one of the place's own airports.
+ */
+export function cityFlightCodeLocally(name: string | null | undefined, country?: string | null): string | null {
+  const raw = (name ?? '').trim();
+  if (!raw) return null;
+  if (!codesByPlace) {
+    codesByPlace = new Map();
+    for (const [code, id] of Object.entries(set.iata)) {
+      const list = codesByPlace.get(id) ?? [];
+      list.push(code);
+      codesByPlace.set(id, list);
+    }
+  }
+  const want = (country ?? '').trim().toLowerCase();
+  for (const key of keysForQuery(raw)) {
+    const entry = set.exact[key];
+    if (!entry) continue;
+    const ids = entry.ids.filter((id) => placeOf(id) !== null);
+    const inCountry = want
+      ? ids.find((id) => {
+          const c = placeOf(id)!.c.toUpperCase();
+          return c.toLowerCase() === want || (set.countryNames[c] ?? '').toLowerCase() === want;
+        })
+      : undefined;
+    const id = inCountry ?? ids[0];
+    if (!id) return null;
+    const place = placeOf(id)!;
+    const own = new Set(place.ap.map(([code]) => code));
+    const metro = (codesByPlace.get(id) ?? []).find((code) => !own.has(code));
+    return metro ?? place.ap[0]?.[0] ?? null;
+  }
+  return null;
+}
+
 /**
  * GeoNames credit for the data behind every answer in this module.
  *

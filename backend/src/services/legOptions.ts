@@ -7,16 +7,18 @@
  * applied and present real alternatives in the proposal card, instead
  * of just silently storing a constraint to honor "later".
  *
- * Returns sorted-by-price options with priceDelta against the user's
+ * Returns options cheapest first (long journeys last) with priceDelta against the user's
  * current transport so the UI can render the savings at a glance.
  */
 
 import { searchFlights, getIataCode, FlightOffer } from './flights';
 import { sameAirportArea } from './location/sameAirportArea';
 import { formatDurationMinutes } from '../utils/duration';
-import { searchTrains, TrainOffer } from './trains';
+import { searchTrains, TrainOffer, type RailPriceSource } from './trains';
+import { flightDoorToDoor, trainCo2, trainDoorToDoor, type Co2Figure, type DoorToDoor } from './legFacts';
 import { logger } from '../utils/logger';
 import { getCityCountry } from '../data/cityCountries';
+import { comparePick, longJourneyLimit, isLongMinutes } from './longJourney';
 
 export type TimeWindow = {
   earliestDepart?: string | null; // HH:MM
@@ -42,7 +44,23 @@ export type LegOption = {
   bookingUrl?: string | null;
   /** Delta vs the user's current transport price for this leg ($). */
   priceDelta: number;
+  /** City centre to city centre (legFacts). Absent when it can't be built. */
+  doorToDoor?: DoorToDoor | null;
+  /** Party CO₂ — Duffel's for a flight, our estimate for a train. */
+  co2?: Co2Figure | null;
+  /** Trains only: where the fare came from. */
+  priceSource?: RailPriceSource;
 };
+
+/** Only the facts that could be built — no `null` keys on the wire. */
+function withFacts(f: { doorToDoor?: DoorToDoor | null; co2?: Co2Figure | null }): Partial<LegOption> {
+  return {
+    ...(f.doorToDoor ? { doorToDoor: f.doorToDoor } : {}),
+    ...(f.co2 ? { co2: f.co2 } : {}),
+  };
+}
+
+type LegEnds = { from: { city: string; country?: string }; to: { city: string; country?: string }; travelers: number };
 
 type SearchParams = {
   from: string;
@@ -201,7 +219,7 @@ function matchesWindow(
 }
 
 /** Map a FlightOffer into the unified LegOption shape. */
-function flightToOption(offer: FlightOffer, currentPrice: number): LegOption {
+function flightToOption(offer: FlightOffer, currentPrice: number, ends?: LegEnds): LegOption {
   const departTime = formatHHMM(offer.departure);
   const arriveTime = formatHHMM(offer.arrival);
   // Duffel offer ids look like "off_..." — we don't expose them, but we
@@ -222,11 +240,23 @@ function flightToOption(offer: FlightOffer, currentPrice: number): LegOption {
     stops: offer.stops,
     bookingUrl: offer.bookingUrl,
     priceDelta: Math.round((offer.price - currentPrice) * 100) / 100,
+    ...(offer.co2 ? { co2: offer.co2 } : {}),
+    ...withFacts({
+      doorToDoor: ends
+        ? flightDoorToDoor({
+            from: ends.from,
+            to: ends.to,
+            originAirport: offer.originAirport,
+            destinationAirport: offer.destinationAirport,
+            flightMinutes: offer.durationMinutes,
+          })
+        : null,
+    }),
   };
 }
 
 /** Map a TrainOffer into the unified LegOption shape. */
-function trainToOption(offer: TrainOffer, currentPrice: number): LegOption {
+function trainToOption(offer: TrainOffer, currentPrice: number, ends?: LegEnds): LegOption {
   const departTime = formatHHMM(offer.departure);
   const arriveTime = formatHHMM(offer.arrival);
   return {
@@ -244,6 +274,11 @@ function trainToOption(offer: TrainOffer, currentPrice: number): LegOption {
       typeof offer.price === 'number'
         ? Math.round((offer.price - currentPrice) * 100) / 100
         : 0,
+    ...(offer.priceSource ? { priceSource: offer.priceSource } : {}),
+    ...withFacts({
+      doorToDoor: ends ? trainDoorToDoor(offer.durationMinutes) : null,
+      co2: ends ? trainCo2(ends.from, ends.to, ends.travelers) : null,
+    }),
   };
 }
 
@@ -352,9 +387,14 @@ export async function searchLegOptions(
 
   // Unified list — both shapes mapped to LegOption so the frontend
   // renders them identically (only the `mode` field distinguishes).
+  const ends: LegEnds = {
+    from: { city: from, country: fromCountry ?? getCityCountry(from) },
+    to: { city: to, country: toCountry ?? getCityCountry(to) },
+    travelers,
+  };
   const allOptions: LegOption[] = [
-    ...flights.map((f) => flightToOption(f, currentPrice)),
-    ...trains.map((t) => trainToOption(t, currentPrice)),
+    ...flights.map((f) => flightToOption(f, currentPrice, ends)),
+    ...trains.map((t) => trainToOption(t, currentPrice, ends)),
   ];
 
   const windowActive = !!(
@@ -369,20 +409,65 @@ export async function searchLegOptions(
     ? allOptions.filter((o) => matchesWindow(o.departTime, o.arriveTime, window))
     : allOptions;
 
-  // Sort cheapest-first so the default-selected option in the UI
-  // maximizes savings. Options with price=0 (data gap) go to the end
-  // rather than misleading the user into thinking the train is free.
-  matched.sort((a, b) => {
-    const pa = a.price || Infinity;
-    const pb = b.price || Infinity;
-    return pa - pb;
-  });
-
-  const options = matched.slice(0, limit);
+  const options = orderLegOptions(matched, limit);
 
   return {
     options,
     hasMatches: options.length > 0,
     windowFilteredAll: windowActive && allOptions.length > 0 && options.length === 0,
   };
+}
+
+/**
+ * The order a leg card shows its options in, cut to `limit`. options[0] is
+ * what a new plan's card shows, so it has to be what compareLeg scored the
+ * leg with, or the card and the trip total disagree.
+ *
+ * Cheapest first, long journeys (longJourney.ts) after every sensible one,
+ * unpriced options (null / 0) last within their group. Two rules on top:
+ *
+ * 1. A FLIGHT is long against the fastest FLIGHT, a TRAIN against the fastest
+ *    TRAIN — never across modes. That is compareLeg's own rule
+ *    (cheapestSensible over each mode). Judging both modes together made Vienna → Munich's
+ *    4h03m ÖBB train ($56) "long" next to a 1h flight (limit 4h00m): it
+ *    sorted behind four $364 flights, fell off the top 4, and the card
+ *    showed the flight while the optimizer had picked the route on the train.
+ *    The rule exists to bury 22h 50m connecting itineraries, which are
+ *    flights; a 4h train against a 1h flight is the comparison the product
+ *    is for.
+ * 2. Both modes stay on the card. When the cut would drop every option of a
+ *    mode that has a priced one, that mode's best takes the last slot, so a
+ *    leg never shows "no train" (or no flight) for a train it actually found.
+ */
+export function orderLegOptions(options: LegOption[], limit: number): LegOption[] {
+  const flightLimit = longJourneyLimit(
+    options.filter((o) => o.mode === 'flight').map((o) => o.durationMinutes),
+  );
+  // Trains the same way, against the fastest TRAIN — never against a flight
+  // (rule 1). Buries a 39h 12m Munich → Prague connection behind the 5h 37m
+  // train, as compareLeg does.
+  const trainLimit = longJourneyLimit(
+    options.filter((o) => o.mode === 'train').map((o) => o.durationMinutes),
+  );
+  const rank = (o: LegOption) =>
+    isLongMinutes(o.durationMinutes, o.mode === 'flight' ? flightLimit : trainLimit) ? 1 : 0;
+  const price = (o: LegOption) =>
+    typeof o.price === 'number' && o.price > 0 ? o.price : Infinity;
+  // Within a group: priced first, daytime before small hours (00:00–04:59),
+  // cheapest first (longJourney.ts comparePick).
+  const sorted = options
+    .map((o, i) => ({ o, i }))
+    .sort((a, b) => rank(a.o) - rank(b.o) || comparePick(a.o, b.o) || a.i - b.i)
+    .map((x) => x.o);
+
+  const top = sorted.slice(0, Math.max(0, limit));
+  if (limit < 2) return top;
+  for (const mode of ['train', 'flight'] as const) {
+    if (top.some((o) => o.mode === mode)) continue;
+    const best = sorted.find((o) => o.mode === mode && price(o) < Infinity);
+    if (!best) continue;
+    if (top.length < limit) top.push(best);
+    else top[top.length - 1] = best;
+  }
+  return top;
 }

@@ -83,6 +83,11 @@ export default function SuggestionsPanel({
                       : s.type === 'edit'
                         ? 'Proposed changes'
                         : 'Reaction'}
+                  {s.payload?.author && (
+                    <span className="text-gray-400 font-normal" data-testid="suggestion-author">
+                      {' '}by {s.payload.author}
+                    </span>
+                  )}
                 </span>
               </div>
 

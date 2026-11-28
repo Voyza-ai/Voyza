@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Sparkles, Check, X, Clock, Plane, TrainFront, ArrowRight } from 'lucide-react';
+import { Send, Sparkles, Check, X, Clock, Plane, TrainFront, ArrowRight, PanelRightClose } from 'lucide-react';
 import { Trip, Transport } from '@/lib/types';
 import {
   planChat,
@@ -10,15 +10,24 @@ import {
   ChatProposal,
   ChatTurn,
   CityEditProposal,
+  LegChoice,
   LegOption,
   LegRefresh,
   ModeComparison,
+  TransportChangeProposal,
 } from '@/lib/api';
 import { useTripStore, requestPicksForAddedCity } from '@/store/tripStore';
 import { displayAmount } from '@/lib/tripTotals';
 import { applyCityEdit, cityEditDiff, type CityEditRow } from '@/lib/cityEdit';
+import {
+  applyLegOptions,
+  applyTransportChange,
+  transportChangeApplies,
+  transportChangeTotals,
+} from '@/lib/transportChange';
 import { getCityColor } from '@/lib/cityColors';
 import { nightsBetween } from '@/lib/hotelScore';
+import { track } from '@/lib/track';
 
 type Message = {
   id: number;
@@ -26,8 +35,12 @@ type Message = {
   content: string;
   /** Present on AI messages that carry a proposal card (date_shift or city_edit). */
   proposal?: ChatProposal;
-  /** UI state for proposal cards so Accept/Reject hide the buttons. */
-  proposalState?: 'pending' | 'accepted' | 'rejected';
+  /**
+   * UI state for proposal cards so Accept/Reject hide the buttons.
+   * 'outdated': Accept found the leg changed since the proposal was priced,
+   * so nothing was applied.
+   */
+  proposalState?: 'pending' | 'accepted' | 'rejected' | 'outdated';
   /** Present on AI messages that carry an inline flight-vs-train comparison. */
   comparison?: ModeComparison;
   /**
@@ -43,14 +56,25 @@ type Message = {
  * baseline is the optimizer's: the cities in the order they were given
  * (optimizer.ts savingsVsNaive), not a "most common routing".
  */
-function messageText(m: Message, priceMode: 'total' | 'perPerson', travelers: number): string {
+function messageText(m: Message, priceMode: 'total' | 'perPerson', trip: Trip): string {
   if (!m.intro) return m.content;
+  const travelers = trip.travelers;
+  // The greeting describes the trip as it is NOW: it used to keep the count
+  // and saving from when the chat opened, so after a city was removed (here
+  // or by a collaborator) it still said "this 4-city trip … save you $X".
+  const intro =
+    m.intro.kind === 'greeting' ? { ...m.intro, cities: trip.cities.length, savings: trip.savings ?? 0 } : m.intro;
   const perPerson = priceMode === 'perPerson' && travelers > 1;
-  const amount = `$${displayAmount(m.intro.savings, priceMode, travelers).toLocaleString()}${perPerson ? ' per person' : ''}`;
-  if (m.intro.kind === 'shiftTip') return `${m.intro.text} would save about ${amount}.`;
-  return m.intro.savings > 0
-    ? `I built this ${m.intro.cities}-city trip to save you ${amount} vs your original city order. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`
-    : `You're working on a ${m.intro.cities}-city trip. Ask me anything — swap transports, shift dates, rework a city, or ask why things are ordered this way.`;
+  const amount = `$${displayAmount(intro.savings, priceMode, travelers).toLocaleString()}${perPerson ? ' per person' : ''}`;
+  if (intro.kind === 'shiftTip') return `${intro.text} would save about ${amount}.`;
+  return intro.savings > 0
+    ? `I built this ${intro.cities}-city trip to save you ${amount} vs your original city order. Ask me anything — pin cities to specific dates, set travel-time constraints, or ask why I ordered things this way.`
+    : `You're working on a ${intro.cities}-city trip. Ask me anything — swap transports, shift dates, rework a city, or ask why things are ordered this way.`;
+}
+
+/** The date-shift tip goes once the trip no longer offers it (the stops were rearranged). */
+function isStale(m: Message, trip: Trip): boolean {
+  return m.intro?.kind === 'shiftTip' && !(trip.dateShiftSuggestion && trip.dateShiftSuggestion.savings > 0);
 }
 
 type AIChatPanelProps = {
@@ -68,6 +92,8 @@ type AIChatPanelProps = {
    * passes a reader over its live local state.
    */
   getLatestTrip?: () => Trip | null;
+  /** Shows a hide button in the header (the page then offers a tab to bring it back). */
+  onHide?: () => void;
 };
 
 /**
@@ -254,7 +280,7 @@ function applyLegRefreshToTrip(trip: Trip, refresh: LegRefresh): Trip {
   } as Trip;
 }
 
-export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AIChatPanelProps) {
+export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip, onHide }: AIChatPanelProps) {
   const setTrip = useTripStore((s) => s.setTrip);
 
   // Host-provided sinks with trip-store defaults — the results page uses
@@ -354,15 +380,17 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     // did with it: left out, the model saw "swap Venice for Milan" with no
     // answer, then the next request — two user turns in a row — and redid
     // the first one (re-proposed Milan for "replace Venice with X").
-    const history: ChatTurn[] = messages.map((m) => {
-      let content = messageText(m, priceMode, trip.travelers);
+    const history: ChatTurn[] = messages.filter((m) => !isStale(m, trip)).map((m) => {
+      let content = messageText(m, priceMode, trip);
       if (m.proposal) {
         const outcome =
           m.proposalState === 'accepted'
             ? 'The user ACCEPTED this change; it is applied.'
             : m.proposalState === 'rejected'
               ? 'The user REJECTED this change; the trip is unchanged.'
-              : 'The user has not accepted this change yet; the trip is unchanged.';
+              : m.proposalState === 'outdated'
+                ? 'The trip changed before the user accepted, so this was NOT applied; the trip is unchanged.'
+                : 'The user has not accepted this change yet; the trip is unchanged.';
         content = `${content} [${outcome}]`;
       }
       return { role: m.role === 'user' ? 'user' : 'assistant', content };
@@ -371,9 +399,14 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
+    track('ai_chat_sent', { turn: messages.filter((m) => m.role === 'user').length + 1 });
 
     try {
-      const result = await planChat({ message: trimmed, currentTrip: trip, history });
+      const result = await planChat({ message: trimmed, currentTrip: trip, history, priceMode });
+      track('ai_chat_answered', {
+        type: result.type,
+        proposal: result.type === 'proposal' ? (result.proposal as any)?.kind ?? null : null,
+      });
 
       if (result.type === 'leg_refresh') {
         // The chat wants to update the transport card directly — no inline
@@ -382,6 +415,19 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
         const currentTrip = latestTrip();
         if (currentTrip) {
           applyTrip(applyLegRefreshToTrip(currentTrip, result.refresh));
+        }
+        setMessages((prev) => [
+          ...prev,
+          { id: idRef.current++, role: 'ai', content: result.reply },
+        ]);
+      } else if (result.type === 'leg_options') {
+        // Options the user asked to SEE for a leg (a home flight included):
+        // they go on that leg's card, first, and nothing else changes — the
+        // selection and the total stay as they are.
+        const currentTrip = latestTrip();
+        if (currentTrip) {
+          const next = applyLegOptions(currentTrip, result.legOptions);
+          if (next !== currentTrip) applyTrip(next);
         }
         setMessages((prev) => [
           ...prev,
@@ -442,6 +488,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
     // updated the page that hosts this panel mid-render.
     const msg = messages.find((m) => m.id === messageId);
     if (!msg?.proposal || msg.proposalState !== 'pending') return;
+    track('ai_proposal_decided', { kind: msg.proposal.kind, decision: 'accepted' });
     if (msg.proposal.kind === 'city_edit') {
       // Built on the trip as it is NOW (picks may have landed since the card
       // appeared); the priced pieces are the proposal's.
@@ -466,6 +513,23 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
         // A saved trip's edit reaches the database through the results
         // page's autosave (useSavedTripAutosave), as do its picks landing.
       }
+    } else if (msg.proposal.kind === 'transport_change') {
+      // Applied to the trip as it is NOW, and only if the leg still has the
+      // option the change was priced against: the card's "before → after"
+      // total is then exactly what the header does.
+      const current = latestTrip() ?? trip;
+      if (!transportChangeApplies(current, msg.proposal)) {
+        setMessages((prev) => [
+          ...prev.map((m) => (m.id === messageId ? { ...m, proposalState: 'outdated' as const } : m)),
+          {
+            id: idRef.current++,
+            role: 'ai' as const,
+            content: 'That leg changed since I proposed this, so I didn\'t apply it — your trip is unchanged. Ask me again and I\'ll price it against what you have now.',
+          },
+        ]);
+        return;
+      }
+      applyTrip(applyTransportChange(current, msg.proposal));
     } else {
       applyTrip(msg.proposal.proposedTrip as Trip);
     }
@@ -475,6 +539,8 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
   };
 
   const rejectProposal = (messageId: number) => {
+    const msg = messages.find((m) => m.id === messageId);
+    if (msg?.proposal) track('ai_proposal_decided', { kind: msg.proposal.kind, decision: 'rejected' });
     setMessages((prev) =>
       prev.map((m) =>
         m.id === messageId ? { ...m, proposalState: 'rejected' } : m,
@@ -499,10 +565,21 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
         >
           <Sparkles size={14} className="text-white" />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <div className="text-white text-sm font-medium leading-tight">BlueMurr AI</div>
           <div className="text-white/60 text-[11px]">Tweak your trip in plain English</div>
         </div>
+        {onHide && (
+          <button
+            type="button"
+            onClick={onHide}
+            aria-label="Hide BlueMurr AI"
+            title="Hide"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/15 transition-colors"
+          >
+            <PanelRightClose size={16} />
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -512,7 +589,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
         style={{ scrollbarWidth: 'none' }}
       >
         <AnimatePresence initial={false}>
-          {messages.map((msg) => (
+          {messages.filter((m) => !isStale(m, trip)).map((msg) => (
             <motion.div
               key={msg.id}
               initial={{ opacity: 0, y: 8 }}
@@ -529,7 +606,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
                   border: msg.role === 'user' ? '1px solid rgba(46,107,196,0.2)' : '1px solid rgba(0,0,0,0.06)',
                 }}
               >
-                {messageText(msg, priceMode, trip.travelers)}
+                {messageText(msg, priceMode, trip)}
               </div>
 
               {/* Proposal card — only for date_shift (pin/min-days).
@@ -538,7 +615,7 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
               {msg.proposal && msg.proposal.kind === 'date_shift' && (
                 <DateShiftProposalCard
                   proposal={msg.proposal}
-                  state={msg.proposalState ?? 'pending'}
+                  state={msg.proposalState === 'outdated' ? 'rejected' : (msg.proposalState ?? 'pending')}
                   onAccept={() => acceptProposal(msg.id)}
                   onReject={() => rejectProposal(msg.id)}
                 />
@@ -548,6 +625,19 @@ export default function AIChatPanel({ trip, onTripUpdate, getLatestTrip }: AICha
                   of the whole route, priced, with Accept / Reject. */}
               {msg.proposal && msg.proposal.kind === 'city_edit' && (
                 <CityEditProposalCard
+                  proposal={msg.proposal}
+                  trip={trip}
+                  state={msg.proposalState === 'outdated' ? 'rejected' : (msg.proposalState ?? 'pending')}
+                  priceMode={priceMode}
+                  onAccept={() => acceptProposal(msg.id)}
+                  onReject={() => rejectProposal(msg.id)}
+                />
+              )}
+
+              {/* One leg switched to one option — a home flight included —
+                  with its exact price change and Accept / Reject. */}
+              {msg.proposal && msg.proposal.kind === 'transport_change' && (
+                <TransportChangeProposalCard
                   proposal={msg.proposal}
                   trip={trip}
                   state={msg.proposalState ?? 'pending'}
@@ -764,6 +854,9 @@ const EDIT_TITLE: Record<CityEditProposal['toolName'], string> = {
   add_city: 'Add a city',
   remove_city: 'Remove a city',
   replace_city: 'Swap a city',
+  pin_city_dates: 'Change dates',
+  set_min_days: 'Change dates',
+  reorder_cities: 'Reorder cities',
 };
 
 function CityEditProposalCard({ proposal, trip, state, priceMode, onAccept, onReject }: CityEditProposalCardProps) {
@@ -779,7 +872,13 @@ function CityEditProposalCard({ proposal, trip, state, priceMode, onAccept, onRe
   };
   const newLegs = proposal.legs.map((l) => {
     const best = l.options[0];
-    return { key: `${l.from}-${l.to}`, label: `${l.from} → ${l.to}`, best };
+    const f = l.flag;
+    const hm = (m: number) => `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`;
+    // No sensible flight on this pair: say so on the row (the total includes it).
+    const warning = f
+      ? `${hm(f.fastestMinutes)}${f.stops > 0 ? `, ${f.stops} stop${f.stops === 1 ? '' : 's'}` : ''} — no sensible flight${f.groundHours ? ` · ground ≈ ${f.groundHours[0]}–${f.groundHours[1]}h (estimate)` : ''}`
+      : null;
+    return { key: `${l.from}-${l.to}`, label: `${l.from} → ${l.to}`, best, warning };
   });
 
   return (
@@ -857,12 +956,17 @@ function CityEditProposalCard({ proposal, trip, state, priceMode, onAccept, onRe
       {newLegs.length > 0 && (
         <div className="px-4 py-2 flex flex-col gap-1" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
           {newLegs.map((l) => (
-            <div key={l.key} className="flex items-center gap-1.5 text-[11px] text-white/60">
+            <div key={l.key} className="flex flex-wrap items-center gap-1.5 text-[11px] text-white/60">
               {l.best?.mode === 'train' ? <TrainFront size={11} /> : <Plane size={11} />}
               <span className="flex-1 truncate">{l.label}</span>
               <span className="text-white/80">
                 {l.best ? `${l.best.operator ? `${l.best.operator} · ` : ''}${l.best.price > 0 ? money(l.best.price) : '—'}` : 'No option found'}
               </span>
+              {l.warning && (
+                <span className="basis-full pl-[17px] text-[10px]" style={{ color: '#f5b098' }} data-testid="leg-flag">
+                  {l.warning}
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -908,6 +1012,151 @@ function CityEditProposalCard({ proposal, trip, state, priceMode, onAccept, onRe
           style={{ borderTop: '1px solid rgba(255,255,255,0.06)', color: state === 'accepted' ? '#a0dfc0' : 'rgba(255,255,255,0.4)' }}
         >
           {state === 'accepted' ? '✓ Applied to your trip' : '× Dismissed — your trip is unchanged'}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ─── Transport-change proposal card ─────────────────────────
+// select_transport_option / find_transport_option: one leg — the flight out,
+// an inter-city leg or the flight home — from its current option to the
+// proposed one, with the trip total before → after. The same dark #0f0f1a AI
+// surface and dashed-route line as the city-edit card.
+type TransportChangeProposalCardProps = {
+  proposal: TransportChangeProposal;
+  trip: Trip;
+  state: 'pending' | 'accepted' | 'rejected' | 'outdated';
+  priceMode: 'total' | 'perPerson';
+  onAccept: () => void;
+  onReject: () => void;
+};
+
+function transportChangeTitle(p: TransportChangeProposal): string {
+  const what = p.after.mode === 'train' ? 'train' : 'flight';
+  if (p.leg.kind === 'return') return `Change ${what} home`;
+  if (p.leg.kind === 'outbound') return `Change ${what} out`;
+  return `Change ${p.leg.from} → ${p.leg.to}`;
+}
+
+function ChoiceRow({ label, choice, money, muted }: { label: string; choice: LegChoice; money: (n: number) => string; muted?: boolean }) {
+  const Icon = choice.mode === 'train' ? TrainFront : Plane;
+  const nextDay = choice.arriveDate && choice.departDate && choice.arriveDate > choice.departDate;
+  return (
+    <div className="relative flex items-start gap-2.5" data-testid={`transport-row-${label.toLowerCase()}`}>
+      <div
+        className="relative z-10 mt-0.5 w-3 h-3 rounded-full flex-shrink-0"
+        style={{
+          background: muted ? '#0f0f1a' : '#4f8ef7',
+          border: `1.5px solid ${muted ? 'rgba(255,255,255,0.3)' : '#9cc0ff'}`,
+        }}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wide text-white/40 w-7">{label}</span>
+          <Icon size={11} className={muted ? 'text-white/40' : 'text-white/80'} />
+          <span className={`text-[12px] font-medium truncate ${muted ? 'line-through text-white/40' : 'text-white'}`}>
+            {choice.operator || (choice.mode === 'train' ? 'Train' : 'Flight')}
+          </span>
+          <span className={`ml-auto text-[12px] tabular-nums ${muted ? 'text-white/40' : 'text-white'}`}>
+            {choice.price > 0 ? money(choice.price) : '—'}
+          </span>
+        </div>
+        <div className={`text-[11px] tabular-nums ${muted ? 'text-white/30' : 'text-white/60'}`}>
+          {[choice.fromAirport, choice.departTime].filter(Boolean).join(' ')} → {[choice.toAirport, choice.arriveTime].filter(Boolean).join(' ')}
+          {nextDay ? ` (+1)` : ''} · {fmt(choice.departDate)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TransportChangeProposalCard({ proposal, trip, state, priceMode, onAccept, onReject }: TransportChangeProposalCardProps) {
+  // Fixed when the card appears: it is what Accept was offered.
+  const [totals] = useState(() => transportChangeTotals(trip, proposal));
+  const isPending = state === 'pending';
+  const travelers = trip.travelers;
+  const money = (n: number) => `$${displayAmount(n, priceMode, travelers).toLocaleString()}`;
+  const before = displayAmount(totals.before, priceMode, travelers);
+  const after = displayAmount(totals.after, priceMode, travelers);
+  const delta = after - before;
+  const fs = proposal.firstStay;
+  const done =
+    state === 'accepted'
+      ? { text: '✓ Applied to your trip', color: '#a0dfc0' }
+      : state === 'outdated'
+        ? { text: '× Not applied — that leg changed since', color: 'rgba(255,255,255,0.4)' }
+        : { text: '× Dismissed — your trip is unchanged', color: 'rgba(255,255,255,0.4)' };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.1, duration: 0.25 }}
+      className="mt-2 max-w-[92%] w-full overflow-hidden"
+      style={{ background: '#0f0f1a', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)' }}
+      data-testid="transport-change-card"
+    >
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+        <div className="text-[12px] font-medium text-white">{transportChangeTitle(proposal)}</div>
+        <div className="text-[10px] uppercase tracking-wide text-white/40">Proposed</div>
+      </div>
+      <div className="px-4 pb-1 text-[11px] text-white/50">
+        {proposal.leg.from} → {proposal.leg.to}
+      </div>
+
+      <div className="relative px-4 pb-3 pt-1">
+        <div
+          className="absolute top-3 bottom-5 border-l-[1.5px] border-dashed"
+          style={{ left: 22, borderColor: 'rgba(79,142,247,0.45)' }}
+        />
+        <div className="flex flex-col gap-2">
+          {proposal.before && <ChoiceRow label="Now" choice={proposal.before} money={money} muted />}
+          <ChoiceRow label="New" choice={proposal.after} money={money} />
+        </div>
+      </div>
+
+      {fs && (
+        <div className="px-4 py-2 text-[11px] text-white/60" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          Lands {fmt(fs.arrivalAfter)}, so {fs.city} starts {fmt(fs.arrivalAfter)}: {fs.nightsAfter} night{fs.nightsAfter === 1 ? '' : 's'} instead of {fs.nightsBefore}.
+        </div>
+      )}
+
+      <div className="px-4 py-2.5 flex items-center justify-between" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="text-[11px] text-white/50">
+          Trip total{priceMode === 'perPerson' && travelers > 1 ? ' per person' : ''}
+        </div>
+        <div className="text-[12px] text-white" data-testid="transport-change-total">
+          <span className="text-white/40">${before.toLocaleString()}</span>
+          <span className="mx-1 text-white/40">→</span>
+          <span className="font-semibold">${after.toLocaleString()}</span>
+          <span className="ml-1.5 text-[11px]" style={{ color: delta > 0 ? '#f5b098' : delta < 0 ? '#a0dfc0' : 'rgba(255,255,255,0.4)' }}>
+            {delta > 0 ? '+' : delta < 0 ? '−' : '±'}${Math.abs(delta).toLocaleString()}
+          </span>
+        </div>
+      </div>
+
+      {isPending ? (
+        <div className="px-4 py-2.5 flex justify-end gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <button
+            onClick={onReject}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-white/60 hover:text-white hover:bg-white/5 transition"
+          >
+            <X size={13} className="inline mr-1 -mt-0.5" />
+            Reject
+          </button>
+          <button
+            onClick={onAccept}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-white transition hover:opacity-90"
+            style={{ background: '#2e6bc4' }}
+          >
+            <Check size={13} className="inline mr-1 -mt-0.5" />
+            Accept
+          </button>
+        </div>
+      ) : (
+        <div className="px-4 py-2 text-[11px]" style={{ borderTop: '1px solid rgba(255,255,255,0.06)', color: done.color }}>
+          {done.text}
         </div>
       )}
     </motion.div>

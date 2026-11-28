@@ -1,4 +1,5 @@
 import { getDuffel } from './duffel';
+import { flightCo2FromOffer, type Co2Figure, type DoorToDoor } from './legFacts';
 import { currentDuffelRetryBudget } from './duffelBudget';
 import { getSupabase } from './supabase';
 import { AppError } from '../middleware/error';
@@ -13,6 +14,7 @@ import {
   type SuggestedPlace,
 } from './location/destinationAirport';
 import { sameAirportArea } from './location/sameAirportArea';
+import { islandIata } from './location/islandNames';
 import { parseIsoDuration } from '../utils/duration';
 import { withoutTestAirlineWhenRealOffered } from '../utils/testAirline';
 import { elapsedMinutesBetween } from '../utils/localTime';
@@ -55,6 +57,13 @@ export type FlightOffer = {
    */
   originAirport?: string;
   destinationAirport?: string;
+  /**
+   * Duffel's CO₂ estimate for this itinerary and the whole party
+   * (`total_emissions_kg`). Absent when the offer carries none.
+   */
+  co2?: Co2Figure | null;
+  /** Door-to-door time — set by compareLeg / legOptions, which know the cities. */
+  doorToDoor?: DoorToDoor | null;
 };
 
 type SearchFlightsParams = {
@@ -408,6 +417,7 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
 
       const airportCode = (place: any): string | undefined =>
         typeof place?.iata_code === 'string' && place.iata_code ? place.iata_code.toUpperCase() : undefined;
+      const co2 = flightCo2FromOffer(offer);
       const originAirport = airportCode(firstSegment?.origin);
       const destinationAirport = airportCode(lastSegment?.destination);
 
@@ -425,6 +435,7 @@ async function searchFlightsUncached(params: SearchFlightsParams): Promise<Fligh
         raw: offer,
         ...(originAirport ? { originAirport } : {}),
         ...(destinationAirport ? { destinationAirport } : {}),
+        ...(co2 ? { co2 } : {}),
       };
     });
 
@@ -604,6 +615,14 @@ export async function getIataCode(
   // In-memory, no network, and no database read.
   const fromArtifact = resolveDestinationIata(cityName, context);
   if (fromArtifact) return fromArtifact;
+
+  // An island-style name neither knows as written ("Grand Turk Island",
+  // "Mykonos Island"): retry it with the island word stripped, against the
+  // curated table and the artifact only, behind the guards in islandNames.ts
+  // that keep "Hamilton Island" from flying to Ontario. Also in-memory, and
+  // ahead of the cache for the same reason the artifact is.
+  const fromIsland = islandIata(cityName, context);
+  if (fromIsland) return fromIsland;
 
   // Where the artifact says this name is, when it could not answer it. Empty
   // when it knows nothing about the name and there is no trip.

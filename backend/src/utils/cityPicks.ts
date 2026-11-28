@@ -67,3 +67,23 @@ export function keepOwnCity<T extends { name?: unknown; placeQuery?: unknown }>(
     return !list.some((o) => mentions(text, o));
   });
 }
+
+/**
+ * Restaurants to ask the AI for: about a lunch and a dinner for most days of
+ * the stay — 5 for a short one, up to 10. With a fixed 5, a 4-night stay ran
+ * out of new places and repeated them (live: St. JOHN twice).
+ */
+export function restaurantPickCount(nights?: number | null): number {
+  if (!nights || !Number.isFinite(nights) || nights < 1) return 5;
+  return Math.max(5, Math.min(10, Math.round(nights) * 2 + 1));
+}
+
+/**
+ * How many of those are breakfast places (a café, bakery or market): about
+ * one every two nights. Breakfast is only planned at such a place, so without
+ * any the day plans have no breakfast.
+ */
+export function breakfastPickCount(nights?: number | null): number {
+  if (!nights || !Number.isFinite(nights) || nights < 1) return 1;
+  return Math.max(1, Math.min(3, Math.round(nights / 2)));
+}

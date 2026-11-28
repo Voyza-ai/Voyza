@@ -7,7 +7,10 @@ import { Trip, City, TransportMode } from '@/lib/types';
 import { getCityColor } from '@/lib/cityColors';
 import { parseLocal, toIso, daysBetween } from '@/lib/dateHelpers';
 import { homeDepartureDay } from '@/lib/tripSpan';
+import { effectiveTransportIn, effectiveTransportOut, arrivesNextDay } from '@/lib/cityLegs';
 import DayPlanner from './DayPlanner';
+import WeatherChip from './WeatherChip';
+import { useTripWeather } from '@/lib/tripWeather';
 
 type CalendarViewProps = {
   trip: Trip;
@@ -29,6 +32,7 @@ type DayCell = {
 };
 
 export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
+  const weather = useTripWeather(trip);
   const [selectedDay, setSelectedDay] = useState<DayCell | null>(null);
 
   // Filter to cities with valid dates for calendar rendering
@@ -110,20 +114,24 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
       // Departure day shows the city's departure flight, not the city itself.
       // The home departure day is one too: the outbound leaving home, with
       // no city on it (the first stay starts the day it lands).
-      const departureCity = trip.cities.find((c) => c.dates.departure === iso);
+      const departureIndex = trip.cities.findIndex((c) => c.dates.departure === iso);
+      const departureCity = departureIndex >= 0 ? trip.cities[departureIndex] : undefined;
+      // The last city's way out is the flight home (origin.returnLeg), not
+      // its placeholder transportOut.
+      const departureLeg = departureCity ? effectiveTransportOut(trip, departureIndex) : undefined;
       const leavesHome = !departureCity && iso === homeDeparture;
       const isDeparture = !!departureCity || leavesHome;
       // A leg nothing was found for (`unavailable`) carries the empty
       // placeholder's mode, 'flight' — not a flight. It gets no mode icon.
-      const departureMode = departureCity
-        ? departureCity.transportOut.unavailable
+      const departureMode = departureLeg
+        ? departureLeg.unavailable
           ? null
-          : departureCity.transportOut.mode ?? null
+          : departureLeg.mode ?? null
         : leavesHome
           ? 'flight'
           : null;
       const departureTime =
-        departureCity?.transportOut.departTime ??
+        departureLeg?.departTime ??
         (leavesHome ? trip.origin?.outboundLeg?.departTime ?? null : null);
 
       cells.push({
@@ -232,7 +240,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
               <div className="grid grid-cols-7 gap-2">
                 {cells.map((cell, ci) => {
                   if (!cell.isInMonth) {
-                    return <div key={ci} className="h-[88px]" />;
+                    return <div key={ci} className="h-[104px]" />;
                   }
 
                   const theme = cell.city && cell.cityIndex != null
@@ -246,7 +254,7 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                         if (cell.city || cell.isDeparture) setSelectedDay(cell);
                       }}
                       whileHover={cell.city || cell.isDeparture ? { scale: 1.04 } : undefined}
-                      className="relative h-[88px] rounded-xl border overflow-hidden text-left p-2 transition-colors"
+                      className="relative h-[104px] rounded-xl border overflow-hidden text-left p-2 transition-colors flex flex-col"
                       style={{
                         background: theme
                           ? theme.bg
@@ -297,20 +305,29 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                           <div className="text-gray-900 text-[11px] font-medium leading-tight truncate">
                             {cell.city.name}
                           </div>
-                          {cell.isArrival ? (
+                          {cell.isArrival ? (() => {
+                            // The first city's way in is the flight from home
+                            // (origin.outboundLeg), not its placeholder transportIn.
+                            const inLeg = effectiveTransportIn(trip, cell.cityIndex!);
+                            return (
                             <div className="flex items-center gap-1 mt-0.5">
-                              {cell.city.transportIn.unavailable ? null : cell.city.transportIn.mode === 'flight' ? (
+                              {inLeg.unavailable ? null : inLeg.mode === 'flight' ? (
                                 <Plane size={8} className="text-gray-400" />
                               ) : (
                                 <TrainFront size={8} className="text-gray-400" />
                               )}
                               <span className="text-gray-400 text-[9px] font-mono">
-                                {cell.city.transportIn.departTime && cell.city.transportIn.arriveTime
-                                  ? `${cell.city.transportIn.departTime}→${cell.city.transportIn.arriveTime}`
-                                  : cell.city.transportIn.arriveTime || 'arrive'}
+                                {inLeg.departTime && inLeg.arriveTime
+                                  ? `${inLeg.departTime}→${inLeg.arriveTime}`
+                                  : inLeg.arriveTime || 'arrive'}
+                                {/* Arrives after midnight — the day after this one.
+                                    The first city's way in is the home flight, whose
+                                    landing day this cell already is. */}
+                                {cell.cityIndex! > 0 && arrivesNextDay(inLeg) ? ' +1' : ''}
                               </span>
                             </div>
-                          ) : (
+                            );
+                          })() : (
                             <div className="flex items-center gap-1 mt-0.5">
                               <Moon size={8} className="text-gray-300" />
                               <span className="text-gray-400 text-[9px]">night</span>
@@ -318,6 +335,17 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
                           )}
                         </div>
                       )}
+
+                      {/* The day's weather in its city, centred on the bottom line. Only on
+                          a city's own days — not on the grey travel days around them. */}
+                      {(() => {
+                        const day = theme && cell.city ? weather.at(cell.city.name, cell.iso) : null;
+                        return day ? (
+                          <div className="mt-auto pt-1 flex justify-center">
+                            <WeatherChip day={day} fahrenheit={weather.fahrenheit} typicalYears={weather.typicalYears} accent={theme!.text} variant="inline" />
+                          </div>
+                        ) : null;
+                      })()}
 
                       {/* Departure-only cell — last city's outbound flight (e.g. flying home).
                           City is null because the dep date isn't mapped to any in-trip city. */}
@@ -345,6 +373,11 @@ export default function CalendarView({ trip, onCityClick }: CalendarViewProps) {
       {/* Footer summary */}
       <div className="mt-8 text-gray-400 text-[12px] text-center">
         {totalNights} nights · {trip.cities.length} cities · click a day to see its itinerary
+        {weather.typicalYears && (
+          <div className="mt-1" data-testid="weather-typical-note">
+            Weather marked avg: typical for the date ({weather.typicalYears} average), not a forecast
+          </div>
+        )}
       </div>
 
       {/* Day planner — Google Calendar style. The fly-home day has no city

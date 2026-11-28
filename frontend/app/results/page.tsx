@@ -2,7 +2,9 @@
 
 import { useTripStore, restoreTripSession } from '@/store/tripStore';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState, useRef, Suspense } from 'react';
+import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Eye, Sparkles, UserX, WifiOff } from 'lucide-react';
 import Navbar from '@/components/shared/Navbar';
 import ResultsHeader from '@/components/results/ResultsHeader';
 import OriginClarification, { type OriginChoice } from '@/components/results/OriginClarification';
@@ -21,15 +23,30 @@ import ActivitiesDetailPanel from '@/components/results/ActivitiesDetailPanel';
 import BudgetOverBanner from '@/components/results/BudgetOverBanner';
 import NoRailDataNotice from '@/components/results/NoRailDataNotice';
 import VibeTierUpBanner from '@/components/results/VibeTierUpBanner';
-import { searchHotels, fetchHomeLegs, updateTrip, compareLeg, type LegComparison } from '@/lib/api';
+import MissingPricesNotice from '@/components/results/MissingPricesNotice';
+import { searchHotels, fetchHomeLegs, updateTrip, compareLeg, fetchSharedTrip, type LegComparison } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { hotelFromResult, rerankSavedCityHotels } from '@/lib/hotelShape';
 import { originAirportsForCity } from '@/lib/locationResolver';
 import { Hotel, City, Transport, HomeLeg, Trip } from '@/lib/types';
 import { tripStartDate, addDaysIso, daysFrom } from '@/lib/tripSpan';
 import { formatMinutes } from '@/lib/dateHelpers';
+import { pickLegFacts } from '@/lib/legFacts';
 import { useAuthStore } from '@/store/authStore';
-import { useSavedTripAutosave } from '@/lib/useSavedTripAutosave';
+import { useSavedTripAutosave, useSavedTripUnsaved } from '@/lib/useSavedTripAutosave';
+import { useLeaveGuard, type LeaveGuardCopy } from '@/lib/leaveGuard';
+import { requestPicksForAddedCity } from '@/store/tripStore';
+import { useTripCollaboration } from '@/hooks/useTripCollaboration';
+import { isApplyingRemote, remoteAppliedWithin, rechainDates, staleLegIndices } from '@/lib/tripCollab';
+import { nextColorIndex } from '@/lib/cityColors';
+import ShareModal from '@/components/canvas/ShareModal';
+import AddCityModal from '@/components/canvas/AddCityModal';
+import HomeEditModal from '@/components/canvas/HomeEditModal';
+import SuggestedCitiesPanel from '@/components/canvas/SuggestedCitiesPanel';
+import SuggestionsPanel from '@/components/canvas/SuggestionsPanel';
+import LoginModal from '@/components/shared/LoginModal';
+import { useNotificationsStore } from '@/store/notificationsStore';
+import { track as trackEvent } from '@/lib/track';
 
 // Next.js 14 requires useSearchParams() to be wrapped in a <Suspense> boundary
 // during the static build pass. We split the page into an outer wrapper that
@@ -42,6 +59,19 @@ export default function ResultsPage() {
   );
 }
 
+/** Longest stay the nights stepper allows (the backend's MAX_STAY_NIGHTS). */
+const MAX_CITY_NIGHTS = 60;
+
+/** The leave dialog's words (lib/leaveGuard). */
+const UNSAVED_TRIP: LeaveGuardCopy = {
+  title: 'Leave this trip?',
+  body: "You haven't saved it yet, so it will be lost.",
+};
+const UNSENT_SUGGESTIONS: LeaveGuardCopy = {
+  title: 'Leave this trip?',
+  body: "You haven't sent your changes to the owner yet, so they will be lost.",
+};
+
 function ResultsPageInner() {
   const { currentTrip, setTrip } = useTripStore();
   // A saved trip's changes made here (legs, schedule, AI city edits) are
@@ -52,12 +82,110 @@ function ResultsPageInner() {
   const tripId = searchParams.get('tripId');
   const [view, setView] = useState<ResultsView>('flowchart');
   const [openCityIndex, setOpenCityIndex] = useState<number | null>(null);
+  // The guide is on its way back into its card: the view behind it fades in.
+  const [guideClosing, setGuideClosing] = useState(false);
   const [openActivitiesIndex, setOpenActivitiesIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isAuthLoading = useAuthStore((s) => s.isLoading);
+  const user = useAuthStore((s) => s.user);
   const fetchedRef = useRef(false);
+
+  // The trip as a shared, live document (what the canvas page used to be):
+  // roles, share-link joins, presence, live edits, suggestions.
+  const collab = useTripCollaboration(tripId, searchParams.get('share'));
+
+  // ── Ask before the trip is left with work that would be lost ──
+  // A trip never saved lives only in this tab: Back (a trackpad swipe) went to
+  // /plan, which wipes it. A saved trip is asked about only for a close or
+  // reload while a change is still being written — leaving inside the app
+  // writes it on the way out (useSavedTripAutosave) — and never when it is
+  // opened read-only. A suggester's changes live here until proposed.
+  const savedTripUnsaved = useSavedTripUnsaved((s) => s.unsaved);
+  const tripOnScreen =
+    !!currentTrip && (!tripId || currentTrip.id === tripId) && !loading && !error && !collab.accessGate;
+  const neverSaved = tripOnScreen && (!currentTrip!.id || currentTrip!.id.startsWith('mock'));
+  const unsentSuggestions = tripOnScreen && collab.hasLocalChanges;
+  const changeBeingWritten =
+    tripOnScreen && !neverSaved && savedTripUnsaved && (!collab.active || collab.role === 'owner');
+  useLeaveGuard({
+    inApp: neverSaved || unsentSuggestions,
+    unload: neverSaved || unsentSuggestions || changeBeingWritten,
+    // A reload of a bare /results puts an unsaved trip back from the tab's
+    // session snapshot (restoreTripSession); a close doesn't.
+    reloadRestores: neverSaved && !tripId,
+    copy: unsentSuggestions ? UNSENT_SUGGESTIONS : UNSAVED_TRIP,
+  });
+
+  // BlueMurr AI shown or hidden by the person; remembered on this browser
+  // (read after mount, so the server's first render matches).
+  const [chatOpen, setChatOpenState] = useState(true);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem('bluemurr.chatHidden') === '1') setChatOpenState(false);
+    } catch {}
+  }, []);
+  const setChatOpen = (open: boolean) => {
+    setChatOpenState(open);
+    try {
+      window.localStorage.setItem('bluemurr.chatHidden', open ? '0' : '1');
+    } catch {}
+  };
+
+  // ── Shut out, then invited (again) ──
+  // The removed / no-access screen watches the notifications for an invite to
+  // THIS trip that arrived after the screen came up, and offers to open it.
+  // Opening is a full load: the page's trip, role and live channel were all
+  // set up for the old membership.
+  const gateAtRef = useRef<number | null>(null);
+  if (collab.accessGate && gateAtRef.current == null) gateAtRef.current = Date.now();
+  if (!collab.accessGate) gateAtRef.current = null;
+  const notifItems = useNotificationsStore((st) => st.items);
+  const reinvite = (() => {
+    if (!collab.accessGate || !tripId) return null;
+    const since = (gateAtRef.current ?? Date.now()) - 5000;
+    const n = notifItems.find(
+      (i) =>
+        i.type === 'canvas_invite' &&
+        i.data?.tripId === tripId &&
+        typeof i.data?.link === 'string' &&
+        (collab.accessGate === 'no_access' || new Date(i.created_at).getTime() >= since),
+    );
+    return n ? { link: n.data!.link as string, role: String(n.data?.role || 'viewer') } : null;
+  })();
+  const openReinvite = (r: { link: string }) => window.location.assign(r.link);
+  // The bell's own invite row navigates within the page (?share= changes);
+  // reload so the new invite is claimed from a clean start.
+  // Only a NEW token: the one this page loaded with was already tried.
+  const shareInUrl = searchParams.get('share');
+  const loadedShare = useRef(shareInUrl);
+  useEffect(() => {
+    if (collab.accessGate && shareInUrl && shareInUrl !== loadedShare.current) window.location.reload();
+  }, [collab.accessGate, shareInUrl]);
+  /**
+   * Only the owner writes the trip row (PATCH is owner-only): a shared
+   * trip's other members got a 403 for every total or home-flight backfill.
+   * Their changes reach the database through the owner's page instead.
+   */
+  const writesTripRef = useRef(true);
+  // Signed out (a view-only link opened without an account): nothing writes.
+  writesTripRef.current = !!user && (!collab.active || collab.role === 'owner');
+  /**
+   * A "View only" share link opened by someone with no account shows the
+   * trip read-only instead of a sign-in wall (backend routes/shared.ts).
+   * 'failed' (the link is suggest/edit, reset, or the trip is gone) falls
+   * back to the sign-in wall as before.
+   */
+  const [publicState, setPublicState] = useState<'idle' | 'loading' | 'ok' | 'failed'>('idle');
+  const publicStartedRef = useRef(false);
+  const publicView = publicState === 'ok' && !user;
+  const [publicSignIn, setPublicSignIn] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [membersKey, setMembersKey] = useState(0);
+  const [addingAfter, setAddingAfter] = useState<number | null>(null);
+  const [homeEdit, setHomeEdit] = useState<'outbound' | 'inbound' | null>(null);
+  const [refreshingLegs, setRefreshingLegs] = useState<string[]>([]);
 
   useEffect(() => {
     // A reload of a trip that was never saved: this tab's own copy is the
@@ -69,6 +197,36 @@ function ResultsPageInner() {
 
     // Wait for auth to be ready before fetching protected routes
     if (isAuthLoading) return;
+
+    // Signed out with a share link: try it as a view-only link first.
+    if (tripId && !user && shareInUrl) {
+      if (publicStartedRef.current) return;
+      publicStartedRef.current = true;
+      setPublicState('loading');
+      fetchSharedTrip(tripId, shareInUrl)
+        .then(({ trip }) => {
+          if (!trip || !Array.isArray(trip.cities)) throw new Error('no trip');
+          trip.cities = trip.cities.map((c: any) =>
+            rerankSavedCityHotels({ ...c, country: c.country || countryForCity(c.name) }),
+          );
+          setTrip(trip);
+          setPublicState('ok');
+        })
+        .catch(() => setPublicState('failed'));
+      return;
+    }
+    // Signed in after viewing it read-only: load the full trip (and join).
+    if (tripId && user && publicStartedRef.current && publicState === 'ok') {
+      publicStartedRef.current = false;
+      setPublicState('idle');
+      fetchedRef.current = false;
+      useTripStore.setState({ currentTrip: null });
+      return;
+    }
+    // A saved trip needs an account (the sign-in modal shows below), and a
+    // share link is claimed before the trip loads so the load sees the new
+    // membership.
+    if (tripId && (!user || collab.joinPending)) return;
 
     // If a tripId is provided AND the store already has that exact trip
     // (freshly planned, or previously loaded), skip the refetch. Before
@@ -222,7 +380,7 @@ function ResultsPageInner() {
 
     // No trip anywhere — redirect to planning
     router.push('/plan');
-  }, [tripId, isAuthLoading, currentTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tripId, isAuthLoading, currentTrip?.id, user?.id, collab.joinPending, publicState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateCity = useTripStore((s) => s.updateCity);
 
@@ -266,7 +424,7 @@ function ResultsPageInner() {
     const live = liveTripTotal(cur);
     if (!Number.isFinite(live) || live === cur.totalCost) return;
     setTrip({ ...cur, totalCost: live });
-    if (cur.id && !cur.id.startsWith('mock')) {
+    if (cur.id && !cur.id.startsWith('mock') && writesTripRef.current) {
       updateTrip(cur.id, { totalCost: live }).catch(() => {});
     }
   };
@@ -335,8 +493,10 @@ function ResultsPageInner() {
     );
 
   /** Re-price the inter-city leg that leaves `from` on `date` for `to`. */
-  const repriceLeg = (from: string, to: string, date: string, travelers: number) =>
-    track(
+  const repriceLeg = (from: string, to: string, date: string, travelers: number) => {
+    const key = `${from}→${to}`;
+    setRefreshingLegs((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    return track(
       compareLeg({ origin: from, destination: to, date, travelers }).then((result) => {
         const cur = useTripStore.getState().currentTrip;
         if (!cur) return;
@@ -351,7 +511,8 @@ function ResultsPageInner() {
         cities[idx + 1] = { ...cities[idx + 1], transportIn: flat };
         setTrip({ ...cur, cities });
       }),
-    );
+    ).finally(() => setRefreshingLegs((prev) => prev.filter((k) => k !== key)));
+  };
 
   // Enrich cities with real hotel data if hotels[] is empty
   const hotelsFetchedRef = useRef(false);
@@ -444,6 +605,10 @@ function ResultsPageInner() {
             .then((r) => {
               const cur = useTripStore.getState().currentTrip;
               if (!cur?.origin) return;
+              // The trip moved on (its first stop changed while this was out
+              // — e.g. a suggester's edit was sent and the view reset): this
+              // flight is for a stop the trip no longer starts at.
+              if (cur.cities[0]?.name !== first.name) return;
               const leg = r.outboundLeg ?? null;
               const stay = cur.cities[0];
               // Re-date only the stay the search was for, at the dates it
@@ -484,6 +649,13 @@ function ResultsPageInner() {
             .then((r) => {
               const cur = useTripStore.getState().currentTrip;
               if (!cur?.origin) return;
+              // Same for the flight home: measured live, a suggester's
+              // proposal reset the trip to end in Venice, then this answer
+              // (searched from Florence, the edit's last stop) landed on it —
+              // the page read that as an unsent change and stopped following
+              // the owner.
+              const end = cur.cities[cur.cities.length - 1];
+              if (end?.name !== last.name || end.dates?.departure !== last.dates?.departure) return;
               setTrip({ ...cur, origin: { ...cur.origin, returnLeg: r.returnLeg ?? null } });
             })
             .finally(() => setHomeLegSearch((s) => ({ ...s, return: false }))),
@@ -498,6 +670,7 @@ function ResultsPageInner() {
       Promise.allSettled(jobs).then(() => {
         const cur = useTripStore.getState().currentTrip;
         if (!cur?.id || cur.id.startsWith('mock') || !cur.origin) return;
+        if (!writesTripRef.current) return;
         if (!cur.origin.outboundLeg && !cur.origin.returnLeg) return;
         updateTrip(cur.id, {
           outboundLeg: cur.origin.outboundLeg ?? null,
@@ -556,6 +729,8 @@ function ResultsPageInner() {
     if (!trip?.origin?.city || trip.cities.length === 0) return;
     const key = trip.id ?? 'store-trip';
     if (homeLegsFetchedRef.current === key) return;
+    // A collaborator's change: their screen searches what it needs.
+    if (remoteAppliedWithin(1500)) return;
 
     const needOutbound = !trip.origin.outboundLeg;
     const needReturn = (trip.returnToHome ?? true) && !trip.origin.returnLeg;
@@ -607,6 +782,8 @@ function ResultsPageInner() {
         const next = state.currentTrip;
         const prev = prevState.currentTrip;
         if (!next || !prev || next === prev) return;
+        // A collaborator's change was re-priced on their screen already.
+        if (isApplyingRemote()) return;
         const work = datedWork(prev, next);
         if (!work) return;
         freeze(prev);
@@ -652,6 +829,352 @@ function ResultsPageInner() {
     [], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // ─── Rearranging the trip (what the canvas did) ────────────────────────
+  //
+  // Reorder, add and remove stays, and change the home airports. The stays'
+  // dates re-chain from the trip's start (each keeps its nights); then what
+  // the change left wrong is searched again, each with its own loading state:
+  //   - every inter-city leg that now joins different stops or leaves on
+  //     another day (its connector shows "Finding transport…");
+  //   - the outbound when the first stop changed, the return when the last
+  //     stop or its last night changed ("Finding flights…");
+  //   - a new stop's hotels and AI picks.
+  // A stay that only moved keeps its hotel (same nights, as the canvas did).
+  const EMPTY_LEG: Transport = { mode: 'flight', operator: '', duration: '', price: 0 };
+
+  const restructure = (raw: City[], added?: string) => {
+    const prev = useTripStore.getState().currentTrip;
+    if (!prev || raw.length === 0) return;
+    const names = new Set(raw.map((c) => c.name.toLowerCase()));
+    const isTripCity = (n?: string) => !!n && names.has(n.toLowerCase());
+    const chained = rechainDates(raw).map((c, i, all) => ({
+      ...c,
+      // The ends of the row have no inter-city leg in/out; a leg left over
+      // from the city's old neighbour would draw a train that isn't taken.
+      ...(i === 0 && isTripCity(c.transportIn?.from) ? { transportIn: EMPTY_LEG } : {}),
+      ...(i === all.length - 1 && isTripCity(c.transportOut?.to) ? { transportOut: EMPTY_LEG } : {}),
+    }));
+    // An auto-titled trip ("Rome → Venice") follows its stops, as an AI city
+    // edit does (lib/cityEdit); a name the owner chose stays.
+    const oldRoute = prev.cities.map((c) => c.name).join(' → ');
+    const next: Trip = {
+      ...prev,
+      cities: chained,
+      title: !prev.title || prev.title === oldRoute ? chained.map((c) => c.name).join(' → ') : prev.title,
+      // Priced for the old itinerary: the date-shift tip, and the saving
+      // "vs your original city order" — a hand-arranged order is not the
+      // optimizer's, so the green box no longer claims it.
+      dateShiftSuggestion: undefined,
+      dateShiftChecked: false,
+      savings: 0,
+    };
+    // The total the saving box measures against, for the new stops. This
+    // screen shows the frozen total until the searches settle; everyone else
+    // receives this, and with the old stops' total kept they showed the
+    // removed city's price as "You can save $X".
+    next.totalCost = liveTripTotal(next);
+    freeze(prev);
+    homeLegsFetchedRef.current = next.id ?? 'store-trip';
+    setTrip(next);
+
+    const prevByName = new Map(prev.cities.map((c) => [c.name, c]));
+    for (let i = 0; i < chained.length - 1; i++) {
+      const c = chained[i];
+      const to = chained[i + 1];
+      const t = c.transportOut;
+      const was = prevByName.get(c.name);
+      const stale =
+        !t ||
+        t.unavailable ||
+        !t.operator ||
+        (t.price ?? 0) <= 0 ||
+        (!!t.to && t.to.toLowerCase() !== to.name.toLowerCase()) ||
+        (!!t.from && t.from.toLowerCase() !== c.name.toLowerCase()) ||
+        // Leaves on another day than it was priced for.
+        (!!was && was.dates.departure !== c.dates.departure);
+      if (stale) repriceLeg(c.name, to.name, c.dates.departure, next.travelers);
+    }
+
+    if (next.origin?.city) {
+      const first = prev.cities[0];
+      const last = prev.cities[prev.cities.length - 1];
+      const nFirst = chained[0];
+      const nLast = chained[chained.length - 1];
+      const outbound = first?.name !== nFirst.name;
+      const ret =
+        (next.returnToHome ?? true) &&
+        (last?.name !== nLast.name || last?.dates.departure !== nLast.dates.departure);
+      if (outbound || ret) {
+        const cleared: Trip = {
+          ...next,
+          origin: {
+            ...next.origin,
+            ...(outbound ? { outboundLeg: null } : {}),
+            ...(ret ? { returnLeg: null } : {}),
+          },
+        };
+        setTrip(cleared);
+        searchHomeLegs(
+          cleared,
+          { outbound, return: ret },
+          tripStartDate(prev) ?? nFirst.dates.arrival,
+        );
+      }
+    }
+
+    if (added) {
+      const c = chained.find((x) => x.name === added);
+      if (c) {
+        searchVisitHotels({ name: c.name, arrival: c.dates.arrival, departure: c.dates.departure }, next.travelers);
+        requestPicksForAddedCity({
+          city: c.name,
+          country: c.country || undefined,
+          vibe: useTripStore.getState().answers.vibe ?? undefined,
+          travelers: next.travelers,
+          nights: Math.max(1, daysFrom(c.dates.arrival, c.dates.departure)),
+          budget: next.budget,
+          otherCities: chained.filter((x) => x.name !== c.name).map((x) => x.name),
+        });
+      }
+    }
+    releaseIfIdle();
+  };
+
+  const reorderCities = (order: City[]) => restructure(order);
+
+  // Two people's changes merged (lib/tripCollab applyCollabDelta): a leg
+  // can now join stops neither of them had next to each other. Whoever can
+  // edit prices it again; the result goes out like any other change.
+  collab.onMergedRef.current = () => {
+    if (collab.role !== 'owner' && collab.role !== 'editor') return;
+    queueMicrotask(() => {
+      const cur = useTripStore.getState().currentTrip;
+      if (!cur) return;
+      for (const i of staleLegIndices(cur)) {
+        const from = cur.cities[i];
+        const to = cur.cities[i + 1];
+        repriceLeg(from.name, to.name, from.dates.departure, cur.travelers);
+      }
+    });
+  };
+
+  const removeCity = (index: number) => {
+    const cur = useTripStore.getState().currentTrip;
+    if (!cur || cur.cities.length <= 1) return;
+    const removed = cur.cities[index];
+    restructure(cur.cities.filter((_, i) => i !== index));
+    if (removed) collab.showToast(`${removed.name} removed`, 'info');
+  };
+
+  const addCity = (afterIndex: number, data: { name: string; country?: string; nights: number }) => {
+    const cur = useTripStore.getState().currentTrip;
+    if (!cur) return;
+    if (cur.cities.some((c) => c.name.toLowerCase() === data.name.toLowerCase())) {
+      collab.showToast(`${data.name} is already on this trip`, 'info');
+      return;
+    }
+    const nights = Math.max(1, data.nights || 2);
+    const city: City = {
+      name: data.name,
+      country: data.country || countryForCity(data.name) || '',
+      // A placeholder start that only carries the nights; rechainDates dates it.
+      dates: { arrival: '2000-01-01', departure: addDaysIso('2000-01-01', nights) },
+      hotel: { name: '', rating: 0, pricePerNight: 0, area: '' },
+      hotels: [],
+      selectedHotelIndex: 0,
+      activities: [],
+      restaurants: [],
+      vibes: [],
+      colorIndex: nextColorIndex(cur.cities),
+      transportIn: EMPTY_LEG,
+      transportOut: EMPTY_LEG,
+    } as City;
+    const list = [...cur.cities];
+    list.splice(Math.max(0, afterIndex + 1), 0, city);
+    restructure(list, city.name);
+    collab.showToast(`${data.name} added`, 'success');
+  };
+
+  // A stay made longer or shorter from its card. Every later stay moves by
+  // the difference (rechainDates keeps the trip's start); the date-change
+  // subscription above then re-searches what moved: hotels for the new
+  // dates, legs leaving on another day, the flight home.
+  const setCityNights = (index: number, nights: number) => {
+    const cur = useTripStore.getState().currentTrip;
+    const c = cur?.cities[index];
+    if (!cur || !c?.dates.arrival || !c.dates.departure) return;
+    const n = Math.max(1, Math.min(MAX_CITY_NIGHTS, Math.round(nights)));
+    if (n === daysFrom(c.dates.arrival, c.dates.departure)) return;
+    const cities = cur.cities.map((x, i) =>
+      i === index ? { ...x, dates: { ...x.dates, departure: addDaysIso(x.dates.arrival, n) } } : x,
+    );
+    setTrip({ ...cur, cities: rechainDates(cities) });
+  };
+
+  const applyHomeEdit = (direction: 'outbound' | 'inbound', updates: { city: string; airports: string[] }) => {
+    setHomeEdit(null);
+    const cur = useTripStore.getState().currentTrip;
+    if (!cur?.origin || cur.cities.length === 0) return;
+    const start = tripStartDate(cur) ?? cur.cities[0].dates.arrival;
+    const origin =
+      direction === 'outbound'
+        ? { ...cur.origin, city: updates.city, airports: updates.airports, outboundLeg: null }
+        : { ...cur.origin, returnCity: updates.city, returnAirports: updates.airports, returnLeg: null };
+    const next: Trip = { ...cur, origin, dateShiftSuggestion: undefined, dateShiftChecked: false };
+    freeze(cur);
+    homeLegsFetchedRef.current = next.id ?? 'store-trip';
+    setTrip(next);
+    searchHomeLegs(next, { outbound: direction === 'outbound', return: direction === 'inbound' }, start);
+    releaseIfIdle();
+  };
+
+  // The share dialog after a sign-in that the Share button asked for.
+  const openShareParam = searchParams.get('openShare');
+  useEffect(() => {
+    if (!openShareParam || !tripId || currentTrip?.id !== tripId) return;
+    setShareOpen(true);
+    router.replace(`/results?tripId=${tripId}`);
+  }, [openShareParam, tripId, currentTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Live cursors (everyone on a shared trip sees everyone's pointer) ───
+  const cardsAreaRef = useRef<HTMLDivElement | null>(null);
+  const [cursors, setCursors] = useState<Record<string, { x: number; y: number; name: string | null; ts: number }>>({});
+  const lastCursorSent = useRef(0);
+  const onCardsMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!collab.active || collab.presence.length < 2) return;
+      const now = Date.now();
+      if (now - lastCursorSent.current < 50) return;
+      lastCursorSent.current = now;
+      const rect = cardsAreaRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      collab.broadcastCursor(e.clientX - rect.left, e.clientY - rect.top);
+    },
+    [collab.active, collab.presence.length, collab.broadcastCursor], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  useEffect(() => {
+    const ev = collab.cursorEvent;
+    if (!ev || !user || ev.actor === user.id) return;
+    setCursors((prev) => ({ ...prev, [ev.actor]: { x: ev.x, y: ev.y, name: ev.name, ts: ev.ts } }));
+  }, [collab.cursorEvent, user]);
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setCursors((prev) => {
+        const cutoff = Date.now() - 4000;
+        const next: typeof prev = {};
+        let changed = false;
+        for (const [k, v] of Object.entries(prev)) {
+          if (v.ts >= cutoff) next[k] = v;
+          else changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, 1500);
+    return () => clearInterval(iv);
+  }, []);
+
+  // A saved trip needs an account. Dismissing sign-in leaves for the hub.
+  const signedInRef = useRef(false);
+  const signInModal = (
+    <LoginModal
+      isOpen={
+        !!tripId &&
+        !isAuthLoading &&
+        !user &&
+        (publicSignIn || !shareInUrl || publicState === 'failed')
+      }
+      subtitle="Sign in or create an account to open this trip"
+      onSuccess={() => {
+        signedInRef.current = true;
+      }}
+      onClose={(reason) => {
+        // Going on to sign up: that page brings them back here afterwards
+        // (?next=). Redirecting to /main here overrode it — measured, the
+        // popup's "Create account" landed on /main.
+        if (reason === 'signup') return;
+        // Closing the sign-in that the read-only view's banner opened just
+        // goes back to viewing.
+        if (publicView) {
+          setPublicSignIn(false);
+          return;
+        }
+        collab.dropShareToken();
+        setTimeout(() => {
+          if (!signedInRef.current) router.push('/main');
+        }, 0);
+      }}
+    />
+  );
+
+  const accessGate = collab.accessGate && (
+    <div className="flex-1 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-6 text-center">
+        <div className="mx-auto mb-3 w-11 h-11 rounded-full flex items-center justify-center bg-red-50">
+          <UserX size={20} className="text-red-500" />
+        </div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-1.5">
+          {collab.accessGate === 'removed'
+            ? "You've been removed from this trip"
+            : "You don't have access to this trip"}
+        </h2>
+        <p className="text-[13px] text-gray-500 mb-5">
+          {collab.accessGate === 'removed'
+            ? 'The trip owner removed you from this trip, so you no longer have access to it.'
+            : collab.linkInvalid
+              ? 'The link you opened is no longer valid. The owner may have reset it. Ask them for a new link or an invite.'
+              : 'This trip isn’t shared with your account. Ask the trip owner for an invite if you think this is a mistake.'}
+        </p>
+        {reinvite ? (
+          <>
+            <p className="text-[13px] text-gray-700 mb-3" data-testid="reinvite-note">
+              You’ve been invited {collab.accessGate === 'removed' ? 'back ' : ''}as {reinvite.role === 'editor' ? 'an editor' : `a ${reinvite.role}`}.
+            </p>
+            <button
+              onClick={() => openReinvite(reinvite)}
+              className="w-full px-4 py-2.5 rounded-xl text-[13px] font-medium text-white bg-[#2563eb] hover:brightness-110 transition-all mb-2"
+            >
+              Open the trip
+            </button>
+            <button
+              onClick={() => router.push('/history')}
+              className="w-full px-4 py-2.5 rounded-xl text-[13px] font-medium text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all"
+            >
+              Take me back to My Trips
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => router.push('/history')}
+            className="w-full px-4 py-2.5 rounded-xl text-[13px] font-medium text-white bg-[#2563eb] hover:brightness-110 transition-all"
+          >
+            Take me back to My Trips
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  if (tripId && !isAuthLoading && !user && !publicView) {
+    const checkingLink = !!shareInUrl && (publicState === 'idle' || publicState === 'loading');
+    return (
+      <main className="h-screen flex items-center justify-center" style={{ background: '#f0f4f8' }}>
+        <p className="text-gray-500 text-sm">{checkingLink ? 'Opening the shared trip…' : 'Sign in to open this trip'}</p>
+        {signInModal}
+      </main>
+    );
+  }
+
+  if (collab.accessGate) {
+    // The navbar stays (with its notification bell): a removed person who is
+    // invited again sees it arrive here instead of having to go elsewhere.
+    return (
+      <main className="h-screen flex flex-col" style={{ background: '#f0f4f8' }}>
+        <Navbar />
+        {accessGate}
+      </main>
+    );
+  }
+
   if (loading) {
     return (
       <main className="h-screen flex items-center justify-center" style={{ background: '#f0f4f8' }}>
@@ -683,8 +1206,24 @@ function ResultsPageInner() {
   const pricedTrip = frozenTrip ?? currentTrip;
 
   const handleCityClick = (cityIndex: number) => {
+    setGuideClosing(false);
     setOpenCityIndex(cityIndex);
     setOpenActivitiesIndex(null);
+  };
+
+  /**
+   * Where city `i`'s card is on screen, for the guide to grow out of and
+   * shrink back into — or null when it is not in view (another tab is open,
+   * or the flowchart is scrolled away from it), and the guide just fades.
+   */
+  const cityCardRect = (i: number): DOMRect | null => {
+    const area = cardsAreaRef.current;
+    const el = area?.querySelector(`[data-city-card="${i}"]`);
+    if (!area || !el) return null;
+    const r = el.getBoundingClientRect();
+    const a = area.getBoundingClientRect();
+    const visible = r.width > 0 && r.right > a.left + 40 && r.left < a.right - 40;
+    return visible ? r : null;
   };
 
   const handleActivitiesClick = (cityIndex: number) => {
@@ -692,21 +1231,83 @@ function ResultsPageInner() {
     setOpenCityIndex(null);
   };
 
+  // What this person may change. An unsaved trip — or a saved one whose role
+  // is still loading for its signed-in owner — is their own to edit.
+  const editable = !publicView && (!collab.active || collab.canManipulate);
+  const chatAllowed = !publicView && (!collab.active || collab.role !== 'viewer');
+
   return (
     <main className="h-screen overflow-hidden dot-grid-bg text-gray-900 flex flex-col">
       {/* View tabs live in the navbar (next to the auth corner) so the cards
           below get the full viewport height. The date-shift savings tip now
           arrives as a BlueMurr AI chat message instead of a page banner. */}
-      <Navbar tabs={<ViewTabs value={view} onChange={setView} />} />
+      <Navbar
+        tabs={
+          <ViewTabs
+            value={view}
+            onChange={(v) => {
+              if (v !== view) trackEvent('results_tab_viewed', { tab: v });
+              setView(v);
+            }}
+          />
+        }
+      />
 
       {/* Page body fills the viewport below the navbar. Nothing here scrolls
           except the cards area (left↔right) and the AI chat panel. */}
       {/* Near-zero side gutters: no max-width cap, minimal padding — the
           cards start at the left edge and the chat ends at the right edge. */}
-      <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 px-2 pb-2 pt-[3rem] w-full">
-        {/* Main column — header pinned, cards fill the rest */}
-        <div className="flex-1 min-w-0 flex flex-col min-h-0">
-          <ResultsHeader trip={currentTrip} pricedTrip={frozenTrip ?? undefined} />
+      {/* When the trip is editable the left edge holds the "Suggested Cities"
+          pull-out tab, so the content starts just clear of it. */}
+      <div className={`flex-1 min-h-0 flex flex-col pb-2 pt-[3rem] w-full ${editable ? 'pl-9' : 'pl-2'} ${chatAllowed && !chatOpen ? 'pr-9' : 'pr-2'}`}>
+        {/* Header and notices across the full width, so the cards and the
+            BlueMurr AI panel below start on the same line and are the same
+            height. */}
+        <div className="flex-shrink-0">
+          <ResultsHeader
+            trip={currentTrip}
+            pricedTrip={frozenTrip ?? undefined}
+            collab={collab}
+            onOpenShare={() => setShareOpen(true)}
+            membersKey={membersKey}
+            canEdit={editable}
+            publicView={publicView}
+          />
+          {publicView && (
+            <div
+              data-testid="public-view-banner"
+              className="mx-1 mt-2 flex items-center justify-between gap-3 px-4 py-2 rounded-xl border text-[12px]"
+              style={{ background: '#eef3fb', borderColor: 'rgba(37,99,235,0.25)', color: '#1e3a8a' }}
+            >
+              <span className="flex items-center gap-2">
+                <Eye size={13} />
+                You&apos;re viewing a shared trip. Sign in to save your own copy or plan one like it.
+              </span>
+              <button
+                type="button"
+                onClick={() => setPublicSignIn(true)}
+                className="px-3 py-1 rounded-lg text-[12px] font-medium text-white flex-shrink-0 hover:brightness-110"
+                style={{ background: '#2563eb' }}
+              >
+                Sign in
+              </button>
+            </div>
+          )}
+          <AnimatePresence>
+            {collab.connectionLost && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="mx-4 mt-2 flex items-center justify-center gap-2 py-1.5 rounded-lg text-[12px] text-amber-700" style={{ background: '#fffbeb' }}>
+                  <WifiOff size={12} />
+                  Connection lost — reconnecting automatically…
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           {typeof currentTrip.budget === 'number' && (
             // The total the header shows, not the stored totalCost: that is
             // set once (at creation, or a preset's quote on save) and does
@@ -714,6 +1315,7 @@ function ResultsPageInner() {
             <BudgetOverBanner budget={currentTrip.budget} totalCost={liveTripTotal(pricedTrip)} />
           )}
           <NoRailDataNotice trip={currentTrip} />
+          <MissingPricesNotice trip={currentTrip} />
           {currentTrip.vibeTierUp && (
             <VibeTierUpBanner tierUp={currentTrip.vibeTierUp} />
           )}
@@ -724,24 +1326,41 @@ function ResultsPageInner() {
               onChoose={chooseOrigin}
             />
           )}
+        </div>
 
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 mt-3">
+        {/* Main column — the cards fill it */}
+        <div className="flex-1 min-w-0 flex flex-col min-h-0">
           {/* Full-height cards area */}
-          <div className="flex-1 min-h-0 overflow-hidden">
-            {openCityIndex !== null ? (
-              <CityDetailPanel
-                trip={currentTrip}
-                cityIndex={openCityIndex}
-                onClose={() => setOpenCityIndex(null)}
-                onPrev={() =>
-                  setOpenCityIndex((i) => (i !== null && i > 0 ? i - 1 : i))
-                }
-                onNext={() =>
-                  setOpenCityIndex((i) =>
-                    i !== null && i < currentTrip.cities.length - 1 ? i + 1 : i
-                  )
-                }
-              />
-            ) : openActivitiesIndex !== null ? (
+          <div
+            ref={cardsAreaRef}
+            onMouseMove={onCardsMouseMove}
+            className="relative flex-1 min-h-0 overflow-hidden"
+          >
+            {/* Collaborators' pointers */}
+            {Object.keys(cursors).length > 0 && (
+              <div className="pointer-events-none absolute inset-0 z-30" aria-hidden>
+                {Object.entries(cursors).map(([actor, c]) => {
+                  let hash = 0;
+                  for (let i = 0; i < actor.length; i++) hash = (hash * 31 + actor.charCodeAt(i)) | 0;
+                  const hue = Math.abs(hash) % 360;
+                  return (
+                    <div key={actor} className="absolute transition-all duration-75 ease-linear" style={{ left: c.x, top: c.y }}>
+                      <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
+                        <path d="M1 1 L15 8.5 L8.5 10 L5.5 17 Z" fill={`hsl(${hue}, 65%, 50%)`} stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" />
+                      </svg>
+                      <span
+                        className="ml-3 -mt-0.5 inline-block px-1.5 py-0.5 rounded-md text-[10px] font-medium text-white whitespace-nowrap"
+                        style={{ background: `hsl(${hue}, 65%, 45%)` }}
+                      >
+                        {c.name ?? 'Someone'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {openActivitiesIndex !== null ? (
               <ActivitiesDetailPanel
                 trip={currentTrip}
                 cityIndex={openActivitiesIndex}
@@ -755,12 +1374,35 @@ function ResultsPageInner() {
                   )
                 }
               />
-            ) : view === 'flowchart' ? (
+            ) : (
+              /* The view stays mounted under the city guide — faded out, not
+                 unmounted — so the guide can grow out of the card that was
+                 clicked and shrink back into it, and the flowchart keeps its
+                 scroll. Hidden once faded, so it takes no clicks or tabs. */
+              <motion.div
+                className="h-full"
+                initial={false}
+                animate={
+                  openCityIndex !== null && !guideClosing
+                    ? { opacity: 0, transitionEnd: { visibility: 'hidden' } }
+                    : { opacity: 1, visibility: 'visible' }
+                }
+                transition={{ duration: 0.3, ease: [0.22, 0.61, 0.36, 1] }}
+                aria-hidden={openCityIndex !== null && !guideClosing}
+              >
+            {view === 'flowchart' ? (
               <Flowchart
                 trip={currentTrip}
                 onCityClick={handleCityClick}
                 onActivitiesClick={handleActivitiesClick}
                 homeLegSearch={homeLegSearch}
+                editable={editable}
+                onReorder={reorderCities}
+                onRemoveCity={removeCity}
+                onNightsChange={setCityNights}
+                onAddCityAfter={(i) => setAddingAfter(i)}
+                onEditHome={(d) => setHomeEdit(d)}
+                refreshingLegs={refreshingLegs}
               />
             ) : view === 'schedule' ? (
               <div className="h-full min-h-0">
@@ -771,6 +1413,30 @@ function ResultsPageInner() {
             ) : (
               <div className="h-full overflow-y-auto">
                 <CalendarView trip={currentTrip} onCityClick={handleCityClick} />
+              </div>
+            )}
+              </motion.div>
+            )}
+            {openCityIndex !== null && (
+              <div className="absolute inset-0 z-20">
+                <CityDetailPanel
+                  trip={currentTrip}
+                  cityIndex={openCityIndex}
+                  originOf={cityCardRect}
+                  onCloseStart={() => setGuideClosing(true)}
+                  onClose={() => {
+                    setOpenCityIndex(null);
+                    setGuideClosing(false);
+                  }}
+                  onPrev={() =>
+                    setOpenCityIndex((i) => (i !== null && i > 0 ? i - 1 : i))
+                  }
+                  onNext={() =>
+                    setOpenCityIndex((i) =>
+                      i !== null && i < currentTrip.cities.length - 1 ? i + 1 : i
+                    )
+                  }
+                />
               </div>
             )}
           </div>
@@ -786,10 +1452,131 @@ function ResultsPageInner() {
             attribution. Cap it below `md` so the content above always keeps
             the larger share; from `md` up it docks to the right and the cap
             is irrelevant. */}
-        <aside className="max-h-[45vh] md:max-h-none md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 flex md:mt-3">
-          <AIChatPanel trip={currentTrip} />
-        </aside>
+        {/* Hidden, it stays mounted (the conversation is kept) and the cards
+            take the width; a tab on the right edge brings it back. */}
+        {chatAllowed && (
+          <aside
+            className={`max-h-[45vh] md:max-h-none md:w-[340px] lg:w-[380px] md:flex-shrink-0 min-h-0 ${chatOpen ? 'flex' : 'hidden'}`}
+          >
+            <AIChatPanel trip={currentTrip} onHide={() => setChatOpen(false)} />
+          </aside>
+        )}
+        </div>
       </div>
+
+      {/* BlueMurr AI pull-out tab — the right-edge twin of "Suggested Cities". */}
+      <AnimatePresence>
+        {chatAllowed && !chatOpen && (
+          <motion.button
+            initial={{ x: 48 }}
+            animate={{ x: 0 }}
+            exit={{ x: 48 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 250 }}
+            onClick={() => setChatOpen(true)}
+            aria-label="Show BlueMurr AI"
+            className="fixed right-0 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-1.5 rounded-l-xl py-3.5 px-1.5 shadow-md hover:shadow-lg transition-shadow"
+            style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.08)', borderRight: 'none' }}
+          >
+            <Sparkles size={13} style={{ color: '#2563eb' }} />
+            <span className="text-[10px] font-medium text-gray-600 tracking-wide" style={{ writingMode: 'vertical-rl' }}>
+              BlueMurr AI
+            </span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* ─── From the canvas: suggested cities, pending suggestions,
+          add-city / home-airport editors, the share dialog ─── */}
+      {editable && (
+        <SuggestedCitiesPanel
+          tripId={currentTrip.id ?? ''}
+          currentCities={currentTrip.cities.map((c) => c.name)}
+          budget={currentTrip.budget}
+          role={collab.active ? (collab.role ?? 'viewer') : 'owner'}
+          onAddCity={(dest) => addCity(currentTrip.cities.length - 1, { name: dest.name, nights: 2 })}
+          onSuggestCity={collab.suggestCity}
+        />
+      )}
+      {collab.active && collab.role && (
+        <SuggestionsPanel
+          suggestions={collab.suggestions}
+          role={collab.role}
+          onApprove={(id) =>
+            collab.approve(id, (name) =>
+              addCity((useTripStore.getState().currentTrip?.cities.length ?? 1) - 1, { name, nights: 2 }),
+            )
+          }
+          onReject={collab.reject}
+        />
+      )}
+      <AddCityModal
+        isOpen={addingAfter !== null}
+        onClose={() => setAddingAfter(null)}
+        onAdd={(data) => {
+          const after = addingAfter ?? currentTrip.cities.length - 1;
+          setAddingAfter(null);
+          addCity(after, data);
+        }}
+        currentCities={currentTrip.cities.map((c) => c.name)}
+      />
+      {publicView && signInModal}
+      <HomeEditModal
+        isOpen={homeEdit !== null}
+        direction={homeEdit ?? 'outbound'}
+        city={
+          homeEdit === 'inbound'
+            ? currentTrip.origin?.returnCity ?? currentTrip.origin?.city ?? ''
+            : currentTrip.origin?.city ?? ''
+        }
+        airports={
+          homeEdit === 'inbound'
+            ? currentTrip.origin?.returnAirports ?? currentTrip.origin?.airports ?? []
+            : currentTrip.origin?.airports ?? []
+        }
+        onClose={() => setHomeEdit(null)}
+        onApply={(updates) => homeEdit && applyHomeEdit(homeEdit, updates)}
+      />
+      {currentTrip.id && !currentTrip.id.startsWith('mock') && (
+        <ShareModal
+          tripId={currentTrip.id}
+          role={collab.role ?? 'owner'}
+          isOpen={shareOpen}
+          onClose={() => {
+            setShareOpen(false);
+            setMembersKey((k) => k + 1);
+          }}
+          onToast={collab.showToast}
+          onRoleChanged={(target, role) => {
+            collab.broadcastRoleChange(target, role);
+            setMembersKey((k) => k + 1);
+          }}
+          onTransferred={collab.onTransferred}
+        />
+      )}
+
+      {/* ─── Toast ─── */}
+      <AnimatePresence>
+        {collab.toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-full text-[13px] font-medium shadow-lg"
+            style={{
+              background:
+                collab.toast.type === 'success'
+                  ? 'rgba(34,192,136,0.95)'
+                  : collab.toast.type === 'error'
+                    ? 'rgba(220,38,38,0.95)'
+                    : 'rgba(37,99,235,0.95)',
+              color: '#ffffff',
+            }}
+            role="status"
+          >
+            {collab.toast.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }
@@ -824,6 +1611,8 @@ function sameLeg(a: HomeLeg | null | undefined, b: HomeLeg | null | undefined): 
   );
 }
 
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 function datedWork(prev: Trip, next: Trip): DatedWork | null {
   // Only the same itinerary moving in time. Another trip, or stops added,
   // removed or reordered, is a different trip, priced where it was built.
@@ -836,10 +1625,18 @@ function datedWork(prev: Trip, next: Trip): DatedWork | null {
   next.cities.forEach((c, i) => {
     const p = prev.cities[i];
     if (!p.dates || !c.dates) return;
-    if (p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) hotels.push(i);
-    if (i < next.cities.length - 1 && p.dates.departure !== c.dates.departure) legs.push(i);
+    // A stay or leg the same update already re-priced (an accepted AI date
+    // edit carries hotels and legs searched for the new dates, so its card
+    // states the exact total) is not searched again: a second search would
+    // move the header by an amount the card never showed.
+    // Compared by content: a copy of the same leg or hotels is not a re-price.
+    if ((p.dates.arrival !== c.dates.arrival || p.dates.departure !== c.dates.departure) && sameJson(c.hotels, p.hotels)) hotels.push(i);
+    if (i < next.cities.length - 1 && p.dates.departure !== c.dates.departure && sameJson(c.transportOut, p.transportOut)) legs.push(i);
   });
-  if (hotels.length === 0) return null;
+  const moved = next.cities.some(
+    (c, i) => !!prev.cities[i].dates && !!c.dates && (prev.cities[i].dates.arrival !== c.dates.arrival || prev.cities[i].dates.departure !== c.dates.departure),
+  );
+  if (!moved) return null;
 
   const origin = next.origin;
   const last = next.cities.length - 1;
@@ -853,10 +1650,13 @@ function datedWork(prev: Trip, next: Trip): DatedWork | null {
     prevStart
       ? addDaysIso(prevStart, daysFrom(prev.cities[0].dates.arrival, next.cities[0].dates.arrival))
       : null;
+  // A flight home that is missing is searched too: measured, two quick
+  // clicks on a stay's "+" cleared it for the first new date, the second
+  // click then saw no flight and searched nothing, and the first answer was
+  // dropped as stale — the trip was left with no flight home.
   const ret = !!(
     origin?.city &&
     (next.returnToHome ?? true) &&
-    origin.returnLeg &&
     sameLeg(origin.returnLeg, prev.origin?.returnLeg) &&
     prev.cities[last].dates.departure !== next.cities[last].dates.departure
   );
@@ -893,6 +1693,7 @@ function comparisonToTransport(
         departDate: date,
         layovers: flight.stops ?? 0,
         bookingUrl: flight.bookingUrl || undefined,
+        ...pickLegFacts(flight, 'flight'),
       };
     }
     if (mode === 'train' && train && train.price != null) {
@@ -908,6 +1709,7 @@ function comparisonToTransport(
         departDate: date,
         layovers: 0,
         bookingUrl: train.bookingUrl || undefined,
+        ...pickLegFacts(train, 'train'),
       };
     }
     return null;

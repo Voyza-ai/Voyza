@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
+import { motion, Reorder, useDragControls } from 'framer-motion';
 // PenSquare and Link were left over from before the Edit-in-Canvas button
 // got consolidated into ResultsHeader (backend_gohiltalla). Keeping the
 // `Transport` type — still referenced by the homeLegToTransport helper
 // further down in this file.
-import { ChevronLeft, ChevronRight, Home, Loader2 } from 'lucide-react';
-import { Trip, HomeLeg, Transport } from '@/lib/types';
+import { ChevronLeft, ChevronRight, Home, Loader2, GripHorizontal, X, Plus, Pencil } from 'lucide-react';
+import { Trip, HomeLeg, Transport, City } from '@/lib/types';
 import CityCard from './CityCard';
 import CityActivitiesCard from './CityActivitiesCard';
 import Connector from './Connector';
@@ -54,9 +54,51 @@ type FlowchartProps = {
   /** True per direction while the results page is backfilling a missing
    *  home-leg flight — shows a searching pill instead of an empty gap. */
   homeLegSearch?: { outbound: boolean; return: boolean };
+  /**
+   * The trip can be rearranged here (what the canvas used to do): drag a
+   * city by its handle, remove it, add one between two stops, change the
+   * home airports. Off for people the trip was shared with to view.
+   */
+  editable?: boolean;
+  /** A drag ended with the cities in a new order. */
+  onReorder?: (cities: City[]) => void;
+  onRemoveCity?: (index: number) => void;
+  /** A stay's nights changed from its card's − / + control. */
+  onNightsChange?: (index: number, nights: number) => void;
+  /** Add a city after this index (-1 = before the first). */
+  onAddCityAfter?: (index: number) => void;
+  onEditHome?: (direction: 'outbound' | 'inbound') => void;
+  /** Inter-city legs being searched again, keyed "From→To". */
+  refreshingLegs?: string[];
 };
 
-export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLegSearch }: FlowchartProps) {
+export default function Flowchart({
+  trip,
+  onCityClick,
+  onActivitiesClick,
+  homeLegSearch,
+  editable = false,
+  onReorder,
+  onRemoveCity,
+  onNightsChange,
+  onAddCityAfter,
+  onEditHome,
+  refreshingLegs = [],
+}: FlowchartProps) {
+  // The order while a city is being dragged; committed on drop.
+  const [dragOrder, setDragOrder] = useState<City[] | null>(null);
+  const dragOrderRef = useRef<City[] | null>(null);
+  dragOrderRef.current = dragOrder;
+  const cities = dragOrder ?? trip.cities;
+  const canAdd = editable && !!onAddCityAfter;
+  const canRemove = editable && !!onRemoveCity && trip.cities.length > 1;
+  const commitDrag = () => {
+    const order = dragOrderRef.current;
+    setDragOrder(null);
+    if (!order) return;
+    const moved = order.some((c, i) => c !== trip.cities[i]);
+    if (moved) onReorder?.(order);
+  };
   const setHomeLegAlternative = useTripStore((s) => s.setHomeLegAlternative);
   // AI picks still on their way (/results opens before them; see startTripPicks).
   const tripPicks = useTripStore((s) => s.tripPicks);
@@ -70,6 +112,83 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+
+  // ── Scrolling the row while a city is dragged ──
+  // Dragging a city toward an edge of the cards area scrolls it, faster the
+  // closer the pointer is, so a city can go from one end of a long trip to
+  // the other in one drag (it used to take a drag per screen and the arrows
+  // in between).
+  const dragX = useRef<number | null>(null);
+  const autoRaf = useRef<number | null>(null);
+  const stopAutoScroll = useCallback(() => {
+    dragX.current = null;
+    if (autoRaf.current != null) cancelAnimationFrame(autoRaf.current);
+    autoRaf.current = null;
+  }, []);
+  const startAutoScroll = useCallback(
+    (e: React.PointerEvent) => {
+      const el = scrollRef.current;
+      if (!el) return;
+      dragX.current = e.clientX;
+      let lastY = e.clientY;
+      // The drag places the card by how far the POINTER moved since it began;
+      // scrolling the row moves the card with the content, away from a still
+      // pointer (measured: the card scrolled off and the city moved one slot).
+      // So the drag is shown the pointer shifted by how far the row has
+      // scrolled since the drag began — the card stays under the pointer and
+      // the order is checked against where it really is.
+      const scroll0 = el.scrollLeft;
+      const shifted = (type: string, x: number, y: number, src?: PointerEvent) =>
+        new PointerEvent(type, {
+          clientX: x + (el.scrollLeft - scroll0),
+          clientY: y,
+          bubbles: true,
+          cancelable: true,
+          pointerId: src?.pointerId ?? 1,
+          pointerType: src?.pointerType ?? 'mouse',
+          isPrimary: true,
+          buttons: type === 'pointermove' ? 1 : 0,
+        });
+      const relay = (ev: PointerEvent) => {
+        if (!ev.isTrusted) return; // our own relayed copy: let it through
+        ev.stopImmediatePropagation();
+        dragX.current = ev.clientX;
+        lastY = ev.clientY;
+        window.dispatchEvent(shifted(ev.type, ev.clientX, ev.clientY, ev));
+        if (ev.type !== 'pointermove') end();
+      };
+      const end = () => {
+        window.removeEventListener('pointermove', relay, true);
+        window.removeEventListener('pointerup', relay, true);
+        window.removeEventListener('pointercancel', relay, true);
+        stopAutoScroll();
+      };
+      window.addEventListener('pointermove', relay, true);
+      window.addEventListener('pointerup', relay, true);
+      window.addEventListener('pointercancel', relay, true);
+      const EDGE = 110; // px from either edge where scrolling starts
+      const MAX = 24; // px per frame at the very edge
+      const tick = () => {
+        const x = dragX.current;
+        if (x == null) return;
+        const r = el.getBoundingClientRect();
+        let v = 0;
+        if (x < r.left + EDGE) v = -MAX * Math.min(1, (r.left + EDGE - x) / EDGE);
+        else if (x > r.right - EDGE) v = MAX * Math.min(1, (x - (r.right - EDGE)) / EDGE);
+        if (v !== 0) {
+          const before = el.scrollLeft;
+          el.scrollLeft = before + v;
+          // The row moved under a still pointer: tell the drag.
+          if (el.scrollLeft !== before) window.dispatchEvent(shifted('pointermove', x, lastY));
+        }
+        autoRaf.current = requestAnimationFrame(tick);
+      };
+      if (autoRaf.current != null) cancelAnimationFrame(autoRaf.current);
+      autoRaf.current = requestAnimationFrame(tick);
+    },
+    [stopAutoScroll],
+  );
+  useEffect(() => stopAutoScroll, [stopAutoScroll]);
 
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current;
@@ -168,9 +287,16 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
 
       {/* Scrollable flowchart window — scrolls both horizontally (between
           cities) and vertically (when sub-cards push past the viewport) */}
-      <div
+      {/* layoutScroll: the cards' positions are measured net of this
+          container's scroll, so scrolling it during a drag isn't taken for
+          the dragged card having moved (see startAutoScroll). */}
+      {/* overscroll-x-contain: a two-finger swipe that runs past the first
+          city stops here instead of reaching the page, where Chrome and Edge
+          on macOS turn it into the browser's Back (the trip was lost). */}
+      <motion.div
+        layoutScroll
         ref={scrollRef}
-        className="flex-1 min-h-0 overflow-x-auto overflow-y-auto scrollbar-hide"
+        className="flex-1 min-h-0 overflow-x-auto overflow-y-auto overscroll-x-contain scrollbar-hide"
         style={{
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
@@ -211,12 +337,13 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                 label="Home"
                 direction="outbound"
                 leg={trip.origin.outboundLeg ?? null}
+                onEdit={editable && onEditHome ? () => onEditHome('outbound') : undefined}
               />
               {/* Always show SOMETHING between home and the first city:
                   the real flight, a searching state while the backfill
                   runs, or an honest "no flights found" card. */}
               {trip.origin.outboundLeg ? (
-                <div className="flex items-center flex-shrink-0 mx-2">
+                <AddSlot show={canAdd} onAdd={() => onAddCityAfter?.(-1)} label="Add a city before the first stop">
                   <Connector
                     transport={homeLegToTransport(
                       trip.origin.outboundLeg,
@@ -238,11 +365,11 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                       setHomeLegAlternative('outbound', altIdx)
                     }
                   />
-                </div>
+                </AddSlot>
               ) : homeLegSearch?.outbound ? (
                 <HomeLegSearchingPill />
               ) : (
-                <div className="flex items-center flex-shrink-0 mx-2">
+                <AddSlot show={canAdd} onAdd={() => onAddCityAfter?.(-1)} label="Add a city before the first stop">
                   <Connector
                     transport={{
                       mode: 'flight',
@@ -265,12 +392,19 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                       })
                     }
                   />
-                </div>
+                </AddSlot>
               )}
             </motion.div>
           )}
 
-          {trip.cities.map((city, idx) => {
+          <Reorder.Group
+            as="div"
+            axis="x"
+            values={cities}
+            onReorder={(order: City[]) => setDragOrder(order)}
+            className="flex items-stretch gap-6"
+          >
+          {cities.map((city, idx) => {
             const picksLoading = cityPicksLoading(tripPicks, trip, city.name);
             const hasSub =
               city.activities.length > 0 || city.restaurants.length > 0 || picksLoading;
@@ -280,21 +414,33 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
             const hoveredCity = activeIndex ?? activeSubIndex;
             const isDimmed = hoveredCity !== null && hoveredCity !== idx;
             return (
-              <motion.div
-                key={`${city.name}|${city.dates.arrival}`}
-                className="flex items-stretch"
-                variants={{
-                  hidden: { opacity: 0, y: 24 },
-                  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 0.61, 0.36, 1] } },
-                }}
+              <CityReorderItem
+                // Stable across a reorder: the old fallback to the position
+                // (`idx`) — trips without colour indices, e.g. one just
+                // planned — remounted the dragged card at its first swap, and
+                // the drag stopped there (a city moved one place per drag).
+                key={stableCityKey(cities, idx)}
+                city={city}
+                editable={editable && !!onReorder}
+                onDragEnd={commitDrag}
+                onDragStart={startAutoScroll}
               >
+                {(startDrag) => (
+                  <>
                 {/* City column: main card → linker line → sub-card */}
                 <div
                   ref={(el) => {
                     cardRefs.current[idx] = el;
                   }}
-                  className="flex flex-col items-center"
+                  className="relative group flex flex-col items-center"
                 >
+                  {editable && (
+                    <CityEditControls
+                      cityName={city.name}
+                      onStartDrag={startDrag}
+                      onRemove={canRemove ? () => onRemoveCity?.(idx) : undefined}
+                    />
+                  )}
                   <CityCard
                     city={city}
                     index={idx}
@@ -303,6 +449,9 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     onHover={() => setActiveIndex(idx)}
                     onLeave={() => setActiveIndex(null)}
                     onClick={() => onCityClick?.(idx)}
+                    onNightsChange={
+                      editable && onNightsChange && !dragOrder ? (n) => onNightsChange(idx, n) : undefined
+                    }
                   />
 
                   {hasSub && (
@@ -343,14 +492,21 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                     row has the same height = tallest city column,
                     so every connector's vertical center lands at the
                     same Y on the flowchart. */}
-                {idx < trip.cities.length - 1 && (
-                  <div className="flex items-center flex-shrink-0 mx-2">
+                {idx < cities.length - 1 && !dragOrder &&
+                  refreshingLegs.includes(`${city.name}→${cities[idx + 1]?.name ?? ''}`) ? (
+                  <HomeLegSearchingPill label="Finding transport…" />
+                ) : idx < cities.length - 1 && (
+                  <AddSlot
+                    show={canAdd && !dragOrder}
+                    onAdd={() => onAddCityAfter?.(idx)}
+                    label={`Add a city after ${city.name}`}
+                  >
                     <Connector
                       transport={city.transportOut}
                       legDate={city.dates?.departure}
                       noRailRegion={legNoRailRegion(
                         city.country,
-                        trip.cities[idx + 1]?.country,
+                        cities[idx + 1]?.country,
                         city.transportOut,
                       )}
                       index={idx}
@@ -365,11 +521,14 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                         })
                       }
                     />
-                  </div>
+                  </AddSlot>
                 )}
-              </motion.div>
+                  </>
+                )}
+              </CityReorderItem>
             );
           })}
+          </Reorder.Group>
 
           {/* Trailing return leg + "Back home" card. Same motion.div
               shape as outbound: Connector first, then HomeCard, in one
@@ -384,7 +543,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
               }}
             >
               {trip.origin.returnLeg ? (
-                <div className="flex items-center flex-shrink-0 mx-2">
+                <AddSlot show={canAdd} onAdd={() => onAddCityAfter?.(trip.cities.length - 1)} label="Add a city after the last stop">
                   <Connector
                     transport={homeLegToTransport(
                       trip.origin.returnLeg,
@@ -406,11 +565,11 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                       setHomeLegAlternative('return', altIdx)
                     }
                   />
-                </div>
+                </AddSlot>
               ) : homeLegSearch?.return ? (
                 <HomeLegSearchingPill />
               ) : (
-                <div className="flex items-center flex-shrink-0 mx-2">
+                <AddSlot show={canAdd} onAdd={() => onAddCityAfter?.(trip.cities.length - 1)} label="Add a city after the last stop">
                   <Connector
                     transport={{
                       mode: 'flight',
@@ -433,7 +592,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                       })
                     }
                   />
-                </div>
+                </AddSlot>
               )}
               <HomeCard
                 city={trip.origin.returnCity ?? trip.origin.city}
@@ -441,15 +600,33 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
                 label="Back home"
                 direction="inbound"
                 leg={trip.origin.returnLeg ?? null}
+                onEdit={editable && onEditHome ? () => onEditHome('inbound') : undefined}
               />
             </motion.div>
           )}
+
+          {/* No back-home card to hang a "+" on: add after the last stop here. */}
+          {canAdd && !(trip.origin?.city && trip.returnToHome) && (
+            <div className="flex items-center flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => onAddCityAfter?.(trip.cities.length - 1)}
+                aria-label="Add a city after the last stop"
+                title="Add a city"
+                className="w-12 h-12 rounded-full flex items-center justify-center border-2 border-dashed text-gray-400 transition-all hover:scale-110 hover:border-[#2563eb] hover:text-[#2563eb]"
+                style={{ borderColor: 'rgba(0,0,0,0.15)' }}
+              >
+                <Plus size={20} />
+              </button>
+            </div>
+          )}
         </motion.div>
-      </div>
+      </motion.div>
 
       {/* Hint — pinned below the scroll window */}
       <div className="flex-shrink-0 text-center pt-2 pb-1 text-gray-500 text-xs">
         Hover or use ← → keys to focus a stop · Click to open the full guide
+        {editable && onReorder ? ' · Drag a city by its handle to reorder' : ''}
       </div>
     </div>
   );
@@ -457,7 +634,7 @@ export default function Flowchart({ trip, onCityClick, onActivitiesClick, homeLe
 
 /** Compact pill shown in a home connector's slot while the results page
  *  backfills that direction's flight. */
-function HomeLegSearchingPill() {
+function HomeLegSearchingPill({ label = 'Finding flights…' }: { label?: string } = {}) {
   return (
     <div className="flex items-center flex-shrink-0 mx-2">
       <div
@@ -465,7 +642,7 @@ function HomeLegSearchingPill() {
         style={{ background: '#ffffff', borderColor: 'rgba(0,0,0,0.08)' }}
       >
         <Loader2 size={13} className="animate-spin" style={{ color: '#2563eb' }} />
-        Finding flights…
+        {label}
       </div>
     </div>
   );
@@ -482,18 +659,21 @@ function HomeLegSearchingPill() {
 // Terminal/gate info is omitted because our current flight data
 // source doesn't return it; if we upgrade to Amadeus/Duffel we'll
 // surface it here too.
-function HomeCard({
+export function HomeCard({
   city,
   airports,
   label,
   direction,
   leg,
+  onEdit,
 }: {
   city: string;
   airports: string[];
   label: string;
   direction: 'outbound' | 'inbound';
   leg: HomeLeg | null;
+  /** Change this direction's home city / airports (editable trips). */
+  onEdit?: () => void;
 }) {
   // Pick the airport IATA on the HOME side of this leg. Outbound
   // leaves from home (originAirport). Inbound arrives at home
@@ -531,6 +711,17 @@ function HomeCard({
         >
           <Home size={14} />
           <div className="text-[11px] uppercase tracking-wider font-semibold">{label}</div>
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              aria-label={`Change ${direction === 'outbound' ? 'home' : 'back-home'} airports`}
+              title="Change city or airports"
+              className="ml-auto w-6 h-6 rounded-md flex items-center justify-center text-white/75 hover:text-white hover:bg-white/15 transition-colors"
+            >
+              <Pencil size={12} />
+            </button>
+          )}
         </div>
 
         <div className="flex-1 flex flex-col px-4 py-4 gap-3">
@@ -677,3 +868,136 @@ function homeLegToTransport(leg: HomeLeg, fromCity: string, toCity: string): Tra
   return main;
 }
 
+
+/**
+ * A connector slot that also offers "add a city here" on hover — the canvas's
+ * between-cards "+". The slot keeps the connector's layout (stretched,
+ * content centred); the button sits just under the leg card.
+ */
+function AddSlot({
+  show,
+  onAdd,
+  label,
+  children,
+}: {
+  show: boolean;
+  onAdd: () => void;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="relative group/add flex items-center flex-shrink-0 mx-2">
+      {children}
+      {show && (
+        <button
+          type="button"
+          onClick={onAdd}
+          aria-label={label}
+          title="Add a city here"
+          className="absolute left-1/2 -translate-x-1/2 w-7 h-7 rounded-full flex items-center justify-center bg-white border border-dashed text-gray-400 opacity-0 group-hover/add:opacity-100 focus:opacity-100 transition-all hover:border-[#2563eb] hover:text-[#2563eb] hover:scale-110"
+          style={{ top: 'calc(50% + 84px)', borderColor: 'rgba(0,0,0,0.2)' }}
+        >
+          <Plus size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A small hover toolbar at the top centre of an editable city: the drag
+ * handle and, when the city can go, a remove button. Kept off the card's
+ * name and its number/stay badges.
+ */
+function CityEditControls({
+  cityName,
+  onStartDrag,
+  onRemove,
+}: {
+  cityName: string;
+  onStartDrag: (e: React.PointerEvent) => void;
+  onRemove?: () => void;
+}) {
+  return (
+    <div className="absolute top-1.5 left-1/2 -translate-x-1/2 z-10 flex items-center rounded-full bg-white/90 border border-black/10 shadow-sm opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+      <button
+        type="button"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          onStartDrag(e);
+        }}
+        aria-label={`Drag to move ${cityName}`}
+        title="Drag to reorder"
+        className="px-2 py-0.5 flex items-center justify-center text-gray-500 cursor-grab active:cursor-grabbing hover:text-gray-800"
+        style={{ touchAction: 'none' }}
+      >
+        <GripHorizontal size={14} />
+      </button>
+      {onRemove && (
+        <>
+          <span className="w-px h-3.5 bg-black/10" />
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={`Remove ${cityName}`}
+            title={`Remove ${cityName}`}
+            className="px-1.5 py-0.5 flex items-center justify-center text-gray-500 hover:text-red-600"
+          >
+            <X size={12} />
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One city's column in the reorderable row. Dragging starts only from the
+ * handle (so a click on the card still opens its guide); the order is kept
+ * locally while dragging and committed on drop.
+ */
+function CityReorderItem({
+  city,
+  editable,
+  onDragEnd,
+  onDragStart,
+  children,
+}: {
+  city: City;
+  editable: boolean;
+  onDragEnd: () => void;
+  onDragStart?: (e: React.PointerEvent) => void;
+  children: (startDrag: (e: React.PointerEvent) => void) => ReactNode;
+}) {
+  const controls = useDragControls();
+  return (
+    <Reorder.Item
+      as="div"
+      value={city}
+      dragListener={false}
+      dragControls={controls}
+      drag={editable ? 'x' : false}
+      onDragEnd={onDragEnd}
+      className="flex items-stretch"
+      whileDrag={{ scale: 1.03, zIndex: 50 }}
+      variants={{
+        hidden: { opacity: 0, y: 24 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 0.61, 0.36, 1] } },
+      }}
+    >
+      {children((e) => {
+        if (!editable) return;
+        controls.start(e);
+        onDragStart?.(e);
+      })}
+    </Reorder.Item>
+  );
+}
+
+/** A React key for a city that survives reordering: its name, plus which of the same-named stays it is. */
+function stableCityKey(cities: City[], idx: number): string {
+  const name = cities[idx].name;
+  let nth = 0;
+  for (let i = 0; i < idx; i++) if (cities[i].name === name) nth++;
+  return `${name}|${nth}`;
+}

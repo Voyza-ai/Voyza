@@ -12,6 +12,7 @@ import {
 import { Transport } from '@/lib/types';
 import { useTripStore } from '@/store/tripStore';
 import { displayAmount } from '@/lib/tripTotals';
+import { arrivesNextDay } from '@/lib/cityLegs';
 
 type TransportDetailCardProps = {
   transport: Transport;
@@ -175,6 +176,7 @@ export default function TransportDetailCard({ transport, onClose }: TransportDet
               <div className="flex items-baseline justify-between gap-2">
                 <div className="text-gray-900 text-[15px] font-mono font-semibold tabular-nums">
                   {transport.arriveTime || '—'}
+                  {arrivesNextDay(transport) && <span className="text-[10px] text-gray-500 align-super ml-0.5">+1</span>}
                 </div>
                 <div className="text-gray-600 text-[10px] uppercase tracking-wider">
                   Arrive
@@ -225,6 +227,15 @@ export default function TransportDetailCard({ transport, onClose }: TransportDet
             Book
             <ExternalLink size={11} />
           </a>
+        ) : !isFlight ? (
+          <div
+            role="note"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-dashed cursor-default select-none text-[11px]"
+            style={{ borderColor: `${accentColor}99`, color: '#15805a' }}
+          >
+            <TrainFront size={11} />
+            Rail partner booking · coming soon
+          </div>
         ) : (
           <div className="text-gray-300 text-[11px]">Booking link soon</div>
         )}

@@ -6,8 +6,9 @@ import { ArrowRight, Send, SkipForward, Pencil, Check, X, MapPin, LocateFixed, L
 import { useTripStore, requestCityPicks, startTripPicks, type CityPicksRequest } from '@/store/tripStore';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ApiError, interpretPlan, optimizeTrip, reviseDestinations, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
+import { ApiError, getOptimizeProgress, interpretPlan, optimizeTrip, reviseDestinations, searchHotels, suggestDestinations, OptimizeResult } from '@/lib/api';
 import { Trip, City, Transport, PlanningAnswers, VibeDestinationSuggestion } from '@/lib/types';
+import { pickLegFacts } from '@/lib/legFacts';
 import { hotelFromResult } from '@/lib/hotelShape';
 import { liveTripTotal } from '@/lib/tripTotals';
 import { suggestDestinationsForVibe } from '@/lib/api';
@@ -15,6 +16,7 @@ import { parseDateInput, parseDateRangeInput } from '@/lib/parseDate';
 import { buildCityScheduleFromSuggestions } from '@/lib/dayScheduleDefaults';
 import { countryForCity } from '@/data/worldCities';
 import { vibesFromAnswer } from '@/lib/vibeMap';
+import { dedupeVibes, joinVibes, pillsAndText, splitVibeText, vibeBubbleText, vibeList } from '@/lib/vibes';
 // `originAirportsForCity` is a VALUE import, so the 60 KB hot set lands in
 // this chunk. That is deliberate and it is what a hot set is for: the planner
 // is exactly the screen that has to answer an origin while someone types, and
@@ -28,11 +30,16 @@ import type { SummaryField } from '@/lib/tripSummary';
 import IntentPicker from './IntentPicker';
 import VibePills from './VibePills';
 import ConversationalPlanner from './ConversationalPlanner';
+import SearchProgress from './SearchProgress';
+import { startSearchProgress, type SearchProgressState } from '@/lib/searchProgress';
+import { capturedLabel, demoTripFor, openDemoTrip } from '@/lib/demoTrips';
+import { usePlannerLeaveGuard } from '@/hooks/usePlannerLeaveGuard';
 import { formatMinutes, humanDay, humanDayRange } from '@/lib/dateHelpers';
 import DatePicker from './DatePicker';
 import TravelersPicker from './TravelersPicker';
 import BudgetPicker from './BudgetPicker';
 import NightsPicker from './NightsPicker';
+import { moneyBucket, track } from '@/lib/track';
 
 /**
  * The three `LocationAnswer` branches collapsed to the `string[]` that
@@ -268,8 +275,12 @@ export default function PlanningChat() {
   const [isComplete, setIsComplete] = useState(false);
   const [showIntent, setShowIntent] = useState(false);
   const [vibe, setVibe] = useState<string | null>(null);
+  // The vibe step's picked pills, before Continue.
+  const [vibeDraft, setVibeDraft] = useState<string[]>([]);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editingMsgValue, setEditingMsgValue] = useState('');
+  // Editing the vibe answer re-opens the pills: these are its picks.
+  const [editingVibePills, setEditingVibePills] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const initialized = useRef(false);
@@ -467,6 +478,7 @@ export default function PlanningChat() {
       budget: 'budget',
     };
     setAnswer('planningMode', modeMap[selectedIntent]);
+    track('plan_started', { mode: modeMap[selectedIntent] });
 
     const labels: Record<string, string> = {
       place: 'I have a place in mind',
@@ -718,7 +730,7 @@ export default function PlanningChat() {
         warnIfMock(parsed);
 
         // Store anything else the AI extracted from the destination text
-        if (parsed.vibe && !answers.vibe) setAnswer('vibe', parsed.vibe);
+        if (parsed.vibe && !answers.vibe) commitVibes(splitVibeText(parsed.vibe));
         if (parsed.travelers && !answers.travelers) setAnswer('travelers', parsed.travelers);
         if (parsed.budget && !answers.budget) setAnswer('budget', parsed.budget);
         if (typeof parsed.budgetPerPerson === 'boolean' && answers.budgetPerPerson === undefined) {
@@ -835,12 +847,33 @@ export default function PlanningChat() {
   // Open chat submit — user types everything at once. Calls AI interpret
   // immediately, then asks only for whatever's missing (budget, vibe, etc.)
   // before going to Find my trip.
-  const handleVibeSelect = (selectedVibe: string) => {
-    setVibe(selectedVibe);
-    setAnswer('vibe', selectedVibe);
+  /**
+   * Store the vibes: the list for the planner's own UI and, joined, the one
+   * string the backend and the saved trip take ("Culture, Food").
+   */
+  const commitVibes = (list: string[]) => {
+    const vibes = dedupeVibes(list);
+    if (vibes.length === 0) return;
+    setVibe(vibes[0]);
+    setAnswer('vibes', vibes);
+    setAnswer('vibe', joinVibes(vibes));
+  };
+
+  /**
+   * Confirm the vibe step: the picked pills plus anything typed in the bar
+   * ("Culture" + "food" → Culture, food). Typed text alone still works, as
+   * it always has; "beach and food" counts as two vibes.
+   */
+  const handleVibeConfirm = (typed?: string) => {
+    const text = (typed ?? '').trim();
+    const vibes = dedupeVibes([...vibeDraft, ...splitVibeText(text)]);
+    if (vibes.length === 0) return;
+    commitVibes(vibes);
+    setVibeDraft([]);
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: 'user', content: selectedVibe, stepId: 'vibe' },
+      // The bubble keeps the traveller's own words for what they typed.
+      { id: nextId(), role: 'user', content: vibeBubbleText(text ? [...vibeDraft, text] : vibes), stepId: 'vibe' },
     ]);
     advanceToNextStep(currentStepIndex);
   };
@@ -986,8 +1019,7 @@ export default function PlanningChat() {
     // these bubbles when a fact is clicked: an edit that changed only the
     // bubble would leave the summary (and the search) on the old answer.
     if (stepId === 'vibe') {
-      setVibe(text.trim());
-      setAnswer('vibe', text.trim());
+      commitVibes(splitVibeText(text));
       return true;
     }
 
@@ -1088,6 +1120,7 @@ export default function PlanningChat() {
       layovers: opt.mode === 'flight' ? (opt.stops ?? 0) : 0,
       bookingUrl: opt.bookingUrl ?? undefined,
       flightNumber: opt.mode === 'flight' ? (opt.flightNumber ?? undefined) : undefined,
+      ...pickLegFacts(opt, opt.mode),
     });
 
     // Helper: extract a Transport from an optimizer leg.
@@ -1173,6 +1206,7 @@ export default function PlanningChat() {
             ? new Date(otherArriveIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
             : undefined,
           bookingUrl: other.bookingUrl || undefined,
+          ...pickLegFacts(other, otherMode),
         });
       }
 
@@ -1189,6 +1223,7 @@ export default function PlanningChat() {
         layovers: mode === 'flight' ? (picked.stops ?? 0) : 0,
         bookingUrl: picked.bookingUrl || undefined,
         flightNumber: mode === 'flight' ? (picked.carrierCode ?? undefined) : undefined,
+        ...pickLegFacts(picked, mode),
         alternatives,
         // Honest "no train" note when a flight was picked, no train option came
         // back, and the route is short enough (≤6h) that a train would compete.
@@ -1221,7 +1256,7 @@ export default function PlanningChat() {
         selectedHotelIndex: 0,
         activities: [],
         restaurants: [],
-        vibes: vibesFromAnswer(answers.vibe),
+        vibes: vibesFromAnswer(vibeList(answers)),
       };
     });
 
@@ -1273,7 +1308,21 @@ export default function PlanningChat() {
 
   const [findTripLoading, setFindTripLoading] = useState(false);
   const [findTripStatus, setFindTripStatus] = useState('');
+  /** The running search, step by step (SearchProgress). Null when none is. */
+  const [searchProgress, setSearchProgress] = useState<SearchProgressState | null>(null);
+  // A long search for a trip there is a stored demo of: offer that instead
+  // (lib/demoTrips.ts). Leaving /plan stops the live search (mountedRef).
+  const slowSearchDemo = searchProgress ? demoTripFor(searchProgress.cities) : null;
+  const demoFallback = slowSearchDemo
+    ? {
+        afterSeconds: 20,
+        label: `Taking a while? Open the stored search (prices from ${capturedLabel(slowSearchDemo.capturedAt)})`,
+        onOpen: () => openDemoTrip(slowSearchDemo, (href) => router.push(href)),
+      }
+    : null;
   const [findTripError, setFindTripError] = useState<string | null>(null);
+  // Ask before leaving once something is answered, until Find my trip runs.
+  usePlannerLeaveGuard(findTripLoading);
 
   // City selection state — shown when user mentions countries
   const [citySelectionData, setCitySelectionData] = useState<{
@@ -1336,10 +1385,13 @@ export default function PlanningChat() {
     const hasDates = answers.dateRange?.start || parsed?.dates?.start;
     const hasTravelers = typeof answers.travelers === 'number' || typeof parsed?.travelers === 'number';
     const hasBudget = typeof answers.budget === 'number' || typeof parsed?.budget === 'number';
-    const hasOrigin = !!(answers.origin || parsed?.origin);
-    const hasRoundTrip =
-      typeof answers.returnToHome === 'boolean' ||
-      typeof parsed?.returnToHome === 'boolean';
+    // Where they fly from and round-trip vs one-way are ASKED unless the
+    // traveller already answered them here. The interpret guess was used to
+    // skip both questions but never stored, so "flying out of Paris to
+    // London…" lost its home city, and a mid-route "back to Paris" read as
+    // round-trip.
+    const hasOrigin = !!answers.origin;
+    const hasRoundTrip = typeof answers.returnToHome === 'boolean';
     const travelersAmbiguous = parsed?.travelersAmbiguous === true && hasTravelers;
     const budgetPerPersonKnown =
       typeof answers.budgetPerPerson === 'boolean' ||
@@ -1504,6 +1556,15 @@ export default function PlanningChat() {
     const travelers = parsed.travelers ?? answers.travelers ?? 1;
     setFindTripLoading(true);
     setFindTripError(null);
+    const searchStarted = Date.now();
+    track('trip_search_started', {
+      mode: answers.planningMode ?? 'destination',
+      cities: Array.isArray(parsed.destinations) ? parsed.destinations.length : null,
+      travelers,
+      nights: typeof answers.nights === 'number' ? answers.nights : null,
+      round_trip: answers.returnToHome !== false,
+      has_budget: typeof (parsed.budget ?? answers.budget) === 'number',
+    });
 
     try {
       // Normalize whatever the user / AI produced into YYYY-MM-DD. The
@@ -1559,7 +1620,26 @@ export default function PlanningChat() {
         }
       }
 
+      // Live progress: the optimizer reports its own counts under this id
+      // while the request is open, polled here (see lib/searchProgress.ts).
+      const progressId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+      setSearchProgress(startSearchProgress(parsed.destinations, answers.origin ?? undefined));
+      let polling = true;
+      const poll = async () => {
+        while (polling && mountedRef.current) {
+          await new Promise((r) => setTimeout(r, 700));
+          if (!polling) break;
+          const p = await getOptimizeProgress(progressId);
+          if (p && polling) setSearchProgress((s) => (s && s.phase === 'optimize' ? { ...s, optimize: p } : s));
+        }
+      };
+      void poll();
+
       const result = await optimizeTrip({
+        progressId,
         cities: parsed.destinations.map((d: string) => ({ name: d })),
         startDate,
         travelers,
@@ -1571,6 +1651,8 @@ export default function PlanningChat() {
         originAirports: answers.originAirports ?? undefined,
         returnToHome: answers.returnToHome ?? true,
         totalNights: totalNightsForOptimize,
+      }).finally(() => {
+        polling = false;
       });
 
       // The user may have left /plan while that ran. The search outlives the
@@ -1583,6 +1665,7 @@ export default function PlanningChat() {
       if (!mountedRef.current) return;
 
       trip = buildTripFromOptimize(result, travelers);
+      setSearchProgress((s) => (s ? { ...s, phase: 'hotels' } : s));
 
       // Compute a per-night hotel cap from the total budget.
       // Rule of thumb: hotels get ~40% of the total trip budget. For a
@@ -1645,6 +1728,7 @@ export default function PlanningChat() {
       const HOTEL_CONCURRENCY = 2;
 
       const fetchOne = async (city: (typeof trip.cities)[number]) => {
+        setSearchProgress((s) => (s ? { ...s, hotelsActive: [...s.hotelsActive, city.name] } : s));
         try {
           const stay = {
             city: city.name,
@@ -1687,6 +1771,16 @@ export default function PlanningChat() {
           }
         } catch {
           // Hotel search failure is non-fatal
+        } finally {
+          setSearchProgress((s) =>
+            s
+              ? {
+                  ...s,
+                  hotelsActive: s.hotelsActive.filter((n) => n !== city.name),
+                  hotelsDone: [...s.hotelsDone, city.name],
+                }
+              : s,
+          );
         }
         return null;
       };
@@ -1736,6 +1830,13 @@ export default function PlanningChat() {
         trip.budget = totalBudget;
       }
 
+      // The vibes the picks were asked for, as the one string a saved trip
+      // keeps in `trips.vibe` ("Culture, Food").
+      const tripVibe = parsed.vibe ?? answers.vibe;
+      if (typeof tripVibe === 'string' && tripVibe.trim()) {
+        trip.vibe = tripVibe.trim();
+      }
+
       // Vibe-first only: attach Claude's "bump your budget by $X" hint
       // when present so the results page can render a banner. Caller
       // passes this in via parsed.vibeTierUp; absent for non-vibe flows.
@@ -1754,9 +1855,17 @@ export default function PlanningChat() {
       // Step 4 lands on /results: the trip goes on screen now, and each city's
       // AI picks fill in when they answer (startTripPicks).
       startTripPicks(trip, picksRequests, picksInFlight);
+      setSearchProgress((s) => (s ? { ...s, phase: 'opening' } : s));
+      track('trip_search_succeeded', {
+        cities: trip.cities.length,
+        travelers: trip.travelers,
+        seconds: Math.round((Date.now() - searchStarted) / 1000),
+        total: moneyBucket(trip.totalCost),
+      });
       router.push('/results');
     } catch (err: unknown) {
       const friendly = plannerErrorMessage(err);
+      track('trip_search_failed', { seconds: Math.round((Date.now() - searchStarted) / 1000), error: String(friendly).slice(0, 80) });
       setFindTripError(friendly);
       setMessages((prev) => {
         // Avoid stacking identical error bubbles if the user spams the button.
@@ -1770,6 +1879,7 @@ export default function PlanningChat() {
     } finally {
       setFindTripLoading(false);
       setFindTripStatus('');
+      setSearchProgress(null);
     }
   };
 
@@ -1974,7 +2084,7 @@ export default function PlanningChat() {
       case 'Architecture': return 'radial-gradient(ellipse at 50% 80%, rgba(200,160,255,0.06) 0%, transparent 60%)';
       case 'Adventure': return 'radial-gradient(ellipse at 50% 80%, rgba(80,220,140,0.06) 0%, transparent 60%)';
       case 'Culture': return 'radial-gradient(ellipse at 50% 80%, rgba(244,114,182,0.06) 0%, transparent 60%)';
-      default: return vibe ? 'radial-gradient(ellipse at 50% 80%, rgba(79,142,247,0.05) 0%, transparent 60%)' : 'none';
+      default: return vibe ? 'radial-gradient(ellipse at 50% 80%, rgba(37,99,235,0.05) 0%, transparent 60%)' : 'none';
     }
   })();
 
@@ -2012,6 +2122,26 @@ export default function PlanningChat() {
   const canReviseDestinations =
     !!intent && intent !== 'chat' && (answers.destinations?.length ?? 0) > 0 && !citySelectionData;
 
+  // Editing the vibe answer re-opens the pills with the current picks; any
+  // vibe that isn't a pill comes back as text beside them.
+  const openVibeEditor = () => {
+    const { pills, text } = pillsAndText(vibeList(useTripStore.getState().answers));
+    setEditingVibePills(pills);
+    setEditingMsgValue(text);
+  };
+  const saveVibeEdit = (msgId: string) => {
+    const text = editingMsgValue.trim();
+    const vibes = dedupeVibes([...editingVibePills, ...splitVibeText(text)]);
+    if (vibes.length === 0) return; // a vibe answer can't be saved empty
+    commitVibes(vibes);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId ? { ...m, content: vibeBubbleText(text ? [...editingVibePills, text] : vibes) } : m,
+      ),
+    );
+    setEditingMsgId(null);
+  };
+
   // ── Running trip summary: clicking a fact revises that answer ─────────
   //
   // Guided mode opens the answer's own bubble in its inline editor (the
@@ -2047,6 +2177,7 @@ export default function PlanningChat() {
     if (!bubble) return;
     setEditingMsgId(bubble.id);
     setEditingMsgValue(bubble.content.replace(/^📍\s*/, ''));
+    if (bubble.stepId === 'vibe') openVibeEditor();
     requestAnimationFrame(() => {
       document
         .querySelector(`[data-msg-id="${bubble.id}"]`)
@@ -2102,6 +2233,11 @@ export default function PlanningChat() {
 
   const handleBarSubmit = () => {
     const value = textInput.trim();
+    // The vibe step: Enter in an empty bar confirms the picked pills.
+    if (!value && !revising && !isComplete && currentStep?.type === 'vibes' && vibeDraft.length > 0) {
+      handleVibeConfirm();
+      return;
+    }
     if (!value || revising) return;
     // After "Perfect — I've got everything" the bar stays only for
     // destination corrections; any other text gets a pointer to the
@@ -2169,7 +2305,7 @@ export default function PlanningChat() {
         return;
       }
       case 'vibes':
-        handleVibeSelect(value);
+        handleVibeConfirm(value);
         setTextInput('');
         return;
       case 'dates': {
@@ -2332,7 +2468,7 @@ export default function PlanningChat() {
   }, [findTripLoading, findTripError, intent]);
 
   return (
-    <div className="relative flex flex-col h-screen" style={{ background: '#0f0f1a' }}>
+    <div className="relative flex flex-col h-screen" style={{ background: '#f0f4f8' }}>
       {/* Subtle vibe background shift */}
       <motion.div
         className="absolute inset-0 pointer-events-none"
@@ -2343,7 +2479,7 @@ export default function PlanningChat() {
 
       {/* Header */}
       <div className="relative z-10 flex items-center justify-center pt-10 pb-5">
-        <Link href="/main" className="text-4xl font-bold tracking-tight hover:opacity-80 transition-opacity" style={{ color: '#4f8ef7' }}>
+        <Link href="/main" className="text-4xl font-bold tracking-tight hover:opacity-80 transition-opacity" style={{ color: '#2563eb' }}>
           BlueMurr
         </Link>
       </div>
@@ -2354,6 +2490,8 @@ export default function PlanningChat() {
           onFindTrip={handleFindTrip}
           findTripLoading={findTripLoading}
           findTripStatus={findTripStatus}
+          searchProgress={searchProgress}
+          searchFallback={demoFallback}
           findTripError={findTripError}
           onSwitchToGuided={() => {
             setIntent('place');
@@ -2386,7 +2524,52 @@ export default function PlanningChat() {
                 transition={{ duration: 0.35, ease: 'easeOut' }}
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                {msg.role === 'user' && editingMsgId === msg.id ? (
+                {msg.role === 'user' && editingMsgId === msg.id && msg.stepId === 'vibe' ? (
+                  /* Editing the vibe answer: the pills again, with the
+                     current picks, and any typed vibe beside them. */
+                  <div className="w-full flex flex-col gap-3" data-testid="vibe-editor">
+                    <VibePills
+                      selected={editingVibePills}
+                      onChange={setEditingVibePills}
+                      onContinue={() => saveVibeEdit(msg.id)}
+                      hideContinue
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={editingMsgValue}
+                        onChange={(e) => setEditingMsgValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            saveVibeEdit(msg.id);
+                          }
+                          if (e.key === 'Escape') setEditingMsgId(null);
+                        }}
+                        placeholder="Or describe your vibe..."
+                        aria-label="Describe your vibe"
+                        className="flex-1 min-w-0 bg-white border border-gray-200 rounded-full px-4 py-2 text-[15px] text-gray-900 placeholder-gray-500 outline-none focus:border-[#2563eb]/60"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditingMsgId(null)}
+                        className="flex items-center gap-1 text-[12px] text-gray-500 hover:text-gray-800 transition-colors px-2 py-1"
+                      >
+                        <X size={12} />
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveVibeEdit(msg.id)}
+                        disabled={editingVibePills.length === 0 && !editingMsgValue.trim()}
+                        className="flex items-center gap-1 text-[12px] text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-1 transition-all disabled:opacity-40"
+                      >
+                        <Check size={12} />
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : msg.role === 'user' && editingMsgId === msg.id ? (
                   /* Inline edit mode for user messages */
                   <div className="max-w-[80%] flex flex-col gap-2">
                     <textarea
@@ -2409,14 +2592,14 @@ export default function PlanningChat() {
                         }
                         if (e.key === 'Escape') setEditingMsgId(null);
                       }}
-                      className="w-full bg-[#4f8ef7]/80 text-white rounded-2xl rounded-br-md px-5 py-3.5 text-[17px] leading-relaxed resize-none outline-none border-2 border-white/30 focus:border-white/60"
+                      className="w-full bg-[#2563eb] text-white rounded-2xl rounded-br-md px-5 py-3.5 text-[17px] leading-relaxed resize-none outline-none border-2 border-blue-300 focus:border-blue-800"
                       rows={2}
                     />
                     <div className="flex items-center justify-end gap-2">
                       <button
                         type="button"
                         onClick={() => setEditingMsgId(null)}
-                        className="flex items-center gap-1 text-[12px] text-white/50 hover:text-white/80 transition-colors px-2 py-1"
+                        className="flex items-center gap-1 text-[12px] text-gray-500 hover:text-gray-800 transition-colors px-2 py-1"
                       >
                         <X size={12} />
                         Cancel
@@ -2435,7 +2618,7 @@ export default function PlanningChat() {
                           }
                           setEditingMsgId(null);
                         }}
-                        className="flex items-center gap-1 text-[12px] text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1 transition-all"
+                        className="flex items-center gap-1 text-[12px] text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-1 transition-all"
                       >
                         <Check size={12} />
                         Save
@@ -2448,10 +2631,10 @@ export default function PlanningChat() {
                     <div
                       className={`w-fit px-5 py-3.5 rounded-2xl text-[17px] leading-relaxed ${
                         msg.role === 'user'
-                          ? 'bg-[#4f8ef7] text-white rounded-br-md ml-auto'
-                          : 'text-white/80'
+                          ? 'bg-[#2563eb] text-white rounded-br-md ml-auto'
+                          : 'text-gray-800'
                       }`}
-                      style={msg.role === 'assistant' ? { background: 'rgba(255,255,255,0.05)' } : undefined}
+                      style={msg.role === 'assistant' ? { background: '#ffffff', boxShadow: 'inset 0 0 0 1px #e5e7eb' } : undefined}
                     >
                       {msg.content}
                     </div>
@@ -2462,12 +2645,13 @@ export default function PlanningChat() {
                         onClick={() => {
                           setEditingMsgId(msg.id);
                           setEditingMsgValue(msg.content);
+                          if (msg.stepId === 'vibe') openVibeEditor();
                         }}
                         className="absolute -left-8 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ background: 'rgba(255,255,255,0.1)' }}
+                        style={{ background: '#ffffff', boxShadow: 'inset 0 0 0 1px #e5e7eb' }}
                         title="Edit message"
                       >
-                        <Pencil size={11} className="text-white/60" />
+                        <Pencil size={11} className="text-gray-500" />
                       </button>
                     )}
                   </div>
@@ -2491,13 +2675,18 @@ export default function PlanningChat() {
 
           {/* Auto-run searching state — the date-shift replan has no chat
               mode mounted, so its progress renders here instead. */}
-          {findTripLoading && !intent && (
+          {findTripLoading && !intent && searchProgress && (
+            <div className="mt-3">
+              <SearchProgress progress={searchProgress} fallback={demoFallback} />
+            </div>
+          )}
+          {findTripLoading && !intent && !searchProgress && (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-3 flex items-center gap-2.5 text-sm text-gray-400"
+              className="mt-3 flex items-center gap-2.5 text-sm text-gray-500"
             >
-              <Loader2 size={16} className="animate-spin" style={{ color: '#4f8ef7' }} />
+              <Loader2 size={16} className="animate-spin" style={{ color: '#2563eb' }} />
               <span>{findTripStatus || 'Searching flights, trains, and hotels...'}</span>
             </motion.div>
           )}
@@ -2515,7 +2704,16 @@ export default function PlanningChat() {
               className="mt-1"
             >
               {currentStep.type === 'vibes' && (
-                <VibePills onSelect={handleVibeSelect} />
+                <VibePills
+                  selected={vibeDraft}
+                  onChange={setVibeDraft}
+                  onContinue={() => {
+                    const typed = textInput;
+                    setTextInput('');
+                    handleVibeConfirm(typed);
+                  }}
+                  canContinue={vibeDraft.length > 0 || textInput.trim().length > 0}
+                />
               )}
               {currentStep.type === 'dates' && (
                 <DatePicker onSelect={handleDatesSelect} onSkip={handleSkip} />
@@ -2533,19 +2731,19 @@ export default function PlanningChat() {
                 <div className="flex gap-3 w-full">
                   <button
                     onClick={() => handleBudgetPerPersonConfirm(true)}
-                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: '#ffffff' }}
                   >
                     <span className="text-[15px] font-medium">Per person</span>
-                    <span className="text-white/40 text-[12px]">Each traveler has that much to spend</span>
+                    <span className="text-gray-500 text-[12px]">Each traveler has that much to spend</span>
                   </button>
                   <button
                     onClick={() => handleBudgetPerPersonConfirm(false)}
-                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: '#ffffff' }}
                   >
                     <span className="text-[15px] font-medium">Total for the trip</span>
-                    <span className="text-white/40 text-[12px]">Combined for everyone</span>
+                    <span className="text-gray-500 text-[12px]">Combined for everyone</span>
                   </button>
                 </div>
               )}
@@ -2557,13 +2755,13 @@ export default function PlanningChat() {
                 <button
                   onClick={handleUseMyLocation}
                   disabled={locating}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 text-[13px]"
-                  style={{ background: 'rgba(255,255,255,0.04)' }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.02] active:scale-[0.98] text-[13px]"
+                  style={{ background: '#ffffff' }}
                 >
                   {locating ? (
-                    <Loader2 size={14} className="animate-spin" style={{ color: '#4f8ef7' }} />
+                    <Loader2 size={14} className="animate-spin" style={{ color: '#2563eb' }} />
                   ) : (
-                    <LocateFixed size={14} style={{ color: '#4f8ef7' }} />
+                    <LocateFixed size={14} style={{ color: '#2563eb' }} />
                   )}
                   {locating ? 'Finding your nearest airport…' : 'Use my location'}
                 </button>
@@ -2575,19 +2773,19 @@ export default function PlanningChat() {
                 <div className="flex gap-3 w-full">
                   <button
                     onClick={() => handleRoundTripSelect(true)}
-                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: '#ffffff' }}
                   >
                     <span className="text-[15px] font-medium">Round-trip</span>
-                    <span className="text-white/40 text-[12px]">Return to where I started</span>
+                    <span className="text-gray-500 text-[12px]">Return to where I started</span>
                   </button>
                   <button
                     onClick={() => handleRoundTripSelect(false)}
-                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-white/10 text-white/80 hover:text-white hover:border-[#4f8ef7]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
+                    className="flex-1 flex flex-col items-center gap-1 py-5 rounded-2xl border border-gray-200 text-gray-800 hover:text-gray-900 hover:border-[#2563eb]/40 transition-all hover:scale-[1.03] active:scale-[0.97]"
+                    style={{ background: '#ffffff' }}
                   >
                     <span className="text-[15px] font-medium">One-way</span>
-                    <span className="text-white/40 text-[12px]">No return flight needed</span>
+                    <span className="text-gray-500 text-[12px]">No return flight needed</span>
                   </button>
                 </div>
               )}
@@ -2605,8 +2803,8 @@ export default function PlanningChat() {
               {citySelectionData.countries.map((countryData) => (
                 <div key={countryData.country} className="mb-5">
                   <div className="flex items-center gap-2 mb-3">
-                    <MapPin size={16} className="text-[#4f8ef7]" />
-                    <span className="text-white/90 font-medium text-[15px]">{countryData.country}</span>
+                    <MapPin size={16} className="text-[#2563eb]" />
+                    <span className="text-gray-900 font-medium text-[15px]">{countryData.country}</span>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center">
                     {countryData.cities.map((city) => {
@@ -2617,8 +2815,8 @@ export default function PlanningChat() {
                           onClick={() => handleCityToggle(countryData.country, city)}
                           className={`px-4 py-2 rounded-full text-[13px] font-medium transition-all border ${
                             isSelected
-                              ? 'bg-[#4f8ef7] border-[#4f8ef7] text-white shadow-md shadow-blue-500/20'
-                              : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:border-white/25'
+                              ? 'bg-[#2563eb] border-[#2563eb] text-white shadow-md shadow-blue-600/20'
+                              : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'
                           }`}
                         >
                           {city}
@@ -2643,7 +2841,7 @@ export default function PlanningChat() {
                         }
                       }}
                       placeholder="+ another city"
-                      className="bg-transparent border border-dashed border-white/20 text-white/70 placeholder-white/30 text-[13px] rounded-full px-4 py-2 outline-none focus:border-[#4f8ef7]/60 min-w-[140px]"
+                      className="bg-white border border-dashed border-gray-300 text-gray-700 placeholder-gray-500 text-[13px] rounded-full px-4 py-2 outline-none focus:border-[#2563eb]/60 min-w-[140px]"
                     />
                   </div>
                 </div>
@@ -2656,8 +2854,8 @@ export default function PlanningChat() {
                 citySelectionData.selectedCities['_direct'].length > 0 && (
                 <div className="mb-5">
                   <div className="flex items-center gap-2 mb-3">
-                    <MapPin size={16} className="text-[#4f8ef7]" />
-                    <span className="text-white/90 font-medium text-[15px]">Also visiting</span>
+                    <MapPin size={16} className="text-[#2563eb]" />
+                    <span className="text-gray-900 font-medium text-[15px]">Also visiting</span>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center">
                     {citySelectionData.selectedCities['_direct'].map((city) => (
@@ -2674,7 +2872,7 @@ export default function PlanningChat() {
                             selectedCities: { ...citySelectionData.selectedCities, _direct: updated },
                           });
                         }}
-                        className="px-4 py-2 rounded-full text-[13px] font-medium transition-all border bg-[#4f8ef7] border-[#4f8ef7] text-white shadow-md shadow-blue-500/20"
+                        className="px-4 py-2 rounded-full text-[13px] font-medium transition-all border bg-[#2563eb] border-[#2563eb] text-white shadow-md shadow-blue-600/20"
                       >
                         {city}
                         <Check size={12} className="inline ml-1.5 -mt-0.5" />
@@ -2688,7 +2886,7 @@ export default function PlanningChat() {
                 <button
                   onClick={handleCitySelectionConfirm}
                   disabled={Object.values(citySelectionData.selectedCities).flat().length === 0}
-                  className="flex items-center gap-3 bg-[#4f8ef7] hover:bg-[#3d7de6] text-white font-semibold px-10 py-4 rounded-full text-[16px] shadow-lg shadow-blue-500/25 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex items-center gap-3 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold px-10 py-4 rounded-full text-[16px] shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Continue with these cities
                   <ArrowRight size={20} />
@@ -2708,7 +2906,7 @@ export default function PlanningChat() {
               <button
                 onClick={handleFindTrip}
                 disabled={findTripLoading}
-                className="flex items-center gap-3 bg-[#4f8ef7] hover:bg-[#3d7de6] text-white font-semibold px-12 py-5 rounded-full text-[18px] shadow-lg shadow-blue-500/25 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-60 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                className="flex items-center gap-3 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold px-12 py-5 rounded-full text-[18px] shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:hover:scale-100 disabled:cursor-not-allowed"
               >
                 {findTripLoading ? (
                   <>
@@ -2722,8 +2920,11 @@ export default function PlanningChat() {
                   </>
                 )}
               </button>
+              {findTripLoading && searchProgress && (
+                <SearchProgress progress={searchProgress} fallback={demoFallback} />
+              )}
               {findTripError && (
-                <p className="text-red-400 text-sm text-center max-w-md">{findTripError}</p>
+                <p className="text-red-600 text-sm text-center max-w-md">{findTripError}</p>
               )}
             </motion.div>
           )}
@@ -2756,12 +2957,8 @@ export default function PlanningChat() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, ease: 'easeOut' }}
-            className="pointer-events-auto w-full max-w-2xl flex items-end gap-3 px-5 py-3 rounded-3xl border border-white/15 shadow-2xl shadow-black/40"
-            style={{
-              background: 'rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(16px)',
-              WebkitBackdropFilter: 'blur(16px)',
-            }}
+            className="pointer-events-auto w-full max-w-2xl flex items-end gap-3 px-5 py-3 rounded-3xl border border-gray-200 shadow-2xl shadow-slate-900/10"
+            style={{ background: '#ffffff' }}
           >
             <textarea
               ref={inputRef}
@@ -2776,13 +2973,13 @@ export default function PlanningChat() {
                 }
               }}
               placeholder={barPlaceholder}
-              className="flex-1 min-w-0 w-full bg-transparent border-none outline-none resize-none text-white text-[16px] placeholder-white/35 py-1.5 leading-[1.4] max-h-[102px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              style={{ caretColor: 'rgba(255,255,255,0.7)' }}
+              className="flex-1 min-w-0 w-full bg-transparent border-none outline-none resize-none text-gray-900 text-[16px] placeholder-gray-500 py-1.5 leading-[1.4] max-h-[102px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              style={{ caretColor: '#374151' }}
             />
             <button
               onClick={handleBarSubmit}
               disabled={!textInput.trim() || revising}
-              className="p-2.5 rounded-full bg-[#4f8ef7] hover:bg-[#3d7de6] text-white disabled:opacity-30 disabled:hover:bg-[#4f8ef7] transition-all flex-shrink-0"
+              className="p-2.5 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white disabled:opacity-30 disabled:hover:bg-[#2563eb] transition-all flex-shrink-0"
             >
               <Send size={18} />
             </button>
@@ -2800,7 +2997,7 @@ export default function PlanningChat() {
         >
           <button
             onClick={handleSkip}
-            className="flex items-center gap-1.5 text-white/25 hover:text-white/40 text-[15px] transition-colors"
+            className="flex items-center gap-1.5 text-gray-500 hover:text-gray-700 text-[15px] transition-colors"
           >
             Skip this <SkipForward size={16} />
           </button>

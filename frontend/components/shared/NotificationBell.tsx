@@ -16,6 +16,7 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { useNotificationsStore } from '@/store/notificationsStore';
 import { useNotifications } from '@/hooks/useNotifications';
+import { confirmLeave } from '@/lib/leaveGuard';
 import {
   markNotificationRead,
   markAllNotificationsRead,
@@ -106,21 +107,21 @@ export default function NotificationBell() {
       case 'suggestion_decided':
         if (tripId) {
           setOpen(false);
-          router.push(`/canvas/${tripId}`);
+          confirmLeave(() => router.push(`/results?tripId=${tripId}`));
         }
         break;
       case 'canvas_invite': {
         // Heal legacy rows: early notifications stored /canvas/join/<token>,
         // a page that never existed on the frontend (404). Rebuild the real
-        // join URL — /canvas/<tripId>?share=<token> — from the same payload.
+        // join URL — /results?tripId=<tripId>&share=<token> — from the same payload.
         let link: string | undefined = n.data?.link;
         if (link?.startsWith('/canvas/join/') && tripId) {
           const token = link.split('/').pop();
-          link = `/canvas/${tripId}?share=${token}`;
+          link = `/results?tripId=${tripId}&share=${token}`;
         }
         if (link) {
           setOpen(false);
-          router.push(link);
+          confirmLeave(() => router.push(link!));
         }
         break;
       }
@@ -136,7 +137,7 @@ export default function NotificationBell() {
       const res = await cloneTrip(n.data.tripId);
       markRead(n);
       setOpen(false);
-      router.push(`/canvas/${res.tripId}`);
+      confirmLeave(() => router.push(`/results?tripId=${res.tripId}`));
     } catch {
       // Clone failed (trip gone?) — leave the notification for a retry.
     } finally {

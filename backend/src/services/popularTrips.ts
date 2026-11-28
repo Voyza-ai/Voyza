@@ -40,7 +40,12 @@ export type PopularTrip = {
   clonesThisWeek: number;
   createdAt: string;
   cities: Array<{ name: string; country: string | null }>;
-  /** Vibe tags: the trip's vibe + every city's vibes, deduped, lowercase. */
+  /**
+   * Vibe tags shown on the Explore card and matched by its vibe filter:
+   * every city's vibes, deduped, lowercase. The trip's own `vibe` (the
+   * planner answer, "Culture, Food") is NOT included — it is kept for the
+   * AI calls and never displayed (owner's call).
+   */
   tags: string[];
   /** Owner's display name — public trips were shared intentionally, but
    *  emails are never exposed. */
@@ -145,7 +150,6 @@ export async function fetchPopularTrips(
   const enriched: PopularTrip[] = trips.map((t: any) => {
     const cs = citiesByTrip.get(t.id) ?? [];
     const tags = new Set<string>();
-    if (t.vibe) tags.add(String(t.vibe).toLowerCase());
     for (const c of cs) {
       for (const v of Array.isArray(c.vibes) ? c.vibes : []) tags.add(String(v).toLowerCase());
     }

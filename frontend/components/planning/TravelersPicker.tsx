@@ -27,10 +27,10 @@ export default function TravelersPicker({ onSelect }: TravelersPickerProps) {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.25, delay: i * 0.06 }}
             onClick={() => onSelect(opt.count)}
-            className="flex items-center gap-2.5 px-5 py-3.5 rounded-full border border-white/10 text-white/70 hover:text-white hover:border-[#4f8ef7]/40 text-[16px] transition-all hover:scale-[1.04] active:scale-[0.97]"
-            style={{ background: 'rgba(255,255,255,0.04)' }}
+            className="flex items-center gap-2.5 px-5 py-3.5 rounded-full border border-gray-200 text-gray-700 hover:text-gray-900 hover:border-[#2563eb]/40 text-[16px] transition-all hover:scale-[1.04] active:scale-[0.97]"
+            style={{ background: '#ffffff' }}
           >
-            <Icon size={19} className="text-[#4f8ef7]" />
+            <Icon size={19} className="text-[#2563eb]" />
             {opt.label}
           </motion.button>
         );

@@ -8,11 +8,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
+  Minus,
+  Plus,
 } from 'lucide-react';
 import { City } from '@/lib/types';
+import { HotelPhotoFrame, useHotelPhotos } from './HotelHero';
 import { getCityColor } from '@/lib/cityColors';
-import { getVibeColor, VIBE_LABEL } from '@/lib/cityTheme';
 import { effectiveHotel, displayAmount } from '@/lib/tripTotals';
+import { cityHotelTrust } from '@/lib/hotelPriceTrust';
+import { PriceTrustChip } from './PriceTrust';
 import { useTripStore } from '@/store/tripStore';
 
 type CityCardProps = {
@@ -25,13 +29,15 @@ type CityCardProps = {
   onHover: () => void;
   onLeave: () => void;
   onClick: () => void;
+  /** Present when this person can change the trip: shows − / + around the nights. */
+  onNightsChange?: (nights: number) => void;
 };
 
 /**
  * Whether the city has a stay to show. A city whose hotel search came back
  * empty carries a placeholder — name '' (planner, saved trip) or
- * "Select hotel" (canvas) at $0 — which is not a stay. Same rule as the
- * canvas card (CanvasCityCard).
+ * "Select hotel" (trips last saved by the old canvas) at $0 — which is not a
+ * stay.
  */
 export function hasStay(city: City): boolean {
   if (city.customHotel) return true;
@@ -58,6 +64,7 @@ export default function CityCard({
   onHover,
   onLeave,
   onClick,
+  onNightsChange,
 }: CityCardProps) {
   const color = getCityColor(city.colorIndex ?? index);
   // Date guards (from backend_gohiltalla) prevent crashes when a city in
@@ -96,6 +103,8 @@ export default function CityCard({
       onMouseLeave={onLeave}
       onClick={onClick}
       tabIndex={0}
+      // Where the city guide grows out of when this card is clicked.
+      data-city-card={index}
       className="relative flex-shrink-0 flex-1 min-h-0 flex flex-col w-[300px] rounded-3xl border-2 cursor-pointer overflow-hidden transition-colors duration-300 outline-none"
       style={{
         background: color.bg,
@@ -144,46 +153,35 @@ export default function CityCard({
           <span>{arrival}</span>
           <span style={{ color: `${color.text}88` }}>→</span>
           <span>{departure}</span>
-          <span className="ml-1" style={{ color: `${color.text}aa` }}>
-            · {nights} {nights === 1 ? 'night' : 'nights'}
-          </span>
+          {onNightsChange && nights > 0 ? (
+            <NightsStepper
+              city={city.name}
+              nights={nights}
+              color={color.text}
+              onChange={onNightsChange}
+            />
+          ) : (
+            <span className="ml-1" style={{ color: `${color.text}aa` }}>
+              · {nights} {nights === 1 ? 'night' : 'nights'}
+            </span>
+          )}
         </div>
 
-        {/* Vibe chips */}
-        {city.vibes && city.vibes.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-3">
-            {city.vibes.map((v) => {
-              const c = getVibeColor(v);
-              return (
-                <span
-                  key={v}
-                  className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border"
-                  style={{
-                    background: `rgba(255,255,255,0.7)`,
-                    borderColor: `${c}60`,
-                    color: c,
-                  }}
-                >
-                  {VIBE_LABEL[v]}
-                </span>
-              );
-            })}
-          </div>
-        )}
       </div>
 
-      {/* Hotel pill — darker shade of card bg. my-auto centers it in
-          whatever extra height the card absorbed (cards stretch to fill
-          the full flowchart height), keeping header top / hint bottom. */}
-      <div
-        className="mx-4 rounded-2xl my-auto"
-        style={{ background: `${color.text}15` }}
-      >
-        <HotelSection city={city} cityIndex={index} color={color} />
+      {/* The chosen hotel's photos, then the hotel pill (a darker shade of
+          the card). my-auto centres the pair in whatever height the card
+          absorbed (cards stretch to the flowchart's height), keeping the
+          header at the top and the hint at the bottom. */}
+      <div className="mx-4 my-auto flex flex-col gap-3 min-h-0">
+        <CardPhotos city={city} color={color} />
+        <div className="rounded-2xl" style={{ background: `${color.text}15` }}>
+          <HotelSection city={city} cityIndex={index} color={color} />
+        </div>
       </div>
 
       {/* Open detail hint */}
-      <div className="px-6 pb-5 pt-1">
+      <div className="px-6 pb-5 pt-3">
         <div
           className="text-center text-[11px] uppercase tracking-wider transition-colors"
           style={{ color: isActive ? color.text : 'rgba(0,0,0,0.35)' }}
@@ -197,6 +195,28 @@ export default function CityCard({
   );
 }
 
+/* ------------------------------ Hotel photos ----------------------------- */
+
+/**
+ * The chosen hotel's photos, in a frame squarer than the guide's to suit the
+ * card. Left out for the traveller's own stay and for a hotel with none, so
+ * the card never shows an empty frame. Clicking a photo opens the guide like
+ * the rest of the card; the arrows only step the photos.
+ */
+function CardPhotos({ city, color }: { city: City; color: { bg: string; text: string; border: string } }) {
+  const hotel = city.customHotel ? null : city.hotels[city.selectedHotelIndex] ?? city.hotels[0] ?? null;
+  const photos = useHotelPhotos(hotel);
+  if (!hotel || photos.length === 0) return null;
+  return (
+    <HotelPhotoFrame
+      photos={photos}
+      name={hotel.name}
+      accent={color}
+      className="aspect-[4/3] max-h-[26vh]"
+    />
+  );
+}
+
 /* ----------------------------- Hotel section ----------------------------- */
 
 function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: number; color: { bg: string; text: string; border: string; name: string } }) {
@@ -206,6 +226,7 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
   const eff = effectiveHotel(city);
   const perNight = displayAmount(eff.pricePerNight, priceMode, travelers);
   const isCustom = eff.isCustom;
+  const trust = cityHotelTrust(city, travelers);
   const ranked = !isCustom && city.hotels.length > 1;
   const [slideDir, setSlideDir] = useState<1 | -1>(1);
 
@@ -247,6 +268,7 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
               <span>BLUEMURR BOOK</span>
             </span>
           )}
+          {trust && <span className="ml-1"><PriceTrustChip trust={trust} accent={color.text} /></span>}
         </div>
         {ranked && (
           <div className="flex items-center gap-1 text-gray-400 text-[10px]">
@@ -314,5 +336,61 @@ function HotelSection({ city, cityIndex, color }: { city: City; cityIndex: numbe
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * − n nights + on a city card. Its own clicks never reach the card (which
+ * opens the city guide) or start a drag.
+ */
+function NightsStepper({
+  city,
+  nights,
+  color,
+  onChange,
+}: {
+  city: string;
+  nights: number;
+  color: string;
+  onChange: (nights: number) => void;
+}) {
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const btn =
+    'w-5 h-5 rounded-full flex items-center justify-center border transition-colors disabled:opacity-30 disabled:cursor-default enabled:hover:bg-white/70';
+  return (
+    <span
+      className="ml-1 inline-flex items-center gap-1.5"
+      style={{ color: `${color}aa` }}
+      onClick={stop}
+      onPointerDown={stop}
+      onKeyDown={stop}
+    >
+      <span>·</span>
+      <button
+        type="button"
+        aria-label={`Fewer nights in ${city}`}
+        title="One night less"
+        disabled={nights <= 1}
+        onClick={() => onChange(nights - 1)}
+        className={btn}
+        style={{ borderColor: `${color}55`, color }}
+      >
+        <Minus size={10} strokeWidth={2.5} />
+      </button>
+      <span className="tabular-nums" data-testid="city-nights">
+        {nights} {nights === 1 ? 'night' : 'nights'}
+      </span>
+      <button
+        type="button"
+        aria-label={`More nights in ${city}`}
+        title="One night more"
+        disabled={nights >= 60}
+        onClick={() => onChange(nights + 1)}
+        className={btn}
+        style={{ borderColor: `${color}55`, color }}
+      >
+        <Plus size={10} strokeWidth={2.5} />
+      </button>
+    </span>
   );
 }

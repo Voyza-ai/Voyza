@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { AppError } from '../middleware/error';
+import { isAuthServiceDown } from '../middleware/auth';
 import { getSupabase } from '../services/supabase';
 import { compareLeg } from '../services/compareLeg';
 import { searchHotels } from '../services/hotels';
@@ -19,7 +20,8 @@ async function getUserFromToken(authHeader?: string) {
   if (!authHeader?.startsWith('Bearer ')) return null;
   const token = authHeader.slice(7);
   const supabase = getSupabase();
-  const { data } = await supabase.auth.getUser(token);
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error && isAuthServiceDown(error)) throw new AppError(503, 'Sign-in check unavailable, try again');
   return data?.user ?? null;
 }
 
@@ -367,7 +369,8 @@ router.post(
             })
               .then((results) => {
                 if (results.length > 0) {
-                  // `priceSuspect` and `reviewCount` are carried deliberately.
+                  // `priceSuspect`, `priceUnverified` and `reviewCount` are
+                  // carried deliberately.
                   // Dropping them made the verdict die at this boundary: the
                   // flag could not survive the JSONB round trip, so nothing
                   // downstream could warn, and a re-rank would read every thin
@@ -381,6 +384,8 @@ router.post(
                     bookingUrl: r.bookingUrl,
                     reviewCount: r.reviewCount,
                     priceSuspect: r.priceSuspect,
+                    ...(r.priceSuspect && r.priceSuspectReason ? { priceSuspectReason: r.priceSuspectReason } : {}),
+                    priceUnverified: r.priceUnverified,
                     taxesPerNight: r.taxesPerNight,
                   }));
                   city.hotel = city.hotels[0];
@@ -814,11 +819,12 @@ router.post(
           .select()
           .single();
 
-    // /canvas/:tripId?share=<personal invite_token> is the ONLY working
-    // join URL: the canvas page feeds ?share= to POST /join-link, whose
-    // first branch claims a personal invite at the invited role. There is
-    // no /canvas/join/* page on the frontend — the old link shape 404'd.
-    const inviteLink = `${env.FRONTEND_URL}/canvas/${tripId}?share=${data?.invite_token}`;
+    // /results?tripId=<id>&share=<personal invite_token> is the join URL:
+    // the results page (which replaced the canvas page) feeds ?share= to
+    // POST /join-link, whose first branch claims a personal invite at the
+    // invited role. /canvas/<id>?share=… still works — that page redirects
+    // here — so links already sent keep working.
+    const inviteLink = `${env.FRONTEND_URL}/results?tripId=${tripId}&share=${data?.invite_token}`;
 
     // If the invited email already has an account, drop the invite into
     // their bell (invites previously had NO delivery mechanism at all —
@@ -843,7 +849,7 @@ router.post(
           tripTitle: tripRow?.title ?? null,
           role,
           invitedBy: user.id,
-          link: `/canvas/${tripId}?share=${data?.invite_token}`,
+          link: `/results?tripId=${tripId}&share=${data?.invite_token}`,
         },
       });
     }
@@ -852,6 +858,10 @@ router.post(
     // account yet (previously the ONLY delivery was the owner copy-pasting
     // the link). Existing accounts get their stored preferences enforced
     // and an unsubscribe footer; unknown emails get the type's default.
+    // `emailed` lets the share dialog say whether it actually went out (it
+    // said nothing either way, and with no verified sending domain Resend
+    // quietly rejected every address but the account owner's).
+    let emailed = false;
     if (!invitedUserId || invitedUserId !== user.id) {
       const tpl = emailTemplates.canvasInvite(
         user.email ?? null,
@@ -859,8 +869,9 @@ router.post(
         role,
         inviteLink,
         invitedUserId ? unsubscribeUrlFor(invitedUserId) : undefined,
+        (user.user_metadata?.full_name as string | undefined) ?? null,
       );
-      await sendEmail({
+      emailed = await sendEmail({
         to: email,
         userId: invitedUserId ?? undefined,
         type: 'canvas_invite',
@@ -868,7 +879,7 @@ router.post(
       });
     }
 
-    res.status(201).json({ member: data, inviteLink });
+    res.status(201).json({ member: data, inviteLink, emailed, notified: !!invitedUserId });
   }),
 );
 
@@ -1165,7 +1176,7 @@ async function findOrCreateSession(tripId: string) {
 }
 
 const shareUrl = (tripId: string, token: string) =>
-  `${env.FRONTEND_URL}/canvas/${tripId}?share=${token}`;
+  `${env.FRONTEND_URL}/results?tripId=${tripId}&share=${token}`;
 
 // ─── GET /api/canvas/:tripId/share ───────────────────────────
 // Owner-only: current share link + mode.

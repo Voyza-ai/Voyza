@@ -37,6 +37,8 @@ import type { Hotel } from './types';
  */
 export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Hotel {
   const taxes = r.taxesPerNight;
+  const located =
+    typeof r.lat === 'number' && typeof r.lng === 'number' && Number.isFinite(r.lat) && Number.isFinite(r.lng);
   return {
     name: r.name,
     rating: r.rating,
@@ -45,10 +47,31 @@ export function hotelFromResult(r: HotelResult & { taxesPerNight?: number }): Ho
     bookingUrl: r.bookingUrl,
     reviewCount: r.reviewCount,
     priceSuspect: r.priceSuspect,
+    // Optional annotations: copied only when set, so a plain row maps to
+    // exactly the object it always did.
+    ...(r.priceSuspect && r.priceSuspectReason ? { priceSuspectReason: r.priceSuspectReason } : {}),
+    ...(r.priceUnverified ? { priceUnverified: true } : {}),
     ...(typeof taxes === 'number' && Number.isFinite(taxes) && taxes >= 0
       ? { taxesPerNight: taxes }
       : {}),
+    ...(located ? { lat: r.lat, lng: r.lng } : {}),
+    ...(r.thumbnail ? { photos: [largePhoto(r.thumbnail)] } : {}),
+    ...(r.id && /^\d+$/.test(r.id) ? { providerId: r.id } : {}),
+    ...(r.address ? { address: r.address } : {}),
+    // Booking's district (the borough): kept only as the last fallback for
+    // `neighbourhood`, never shown — in `area` it surfaced on the flowchart
+    // card as "Hammersmith and Fulha…".
+    ...(r.district ? { district: r.district } : {}),
   };
+}
+
+/**
+ * Booking's search hands back its 60px square thumbnail. The same image is
+ * served at other sizes by swapping the size segment of the path, so ask for
+ * one big enough to fill the city guide's photo strip.
+ */
+export function largePhoto(url: string): string {
+  return url.replace(/\/images\/hotel\/(square\d+|max\d+(x\d+)?)\//, '/images/hotel/max1024x768/');
 }
 
 /**

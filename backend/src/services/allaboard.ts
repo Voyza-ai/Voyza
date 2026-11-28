@@ -2,32 +2,76 @@ import { randomUUID } from 'crypto';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import type { ProviderTrainOffer } from './trains';
+import { isLongMinutes, longJourneyLimit } from './longJourney';
 
 /**
  * All Aboard (allaboard.eu) — European rail search via their GraphQL API.
  *
  * Coverage: national operators across Western/Central Europe (SNCF, Trenitalia,
  * Renfe, DB, NS, SNCB, SBB, ÖBB, Eurostar, GB operators, Scandinavia…).
- * This is the first real pan-EU rail source; db.transport.rest remains as a
- * second provider (strong DACH schedules) and results are merged upstream.
+ * It is the only rail provider (trains.ts): Deutsche Bahn's community REST
+ * API was removed in 2026-11 after it failed every production search.
  *
  * API shape (test gateway, key is test-scoped):
  *   getLocations(query)            → city/station uids (fast)
- *   getJourneys(origin, dest, date)→ timetable journeys, NO prices (fast, ~1-2s)
+ *   getJourneys(origin, dest, date)→ timetable journeys, NO prices (~1-4s warm;
+ *                                    10s+ on a route the gateway hasn't
+ *                                    seen lately)
  *   getJourneyOffer(journey, …)    → live fares from the operators (SLOW —
  *                                    30s+ cold, ~3s once their cache is warm)
  *
- * Because live pricing is slow, we only price a few journeys spread across
- * the day and return the rest unpriced (limitedCoverage), matching the
- * honest-data pattern used for Deutsche Bahn fares.
+ * Because live pricing is slow and quota-metered, we price up to
+ * OFFER_CANDIDATES of the day's journeys (sensible-length daytime ones first,
+ * see pickOfferCandidates) and return the rest unpriced (limitedCoverage):
+ * a journey without a real fare is shown as such, never given an invented one.
  */
 
-const JOURNEY_TIMEOUT_MS = 10_000;
+/** getLocations: a name lookup, fast even cold. */
+const LOCATION_TIMEOUT_MS = 10_000;
+/**
+ * getJourneys. Was 10s, shared with getLocations, and a cold route routinely
+ * ran past it: in one afternoon of trip searches (2026-11-18) 100 journey
+ * calls aborted at 10s, and each of those legs was planned on a flight —
+ * Vienna → Munich, Prague → Budapest, Amsterdam → Paris, Venice → Milan all
+ * came back as trains on the next search. Legs search in parallel (8 slots),
+ * so the wait is paid once per wave, not per leg.
+ */
+const JOURNEY_TIMEOUT_MS = 25_000;
 const OFFER_TIMEOUT_MS = 30_000;
-/** How many journeys get live-priced per search (spread across the day). */
-const OFFER_CANDIDATES = 3;
+/**
+ * How many journeys get live-priced per search. The cap is ours, not the
+ * provider's: getJourneyOffer prices any journey id getJourneys returned.
+ * It was 3 (first, middle and last of the day), and those are often the
+ * worst three to price: live, 2027-03-19/20 (2026-11-23), Munich → Prague's
+ * last was a 39h three-ticket journey, Vienna → Munich's first and last
+ * were 05:38 and a 22:44 sleeper (NO_FARES), and the 18 daytime trains
+ * between them got one fare. Salzburg → Prague went from 2 fares to 4.
+ * Most of the newly picked journeys on that probe came back UNKNOWN (no
+ * fare yet — the provider's cold path), as cold picks did under the old
+ * rule, so the gain grows as their cache warms.
+ *
+ * Quota: pricing is getJourneyOffer only, which the timetable quota does
+ * not meter. 6 doubles a NEW route-and-day's offer requests (3 → up to 6;
+ * a search is 2 + 1 + up to 6 requests). The gateway sends no rate-limit
+ * headers, so per-request is the honest unit. Repeats come from trains.ts's
+ * 10-minute cache when the answer was complete.
+ */
+export const OFFER_CANDIDATES = 6;
 /** Cap on unpriced schedule rows returned when pricing fails. */
 const MAX_UNPRICED = 3;
+
+/**
+ * True while we talk to All Aboard's TEST gateway (the default URL — our
+ * key is test-scoped). Its fares come from getJourneyOffer like production
+ * ones, but they are not bookable inventory, and the UI says so.
+ */
+export function allAboardIsTestGateway(url: string = env.ALLABOARD_API_URL): boolean {
+  try {
+    return /(^|\.)test\./i.test(new URL(url).hostname);
+  } catch {
+    return true; // unreadable URL: don't claim production
+  }
+}
 
 type GqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
@@ -116,7 +160,7 @@ async function resolveLocationUid(city: string, session: string): Promise<string
     `query($q: String!) { getLocations(query: $q) { uid name } }`,
     { q: city },
     session,
-    JOURNEY_TIMEOUT_MS,
+    LOCATION_TIMEOUT_MS,
   );
 
   const want = normalizeForMatch(city);
@@ -139,13 +183,31 @@ type AaSegment = {
 
 type AaJourney = {
   id: string;
-  itinerary?: Array<{ segments?: AaSegment[] }>;
+  /** LOADING | SUCCESS | ERROR. */
+  status?: string;
+  /** SegmentCollection.status: SUCCESS, RATE_LIMITED, NO_TIMETABLE, … */
+  itinerary?: Array<{ status?: string; segments?: AaSegment[] }>;
 };
+
+/**
+ * Statuses that mean "no answer yet", not "no trains". The gateway still
+ * returns a journey for these, with `segments: null`, so without reading the
+ * status they looked exactly like an empty timetable and were cached as one.
+ * Seen 2026-11-18: the key's 500-an-hour timetable quota ran out and every
+ * search came back RATE_LIMITED for the rest of the hour — on production too,
+ * which shares the key. The others (NO_TIMETABLE, NO_FARES, UNABLE_TO_SELL,
+ * OUTSIDE_TIMETABLE, ONE_DAY, …) are real answers about the route.
+ */
+const TRANSIENT_STATUSES = new Set(['LOADING', 'ERROR', 'RATE_LIMITED', 'INDETERMINATE', 'UNKNOWN']);
+
+function transientStatuses(statuses: Array<string | undefined>): string[] {
+  return [...new Set(statuses.filter((x): x is string => !!x && TRANSIENT_STATUSES.has(x)))];
+}
 
 type AaOffer = { id: string; price?: { amount?: number; currency?: string } };
 
 type AaJourneyOffer = {
-  itinerary?: Array<{ segments?: AaSegment[]; offers?: AaOffer[] }>;
+  itinerary?: Array<{ status?: string; segments?: AaSegment[]; offers?: AaOffer[] }>;
 };
 
 /** Flatten an itinerary's SegmentCollections into one segment list. */
@@ -160,18 +222,75 @@ type SearchParams = {
   travelers: number;
 };
 
-/**
- * Pick which journeys to live-price: first, middle, and last of the day.
- * Pricing is the slow call, so a spread gives morning/midday/evening fares
- * without paying the cost of pricing all ~20 timetable entries.
- */
-function pickOfferCandidates(count: number): number[] {
-  if (count <= OFFER_CANDIDATES) return Array.from({ length: count }, (_, i) => i);
-  return [0, Math.floor(count / 2), count - 1];
+/** A departure's local hour, read from its ISO string ("…T06:49:00+01:00"). */
+function localHour(iso: string | undefined): number | null {
+  const m = /T(\d{2}):/.exec(iso ?? '');
+  return m ? Number(m[1]) : null;
 }
 
+/** Departures from 06:00 up to 21:00 local count as daytime. */
+const DAY_START_HOUR = 6;
+const DAY_END_HOUR = 21;
+
+/** `k` items spread evenly over `items` (in their order), always keeping the first and last. */
+function spread<T>(items: T[], k: number): T[] {
+  if (items.length <= k) return items;
+  if (k <= 0) return [];
+  if (k === 1) return [items[0]];
+  const picked = new Set<number>();
+  for (let i = 0; i < k; i++) picked.add(Math.round((i * (items.length - 1)) / (k - 1)));
+  return [...picked].sort((a, b) => a - b).map((i) => items[i]);
+}
+
+export type OfferCandidateInput = { departure?: string; durationMinutes: number | null };
+
+/**
+ * Pick which of the day's journeys (in timetable order) to live-price, at
+ * most `cap` of them, returned as indices in timetable order.
+ *
+ * Journeys that are long by longJourney.ts's rule (over max(fastest × 2,
+ * fastest + 3h)) are never priced: every picker downstream puts them behind
+ * any sensible option, so a fare for one is quota spent on a train nobody is
+ * offered. Of the rest, daytime departures (06:00–21:00) come first, then
+ * night ones; when a group has more journeys than the slots left, they are
+ * spread across the day rather than taking the earliest.
+ */
+export function pickOfferCandidates(
+  journeys: OfferCandidateInput[],
+  cap: number = OFFER_CANDIDATES,
+): number[] {
+  const limit = longJourneyLimit(journeys.map((j) => j.durationMinutes));
+  const day: number[] = [];
+  const night: number[] = [];
+  journeys.forEach((j, i) => {
+    if (isLongMinutes(j.durationMinutes, limit)) return;
+    const h = localHour(j.departure);
+    (h != null && h >= DAY_START_HOUR && h < DAY_END_HOUR ? day : night).push(i);
+  });
+  const fromDay = spread(day, cap);
+  const fromNight = spread(night, cap - fromDay.length);
+  return [...fromDay, ...fromNight].sort((a, b) => a - b);
+}
+
+/**
+ * What a search found, and whether that is the whole answer. `complete` is
+ * false when a call failed or timed out — the journey list, a location
+ * lookup, or pricing for one of the picked journeys. An incomplete result is
+ * still the best we have for THIS request, but it says nothing about the
+ * route, so callers must not remember it (trains.ts drops it from its 10-min
+ * cache). Before this a cold search that timed out returned [] that was
+ * cached like "no trains here": every trip search for the next 10 minutes
+ * priced the route on flights only, even once All Aboard was warm.
+ */
+export type AllAboardResult = { offers: ProviderTrainOffer[]; complete: boolean };
+
+/** Offers only — the result of {@link searchAllAboardDetailed} without its completeness flag. */
 export async function searchAllAboard(params: SearchParams): Promise<ProviderTrainOffer[]> {
-  if (!env.ALLABOARD_API_KEY) return [];
+  return (await searchAllAboardDetailed(params)).offers;
+}
+
+export async function searchAllAboardDetailed(params: SearchParams): Promise<AllAboardResult> {
+  if (!env.ALLABOARD_API_KEY) return { offers: [], complete: true };
   const { origin, destination, date } = params;
   const session = randomUUID();
 
@@ -182,15 +301,17 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
     ]);
     if (!fromUid || !toUid) {
       logger.info('All Aboard: city not in coverage', { origin, destination });
-      return [];
+      return { offers: [], complete: true };
     }
 
     const data = await gql<{ getJourneys: AaJourney[] }>(
       `query($o: ID!, $d: ID!, $date: Date!) {
         getJourneys(origin: $o, destination: $d, date: $date) {
           id
+          status
           itinerary {
             ... on SegmentCollection {
+              status
               segments {
                 origin { name }
                 destination { name }
@@ -207,12 +328,18 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
       JOURNEY_TIMEOUT_MS,
     );
 
-    const journeys = (data.getJourneys ?? []).filter(
-      (j) => segmentsOf(j.itinerary).length > 0,
+    const returned = data.getJourneys ?? [];
+    const notYet = transientStatuses(
+      returned.flatMap((j) => [j.status, ...(j.itinerary ?? []).map((it) => it.status)]),
     );
-    if (journeys.length === 0) return [];
+    if (notYet.length > 0) {
+      logger.warn('All Aboard journey search incomplete', { origin, destination, date, statuses: notYet });
+    }
+    const journeys = returned.filter((j) => segmentsOf(j.itinerary).length > 0);
+    if (journeys.length === 0) return { offers: [], complete: notYet.length === 0 };
+    let pricingFailed = notYet.length > 0;
 
-    // Live-price a spread of the day's journeys. USD is requested natively so
+    // Live-price the picked journeys (pickOfferCandidates). USD is requested natively so
     // no FX conversion is needed. Amounts arrive in cents. Failures are
     // per-journey and non-fatal.
     //
@@ -224,14 +351,22 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
     // passenger count, dividing it would have silently produced a fraction of
     // the real fare.
     //
-    // The `ProviderTrainOffer` contract stays PER-PERSON (same as Deutsche
-    // Bahn, whose API takes no passenger count and is scaled ×N downstream),
-    // so the party total is divided by the party here and `toPartyTotal` in
+    // The `ProviderTrainOffer` contract stays PER-PERSON (every provider
+    // hands over one adult's fare and is scaled ×N downstream), so the party
+    // total is divided by the party here and `toPartyTotal` in
     // searchTrains multiplies it straight back — their exact figure, and no
     // path on which it can be multiplied twice.
     const party = Math.max(1, Math.floor(params.travelers) || 1);
     const passengers = Array.from({ length: party }, () => '{type: ADULT}').join(', ');
-    const candidates = pickOfferCandidates(journeys.length);
+    const candidates = pickOfferCandidates(
+      journeys.map((j) => {
+        const segs = segmentsOf(j.itinerary);
+        const dep = segs[0]?.departureAt;
+        const arr = segs[segs.length - 1]?.arrivalAt;
+        const minutes = dep && arr ? (new Date(arr).getTime() - new Date(dep).getTime()) / 60000 : NaN;
+        return { departure: dep, durationMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : null };
+      }),
+    );
     const priced = new Map<number, number>();
     await Promise.all(
       candidates.map(async (idx) => {
@@ -240,7 +375,7 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
             `query($j: ID!) {
               getJourneyOffer(journey: $j, passengers: [${passengers}], currency: "USD") {
                 itinerary {
-                  ... on SegmentCollection { offers { id price { amount currency } } }
+                  ... on SegmentCollection { status offers { id price { amount currency } } }
                 }
               }
             }`,
@@ -264,37 +399,62 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
           // than believed. Rates are per unit, so convert after the cents
           // divide.
           const { convertToUsd } = await import('./currency');
-          const offers = (offerData.getJourneyOffer.itinerary ?? []).flatMap(
-            (item) => item.offers ?? [],
+          // RATE_LIMITED (the separate 500/hour offer quota) and friends:
+          // no fare yet, which is not "no fare" — keep it out of the cache.
+          const offerNotYet = transientStatuses(
+            (offerData.getJourneyOffer.itinerary ?? []).map((item) => item.status),
           );
-          const usdAmounts: number[] = [];
-          for (const o of offers) {
-            const raw = o.price?.amount;
-            if (typeof raw !== 'number' || !(raw > 0)) continue;
-            const units = raw / 100;
-            const code = o.price?.currency?.trim().toUpperCase();
+          if (offerNotYet.length > 0) {
+            pricingFailed = true;
+            logger.warn('All Aboard offer pricing incomplete', { journey: journeys[idx]?.id, statuses: offerNotYet });
+          }
+          // One SegmentCollection is one TICKET for part of the journey —
+          // Salzburg → Prague via Vienna (2027-03-21, 19:07) came back as
+          // Salzburg → Wien $257.20 and Wien → Praha $130.67 for two adults.
+          // Its offers are alternative fares (classes) for that ticket. So a
+          // journey costs the cheapest fare of EACH ticket, summed, and has no
+          // price when any ticket has none. Taking the cheapest offer across
+          // every ticket priced that journey as one of its parts ($130.67
+          // for a $387.87 trip), which then won every cheapest-train pick.
+          const tickets = offerData.getJourneyOffer.itinerary ?? [];
+          let total = 0;
+          let everyTicketPriced = tickets.length > 0;
+          for (const ticket of tickets) {
+            const usdAmounts: number[] = [];
+            for (const o of ticket.offers ?? []) {
+              const raw = o.price?.amount;
+              if (typeof raw !== 'number' || !(raw > 0)) continue;
+              const units = raw / 100;
+              const code = o.price?.currency?.trim().toUpperCase();
 
-            if (!code || code === 'USD') {
-              usdAmounts.push(units);
-              continue;
-            }
+              if (!code || code === 'USD') {
+                usdAmounts.push(units);
+                continue;
+              }
 
-            const usd = await convertToUsd(units, code);
-            if (usd === null || !Number.isFinite(usd) || usd <= 0) {
-              logger.warn('All Aboard offer dropped — no USD rate for its currency', {
+              const usd = await convertToUsd(units, code);
+              if (usd === null || !Number.isFinite(usd) || usd <= 0) {
+                logger.warn('All Aboard offer dropped — no USD rate for its currency', {
+                  journey: journeys[idx]?.id,
+                  currency: code,
+                });
+                continue;
+              }
+              logger.warn('All Aboard quoted a currency other than the USD requested', {
                 journey: journeys[idx]?.id,
                 currency: code,
               });
-              continue;
+              usdAmounts.push(usd);
             }
-            logger.warn('All Aboard quoted a currency other than the USD requested', {
-              journey: journeys[idx]?.id,
-              currency: code,
-            });
-            usdAmounts.push(usd);
+            if (usdAmounts.length === 0) {
+              everyTicketPriced = false;
+              break;
+            }
+            total += Math.min(...usdAmounts);
           }
-          if (usdAmounts.length > 0) priced.set(idx, Math.min(...usdAmounts) / party);
+          if (everyTicketPriced && total > 0) priced.set(idx, total / party);
         } catch (err: any) {
+          pricingFailed = true;
           logger.warn('All Aboard offer pricing failed (non-fatal)', {
             message: err?.message,
             journey: journeys[idx]?.id,
@@ -327,6 +487,9 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
         trainType: 'train',
         bookingUrl: null,
         limitedCoverage: pricePerPerson == null,
+        ...(pricePerPerson != null
+          ? { priceSource: { kind: 'live' as const, provider: 'All Aboard', ...(allAboardIsTestGateway() ? { testApi: true } : {}) } }
+          : {}),
       };
     };
 
@@ -341,13 +504,13 @@ export async function searchAllAboard(params: SearchParams): Promise<ProviderTra
       .filter((x) => !priced.has(x.idx))
       .map((x) => x.offer)
       .slice(0, pricedOffers.length > 0 ? 1 : MAX_UNPRICED);
-    return [...pricedOffers, ...unpricedOffers];
+    return { offers: [...pricedOffers, ...unpricedOffers], complete: !pricingFailed };
   } catch (err: any) {
     logger.warn('All Aboard search failed (non-fatal)', {
       message: err?.message,
       origin,
       destination,
     });
-    return [];
+    return { offers: [], complete: false };
   }
 }

@@ -6,14 +6,11 @@ import { buildCity, buildTrip } from './fixtures';
 import {
   compareLeg,
   fetchHomeLegs,
-  getCanvasSession,
-  getCanvasSuggestions,
   planChat,
   searchHotels,
 } from '@/lib/api';
 import { liveTripTotal } from '@/lib/tripTotals';
 import ResultsPage from '@/app/results/page';
-import CanvasPage from '@/app/canvas/[tripId]/page';
 import type { HomeLeg, Transport, Trip } from '@/lib/types';
 
 /**
@@ -36,8 +33,6 @@ const mockedPlanChat = planChat as jest.MockedFunction<typeof planChat>;
 const mockedCompareLeg = compareLeg as jest.MockedFunction<typeof compareLeg>;
 const mockedFetchHomeLegs = fetchHomeLegs as jest.MockedFunction<typeof fetchHomeLegs>;
 const mockedSearchHotels = searchHotels as jest.MockedFunction<typeof searchHotels>;
-const mockedGetSession = getCanvasSession as jest.MockedFunction<typeof getCanvasSession>;
-const mockedGetSuggestions = getCanvasSuggestions as jest.MockedFunction<typeof getCanvasSuggestions>;
 
 const leg = (over: Partial<HomeLeg>): HomeLeg => ({
   originAirport: 'JFK',
@@ -318,50 +313,72 @@ describe('results page: an accepted AI date change re-prices legs and hotels', (
   });
 });
 
-describe('canvas: an accepted AI date change re-prices legs and hotels', () => {
-  it('re-prices the moved legs and home flights and re-searches the moved stays', async () => {
-    const trip = ownerTrip();
-    mockedGetSession.mockResolvedValue({
-      session: {
-        state: {
-          trip: { title: 'Owner trip', travelers: 6, origin: trip.origin, returnToHome: true },
-          cities: trip.cities,
-        },
-      },
-      role: 'owner',
-    } as any);
-    mockedGetSuggestions.mockResolvedValue({ suggestions: [] } as any);
-    mockSearches();
-    render(<CanvasPage />);
-    await screen.findByText(/Jan 11 → Jan 13/);
+/**
+ * The same pin as the server now proposes it: a city edit of the same cities
+ * on new dates, with each moved stay's hotels, each moved leg and both home
+ * flights already searched — so the card states the exact total.
+ */
+function pricedPinProposal() {
+  const hotel = (city: string, ppn: number) =>
+    ({ id: city, name: `${city} New`, price: ppn * 2, pricePerNight: ppn, currency: 'USD', rating: 8.8, reviewCount: 10, stars: 4, thumbnail: '', bookingUrl: `https://b/${city}` }) as any;
+  const opt = (price: number) => ({ mode: 'flight', operator: 'Swiss', price, currency: 'USD', departTime: '08:00', arriveTime: '09:15', duration: '1h 15m', durationMinutes: 75, priceDelta: 0 });
+  const after = [
+    { name: 'Paris', arrival: '2027-01-12', departure: '2027-01-14', status: 'moved', hotels: [hotel('Paris', 380)] },
+    { name: 'Zurich', arrival: '2027-01-14', departure: '2027-01-16', status: 'moved', hotels: [hotel('Zurich', 240)] },
+    { name: 'London', arrival: '2027-01-16', departure: '2027-01-18', status: 'moved', hotels: [hotel('London', 310)] },
+  ];
+  return {
+    type: 'proposal',
+    reply: 'Pinning Zurich to Jan 14 – Jan 16. New dates: … Accept to apply it.',
+    proposal: {
+      kind: 'city_edit',
+      toolName: 'pin_city_dates',
+      op: { kind: 'dates', city: 'Zurich' },
+      before: [
+        { name: 'Paris', arrival: '2027-01-11', departure: '2027-01-13' },
+        { name: 'Zurich', arrival: '2027-01-13', departure: '2027-01-15' },
+        { name: 'London', arrival: '2027-01-15', departure: '2027-01-17' },
+      ],
+      after,
+      removed: [],
+      legs: [
+        { index: 0, from: 'Paris', to: 'Zurich', date: '2027-01-14', options: [opt(300)] },
+        { index: 1, from: 'Zurich', to: 'London', date: '2027-01-16', options: [opt(352)] },
+      ],
+      outboundLeg: OUT_JAN11,
+      returnLeg: BACK_JAN18,
+      note: 'New dates: …',
+      constraints: { pinned_cities: [{ city: 'Zurich', arrival: '2027-01-14', departure: '2027-01-16' }] },
+    },
+  } as any;
+}
 
-    mockedPlanChat.mockResolvedValueOnce(pinProposal(trip));
+describe('results page: a priced AI date change (the card states the exact total)', () => {
+  it("Accept gives exactly the card's total, searches nothing again, and keeps the pin", async () => {
+    const trip = ownerTrip();
+    useTripStore.setState({ currentTrip: trip });
+    mockSearches();
+    render(<ResultsPage />);
+    mockedPlanChat.mockResolvedValueOnce(pricedPinProposal());
     await sendChat('pin Zurich to 2027-01-14 to 2027-01-16');
+    const shown = (await screen.findByTestId('city-edit-total')).textContent!;
+    expect(screen.getByText('Change dates')).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(await screen.findByText('Accept'));
     });
-
-    await waitFor(() =>
-      expect(mockedCompareLeg.mock.calls.map((c) => c[0])).toEqual(
-        expect.arrayContaining([
-          { origin: 'Paris', destination: 'Zurich', date: '2027-01-14', travelers: 6 },
-          { origin: 'Zurich', destination: 'London', date: '2027-01-16', travelers: 6 },
-        ]),
-      ),
-    );
-    await waitFor(() => {
-      const calls = mockedFetchHomeLegs.mock.calls.map((c) => c[0] as any);
-      expect(calls.find((p) => p.outbound)?.startDate).toBe('2027-01-11');
-      expect(calls.find((p) => p.returnToHome)?.endDate).toBe('2027-01-18');
+    await waitFor(() => expect(useTripStore.getState().currentTrip!.cities[2].dates.departure).toBe('2027-01-18'));
+    // Give any re-pricing the page would start a chance to run.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
     });
-    await waitFor(() =>
-      expect(mockedSearchHotels.mock.calls.map((c) => c[0])).toEqual(
-        expect.arrayContaining([
-          { city: 'Paris', checkin: '2027-01-12', checkout: '2027-01-14', adults: 6 },
-          { city: 'Zurich', checkin: '2027-01-14', checkout: '2027-01-16', adults: 6 },
-          { city: 'London', checkin: '2027-01-16', checkout: '2027-01-18', adults: 6 },
-        ]),
-      ),
-    );
+    expect(mockedCompareLeg).not.toHaveBeenCalled();
+    expect(mockedFetchHomeLegs).not.toHaveBeenCalled();
+    expect(mockedSearchHotels).not.toHaveBeenCalled();
+    const after = useTripStore.getState().currentTrip!;
+    // The card's "after" is the header's total, to the dollar.
+    expect(shown.replace(/\s+/g, '')).toContain(`$${liveTripTotal(after).toLocaleString()}`);
+    expect(after.origin?.returnLeg?.departDate).toBe('2027-01-18');
+    expect(after.cities[0].transportOut.price).toBe(300);
+    expect(after.constraints?.pinned_cities).toEqual([{ city: 'Zurich', arrival: '2027-01-14', departure: '2027-01-16' }]);
   });
 });

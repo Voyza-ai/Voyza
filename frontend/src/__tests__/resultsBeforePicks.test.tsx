@@ -1,5 +1,5 @@
 import './mocks';
-import { mockPush } from './mocks';
+import { mockPush, mockReplace } from './mocks';
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
@@ -204,37 +204,38 @@ it('a newer search replaces the older one: its late picks never land', async () 
   expect(store().currentTrip!.cities[0].activities).toEqual([`${name} museum`]);
 });
 
-describe('Edit in Canvas (signed in: the shared auth mock)', () => {
-  it('waits for the picks on "Saving...", saves the trip with them, then opens the canvas in this tab', async () => {
+describe('Share on an unsaved trip (signed in: the shared auth mock)', () => {
+  it('waits for the picks on "Saving...", saves the trip with them, then opens the share dialog on its address', async () => {
     const trip = plannedTrip();
     const name = trip.cities[0].name;
     const call = deferred<CityPicks>();
     startTripPicks(trip, [req(name)], [call.promise]);
-    const open = jest.spyOn(window, 'open').mockImplementation(() => null);
+    const onOpenShare = jest.fn();
 
-    render(<ResultsHeader trip={store().currentTrip!} />);
-    fireEvent.click(screen.getByText('Edit in Canvas'));
+    render(<ResultsHeader trip={store().currentTrip!} onOpenShare={onOpenShare} />);
+    fireEvent.click(screen.getByText('Share'));
     expect(await screen.findByText('Saving...')).toBeInTheDocument();
     expect(mockedSave).not.toHaveBeenCalled();
 
     await act(async () => call.resolve(picksFor(name)));
     await waitFor(() => expect(mockedSave).toHaveBeenCalledTimes(1));
     expect(mockedSave.mock.calls[0][0].cities[0].activities).toEqual([`${name} museum`]);
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/canvas/trip-123'));
-    expect(open).not.toHaveBeenCalled();
-    open.mockRestore();
+    await waitFor(() => expect(onOpenShare).toHaveBeenCalledTimes(1));
+    // The trip now has an address; nothing navigates away to a canvas.
+    expect(mockReplace).toHaveBeenCalledWith('/results?tripId=trip-123');
+    expect(store().currentTrip!.id).toBe('trip-123');
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('with nothing loading, saves at once and opens a new tab, as before', async () => {
+  it('with nothing loading, saves at once and opens the share dialog', async () => {
     const trip = plannedTrip();
     startTripPicks(trip, [], []);
-    const open = jest.spyOn(window, 'open').mockImplementation(() => null);
+    const onOpenShare = jest.fn();
 
-    render(<ResultsHeader trip={store().currentTrip!} />);
-    fireEvent.click(screen.getByText('Edit in Canvas'));
-    await waitFor(() => expect(open).toHaveBeenCalledWith('/canvas/trip-123', '_blank'));
-    expect(mockPush).not.toHaveBeenCalledWith('/canvas/trip-123');
-    open.mockRestore();
+    render(<ResultsHeader trip={store().currentTrip!} onOpenShare={onOpenShare} />);
+    fireEvent.click(screen.getByText('Share'));
+    await waitFor(() => expect(onOpenShare).toHaveBeenCalledTimes(1));
+    expect(mockedSave).toHaveBeenCalledTimes(1);
   });
 });
 
