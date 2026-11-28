@@ -12,6 +12,7 @@
 import { logger } from '../utils/logger';
 import { todayIso } from '../utils/dates';
 import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
+import { createMessage } from './aiUsage';
 import { cityGeo } from './routeGeo';
 import { tripWeather, type CityWeather, type DayWeather } from './weather';
 import { packingFacts, shortDay, type PackingFacts } from './packing';
@@ -138,7 +139,7 @@ async function write(system: string, user: string): Promise<string | null> {
   const anthropic = getAnthropicSafe();
   if (!anthropic) return null;
   try {
-    const res: any = await anthropic.messages.create({
+    const res: any = await createMessage(anthropic, 'chat_weather_writer', {
       model: DEFAULT_MODEL,
       max_tokens: 900,
       system,

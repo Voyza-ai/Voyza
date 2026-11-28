@@ -66,7 +66,8 @@ import {
 } from './cityEdit';
 import { getCityCountry } from '../data/cityCountries';
 import { parseDurationMinutes } from '../utils/duration';
-import { getAnthropicSafe, DEFAULT_MODEL } from './anthropic';
+import { getAnthropicSafe } from './anthropic';
+import { chatRoutingMode, routeChat, shadowAgreement, TIER2_MODEL, type RouteDecision } from './chatRouter';
 import { runPackingTool, runWeatherTool, WEATHER_PROMPT_LINE, WEATHER_TOOLS } from './weatherChat';
 import {
   buildTransportProposal,
@@ -390,12 +391,42 @@ export const CHAT_TOOLS = [
   ...WEATHER_TOOLS,
 ];
 
-/** The system prompt for one turn. Today's date is computed per call. */
-export function chatSystemPrompt(currentTrip: any): string {
-  const context = tripContextForChat(currentTrip);
-  return `You are BlueMurr AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
+/**
+ * The system prompt for one turn, as two blocks for prompt caching:
+ *   1. the instructions — identical for every trip, day and price mode, so it
+ *      (with the tools before it) is cached across all chats;
+ *   2. today's date, the price-mode line and TRIP CONTEXT — cached across the
+ *      questions of one chat until the trip, the day or the price mode changes.
+ */
+export function chatSystemBlocks(currentTrip: any): Array<{ type: 'text'; text: string; cache_control: { type: 'ephemeral' } }> {
+  return [
+    { type: 'text', text: CHAT_INSTRUCTIONS, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: chatTripBlock(currentTrip), cache_control: { type: 'ephemeral' } },
+  ];
+}
 
-Today is ${todayIso()} (UTC). Trip dates are always in the future: a date the user gives without a year ("Dec 10", "the 15th") means its next occurrence after today.
+/** Both blocks as one string (what the model reads). */
+export function chatSystemPrompt(currentTrip: any): string {
+  return chatSystemBlocks(currentTrip).map((b) => b.text).join('\n');
+}
+
+/** Block 2: what changes per day / price mode / trip. */
+export function chatTripBlock(currentTrip: any): string {
+  const context = tripContextForChat(currentTrip);
+  return `Today is ${todayIso()} (UTC). Trip dates are always in the future: a date the user gives without a year ("Dec 10", "the 15th") means its next occurrence after today.
+${perPersonWord() ? `The user is viewing PER-PERSON prices: quote every amount per person (the total divided by ${currentTrip?.travelers} travellers, rounded) and say "per person".\n` : ''}
+TRIP CONTEXT (read-only):
+${JSON.stringify(context, null, 2)}
+`;
+}
+
+/** Tools with a cache breakpoint on the last one (a copy: CHAT_TOOLS itself is never changed). */
+export function cachedChatTools(): any[] {
+  return CHAT_TOOLS.map((t, i) => (i === CHAT_TOOLS.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t));
+}
+
+/** Block 1: the instructions, the same for every trip, day and price mode. */
+const CHAT_INSTRUCTIONS = `You are BlueMurr AI, a travel-planning assistant embedded in the user's itinerary page. You help travelers refine their trip in plain English.
 
 THE TRIP'S LEGS: TRIP CONTEXT "legs" lists every leg in travel order, INCLUDING the flight from home to the first city and the flight from the last city back home. Each leg has an id, its current option and the other options on its card (cardOptions, each with an optionId). Always name a leg by its id.
 - "my flight home", "the flight back", "the return", "back to <home city>" = the leg whose id ends in "→home".
@@ -426,12 +457,8 @@ When the user leaves the choice of city to you ("add another city of your choice
 
 If the user references a city that isn't in the trip for a pin or a min stay, answer_only and ask them to clarify — do NOT invent a pin.
 
-Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them. Prices in TRIP CONTEXT are totals for all travellers.${perPersonWord() ? ` The user is viewing PER-PERSON prices: quote every amount per person (the total divided by ${currentTrip?.travelers} travellers, rounded) and say "per person".` : ''}
-
-TRIP CONTEXT (read-only):
-${JSON.stringify(context, null, 2)}
+Be concise. Reference concrete numbers (prices, durations, dates) from the trip when you have them. Prices in TRIP CONTEXT are totals for all travellers unless the next block says the user is viewing per-person prices.
 `;
-}
 
 /**
  * Run one chat turn. See the seam comment at the top of this file for the
@@ -458,17 +485,38 @@ async function runTripChatInUnits(input: TripChatInput): Promise<TripChatResult>
   for (const turn of history ?? []) messages.push({ role: turn.role, content: turn.content });
   messages.push({ role: 'user', content: message });
 
+  // Model routing (chatRouter.ts), behind CHAT_ROUTING=off|shadow|on.
+  // 'on': tiers 0 / 1 answer here when they can; otherwise today's path.
+  // 'shadow': the router runs alongside and only logs what it would have done.
+  const system = chatSystemBlocks(currentTrip);
+  const route = { anthropic, trip: currentTrip, tripBlock: system[1].text, message, history: history ?? [] };
+  const mode = chatRoutingMode();
+  let routeReason = 'routing_off';
+  if (mode === 'on') {
+    const d = await routeChat(route);
+    logRoute(d, mode);
+    if (d.tier !== 2 && d.reply) return { type: 'answer', reply: d.reply };
+    routeReason = d.reason;
+  }
+  const shadow = mode === 'shadow' ? routeChat(route).catch(() => null) : null;
+
   let response: any;
   try {
-    response = await createMessage(anthropic, 'chat', {
-      model: DEFAULT_MODEL,
-      max_tokens: 1024,
-      system: chatSystemPrompt(currentTrip),
-      tools: CHAT_TOOLS as any,
-      messages,
-    });
+    response = await createMessage(
+      anthropic,
+      'chat',
+      {
+        model: TIER2_MODEL,
+        max_tokens: 1024,
+        system,
+        tools: cachedChatTools(),
+        messages,
+      },
+      { tier: 2, routeReason },
+    );
   } catch (err: any) {
     logger.warn('plan/chat Claude call failed', { message: err?.message });
+    if (shadow) void shadow.then((d) => d && logShadow(d, 'error', ''));
     return {
       type: 'answer',
       reply: 'Sorry — I hit an error reaching the AI. Please try again in a moment. If it keeps happening, let us know.',
@@ -479,9 +527,27 @@ async function runTripChatInUnits(input: TripChatInput): Promise<TripChatResult>
   if (!toolUse) {
     // Claude answered in text instead of calling a tool.
     const textBlock = response.content.find((b: any) => b.type === 'text') as any;
-    return { type: 'answer', reply: textBlock?.text ?? "I'm not sure how to help with that — could you rephrase?" };
+    const reply = textBlock?.text ?? "I'm not sure how to help with that — could you rephrase?";
+    if (shadow) void shadow.then((d) => d && logShadow(d, null, reply));
+    return { type: 'answer', reply };
   }
+  if (shadow) void shadow.then((d) => d && logShadow(d, toolUse.name, toolUse.name === 'answer_only' ? String(toolUse.input?.answer ?? '') : ''));
   return runTool(currentTrip, toolUse.name as string, (toolUse.input ?? {}) as any, message);
+}
+
+/** One line per routed question. Never the message or the reply. */
+function logRoute(d: RouteDecision, mode: string): void {
+  logger.info('chat route', { mode, tier: d.tier, reason: d.reason });
+}
+
+/** Shadow mode: what the router would have done, and whether tier 2 agreed. */
+function logShadow(d: RouteDecision, sonnetTool: string | null, sonnetReply: string): void {
+  logger.info('chat route shadow', {
+    wouldTier: d.tier,
+    reason: d.reason,
+    sonnetTool,
+    agreement: sonnetTool === 'error' ? 'tier2_error' : shadowAgreement(d, sonnetTool, sonnetReply),
+  });
 }
 
 /** Dispatch one tool call. Exported for tests of a tool without a model. */

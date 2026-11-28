@@ -17,6 +17,8 @@ import { logger } from '../utils/logger';
 
 export type AiFeature =
   | 'chat'
+  | 'chat_route'
+  | 'chat_weather_writer'
   | 'chat_suggestions'
   | 'interpret'
   | 'activities'
@@ -28,10 +30,40 @@ export type AiFeature =
   | 'plan_converse'
   | 'preset_generation';
 
+/**
+ * USD per million tokens: input, output, cache read, cache write (5-minute).
+ * Sources: platform.claude.com pricing (Sonnet 5.5 / Haiku 5.5 as relayed
+ * 2026-11-28; cache write = 1.25x input); claude-sonnet-4-5 $3 / $15.
+ * PostHog may not price the newer ids, so the event carries our own cost_usd.
+ */
+export const MODEL_PRICES: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
+  'claude-sonnet-4-5': { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  'claude-sonnet-5-5': { in: 2, out: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+  'claude-haiku-5-5': { in: 0.1, out: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+};
+
+/** What one call cost, from its usage; null for a model without a price. */
+export function costUsd(model: string | null | undefined, usage: any): number | null {
+  const key = Object.keys(MODEL_PRICES).find((k) => String(model ?? '').startsWith(k));
+  if (!key || !usage) return null;
+  const p = MODEL_PRICES[key];
+  const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const usd =
+    (n(usage.input_tokens) * p.in +
+      n(usage.output_tokens) * p.out +
+      n(usage.cache_read_input_tokens) * p.cacheRead +
+      n(usage.cache_creation_input_tokens) * p.cacheWrite) /
+    1_000_000;
+  return Math.round(usd * 1e7) / 1e7;
+}
+
+/** Routing details carried on the event: which tier answered and why. */
+export type AiMeta = { tier?: 0 | 1 | 2; routeReason?: string };
+
 const host = () => (process.env.POSTHOG_HOST || 'https://us.i.posthog.com').replace(/\/+$/, '');
 
 /** The $ai_generation event PostHog prices from model + tokens. Exported for tests. */
-export function aiGenerationEvent(feature: AiFeature, params: any, response: any, latencyMs: number, error?: any) {
+export function aiGenerationEvent(feature: AiFeature, params: any, response: any, latencyMs: number, error?: any, meta: AiMeta = {}) {
   const usage = response?.usage ?? {};
   return {
     event: '$ai_generation',
@@ -54,6 +86,9 @@ export function aiGenerationEvent(feature: AiFeature, params: any, response: any
       $ai_is_error: !!error,
       $ai_http_status: error ? (error?.status ?? 500) : 200,
       feature,
+      cost_usd: costUsd(response?.model ?? params?.model, response?.usage),
+      ...(meta.tier !== undefined ? { tier: meta.tier } : {}),
+      ...(meta.routeReason ? { route_reason: meta.routeReason } : {}),
       environment: process.env.NODE_ENV ?? 'development',
     },
   };
@@ -74,19 +109,19 @@ function report(event: ReturnType<typeof aiGenerationEvent>): void {
  * same errors — callers swap `anthropic.messages.create({` for
  * `createMessage(anthropic, 'feature', {` and nothing else changes.
  */
-export async function createMessage(anthropic: any, feature: AiFeature, params: any): Promise<any> {
+export async function createMessage(anthropic: any, feature: AiFeature, params: any, meta: AiMeta = {}): Promise<any> {
   const started = Date.now();
   try {
     const response = await anthropic.messages.create(params);
     try {
-      report(aiGenerationEvent(feature, params, response, Date.now() - started));
+      report(aiGenerationEvent(feature, params, response, Date.now() - started, undefined, meta));
     } catch {
       /* never affect the call */
     }
     return response;
   } catch (err) {
     try {
-      report(aiGenerationEvent(feature, params, null, Date.now() - started, err));
+      report(aiGenerationEvent(feature, params, null, Date.now() - started, err, meta));
     } catch {
       /* never affect the call */
     }

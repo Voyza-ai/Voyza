@@ -69,6 +69,11 @@ import { runTripChat } from '../services/tripChat';
 import tripFixture from './fixtures/chat-trip-nyc-paris-london.json';
 const { searchFlights } = require('../services/flights');
 
+/** The system prompt as text: it is sent as cache blocks (tripChat.ts chatSystemBlocks). */
+const systemText = (req: any): string =>
+  typeof req?.system === 'string' ? req.system : (req?.system ?? []).map((b: any) => b.text).join('\n');
+
+
 function createApp() {
   const app = express();
   app.use(express.json());
@@ -175,7 +180,7 @@ describe('the model sees home, every leg, and every option on its card', () => {
     expect(trip().totalCost).toBe(1576);
     expect(headerTotal(trip())).toBe(1576);
     await chat(app, 'answer_only', { answer: 'ok' });
-    const system: string = mockCreate.mock.calls[0][0].system;
+    const system: string = systemText(mockCreate.mock.calls[0][0]);
     const ctx = JSON.parse(system.slice(system.indexOf('TRIP CONTEXT (read-only):') + 'TRIP CONTEXT (read-only):'.length));
     expect(ctx.home).toEqual({ city: 'New York', airports: ['JFK', 'LGA', 'EWR'], returnsHome: true });
     expect(ctx.legs.map((l: any) => l.id)).toEqual(['home→Paris', 'Paris→London', 'London→home']);
@@ -496,7 +501,7 @@ describe('per-person view: the reply quotes amounts as the card and header show 
     expect(res.body.reply).toContain('Trip total per person $788 → $800 (+$12).');
     // The proposal itself stays in party amounts (the card converts it).
     expect(res.body.proposal.totals).toEqual({ before: 1576, after: 1599, delta: 23 });
-    expect(mockCreate.mock.calls[0][0].system).toContain('PER-PERSON');
+    expect(systemText(mockCreate.mock.calls[0][0])).toContain('PER-PERSON');
   });
 
   it('a listing: per-person prices and differences', async () => {
@@ -508,7 +513,7 @@ describe('per-person view: the reply quotes amounts as the card and header show 
     const res = await ask({ leg: 'London→home', relative: 'later', timeOfDay: 'evening' });
     expect(res.body.reply).toContain('Trip total $1,576 → $1,599 (+$23)');
     expect(res.body.reply).not.toContain('per person');
-    expect(mockCreate.mock.calls[0][0].system).not.toContain('PER-PERSON');
+    expect(systemText(mockCreate.mock.calls[0][0])).not.toContain('PER-PERSON');
   });
 });
 
@@ -651,7 +656,7 @@ describe('Reject, and what the server claims', () => {
       { role: 'user', content: 'switch my flight home to the British Airways one' },
       { role: 'assistant', content: `${first.body.reply} [The user REJECTED this change; the trip is unchanged.]` },
     ]);
-    const system: string = mockCreate.mock.calls[1][0].system;
+    const system: string = systemText(mockCreate.mock.calls[1][0]);
     expect(system).toContain('"optionId": "London→home#0"');
     expect(system).toContain('"depart": "LON 12:23 2027-01-17"');
     expect(t).toEqual(trip());

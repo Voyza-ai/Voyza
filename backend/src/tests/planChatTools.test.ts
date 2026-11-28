@@ -64,6 +64,11 @@ import { getAnthropicSafe } from '../services/anthropic';
 import { normalizeTimeOfDay, searchLegOptions } from '../services/legOptions';
 const { searchFlights } = require('../services/flights');
 
+/** The system prompt as text: it is sent as cache blocks (tripChat.ts chatSystemBlocks). */
+const systemText = (req: any): string =>
+  typeof req?.system === 'string' ? req.system : (req?.system ?? []).map((b: any) => b.text).join('\n');
+
+
 function createApp() {
   const app = express();
   app.use(express.json());
@@ -543,7 +548,7 @@ describe('D-07 — chat suggestions only offer what the chat can do', () => {
   it('tells the model which legs have trains and what the chat can do', async () => {
     await suggest(['a', 'b', 'c', 'd']);
     const req = mockCreate.mock.calls[0][0];
-    expect(req.system).toMatch(/can NOT/i);
+    expect(systemText(req)).toMatch(/can NOT/i);
     expect(req.messages[0].content).toContain('"trainFound": false');
   });
 });
@@ -557,7 +562,7 @@ describe('D-07 — chat suggestions only offer what the chat can do', () => {
  */
 describe("today's date in the planner prompts", () => {
   const app = createApp();
-  const systemOf = (call: number) => mockCreate.mock.calls[call][0].system as string;
+  const systemOf = (call: number) => systemText(mockCreate.mock.calls[call][0]);
   afterEach(() => jest.setSystemTime(new Date(FROZEN_NOW)));
 
   it('/chat tells the model today (UTC) and that a yearless date means its next occurrence', async () => {
