@@ -14,9 +14,14 @@ YES.
 
 ## 2. Rules Blue never breaks
 
-- **Useful or silent.** A nudge budget per thread (default 3/day while
-  travelling, 1/day before the trip), quiet hours 21:00–08:00 *in the trip
-  city's time zone*, and `Blue mute` / `Blue mute 2h` / `STOP` honoured instantly.
+- **Opted in, or silent.** Linking a phone is not consent to proactive texts.
+  Verifying asks a separate "Want Blue to text you first? Reply YES" and stores
+  it with a timestamp. `STOP` is checked before anything else, saved per phone,
+  and any opted-out member pauses that group's nudges.
+- **Useful or silent.** A nudge budget per trip (default 3/day while
+  travelling, 1/day before the trip). Quiet hours are 21:00–08:00 in the
+  traveller's current time zone: home before the trip, the departure city on
+  travel days. `Blue mute` / `Blue mute 2h` work at any time.
 - **Never acts without YES.** Bookings, purchases and trip changes are
   proposed. Payment always happens on a website, never in a text.
 - **Trip members only.** No trip details while any number in the thread isn't
@@ -38,10 +43,10 @@ open API lets a startup book.
 | Nudge | Trigger (plain code) | Data source | Status |
 |---|---|---|---|
 | Morning brief | 08:00 local, each travel day | trip schedule + weather | New (schedule exists in `cities.schedule`) |
-| Leave now | X min before an `in-head`/`out-head` schedule event (flight 120 / train 30 min buffers) | `frontend/lib/dayScheduleDefaults.ts` rules, moved/mirrored to backend | Reuse (needs per-city time zone) |
-| Price drop on a chosen flight/train | re-search 2×/day; same service (`sameService`) cheaper by ≥ $20 and ≥ 5% | `tripLegs.searchLeg` + `sameService` (fix/ai-chat-home-legs) | Reuse |
+| Leave now | X min before a **booked or confirmed** departure (`transportOut`, home legs), not the planner's buffer blocks, which only exist once the day planner has run | trip legs + bookings | Reuse (needs time zones) |
+| Price drop on a chosen flight/train | re-search 2×/day; the same service **and** cabin/fare brand at the same traveller count, cheaper by ≥ $20 and ≥ 5%; never on booked legs; re-searched when the link is tapped (offers expire) | `tripLegs.searchLeg` + a stricter `sameService` | Reuse + fix matching |
 | Weather swap | rain/heat on a day with outdoor items | weather API | New |
-| Unbooked leg | leg has no booking, departure ≤ 14 days away, prices rising | trip legs + bookings table | Reuse |
+| Unbooked leg | leg has no booking and departs within 14 days ("prices rising" waits for price history) | trip legs + bookings table | Reuse |
 | Packing gap | 3 days and 1 day before departure, items still unchecked | packing list (3b) | New |
 | Check-in reminder | 24h before a booked flight | Duffel order | Reuse |
 | Delay / schedule change | airline change on a Duffel-booked flight | Duffel `order.airline_initiated_change_detected` webhook | New (booked-in-app only; others need paid AeroAPI) |
@@ -91,13 +96,27 @@ every 15 min (one worker):
 watchers (separate cadence): price re-search 2×/day per leg; weather 1×/day per city
 ```
 
-- **Ledger** (`blue_nudges`): one row per (thread, nudge key such as
-  `leave:flight:home→Venice:2027-05-15`), so a restart or re-run never sends
-  twice (same idea as `emailJobs.ts`'s "sent" marks).
-- **Time zones:** schedule times are local "HH:MM" with no zone → add a zone per
-  city (from coordinates) before any time-based nudge.
-- **Scheduler:** one long-running worker on `setInterval`, plus a
-  `CRON_SECRET`-guarded "run now" route (pattern from `routes/email.ts`). pg_cron
+- **Claim first, then send.** Insert the `blue_nudges` row first, unique on
+  (trip, nudge key, recipient), with status `pending`; send; then mark it `sent`.
+  A crash can't double-send and a second worker can't race. (`emailJobs.ts`
+  sends first and marks after, so it is not copied.) Tests probe the second
+  write and a stale `pending` row.
+- **One channel per nudge.** A member may have a 1:1 thread and the group
+  thread, so the key is per trip and the nudge goes to one chosen channel.
+- **Outbound privacy re-check.** Each thread stores a participant snapshot,
+  updated on every inbound message. Before any send, the bot re-checks:
+  - the snapshot against the trip's current members;
+  - that the trip still exists and hasn't ended;
+  - that the owner isn't pending deletion.
+
+  On any mismatch it sends nothing, or a version with no details ("open the
+  app").
+- **Time zones and expiry:** add a zone per city, plus the home zone. Every
+  nudge has a "too late after" time, so a worker that was down never sends
+  "leave now" two hours late.
+- **Scheduler:** one long-running worker holding a Postgres advisory lock, so
+  only one instance ever runs. It must not run on a host that sleeps. Add a
+  `CRON_SECRET`-guarded "run now" route (pattern from `routes/email.ts`); pg_cron
   calls are fire-and-forget, so only as a backup kick.
 - **Replies to nudges** go through the existing bot (YES/NO, pending edit).
 
@@ -114,10 +133,18 @@ New later:
 
 | Phase | Ships | Needs |
 |---|---|---|
-| **P0 Foundation** | live texting, migration 016, saving YES edits (applier + version check), "threads for a trip" | provider account, DB OK |
-| **P1 Proactive MVP** | morning brief, leave-now, unbooked leg, packing list + gaps, mute/quiet hours, ledger | time zones per city, weather API |
-| **P2 Watchers + help** | price-drop alerts, nearby open-now shop, dinner options + booking links, buy links, booking deep link | Google Places key |
+| **P0 Foundation** | live texting (1:1 first), migration 016 (persistent links), STOP/opt-in, threads-for-a-trip + participant snapshot | provider account, DB OK |
+| **P1 "Blue texts first" demo** | claim-first ledger + worker, unbooked-leg nudge, leave-now for a booked flight, booking deep link on YES, mute/quiet hours | time zones |
+| **P2 Watchers + help** | morning brief, weather swap, packing list + gaps, price-drop alerts, nearby open-now shop, dinner options + booking links, buy links (reply-only), saving YES edits (applier + version check) | weather + Google Places keys |
 | **P3 Bigger bets** | delay alerts, group polls, cost split, real reservations (partner), in-thread purchase | partner approvals, AeroAPI |
+
+**Smallest demo that proves the differentiator (P1):**
+1. The owner texts Blue to link a test trip that has an unbooked leg.
+2. A "run now" call with a fake clock makes Blue text first: "Your Venice →
+   Rome train isn't booked yet".
+3. Then a leave-now for a booked flight.
+4. YES returns the booking link.
+5. `Blue mute` stops the next nudge.
 
 ## 8. Testing (owner rule: minimal AI calls)
 
@@ -151,6 +178,12 @@ What drives it:
   ~$140/month at demo scale if opening hours are requested.
 - **Worker hosting:** $0–7/month.
 - **Optional delay alerts** (FlightAware AeroAPI): +$100/month minimum.
+- **Left out of the totals above:**
+  - If texting first on Sendblue needs Blue Ocean or Enterprise, add about
+    $300–500/month.
+  - Twilio group MMS also needs new code (Conversations API); the built
+    Twilio adapter is 1:1 only.
+  - The 1:1 SMS figures are the realistic Twilio option today.
 - **Not yet confirmed:**
   - Sendblue's plan for texting first and for groups ("Blue Ocean" or
     Enterprise; ask sales; ESTIMATE $300–500/month).
@@ -165,9 +198,27 @@ Sources: [Claude pricing](https://platform.claude.com/docs/en/about-claude/prici
 [Google Maps pricing](https://developers.google.com/maps/billing-and-pricing/pricing) ·
 [AeroAPI](https://www.flightaware.com/commercial/aeroapi/)
 
-## 10. Open decisions for the owner
+## 10. Independent review (2026-11-28) — what changed
 
-1. Provider: Sendblue (iMessage, $100/mo; Blue Ocean needed to text first) or Twilio paid SMS.
+A separate reviewer read this plan and the code. Folded in above:
+- **Outbound privacy:** participant snapshot plus a re-check before every send.
+- **Ledger:** claim first, then send; advisory lock.
+- **Consent:** explicit opt-in, with STOP checked first.
+- **Channels:** one channel per nudge.
+- **Leave-now:** based on real departures, not planner blocks.
+- **Time zones:** home vs city, plus nudge expiry.
+- **Price drops:** stricter matching.
+- **Scope:** P1 cut to the smallest "texts first" demo; packing, weather and
+  saving edits moved to P2.
+- **Cost:** gaps noted.
+
+**Existing bug found:** in `backend/src/services/textbot/bot.ts`, the NO
+pattern includes "stop", so STOP while an edit is pending just declines it.
+Fix it in P0, when work resumes.
+
+## 11. Open decisions for the owner
+
+1. Provider: Sendblue (iMessage, $100/mo; ask sales whether texting first in an existing thread works on that plan) or Twilio paid SMS (1:1 first).
 2. Nudge budget and quiet hours defaults (3/day, 21:00–08:00?).
 3. P1 order: which nudges first?
 4. Weather and Google Places keys (paid tiers).
