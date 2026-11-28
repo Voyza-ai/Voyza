@@ -2,9 +2,10 @@ import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
 import { listBookings } from '../bookingStore';
 import { TextBot } from './bot';
-import { LoopbackChatEngine } from './chatEngine';
+import { DirectChatEngine } from './chatEngine';
 import { MemoryTextStore, type TextStore } from './store';
 import { SupabaseTextStore } from './supabaseStore';
+import { TripProposalApplier } from './applier';
 import { SupabaseTripLoader } from './tripLoader';
 import { NudgeEngine, type BookingLookup, type NudgeLeg } from './nudges';
 import { SendbluePoller, SendblueProvider, sendblueConfigFromEnv } from './providers/sendblue';
@@ -159,10 +160,11 @@ export function startTextBot(): void {
 
   bot = new TextBot({
     store: textStore(),
-    chat: new LoopbackChatEngine(),
+    chat: new DirectChatEngine(),
     trips,
     provider,
-    applier: null,
+    // Saving YES edits writes the real trip: only with the durable store (real accounts), never in demo mode.
+    applier: textStore() instanceof SupabaseTextStore ? new TripProposalApplier(trips) : null,
     config: { siteUrl: env.FRONTEND_URL },
   });
   if (mode === 'poll') {

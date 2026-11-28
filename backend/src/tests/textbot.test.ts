@@ -297,7 +297,7 @@ describe('textbot: edits need confirmation', () => {
     await linkedGroup(env);
     await env.send(P_OWNER, 'BlueMurr add a night in London', GROUP);
     expect((await env.send(P_OWNER, 'yes', GROUP))[0]).toBe(
-      "I couldn't apply it: the trip changed on the website since. Nothing was changed.",
+      "I couldn't apply it: the trip changed on the website since. Nothing was changed. The trip: http://localhost:3000/results?tripId=trip-1",
     );
   });
 

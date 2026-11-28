@@ -271,7 +271,7 @@ export class TextBot {
       }
       const res = await this.deps.applier.apply(thread.tripId, pending.result, sender.userId, pending.tripUpdatedAt);
       await store.clearPending(threadKey);
-      if (!res.ok) return reply(`I couldn't apply it: ${res.reason}. Nothing was changed.`);
+      if (!res.ok) return reply(`I couldn't apply it: ${res.reason}. Nothing was changed. The trip: ${this.tripUrl(thread.tripId)}`);
       return reply(`Done: ${pending.summary} It's saved to the trip: ${this.tripUrl(thread.tripId)}`);
     }
 

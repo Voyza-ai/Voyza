@@ -34,3 +34,16 @@ export class LoopbackChatEngine implements ChatEngine {
     }
   }
 }
+
+/**
+ * Direct call into the chat core (services/tripChat.ts runTripChat), now on
+ * dev — the seam the chat fix exported for exactly this. Same behaviour as
+ * POST /api/plan/chat, without a loopback HTTP hop or the route's rate limit.
+ */
+export class DirectChatEngine implements ChatEngine {
+  async run(input: { message: string; currentTrip: unknown; history: ChatTurn[] }): Promise<ChatResult> {
+    const { runTripChat } = await import('../tripChat');
+    const r: any = await runTripChat({ message: input.message, currentTrip: input.currentTrip, history: input.history });
+    return { ...r, reply: String(r?.reply ?? '') };
+  }
+}
