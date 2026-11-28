@@ -25,48 +25,190 @@ grant all on _checks to authenticated;
 insert into _checks
   select 0, 'no 016 tables before apply',
          (to_regclass('public.user_phones') is null and to_regclass('public.text_threads') is null
-          and to_regclass('public.text_link_codes') is null)::text, 'true';
+          and to_regclass('public.text_link_codes') is null and to_regclass('public.text_phone_prefs') is null
+          and to_regclass('public.blue_nudges') is null and to_regclass('public.text_legs_booked') is null)::text, 'true';
 
--- ═══ APPLY 016_text_threads.sql (verbatim, comments trimmed) ═══════════════
+-- ═══ APPLY 016_text_threads.sql (VERBATIM — regenerate this block if the file changes) ═══
 
+-- ============================================================================
+-- 016: Text-your-trip assistant "Blue" (iMessage / SMS) — verified phones,
+--      threads linked to trips, one-time codes, opt-outs, the nudge ledger
+-- ============================================================================
+-- NOT APPLIED. Run by hand in the Supabase SQL editor (Dashboard → SQL
+-- Editor → paste → Run), after first running the rehearsal
+-- supabase/dry-runs/016_text_threads.dry-run.sql (which changes nothing and
+-- must report PASS on every row).
+--
+-- Until this is applied the bot keeps all of this in process memory
+-- (services/textbot/store.ts, MemoryTextStore): links and verified phones are
+-- lost on restart. Nothing currently on `dev` reads or writes these tables,
+-- so applying this ahead of the branch merge changes no existing behaviour.
+--
+-- Personal data: a phone number per user (E.164 only). Visible to its owner
+-- only; written only by the service-role backend after the user proved the
+-- number by texting a one-time code from it. Deleted with the account
+-- (ON DELETE CASCADE from auth.users). No message bodies are stored except
+-- the last 12 bot turns per linked thread (text_threads.history), which go
+-- when the thread is unlinked or the trip is deleted.
+--
+-- WHY EACH TABLE / COLUMN (nothing here that today's feature doesn't use):
+--   user_phones.user_id, phone_e164  who is texting: a text arrives as a
+--       phone number; this maps it to a BlueMurr account so the bot knows
+--       which trips the sender may see. One phone per user, one user per phone.
+--   user_phones.verified_at          shown in Settings ("verified on …").
+--   text_threads.provider, provider_thread_id  which chat (a 1:1 or group on
+--       Sendblue/Twilio) a text came from; unique per provider.
+--   text_threads.trip_id             the trip that chat asks about / edits.
+--   text_threads.linked_by, linked_at  who linked it and when (audit; only
+--       owner/editor may link).
+--   text_threads.history             the last 12 turns, so "do the first one"
+--       works across texts and across a container restart.
+--   text_threads.participants        who was in the chat at its latest text;
+--       every proactive text re-checks it, so trip details never go to a
+--       number that isn't a verified member of the trip.
+--   text_threads.muted_until         "BlueMurr mute 2h" / "mute".
+--   text_link_codes.*                the one-time code that proves "this phone
+--       belongs to this signed-in account" (and, for kind=link, picks the
+--       trip). expires_at/used_at make it 15-min single use.
+--   text_phone_prefs.opted_out_at    STOP / START, per PHONE (anyone can text
+--       STOP, account or not); must survive a restart to stay legal.
+--   text_phone_prefs.proactive_consent_at  "BlueMurr alerts on": explicit
+--       consent for Blue to text FIRST (verifying a phone is not consent).
+--   blue_nudges.*                    claim-first ledger of proactive texts:
+--       a row is inserted BEFORE sending and (trip_id, nudge_key) is the
+--       primary key, so a restart or a second worker can never send the same
+--       nudge twice. local_day + status drive the daily budget.
+--   text_legs_booked.*               "BlueMurr booked": a leg booked outside
+--       the app, so Blue stops asking about it and sends leave-now instead.
+-- Deferred (NOT created): pending edits and delivery dedupe stay in memory
+-- until texted edits are saved to trips; they get their own migration then.
+--
+-- Access: users may SELECT their own phone row. Everything else has NO
+-- policies: only the service-role backend reads or writes it.
+-- ============================================================================
+
+-- 1) Verified phones — one per user, one user per phone.
+-- SAFE ON PRODUCTION: new, empty table; touches no existing table.
 create table if not exists public.user_phones (
-  user_id uuid primary key references auth.users(id) on delete cascade,
-  phone_e164 text not null unique check (phone_e164 ~ '^\+[1-9][0-9]{7,14}$'),
-  verified_at timestamptz not null default now()
+  user_id      uuid        primary key references auth.users(id) on delete cascade,
+  phone_e164   text        not null unique
+                 check (phone_e164 ~ '^\+[1-9][0-9]{7,14}$'),
+  verified_at  timestamptz not null default now()
 );
+
+-- 2) A provider thread (group or 1:1) linked to one trip.
+-- SAFE ON PRODUCTION: new, empty table. Deleting a trip unlinks its threads.
 create table if not exists public.text_threads (
-  id uuid primary key default gen_random_uuid(),
-  provider text not null check (provider in ('sendblue', 'twilio', 'simulator')),
-  provider_thread_id text not null,
-  trip_id uuid not null references public.trips(id) on delete cascade,
-  linked_by uuid references auth.users(id) on delete set null,
-  linked_at timestamptz not null default now(),
-  history jsonb not null default '[]'::jsonb,
+  id                  uuid        primary key default gen_random_uuid(),
+  provider            text        not null check (provider in ('sendblue', 'twilio', 'simulator')),
+  provider_thread_id  text        not null,
+  trip_id             uuid        not null references public.trips(id) on delete cascade,
+  linked_by           uuid        references auth.users(id) on delete set null,
+  linked_at           timestamptz not null default now(),
+  history             jsonb       not null default '[]'::jsonb,
+  participants        text[]      not null default '{}',
+  muted_until         timestamptz,
   unique (provider, provider_thread_id)
 );
 create index if not exists text_threads_trip_idx on public.text_threads (trip_id);
+
+-- 3) One-time codes made in the app ("Text your trip"). Single use is
+--    enforced by the backend's consume statement:
+--      update text_link_codes set used_at = now()
+--       where code = $1 and used_at is null and expires_at > now()
+--      returning *;
+--    which only one of two racing texts can win.
+-- SAFE ON PRODUCTION: new, empty table.
 create table if not exists public.text_link_codes (
-  code text primary key check (code ~ '^[A-HJ-NP-Z2-9]{6}$'),
-  kind text not null check (kind in ('link', 'verify')),
-  trip_id uuid not null references public.trips(id) on delete cascade,
-  user_id uuid not null references auth.users(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  expires_at timestamptz not null,
-  used_at timestamptz,
+  code        text        primary key check (code ~ '^[A-HJ-NP-Z2-9]{6}$'),
+  kind        text        not null check (kind in ('link', 'verify')),
+  trip_id     uuid        not null references public.trips(id) on delete cascade,
+  user_id     uuid        not null references auth.users(id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  expires_at  timestamptz not null,
+  used_at     timestamptz,
   check (expires_at > created_at)
 );
 create index if not exists text_link_codes_expiry_idx on public.text_link_codes (expires_at);
+
+-- 4) Opt-out and consent, per phone number.
+-- SAFE ON PRODUCTION: new, empty table.
+create table if not exists public.text_phone_prefs (
+  phone_e164            text        primary key check (phone_e164 ~ '^\+[1-9][0-9]{7,14}$'),
+  opted_out_at          timestamptz,
+  proactive_consent_at  timestamptz,
+  updated_at            timestamptz not null default now()
+);
+
+-- 5) Ledger of proactive texts ("Blue texts first"), claim-first.
+-- SAFE ON PRODUCTION: new, empty table. Deleting a trip deletes its rows;
+-- unlinking a thread keeps the row (so the nudge still never repeats).
+create table if not exists public.blue_nudges (
+  trip_id     uuid        not null references public.trips(id) on delete cascade,
+  nudge_key   text        not null check (char_length(nudge_key) between 1 and 200),
+  thread_id   uuid        references public.text_threads(id) on delete set null,
+  local_day   date        not null,
+  status      text        not null default 'pending' check (status in ('pending', 'sent', 'failed')),
+  claimed_at  timestamptz not null default now(),
+  primary key (trip_id, nudge_key)
+);
+create index if not exists blue_nudges_trip_day_idx on public.blue_nudges (trip_id, local_day);
+
+-- 6) Legs a traveller said are booked elsewhere.
+-- SAFE ON PRODUCTION: new, empty table.
+create table if not exists public.text_legs_booked (
+  trip_id    uuid        not null references public.trips(id) on delete cascade,
+  leg_id     text        not null check (char_length(leg_id) between 1 and 200),
+  marked_by  uuid        references auth.users(id) on delete set null,
+  marked_at  timestamptz not null default now(),
+  primary key (trip_id, leg_id)
+);
+
+-- 7) RLS on all six. The rls_auto_enable event trigger would do this anyway;
+--    declared for intent.
+-- SAFE ON PRODUCTION: affects only the new tables.
 alter table public.user_phones        enable row level security;
 alter table public.text_threads       enable row level security;
 alter table public.text_link_codes    enable row level security;
+alter table public.text_phone_prefs   enable row level security;
+alter table public.blue_nudges        enable row level security;
+alter table public.text_legs_booked   enable row level security;
+
+-- SAFE ON PRODUCTION: one SELECT policy on a new table. Guarded so a second
+-- run does not fail on "policy already exists".
 do $$
 begin
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'user_phones' and policyname = 'user_phones_owner_select') then
-    create policy "user_phones_owner_select" on public.user_phones for select using (auth.uid() = user_id);
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'public' and tablename = 'user_phones' and policyname = 'user_phones_owner_select'
+  ) then
+    create policy "user_phones_owner_select" on public.user_phones
+      for select using (auth.uid() = user_id);
   end if;
 end $$;
+
+-- 8) Browser roles: read own phone only; never write anything here.
+-- SAFE ON PRODUCTION: revokes on the new tables only; service_role keeps all.
 revoke insert, update, delete, truncate on public.user_phones from anon, authenticated;
-revoke all on public.text_threads, public.text_link_codes from anon, authenticated;
+revoke all on public.text_threads, public.text_link_codes, public.text_phone_prefs,
+              public.blue_nudges, public.text_legs_booked from anon, authenticated;
+
+-- ============================================================================
+-- Housekeeping (run from the backend, not here): delete text_link_codes
+-- rows older than 7 days.
+-- ============================================================================
+
+-- ============================================================================
+-- REVERSAL (run only to undo; unlinks every texting thread and forgets every
+-- verified phone — users would re-verify by texting a new code):
+--
+--   drop table if exists public.text_legs_booked;
+--   drop table if exists public.blue_nudges;
+--   drop table if exists public.text_phone_prefs;
+--   drop table if exists public.text_link_codes;
+--   drop table if exists public.text_threads;
+--   drop table if exists public.user_phones;
+-- ============================================================================
 
 -- ═══ FIXTURES (rolled back) ═════════════════════════════════════════════════
 
@@ -227,7 +369,77 @@ exception when others then
 end $$;
 insert into _checks
   select 28, 'exactly one policy across 016 tables', count(*)::text, '1' from pg_policies
-   where tablename in ('user_phones','text_threads','text_link_codes');
+   where tablename in ('user_phones','text_threads','text_link_codes','text_phone_prefs','blue_nudges','text_legs_booked');
+
+
+-- ═══ PROBES for the tables added for "Blue texts first" ═════════════════════
+-- (fresh fixtures: the trips above were deleted by probes 24–25)
+insert into public.trips (id, user_id, title) select trip_a, u1, 'DRY RUN 016 A2' from _ids;
+insert into public.text_threads (provider, provider_thread_id, trip_id, linked_by)
+  select 'twilio', 'conv_dry', trip_a, u1 from _ids;
+
+-- 29) New threads start with no participants and not muted.
+insert into _checks select 29, 'thread defaults', (participants = '{}' and muted_until is null)::text, 'true'
+  from public.text_threads where provider_thread_id = 'conv_dry';
+
+-- 30) STOP: first write, then the SECOND write for the same phone upserts.
+insert into public.text_phone_prefs (phone_e164, opted_out_at) values ('+12155550001', now());
+insert into public.text_phone_prefs (phone_e164, opted_out_at, proactive_consent_at) values ('+12155550001', null, now())
+  on conflict (phone_e164) do update set opted_out_at = excluded.opted_out_at,
+    proactive_consent_at = excluded.proactive_consent_at, updated_at = now();
+insert into _checks select 30, 'START + alerts on via upsert', (opted_out_at is null and proactive_consent_at is not null)::text, 'true'
+  from public.text_phone_prefs where phone_e164 = '+12155550001';
+do $$ begin
+  insert into public.text_phone_prefs (phone_e164) values ('2155550001');
+  insert into _checks values (31, 'non-E.164 pref phone', 'ACCEPTED', 'rejected');
+exception when check_violation then
+  insert into _checks values (31, 'non-E.164 pref phone', 'rejected', 'rejected');
+end $$;
+
+-- 32–33) Nudge ledger: the claim wins once; a SECOND claim (re-run, restart,
+-- other worker) gets nothing — also while the first is still 'pending' (stale row).
+with c as (insert into public.blue_nudges (trip_id, nudge_key, thread_id, local_day)
+             select trip_a, 'unbooked:Venice→Rome:2027-05-22', t.id, '2027-05-20' from _ids, public.text_threads t
+              where t.provider_thread_id = 'conv_dry'
+           on conflict (trip_id, nudge_key) do nothing returning 1)
+insert into _checks select 32, 'first claim', count(*)::text, '1' from c;
+with c as (insert into public.blue_nudges (trip_id, nudge_key, local_day)
+             select trip_a, 'unbooked:Venice→Rome:2027-05-22', '2027-05-21' from _ids
+           on conflict (trip_id, nudge_key) do nothing returning 1)
+insert into _checks select 33, 'SECOND claim while first still pending', count(*)::text, '0' from c;
+
+-- 34) Status is constrained; the budget count reads sent rows for the day.
+update public.blue_nudges set status = 'sent' where nudge_key like 'unbooked:%';
+do $$ begin
+  update public.blue_nudges set status = 'delivered';
+  insert into _checks values (34, 'bad nudge status', 'ACCEPTED', 'rejected');
+exception when check_violation then
+  insert into _checks values (34, 'bad nudge status', 'rejected', 'rejected');
+end $$;
+insert into _checks select 35, 'sent today (budget count)', count(*)::text, '1'
+  from public.blue_nudges, _ids where trip_id = trip_a and local_day = '2027-05-20' and status = 'sent';
+
+-- 36) "booked": a second mark is a no-op.
+insert into public.text_legs_booked (trip_id, leg_id, marked_by) select trip_a, 'Venice→Rome', u1 from _ids;
+with c as (insert into public.text_legs_booked (trip_id, leg_id) select trip_a, 'Venice→Rome' from _ids
+           on conflict do nothing returning 1)
+insert into _checks select 36, 'SECOND "booked" mark', count(*)::text, '0' from c;
+
+-- 37) Unlinking a thread keeps the ledger row (the nudge still never repeats).
+delete from public.text_threads where provider_thread_id = 'conv_dry';
+insert into _checks select 37, 'unlink keeps ledger, thread_id → null', (thread_id is null)::text, 'true'
+  from public.blue_nudges where nudge_key like 'unbooked:%';
+
+-- 38) Deleting the trip removes its ledger and "booked" rows.
+delete from public.trips t using _ids where t.id = _ids.trip_a;
+insert into _checks select 38, 'trip delete cascades ledger + booked',
+  ((select count(*) from public.blue_nudges) + (select count(*) from public.text_legs_booked))::text, '0';
+
+-- 39–41) Browser roles can't touch the new tables.
+insert into _checks values
+  (39, 'authenticated may NOT read text_phone_prefs', has_table_privilege('authenticated', 'public.text_phone_prefs', 'select')::text, 'false'),
+  (40, 'anon may NOT insert blue_nudges',             has_table_privilege('anon', 'public.blue_nudges', 'insert')::text, 'false'),
+  (41, 'authenticated may NOT read text_legs_booked', has_table_privilege('authenticated', 'public.text_legs_booked', 'select')::text, 'false');
 
 select n, check_name, result, expected,
        case when result = expected then 'PASS' else 'FAIL' end as status
