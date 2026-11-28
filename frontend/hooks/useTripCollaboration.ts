@@ -22,6 +22,7 @@ import {
   applyCollabDelta,
   computeCollabDelta,
   type CollabDelta,
+  ownerShouldApplySessionSave,
 } from '@/lib/tripCollab';
 import { summarizeCanvasChanges } from '@/lib/canvasDiff';
 import { liveTripTotal } from '@/lib/tripTotals';
@@ -279,6 +280,8 @@ export function useTripCollaboration(tripId: string | null, initialShareToken: s
   const baselineRef = useRef<{ id: string; sig: string; trip: Trip } | null>(null);
   const [baselineSig, setBaselineSig] = useState<string | null>(null);
   const lastBroadcastAt = useRef(0);
+  /** The last save by Blue (texted YES) put on screen in an owner's tab. */
+  const lastTextSaveId = useRef<string | null>(null);
   const lastAppliedOpTs = useRef(0);
   /** The shared trip as it moved on while a suggester had unsent edits. */
   const heldShared = useRef<CollabState | null>(null);
@@ -349,7 +352,18 @@ export function useTripCollaboration(tripId: string | null, initialShareToken: s
   // ignored; a collaborator mid-edit keeps their newer local state.
   useEffect(() => {
     const s = rt.canvasState;
-    if (!s || !active || roleRef.current === 'owner') return;
+    if (!s || !active) return;
+    if (roleRef.current === 'owner') {
+      // The owner's own saves echo back here and are skipped — except a save
+      // Blue made from a texted YES, which must reach an open tab before its
+      // next autosave writes the older copy over it.
+      const id = ownerShouldApplySessionSave(s, lastTextSaveId.current);
+      if (id) {
+        lastTextSaveId.current = id;
+        applyRemote(s as CollabState);
+      }
+      return;
+    }
     if (Date.now() - lastBroadcastAt.current < 3000) return;
     if (roleRef.current === 'suggester' && hasLocalChangesRef.current) {
       heldShared.current = s as CollabState;

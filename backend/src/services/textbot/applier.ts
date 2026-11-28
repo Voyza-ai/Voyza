@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabase } from '../supabase';
 import { saveCanvasState } from '../../routes/canvas';
@@ -93,6 +94,11 @@ export class TripProposalApplier implements ProposalApplier {
     const prev: any = (sess.data as any[] | null)?.[0]?.state ?? {};
     const state = {
       ...prev,
+      // Marks this save as Blue's, so an owner's open tab applies it instead
+      // of skipping it as its own echo (frontend lib/tripCollab.ts
+      // ownerShouldApplySessionSave) — and so doesn't later save its older copy over it.
+      savedVia: 'text',
+      textSaveId: randomUUID(),
       cities: next.cities,
       trip: {
         ...(prev.trip ?? {}),

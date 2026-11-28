@@ -67,6 +67,32 @@ export function collabSignature(trip: Trip): string {
  * date-shift tip, the AI picks run) stays. Cities saved before hotels[] or
  * selectedHotelIndex existed are normalised the way the canvas did.
  */
+/**
+ * A session save made by Blue, the text assistant (backend
+ * services/textbot/applier.ts), on the owner's behalf: a traveller texted YES.
+ * It carries `savedVia: 'text'` and a fresh `textSaveId`.
+ */
+export type TextSaveMark = { savedVia?: string; textSaveId?: string };
+
+/**
+ * Whether an OWNER's open tab should put a session save on screen. Their own
+ * saves come back as echoes and are ignored (that's why the owner normally
+ * skips session saves); a save Blue made from a texted YES is not theirs and
+ * must be applied, or this tab's next autosave would write its older copy
+ * over the change. Applied once per save (by `textSaveId`).
+ */
+export function ownerShouldApplySessionSave(state: unknown, lastAppliedTextSaveId: string | null): string | null {
+  const s = (state ?? {}) as TextSaveMark;
+  if (s.savedVia !== 'text' || typeof s.textSaveId !== 'string' || !s.textSaveId) return null;
+  return s.textSaveId === lastAppliedTextSaveId ? null : s.textSaveId;
+}
+
+/** A session state written by the website: never carries Blue's mark (see ownerShouldApplySessionSave). */
+export function withoutTextSaveMark<T extends Record<string, any>>(state: T): T {
+  const { savedVia: _v, textSaveId: _id, ...rest } = state ?? ({} as T);
+  return rest as T;
+}
+
 export function applyCollabState(cur: Trip, state: Partial<CollabState> | null | undefined): Trip {
   if (!state || !Array.isArray(state.cities) || state.cities.length === 0) return cur;
   const t = state.trip ?? {};

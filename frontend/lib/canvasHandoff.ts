@@ -1,5 +1,6 @@
 import { saveTrip, fetchHomeLegs, getCanvasSession, saveCanvas } from './api';
 import type { Trip } from './types';
+import { withoutTextSaveMark } from './tripCollab';
 
 // Carries an "Edit in Canvas" request across the sign-in step. Google OAuth is
 // a full-page redirect that wipes in-memory trip state, so the intent (and the
@@ -202,7 +203,9 @@ export async function persistSavedTrip(trip: Trip): Promise<boolean> {
   if (!id || id.startsWith('mock')) return false;
   const { session, role } = await getCanvasSession(id);
   if (role !== 'owner') return false;
-  const prev = session?.state ?? {};
+  // A save Blue made from a text is marked so open tabs apply it; this one is
+  // the website's own, so it must not carry that mark on.
+  const prev = withoutTextSaveMark(session?.state ?? {});
   const state = {
     ...prev,
     cities: trip.cities,

@@ -189,3 +189,19 @@ it("saves the name with the trip, and the saving and date tip by PATCH (the canv
     dateShiftSuggestion: null,
   });
 });
+
+it("a save after Blue's texted change doesn't carry Blue's mark on (so other tabs don't re-apply it)", async () => {
+  (getCanvasSession as jest.Mock).mockResolvedValue({
+    session: { state: { savedVia: 'text', textSaveId: 'abc', layout: { zoom: 2 }, trip: { title: 'My Italy' } } },
+    role: 'owner',
+  });
+  useTripStore.setState({ currentTrip: saved() });
+  render(<Host />);
+  act(() => useTripStore.setState({ currentTrip: editLeg(useTripStore.getState().currentTrip!) }));
+  await flush();
+  expect(saveCanvas).toHaveBeenCalledTimes(1);
+  const state = (saveCanvas as jest.Mock).mock.calls[0][1];
+  expect(state.savedVia).toBeUndefined();
+  expect(state.textSaveId).toBeUndefined();
+  expect(state.layout).toEqual({ zoom: 2 }); // everything else in the session kept
+});

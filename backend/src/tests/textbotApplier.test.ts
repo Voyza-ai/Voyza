@@ -83,6 +83,9 @@ describe('TripProposalApplier', () => {
     expect(s.layout).toEqual({ zoom: 1.2 });
     expect(s.trip.note).toBe('kept');
     expect(saves[0].by).toBe('owner');
+    // Marked as Blue's, so the owner's open tab applies it (frontend ownerShouldApplySessionSave).
+    expect(s.savedVia).toBe('text');
+    expect(s.textSaveId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('train between cities: the Venice → Rome leg switches, mirrored on Rome’s transportIn', async () => {
