@@ -247,6 +247,15 @@ export class TextBot {
     }
     if (!sender || !senderRole) return; // unreachable after the check above; belt and braces
 
+    // "BlueMurr booked": the leg from the latest unbooked nudge was booked elsewhere.
+    if (lower === 'booked' || lower === 'already booked') {
+      const legId = await store.lastUnbookedNudgeLeg(thread.tripId);
+      if (!legId) return reply("Thanks! I haven't asked about any bookings, so there's nothing to update.");
+      await store.markLegBooked(thread.tripId, legId);
+      const label = legId.replace(/→/g, ' → ');
+      return reply(`Got it: ${label} is booked. I won't ask about it again, and I'll remind you when it's time to leave.`);
+    }
+
     // 4. YES / NO on a pending edit.
     if (yesNo && pending) {
       if (NO.test(text)) {

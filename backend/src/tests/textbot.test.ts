@@ -468,3 +468,18 @@ describe('textbot: mute / unmute', () => {
     expect(env.chatCalls).toHaveLength(0); // commands never reach the AI
   });
 });
+
+describe('textbot: "booked" reply', () => {
+  it('only after an unbooked nudge, and only from a verified member', async () => {
+    const env = setup();
+    await linkedGroup(env);
+    expect((await env.send(P_OWNER, 'BlueMurr booked', GROUP))[0]).toMatch(/nothing to update/);
+    await env.store.claimNudge(TRIP, 'unbooked:Venice→Rome:2027-05-22', 'simulator:g1', '2027-05-20', 1_000_000);
+    await env.store.markNudge(TRIP, 'unbooked:Venice→Rome:2027-05-22', 'sent');
+    expect((await env.send(P_EDITOR, 'BlueMurr booked', GROUP))[0]).toBe(
+      "Got it: Venice → Rome is booked. I won't ask about it again, and I'll remind you when it's time to leave.",
+    );
+    expect(await env.store.legsMarkedBooked(TRIP)).toEqual(new Set(['Venice→Rome']));
+    expect(env.chatCalls).toHaveLength(0);
+  });
+});

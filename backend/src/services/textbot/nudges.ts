@@ -203,7 +203,8 @@ export async function candidateNudges(
           urgency: 40,
           text:
             `Heads up: your ${leg.from} → ${leg.to} ${modeWord(leg.mode)} on ${shortDate(leg.departDate)}` +
-            `${leg.departTime ? ` (${leg.departTime})` : ''} isn't booked yet. Book it here: ${link}`,
+            `${leg.departTime ? ` (${leg.departTime})` : ''} isn't booked yet. Book it here: ${link} ` +
+            `(Booked it elsewhere? Reply "BlueMurr booked".)`,
           expiresAt: departAt ?? dayStart + DAY,
         });
       }
@@ -317,7 +318,12 @@ export class NudgeEngine {
       .map((e, i) => ({ ...e, size: sizes[i].length }))
       .sort((a, b) => b.size - a.size)[0];
 
-    const candidates = await candidateNudges(tripId, trip, now, this.deps.bookings, this.cfg);
+    // "Booked elsewhere" replies count as booked, on top of in-app bookings.
+    const said = await store.legsMarkedBooked(tripId);
+    const lookup: BookingLookup = {
+      isBooked: async (t, leg) => said.has(leg.id) || (await this.deps.bookings.isBooked(t, leg)),
+    };
+    const candidates = await candidateNudges(tripId, trip, now, lookup, this.cfg);
     const tooSoon = now - (await store.lastNudgeAt(tripId)) < this.cfg.minGapMin * MIN;
     for (const n of candidates) {
       if (now > n.expiresAt) continue;

@@ -4,7 +4,7 @@
  * mocked; nothing touches Supabase or Sendblue.
  */
 jest.mock('../config/env', () => ({
-  env: { SUPABASE_URL: 'https://test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', PORT: 4000, FRONTEND_URL: 'http://localhost:3000' },
+  env: { SUPABASE_URL: 'https://test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', PORT: 4000, FRONTEND_URL: 'http://localhost:3000', CRON_SECRET: 'cron-test' },
 }));
 jest.mock('../middleware/auth', () => ({
   requireAuth: (req: any, res: any, next: any) => {
@@ -110,5 +110,17 @@ describe('/api/textbot/sendblue/webhook', () => {
     process.env.SENDBLUE_WEBHOOK_SECRET = 'right-secret';
     await request(app).post('/api/textbot/sendblue/webhook').set('sb-signing-secret', 'wrong-secret').send({}).expect(401);
     await request(app).post('/api/textbot/sendblue/webhook').set('sb-signing-secret', 'right-secret').send({}).expect(200);
+  });
+});
+
+describe('/api/textbot/nudges/run', () => {
+  it('needs the cron secret', async () => {
+    await request(app).post('/api/textbot/nudges/run').send({}).expect(401);
+    await request(app).post('/api/textbot/nudges/run').set('x-cron-secret', 'wrong').send({}).expect(401);
+  });
+
+  it('with the secret but the bot off: 503, nothing runs', async () => {
+    const r = await request(app).post('/api/textbot/nudges/run').set('x-cron-secret', 'cron-test').send({});
+    expect(r.status).toBe(503);
   });
 });

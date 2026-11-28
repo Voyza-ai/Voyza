@@ -4,7 +4,8 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
 import { SlidingLimiter } from '../services/textbot/rateLimit';
-import { textBot, textBotNumber, textStore } from '../services/textbot/runtime';
+import { nudgeEngine, textBot, textBotNumber, textStore } from '../services/textbot/runtime';
+import { env } from '../config/env';
 import { SupabaseTripLoader } from '../services/textbot/tripLoader';
 import { parseSendblueMessage, sendblueWebhookAuthorized } from '../services/textbot/providers/sendblue';
 import { logger } from '../utils/logger';
@@ -20,6 +21,9 @@ import { logger } from '../utils/logger';
  *   DELETE /phone                   (auth) forget my phone
  *   POST   /sendblue/webhook        Sendblue → us (secret header). Later phase:
  *                                   no webhook can reach a dev container.
+ *   POST   /nudges/run              x-cron-secret. Runs the "Blue texts first"
+ *                                   engine once. { at: ISO } sets the clock, only
+ *                                   when TEXTBOT_FAKE_CLOCK=true (demos/tests).
  */
 const router = Router();
 const codeLimiter = new SlidingLimiter();
@@ -89,5 +93,23 @@ router.post('/sendblue/webhook', (req, res): void => {
     bot.handle(inbound).catch((err) => logger.warn('textbot webhook handle failed', { message: err?.message }));
   }
 });
+
+router.post(
+  '/nudges/run',
+  asyncHandler(async (req, res) => {
+    if (!env.CRON_SECRET) throw new AppError(503, 'CRON_SECRET is not configured');
+    if (req.headers['x-cron-secret'] !== env.CRON_SECRET) throw new AppError(401, 'Unauthorized');
+    const engine = nudgeEngine();
+    if (!engine) throw new AppError(503, 'Text bot is off (set TEXTBOT_MODE)');
+    let now = Date.now();
+    if (req.body?.at !== undefined) {
+      if (process.env.TEXTBOT_FAKE_CLOCK !== 'true') throw new AppError(400, 'A fake clock is not allowed here');
+      const t = Date.parse(String(req.body.at));
+      if (!Number.isFinite(t)) throw new AppError(400, 'Bad "at" time');
+      now = t;
+    }
+    res.json({ at: new Date(now).toISOString(), outcomes: await engine.runOnce(now) });
+  }),
+);
 
 export default router;

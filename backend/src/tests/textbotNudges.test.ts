@@ -99,7 +99,8 @@ describe('candidateNudges (rules)', () => {
   it('unbooked text names the leg, date, time and the trip link', async () => {
     const n = (await candidateNudges(TRIP_ID, trip(), utc('2027-05-20T10:00:00Z'), none)).find((x) => x.key.startsWith('unbooked:Venice→Rome'))!;
     expect(n.text).toBe(
-      "Heads up: your Venice → Rome train on May 22 (18:26) isn't booked yet. Book it here: http://localhost:3000/results?tripId=trip-venice-rome",
+      "Heads up: your Venice → Rome train on May 22 (18:26) isn't booked yet. Book it here: http://localhost:3000/results?tripId=trip-venice-rome " +
+        '(Booked it elsewhere? Reply "BlueMurr booked".)',
     );
   });
 
@@ -269,5 +270,22 @@ describe('NudgeEngine (gates)', () => {
     const env = setup({ tripOverride: t });
     await linkedGroup(env);
     expect((await env.engine.runOnce(utc('2027-05-10T14:00:00Z')))[0].reason).toBe('unknown time zone');
+  });
+});
+
+describe('"BlueMurr booked" (booked elsewhere)', () => {
+  it('marks the leg from the latest unbooked nudge; no more unbooked nudges for it, leave-now turns on', async () => {
+    const env = setup();
+    await linkedGroup(env);
+    await env.engine.runOnce(utc('2027-05-13T14:00:00Z')); // unbooked: home→Venice
+    expect(env.provider.sent[0].text).toMatch(/Philadelphia → Venice flight.*Reply "BlueMurr booked"/);
+    expect(await env.store.lastUnbookedNudgeLeg(TRIP_ID)).toBe('home→Venice');
+    await env.store.markLegBooked(TRIP_ID, 'home→Venice');
+    // Next day: the train is still unbooked, the flight is not mentioned again.
+    await env.engine.runOnce(utc('2027-05-14T14:00:00Z'));
+    expect(env.provider.sent[1].text).toMatch(/Venice → Rome train/);
+    // Morning of the flight: leave-now fires because the user said it's booked.
+    const r = await env.engine.runOnce(utc('2027-05-15T12:50:00Z'));
+    expect(r[0].key).toBe('leave:home→Venice:2027-05-15');
   });
 });

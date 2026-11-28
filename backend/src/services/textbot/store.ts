@@ -88,6 +88,11 @@ export interface TextStore {
   markNudge(tripId: string, key: string, status: 'sent' | 'failed'): Promise<void>;
   /** Nudges marked sent for a trip on a local day (YYYY-MM-DD). */
   sentNudgesOn(tripId: string, localDay: string): Promise<number>;
+  /** Legs a traveller said are booked elsewhere ("BlueMurr booked"). */
+  markLegBooked(tripId: string, legId: string): Promise<void>;
+  legsMarkedBooked(tripId: string): Promise<Set<string>>;
+  /** The newest unbooked-leg nudge's leg id for a trip, if any. */
+  lastUnbookedNudgeLeg(tripId: string): Promise<string | null>;
   /** When the last nudge for a trip was claimed (0 = never). */
   lastNudgeAt(tripId: string): Promise<number>;
 
@@ -122,6 +127,7 @@ export class MemoryTextStore implements TextStore {
   private consent = new Set<Phone>();
   private members = new Map<string, Phone[]>();
   private muted = new Map<string, number>();
+  private bookedElsewhere = new Map<string, Set<string>>();
   private ledger = new Map<string, { threadKey: string; localDay: string; status: 'pending' | 'sent' | 'failed'; at: number }>();
 
   /** Clock is injectable so tests and the bot agree on "now". */
@@ -231,6 +237,22 @@ export class MemoryTextStore implements TextStore {
   async markNudge(tripId: string, key: string, status: 'sent' | 'failed') {
     const row = this.ledger.get(`${tripId}|${key}`);
     if (row) row.status = status;
+  }
+  async markLegBooked(tripId: string, legId: string) {
+    const set = this.bookedElsewhere.get(tripId) ?? new Set<string>();
+    set.add(legId);
+    this.bookedElsewhere.set(tripId, set);
+  }
+  async legsMarkedBooked(tripId: string) {
+    return new Set(this.bookedElsewhere.get(tripId) ?? []);
+  }
+  async lastUnbookedNudgeLeg(tripId: string) {
+    let best: { at: number; leg: string } | null = null;
+    for (const [k, v] of this.ledger) {
+      const m = k.match(/^([^|]+)\|unbooked:(.+):\d{4}-\d{2}-\d{2}$/);
+      if (m && m[1] === tripId && v.status === 'sent' && (!best || v.at >= best.at)) best = { at: v.at, leg: m[2] };
+    }
+    return best?.leg ?? null;
   }
   async lastNudgeAt(tripId: string) {
     let last = 0;
