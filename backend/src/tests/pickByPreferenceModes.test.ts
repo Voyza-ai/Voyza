@@ -1,3 +1,16 @@
+// These pure pick rules import modules that load config/env, whose schema
+// needs Supabase credentials at import time. Mocked like legPriceCache.test.ts
+// so the suite runs on a machine without the deployed backend's secrets.
+jest.mock('../config/env', () => ({
+  env: {
+    NODE_ENV: 'test',
+    DUFFEL_ACCESS_TOKEN: 'test_token',
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'test_key',
+    ALLABOARD_API_URL: 'https://test.api-gateway.allaboard.eu',
+  },
+}));
+
 /**
  * The chat's city edits pick each re-searched leg with pickByPreference. A
  * long journey is judged against the fastest option of its OWN mode, as
