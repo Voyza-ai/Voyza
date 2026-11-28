@@ -1,6 +1,7 @@
 import { logger } from '../../utils/logger';
 import { maskPhone, toE164 } from './phone';
 import { MAX_INBOUND_CHARS, SlidingLimiter, TEXT_LIMITS } from './rateLimit';
+import { proposalImpact } from './proposalSummary';
 import type { MemberRole, TextStore } from './store';
 import type {
   ChatEngine,
@@ -305,7 +306,11 @@ export class TextBot {
       const who = this.roleList(this.cfg.confirmRoles);
       const ask = `\n\nReply YES to apply (${who}) or NO to drop it. Expires in ${Math.round(this.cfg.pendingTtlMs / 60_000)} min.`;
       await store.appendHistory(threadKey, { role: 'assistant', content: replyText });
-      return reply(stripAcceptHint(replyText) + ask);
+      // Show what YES changes (dates, legs, total), as the website's card does.
+      const impact = proposalImpact(loaded.trip, result, replyText);
+      // Trim the description, never the YES/NO line.
+      const body = stripAcceptHint(replyText) + (impact ? `\n\n${impact}` : '');
+      return reply(clip(body, this.cfg.maxReplyChars - ask.length) + ask);
     }
 
     if (!READ_TYPES.has(result.type)) {
