@@ -3,6 +3,7 @@ import { AppError } from '../middleware/error';
 import { logger } from '../utils/logger';
 import { checkCityName } from './cityEdit';
 import { createMessage } from './aiUsage';
+import { ruleBasedRevision } from './destinationRevisionRules';
 
 /**
  * Planning-phase destination revision: POST /api/plan/revise-destinations.
@@ -215,10 +216,21 @@ export async function reviseDestinations(params: {
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   currentQuestion?: string;
 }): Promise<RevisionResult> {
-  const anthropic = getAnthropicSafe();
-  if (!anthropic) throw new AppError(503, 'assistant_unavailable', { reason: 'no_api_key' });
-
   const { message, destinations, history = [], currentQuestion } = params;
+
+  // Claude unreachable → the common phrasings are still understood (see
+  // destinationRevisionRules). Anything else keeps the 503, and the planner
+  // hands the message to the current question as it always did.
+  const offline = (reason: string): RevisionResult => {
+    const calls = ruleBasedRevision(message, destinations);
+    if (!calls) throw new AppError(503, 'assistant_unavailable', { reason });
+    logger.warn('revise-destinations: answered by offline rules', { reason });
+    return fromToolCalls(calls, destinations);
+  };
+
+  const anthropic = getAnthropicSafe();
+  if (!anthropic) return offline('no_api_key');
+
   let response: any;
   try {
     response = await createMessage(anthropic, 'destination_revision', {
@@ -234,13 +246,16 @@ export async function reviseDestinations(params: {
     });
   } catch (err: any) {
     logger.error('revise-destinations: AI call failed', { status: err?.status, errMessage: err?.message });
-    throw new AppError(503, 'assistant_unavailable', { reason: 'ai_error' });
+    return offline('ai_error');
   }
 
   const calls = (response?.content ?? []).filter((b: any) => b.type === 'tool_use') as Array<{ name: string; input: any }>;
-  if (calls.length === 0) {
-    throw new AppError(503, 'assistant_unavailable', { reason: 'malformed_output' });
-  }
+  if (calls.length === 0) return offline('malformed_output');
+  return fromToolCalls(calls, destinations);
+}
+
+/** Turn tool calls — the model's, or the offline rules' — into the reply. */
+function fromToolCalls(calls: Array<{ name: string; input: any }>, destinations: string[]): RevisionResult {
   const edits = calls.filter((c) => c.name !== 'answer_only');
   const answer = calls.find((c) => c.name === 'answer_only');
 
