@@ -64,6 +64,16 @@ export interface TextStore {
   /** True the first time a provider message id is seen (dedupe redeliveries). */
   markSeen(provider: ProviderName, providerMessageId: string): Promise<boolean>;
 
+  /** Carrier-style opt-out (STOP). An opted-out phone gets no texts at all. */
+  setOptedOut(phone: Phone, optedOut: boolean): Promise<void>;
+  isOptedOut(phone: Phone): Promise<boolean>;
+  /** Separate, explicit consent for Blue to text FIRST (proactive nudges). */
+  setProactiveConsent(phone: Phone, on: boolean): Promise<void>;
+  hasProactiveConsent(phone: Phone): Promise<boolean>;
+  /** Who was in the thread at its latest inbound message (bot excluded). */
+  setParticipants(threadKey: string, phones: Phone[]): Promise<void>;
+  participants(threadKey: string): Promise<Phone[]>;
+
   history(threadKey: string): Promise<ChatTurn[]>;
   appendHistory(threadKey: string, turn: ChatTurn): Promise<void>;
 
@@ -91,6 +101,9 @@ export class MemoryTextStore implements TextStore {
   private seen = new Set<string>();
   private hist = new Map<string, ChatTurn[]>();
   private pending = new Map<string, PendingEdit>();
+  private optedOut = new Set<Phone>();
+  private consent = new Set<Phone>();
+  private members = new Map<string, Phone[]>();
 
   /** Clock is injectable so tests and the bot agree on "now". */
   constructor(private clock: () => number = () => Date.now()) {}
@@ -155,6 +168,29 @@ export class MemoryTextStore implements TextStore {
     this.seen.add(key);
     if (this.seen.size > 50_000) this.seen.clear(); // bounded; dedupe is best-effort
     return true;
+  }
+
+  async setOptedOut(phone: Phone, v: boolean) {
+    if (v) {
+      this.optedOut.add(phone);
+      this.consent.delete(phone); // STOP also withdraws consent to be texted first
+    } else this.optedOut.delete(phone);
+  }
+  async isOptedOut(phone: Phone) {
+    return this.optedOut.has(phone);
+  }
+  async setProactiveConsent(phone: Phone, on: boolean) {
+    if (on) this.consent.add(phone);
+    else this.consent.delete(phone);
+  }
+  async hasProactiveConsent(phone: Phone) {
+    return this.consent.has(phone) && !this.optedOut.has(phone);
+  }
+  async setParticipants(threadKey: string, phones: Phone[]) {
+    this.members.set(threadKey, [...new Set(phones)].sort());
+  }
+  async participants(threadKey: string) {
+    return [...(this.members.get(threadKey) ?? [])];
   }
 
   async history(threadKey: string) {

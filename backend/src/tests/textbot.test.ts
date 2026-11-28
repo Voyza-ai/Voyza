@@ -383,3 +383,74 @@ describe('textbot: web-only wording', () => {
     expect(stripAcceptHint(input)).toBe(out);
   });
 });
+
+describe('textbot: STOP, START and alerts consent', () => {
+  const proposal = (): ChatResult => ({ type: 'proposal', reply: "Here's your trip with London added. Accept to apply it.", proposal: {} });
+
+  it('STOP while an edit is pending opts the person out (not just "no")', async () => {
+    const env = setup({ chat: proposal });
+    await linkedGroup(env);
+    await env.send(P_OWNER, 'BlueMurr add a night in London', GROUP);
+    const out = await env.send(P_OWNER, 'STOP', GROUP);
+    expect(out[0]).toMatch(/•••0001 won't get any more texts/);
+    expect(await env.store.isOptedOut(P_OWNER)).toBe(true);
+  });
+
+  it('an opted-out sender is never answered, and START undoes it', async () => {
+    const env = setup();
+    await linkedGroup(env);
+    await env.send(P_VIEWER, 'stop', GROUP);
+    expect(await env.send(P_VIEWER, 'BlueMurr hi', [P_VIEWER])).toEqual([]);
+    expect((await env.send(P_VIEWER, 'START', [P_VIEWER]))[0]).toMatch(/Welcome back/);
+    expect(await env.store.isOptedOut(P_VIEWER)).toBe(false);
+  });
+
+  it('one opted-out member silences the bot in that group (a group text reaches everyone)', async () => {
+    const env = setup();
+    await linkedGroup(env);
+    await env.send(P_VIEWER, 'stop', GROUP);
+    expect(await env.send(P_OWNER, 'BlueMurr where are we staying?', GROUP)).toEqual([]);
+    expect(env.chatCalls).toHaveLength(0);
+  });
+
+  it('START from someone who never opted out does nothing', async () => {
+    const env = setup();
+    expect(await env.send(P_OWNER, 'start', [])).toEqual([]);
+  });
+
+  it('cancel is an opt-out keyword, not a NO', async () => {
+    const env = setup({ chat: proposal });
+    await linkedGroup(env);
+    await env.send(P_OWNER, 'BlueMurr add a night in London', GROUP);
+    expect((await env.send(P_EDITOR, 'cancel', GROUP))[0]).toMatch(/won't get any more texts/);
+  });
+
+  it('alerts on/off records consent to be texted first; STOP withdraws it', async () => {
+    const env = setup();
+    await linkedGroup(env);
+    expect((await env.send(P_OWNER, 'BlueMurr alerts on', GROUP))[0]).toMatch(/text you first/);
+    expect(await env.store.hasProactiveConsent(P_OWNER)).toBe(true);
+    await env.send(P_OWNER, 'BlueMurr alerts off', GROUP);
+    expect(await env.store.hasProactiveConsent(P_OWNER)).toBe(false);
+    await env.send(P_OWNER, 'BlueMurr alerts on', GROUP);
+    await env.send(P_OWNER, 'STOP', GROUP);
+    expect(await env.store.hasProactiveConsent(P_OWNER)).toBe(false);
+  });
+
+  it('verifying does not by itself consent to proactive texts, but offers it', async () => {
+    const env = setup();
+    const c = await env.store.createCode('verify', TRIP, VIEWER);
+    const out = await env.send(P_VIEWER, `verify ${c.code}`, GROUP);
+    expect(out[0]).toMatch(/alerts on/);
+    expect(await env.store.hasProactiveConsent(P_VIEWER)).toBe(false);
+  });
+
+  it('remembers who was in the thread at its latest message', async () => {
+    const env = setup();
+    await linkedGroup(env);
+    await env.send(P_OWNER, 'chatter', GROUP);
+    expect(await env.store.participants('simulator:g1')).toEqual([...GROUP].sort());
+    await env.send(P_OWNER, 'chatter', [P_OWNER, P_EDITOR]);
+    expect(await env.store.participants('simulator:g1')).toEqual([P_OWNER, P_EDITOR].sort());
+  });
+});

@@ -72,7 +72,12 @@ const EDIT_TYPES = new Set(['proposal', 'leg_refresh']);
 const READ_TYPES = new Set(['answer', 'mode_comparison', 'leg_options']);
 
 const YES = /^(y|yes|yep|yeah|confirm|do it|apply|ok|okay)[.! ]*$/i;
-const NO = /^(n|no|nope|cancel|stop|don'?t)[.! ]*$/i;
+// STOP/CANCEL are NOT "no": they're carrier opt-out keywords (see OPT_OUT).
+const NO = /^(n|no|nope|don'?t|drop it)[.! ]*$/i;
+/** Carrier-standard opt-out / opt-in keywords (CTIA; Twilio's defaults). Whole message only. */
+const OPT_OUT = /^(stop|stopall|unsubscribe|cancel|end|quit|optout|revoke)[.! ]*$/i;
+const OPT_IN = /^(start|unstop)[.! ]*$/i;
+const ALERTS = /^alerts?\s+(on|off)$/i;
 const CODE_CMD = /^\s*(link|verify)\s+([A-Za-z0-9]{6})\s*$/i;
 
 export class TextBot {
@@ -143,6 +148,24 @@ export class TextBot {
     if (!text) return;
 
     const threadKey = store.threadKey(msg.provider, msg.threadId);
+
+    // 0. Opt-out comes before everything, addressed or not, pending edit or not.
+    if (OPT_OUT.test(text)) {
+      await store.setOptedOut(from, true);
+      return reply(`${maskPhone(from)} won't get any more texts from ${this.cfg.name}. Reply START to undo.`);
+    }
+    if (OPT_IN.test(text)) {
+      if (!(await store.isOptedOut(from))) return;
+      await store.setOptedOut(from, false);
+      return reply(`Welcome back, ${maskPhone(from)}. Say "${this.cfg.name} help" for what I can do.`);
+    }
+    if (await store.isOptedOut(from)) return; // an opted-out sender is never answered
+
+    // Remember who is in the thread: proactive sends re-check this list.
+    await store.setParticipants(threadKey, participants);
+    // Anything sent here reaches everyone in it, so one opted-out member silences the bot.
+    for (const p of participants) if (await store.isOptedOut(p)) return;
+
     const thread = await store.getThread(msg.provider, msg.threadId);
     const pending = thread ? await store.getPending(threadKey, now) : null;
 
@@ -164,6 +187,16 @@ export class TextBot {
     const lower = body.toLowerCase();
 
     if (lower === 'help' || lower === '') return reply(this.helpText(!!thread));
+    const alerts = lower.match(ALERTS);
+    if (alerts) {
+      const on = alerts[1].toLowerCase() === 'on';
+      await store.setProactiveConsent(from, on);
+      return reply(
+        on
+          ? `OK, ${maskPhone(from)}: I'll text you first when something needs attention (max 3 a day, never 9pm–8am). "${this.cfg.name} alerts off" stops it.`
+          : `OK, ${maskPhone(from)}: I'll only reply when asked.`,
+      );
+    }
     if (!thread) {
       return reply(
         `Hi, I'm ${this.cfg.name}. This chat isn't linked to a trip yet. ` +
@@ -284,7 +317,10 @@ export class TextBot {
     await store.linkPhone(row.userId, from);
 
     if (kind === 'verify') {
-      return reply(`Thanks, ${maskPhone(from)} is verified. Say "${this.cfg.name}" plus a question to ask about the trip.`);
+      return reply(
+        `Thanks, ${maskPhone(from)} is verified. Say "${this.cfg.name}" plus a question to ask about the trip. ` +
+          `Want me to text you first with trip alerts (leave-now, unbooked legs)? Reply "${this.cfg.name} alerts on".`,
+      );
     }
     if (!this.cfg.linkRoles.includes(role)) {
       return reply(`Your number is verified, but only ${this.roleList(this.cfg.linkRoles)} can link a chat to the trip.`);
