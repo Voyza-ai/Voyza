@@ -1,0 +1,1019 @@
+{
+ "routes": [
+  {
+   "ordering": [
+    "Paris",
+    "Berlin",
+    "Amsterdam"
+   ],
+   "totalCost": 1094.63,
+   "rankCost": 1094.63,
+   "legs": [
+    {
+     "from": "Paris",
+     "to": "Berlin",
+     "comparison": {
+      "flightOption": {
+       "id": "off_0353PSHhvFtazavPyzBTmq",
+       "price": 102.35,
+       "currency": "USD",
+       "departure": "2027-01-15T18:15:00",
+       "arrival": "2027-01-15T20:05:00",
+       "durationMinutes": 110,
+       "stops": 0,
+       "carrier": "Transavia France",
+       "carrierCode": "TO",
+       "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20BER%20from%20PAR%20on%202027-01-15",
+       "originAirport": "ORY",
+       "destinationAirport": "BER",
+       "co2": {
+        "kg": 52,
+        "source": "duffel"
+       },
+       "doorToDoor": {
+        "totalMinutes": 300,
+        "basis": "city centre to city centre",
+        "parts": [
+         {
+          "kind": "transfer",
+          "label": "City centre \u2192 ORY",
+          "minutes": 45
+         },
+         {
+          "kind": "airport",
+          "label": "Check-in, security & boarding",
+          "minutes": 90
+         },
+         {
+          "kind": "flight",
+          "label": "Flight",
+          "minutes": 110
+         },
+         {
+          "kind": "transfer",
+          "label": "BER \u2192 city centre",
+          "minutes": 55
+         }
+        ]
+       }
+      },
+      "trainOption": null,
+      "cheapest": "flight",
+      "fastest": "flight",
+      "recommendation": "flight",
+      "priceDifference": 0,
+      "timeDifference": 0
+     },
+     "cost": 102.35,
+     "options": [
+      {
+       "mode": "train",
+       "operator": "Deutsche Bahn + \u00d6BB",
+       "flightNumber": null,
+       "price": 87.7,
+       "currency": "USD",
+       "departTime": "19:54",
+       "arriveTime": "07:20",
+       "duration": "11h 26m",
+       "durationMinutes": 686,
+       "bookingUrl": null,
+       "priceDelta": -14.65,
+       "priceSource": {
+        "kind": "live",
+        "provider": "All Aboard",
+        "testApi": true
+       },
+       "doorToDoor": {
+        "totalMinutes": 686,
+        "basis": "city centre to city centre",
+        "parts": [
+         {
+          "kind": "train",
+          "label": "Train, station to station",
+          "minutes": 686
+         }
+        ]
+       },
+       "co2": {
+        "kg": 74.7,
+        "source": "estimate",
+        "distanceKm": 1054,
+        "gramsPerPassengerKm": 35.46
+       }
+      },
+      {
+       "mode": "flight",
+       "operator": "Transavia France",
+       "flightNumber": "TO",
+       "price": 102.35,
+       "currency": "USD",
+       "departTime": "18:15",
+       "arriveTime": "20:05",
+       "duration": "1h 50m",
+       "durationMinutes": 110,
+       "stops": 0,
+       "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20BER%20from%20PAR%20on%202027-01-15",
+       "priceDelta": 0,
+       "co2": {
+        "kg": 52,
+        "source": "duffel"
+       },
+       "doorToDoor": {
+        "totalMinutes": 300,
+        "basis": "city centre to city centre",
+        "parts": [
+         {
+          "kind": "transfer",
+          "label": "City centre \u2192 ORY",
+          "minutes": 45
+         },
+         {
+          "kind": "airport",
+          "label": "Check-in, security & boarding",
+          "minutes": 90
+         },
+         {
+          "kind": "flight",
+          "label": "Flight",
+          "minutes": 110
+         },
+         {
+          "kind": "transfer",
+          "label": "BER \u2192 city centre",
+          "minutes": 55
+         }
+        ]
+       }
+      },
+      {
+       "mode": "flight",
+       "operator": "British Airways",
+       "flightNumber": "BA",
+       "price": 122.18,
+       "currency": "USD",
+       "departTime": "10:50",
+       "arriveTime": "12:35",
+       "duration": "1h 45m",
+       "durationMinutes": 105,
+       "stops": 0,
+       "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20BER%20from%20PAR%20on%202027-01-15",
+       "priceDelta": 19.83,
+       "co2": {
+        "kg": 816,
+        "source": "duffel"
+       }
+      },
+      {
+       "mode": "flight",
+       "operator": "Iberia",
+       "flightNumber": "IB",
+       "price": 122.42,
+       "currency": "USD",
+       "departTime": "10:50",
+       "arriveTime": "12:35",
+       "duration": "1h 45m",
+       "durationMinutes": 105,
+       "stops": 0,
+       "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20BER%20from%20PAR%20on%202027-01-15",
+       "priceDelta": 20.07,
+       "co2": {
+        "kg": 574,
+        "source": "duffel"
+       }
+      }
+     ]
+    },
+    {
+     "from": "Berlin",
+     "to": "Amsterdam",
+     "comparison": {
+      "flightOption": {
+       "id": "off_0353PSHqb9OsKeL1dJKEHw",
+       "price": 100.44,
+       "currency": "USD",
+       "departure": "2027-01-17T12:23:00",
+       "arrival": "2027-01-17T13:45:00",
+       "durationMinutes": 82,
+       "stops": 0,
+       "carrier": "British Airways",
+       "carrierCode": "BA",
+       "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20AMS%20from%20BER%20on%202027-01-17",
+       "originAirport": "BER",
+       "destinationAirport": "AMS",
+       "co2": {
+        "kg": 7,
+        "source": "duffel"
+       },
+       "doorToDoor": {
+        "totalMinutes": 267,
+        "basis": "city centre to city centre",
+        "parts": [
+         {
+          "kind": "transfer",
+          "label": "City centre \u2192 BER",
+          "minutes": 55
+         },
+         {
+          "kind": "airport",
+          "label": "Check-in, security & boarding",
+          "minutes": 90
+         },
+         {
+          "kind": "flight",
+          "label": "Flight",
+          "minutes": 82
+         },
+         {
+          "kind": "transfer",
+          "label": "AMS \u2192 city centre",
+          "minutes": 40
+         }
+        ]
+       }
+      },
+      "trainOption": {
+       "id": "aa-03974384-9740-4600-8734-96b0976ecd26",
+       "currency": "USD",
+       "departure": "2027-01-17T11:31",
+       "arrival": "2027-01-17T19:29",
+       "durationMinutes": 478,
+       "operator": "Deutsche Bahn",
+       "trainType": "train",
+       "bookingUrl": null,
+       "limitedCoverage": false,
+       "priceSource": {
+        "kind": "live",
+        "provider": "All Aboard",
+        "testApi": true
+       },
+       "price": 95.38,
+       "doorToDoor": {
+        "totalMinutes": 478,
+        "basis": "city centre to city centre",
+        "parts": [
+         {
+          "kind": "train",
+          "label": "Train, station to station",
+          "minutes": 478
+         }
+        ]
+       },
+       "co2": {
+        "kg": 49.1,
+        "source": "estimate",
+        "distanceKm": 693,
+        "gramsPerPassengerKm": 35.46
+       }
+      },
+      "cheapest": "train",
+      "fastest": "flight",
+      "recommendation": "flight",
+      "priceDifference": 5.060000000000002,
+      "timeDifference": 211
+     },
+     "cost": 95.38,
+     "options": [
+      {
+       "mode": "train",
+       "operator": "Deutsche Bahn",
+       "flightNumber": null,
+       "price": 95.38,
+       "currency": "USD",
+       "departTime": "05:09",
+       "arriveTime": "11:58",
+       "duration": "6h 49m",
+       "durationMinutes": 409,
+       "bookingUrl": null,
+       "priceDelta": 0,
+       "priceSource": {
+        "kind": "live",
+        "provider": "All Aboard",
+        "testApi": true
+       },
+       "doorToDoor": {
+        "totalMinutes": 409,
+        "basis": "city centre to city centre",
+        "parts": [
+         {
+          "kind": "train",
+          "label": "Train, station to station",
+          "minutes": 409
+         }
+        ]
+       },
+       "co2": {
+        "kg": 49.1,
+        "source": "estimate",
+        "distanceKm": 693,
+        "gramsPerPassengerKm": 35.46
+       }
+      },
+      {
+       "mode": "train",
+       "operator": "Deutsche Bahn",
+       "flightNumber": null,
+       "price": 95.38,
+       "currency": "USD",
+       "departTime": "11:31",
+       "arriveTime": "19:29",
+       "duration": "7h 58m",
+       "durationMinutes": 478,
+       "bookingUrl": null,
+       "priceDelta": 0,
+       "priceSource": {
+        "kind": "live",
+        "provider": "All Aboard",
+        "testApi": true
+       },
+       "doorToDoor": {
+        "totalMinutes": 478,
+        "basis": "city centre to city centre",
+        "parts": [
+         {
+          "kind": "train",
+          "label": "Train, station to station",
+          "minutes": 478
+         }
+        ]
+       },
+       "co2": {
+        "kg": 49.1,
+        "source": "estimate",
+        "distanceKm": 693,
+        "gramsPerPassengerKm": 35.46
+       }
+      },
+      {
+       "mode": "flight",
+       "operator": "British Airways",
+       "flightNumber": "BA",
+       "price": 100.44,
+       "currency": "USD",
+       "departTime": "12:23",
+       "arriveTime": "13:45",
+       "duration": "1h 22m",
+       "durationMinutes": 82,
+       "stops": 0,
+       "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20AMS%20from%20BER%20on%202027-01-17",
+       "priceDelta": 5.06,
+       "co2": {
+        "kg": 7,
+        "source": "duffel"
+       },
+       "doorToDoor": {
+        "totalMinutes": 267,
+        "basis": "city centre to city centre",
+        "parts": [
+         {
+          "kind": "transfer",
+          "label": "City centre \u2192 BER",
+          "minutes": 55
+         },
+         {
+          "kind": "airport",
+          "label": "Check-in, security & boarding",
+          "minutes": 90
+         },
+         {
+          "kind": "flight",
+          "label": "Flight",
+          "minutes": 82
+         },
+         {
+          "kind": "transfer",
+          "label": "AMS \u2192 city centre",
+          "minutes": 40
+         }
+        ]
+       }
+      },
+      {
+       "mode": "flight",
+       "operator": "Lufthansa",
+       "flightNumber": "LH",
+       "price": 438.25,
+       "currency": "USD",
+       "departTime": "18:55",
+       "arriveTime": "22:55",
+       "duration": "4h",
+       "durationMinutes": 240,
+       "stops": 1,
+       "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20AMS%20from%20BER%20on%202027-01-17",
+       "priceDelta": 342.87,
+       "co2": {
+        "kg": 116,
+        "source": "duffel"
+       },
+       "doorToDoor": {
+        "totalMinutes": 425,
+        "basis": "city centre to city centre",
+        "parts": [
+         {
+          "kind": "transfer",
+          "label": "City centre \u2192 BER",
+          "minutes": 55
+         },
+         {
+          "kind": "airport",
+          "label": "Check-in, security & boarding",
+          "minutes": 90
+         },
+         {
+          "kind": "flight",
+          "label": "Flight",
+          "minutes": 240
+         },
+         {
+          "kind": "transfer",
+          "label": "AMS \u2192 city centre",
+          "minutes": 40
+         }
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "bestRoute": {
+  "ordering": [
+   "Paris",
+   "Berlin",
+   "Amsterdam"
+  ],
+  "totalCost": 1094.63,
+  "rankCost": 1094.63,
+  "legs": [
+   {
+    "from": "Paris",
+    "to": "Berlin",
+    "comparison": {
+     "flightOption": {
+      "id": "off_0353PSHhvFtazavPyzBTmq",
+      "price": 102.35,
+      "currency": "USD",
+      "departure": "2027-01-15T18:15:00",
+      "arrival": "2027-01-15T20:05:00",
+      "durationMinutes": 110,
+      "stops": 0,
+      "carrier": "Transavia France",
+      "carrierCode": "TO",
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20BER%20from%20PAR%20on%202027-01-15",
+      "originAirport": "ORY",
+      "destinationAirport": "BER",
+      "co2": {
+       "kg": 52,
+       "source": "duffel"
+      },
+      "doorToDoor": {
+       "totalMinutes": 300,
+       "basis": "city centre to city centre",
+       "parts": [
+        {
+         "kind": "transfer",
+         "label": "City centre \u2192 ORY",
+         "minutes": 45
+        },
+        {
+         "kind": "airport",
+         "label": "Check-in, security & boarding",
+         "minutes": 90
+        },
+        {
+         "kind": "flight",
+         "label": "Flight",
+         "minutes": 110
+        },
+        {
+         "kind": "transfer",
+         "label": "BER \u2192 city centre",
+         "minutes": 55
+        }
+       ]
+      }
+     },
+     "trainOption": null,
+     "cheapest": "flight",
+     "fastest": "flight",
+     "recommendation": "flight",
+     "priceDifference": 0,
+     "timeDifference": 0
+    },
+    "cost": 102.35,
+    "options": [
+     {
+      "mode": "train",
+      "operator": "Deutsche Bahn + \u00d6BB",
+      "flightNumber": null,
+      "price": 87.7,
+      "currency": "USD",
+      "departTime": "19:54",
+      "arriveTime": "07:20",
+      "duration": "11h 26m",
+      "durationMinutes": 686,
+      "bookingUrl": null,
+      "priceDelta": -14.65,
+      "priceSource": {
+       "kind": "live",
+       "provider": "All Aboard",
+       "testApi": true
+      },
+      "doorToDoor": {
+       "totalMinutes": 686,
+       "basis": "city centre to city centre",
+       "parts": [
+        {
+         "kind": "train",
+         "label": "Train, station to station",
+         "minutes": 686
+        }
+       ]
+      },
+      "co2": {
+       "kg": 74.7,
+       "source": "estimate",
+       "distanceKm": 1054,
+       "gramsPerPassengerKm": 35.46
+      }
+     },
+     {
+      "mode": "flight",
+      "operator": "Transavia France",
+      "flightNumber": "TO",
+      "price": 102.35,
+      "currency": "USD",
+      "departTime": "18:15",
+      "arriveTime": "20:05",
+      "duration": "1h 50m",
+      "durationMinutes": 110,
+      "stops": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20BER%20from%20PAR%20on%202027-01-15",
+      "priceDelta": 0,
+      "co2": {
+       "kg": 52,
+       "source": "duffel"
+      },
+      "doorToDoor": {
+       "totalMinutes": 300,
+       "basis": "city centre to city centre",
+       "parts": [
+        {
+         "kind": "transfer",
+         "label": "City centre \u2192 ORY",
+         "minutes": 45
+        },
+        {
+         "kind": "airport",
+         "label": "Check-in, security & boarding",
+         "minutes": 90
+        },
+        {
+         "kind": "flight",
+         "label": "Flight",
+         "minutes": 110
+        },
+        {
+         "kind": "transfer",
+         "label": "BER \u2192 city centre",
+         "minutes": 55
+        }
+       ]
+      }
+     },
+     {
+      "mode": "flight",
+      "operator": "British Airways",
+      "flightNumber": "BA",
+      "price": 122.18,
+      "currency": "USD",
+      "departTime": "10:50",
+      "arriveTime": "12:35",
+      "duration": "1h 45m",
+      "durationMinutes": 105,
+      "stops": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20BER%20from%20PAR%20on%202027-01-15",
+      "priceDelta": 19.83,
+      "co2": {
+       "kg": 816,
+       "source": "duffel"
+      }
+     },
+     {
+      "mode": "flight",
+      "operator": "Iberia",
+      "flightNumber": "IB",
+      "price": 122.42,
+      "currency": "USD",
+      "departTime": "10:50",
+      "arriveTime": "12:35",
+      "duration": "1h 45m",
+      "durationMinutes": 105,
+      "stops": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20BER%20from%20PAR%20on%202027-01-15",
+      "priceDelta": 20.07,
+      "co2": {
+       "kg": 574,
+       "source": "duffel"
+      }
+     }
+    ]
+   },
+   {
+    "from": "Berlin",
+    "to": "Amsterdam",
+    "comparison": {
+     "flightOption": {
+      "id": "off_0353PSHqb9OsKeL1dJKEHw",
+      "price": 100.44,
+      "currency": "USD",
+      "departure": "2027-01-17T12:23:00",
+      "arrival": "2027-01-17T13:45:00",
+      "durationMinutes": 82,
+      "stops": 0,
+      "carrier": "British Airways",
+      "carrierCode": "BA",
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20AMS%20from%20BER%20on%202027-01-17",
+      "originAirport": "BER",
+      "destinationAirport": "AMS",
+      "co2": {
+       "kg": 7,
+       "source": "duffel"
+      },
+      "doorToDoor": {
+       "totalMinutes": 267,
+       "basis": "city centre to city centre",
+       "parts": [
+        {
+         "kind": "transfer",
+         "label": "City centre \u2192 BER",
+         "minutes": 55
+        },
+        {
+         "kind": "airport",
+         "label": "Check-in, security & boarding",
+         "minutes": 90
+        },
+        {
+         "kind": "flight",
+         "label": "Flight",
+         "minutes": 82
+        },
+        {
+         "kind": "transfer",
+         "label": "AMS \u2192 city centre",
+         "minutes": 40
+        }
+       ]
+      }
+     },
+     "trainOption": {
+      "id": "aa-03974384-9740-4600-8734-96b0976ecd26",
+      "currency": "USD",
+      "departure": "2027-01-17T11:31",
+      "arrival": "2027-01-17T19:29",
+      "durationMinutes": 478,
+      "operator": "Deutsche Bahn",
+      "trainType": "train",
+      "bookingUrl": null,
+      "limitedCoverage": false,
+      "priceSource": {
+       "kind": "live",
+       "provider": "All Aboard",
+       "testApi": true
+      },
+      "price": 95.38,
+      "doorToDoor": {
+       "totalMinutes": 478,
+       "basis": "city centre to city centre",
+       "parts": [
+        {
+         "kind": "train",
+         "label": "Train, station to station",
+         "minutes": 478
+        }
+       ]
+      },
+      "co2": {
+       "kg": 49.1,
+       "source": "estimate",
+       "distanceKm": 693,
+       "gramsPerPassengerKm": 35.46
+      }
+     },
+     "cheapest": "train",
+     "fastest": "flight",
+     "recommendation": "flight",
+     "priceDifference": 5.060000000000002,
+     "timeDifference": 211
+    },
+    "cost": 95.38,
+    "options": [
+     {
+      "mode": "train",
+      "operator": "Deutsche Bahn",
+      "flightNumber": null,
+      "price": 95.38,
+      "currency": "USD",
+      "departTime": "05:09",
+      "arriveTime": "11:58",
+      "duration": "6h 49m",
+      "durationMinutes": 409,
+      "bookingUrl": null,
+      "priceDelta": 0,
+      "priceSource": {
+       "kind": "live",
+       "provider": "All Aboard",
+       "testApi": true
+      },
+      "doorToDoor": {
+       "totalMinutes": 409,
+       "basis": "city centre to city centre",
+       "parts": [
+        {
+         "kind": "train",
+         "label": "Train, station to station",
+         "minutes": 409
+        }
+       ]
+      },
+      "co2": {
+       "kg": 49.1,
+       "source": "estimate",
+       "distanceKm": 693,
+       "gramsPerPassengerKm": 35.46
+      }
+     },
+     {
+      "mode": "train",
+      "operator": "Deutsche Bahn",
+      "flightNumber": null,
+      "price": 95.38,
+      "currency": "USD",
+      "departTime": "11:31",
+      "arriveTime": "19:29",
+      "duration": "7h 58m",
+      "durationMinutes": 478,
+      "bookingUrl": null,
+      "priceDelta": 0,
+      "priceSource": {
+       "kind": "live",
+       "provider": "All Aboard",
+       "testApi": true
+      },
+      "doorToDoor": {
+       "totalMinutes": 478,
+       "basis": "city centre to city centre",
+       "parts": [
+        {
+         "kind": "train",
+         "label": "Train, station to station",
+         "minutes": 478
+        }
+       ]
+      },
+      "co2": {
+       "kg": 49.1,
+       "source": "estimate",
+       "distanceKm": 693,
+       "gramsPerPassengerKm": 35.46
+      }
+     },
+     {
+      "mode": "flight",
+      "operator": "British Airways",
+      "flightNumber": "BA",
+      "price": 100.44,
+      "currency": "USD",
+      "departTime": "12:23",
+      "arriveTime": "13:45",
+      "duration": "1h 22m",
+      "durationMinutes": 82,
+      "stops": 0,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20AMS%20from%20BER%20on%202027-01-17",
+      "priceDelta": 5.06,
+      "co2": {
+       "kg": 7,
+       "source": "duffel"
+      },
+      "doorToDoor": {
+       "totalMinutes": 267,
+       "basis": "city centre to city centre",
+       "parts": [
+        {
+         "kind": "transfer",
+         "label": "City centre \u2192 BER",
+         "minutes": 55
+        },
+        {
+         "kind": "airport",
+         "label": "Check-in, security & boarding",
+         "minutes": 90
+        },
+        {
+         "kind": "flight",
+         "label": "Flight",
+         "minutes": 82
+        },
+        {
+         "kind": "transfer",
+         "label": "AMS \u2192 city centre",
+         "minutes": 40
+        }
+       ]
+      }
+     },
+     {
+      "mode": "flight",
+      "operator": "Lufthansa",
+      "flightNumber": "LH",
+      "price": 438.25,
+      "currency": "USD",
+      "departTime": "18:55",
+      "arriveTime": "22:55",
+      "duration": "4h",
+      "durationMinutes": 240,
+      "stops": 1,
+      "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20AMS%20from%20BER%20on%202027-01-17",
+      "priceDelta": 342.87,
+      "co2": {
+       "kg": 116,
+       "source": "duffel"
+      },
+      "doorToDoor": {
+       "totalMinutes": 425,
+       "basis": "city centre to city centre",
+       "parts": [
+        {
+         "kind": "transfer",
+         "label": "City centre \u2192 BER",
+         "minutes": 55
+        },
+        {
+         "kind": "airport",
+         "label": "Check-in, security & boarding",
+         "minutes": 90
+        },
+        {
+         "kind": "flight",
+         "label": "Flight",
+         "minutes": 240
+        },
+        {
+         "kind": "transfer",
+         "label": "AMS \u2192 city centre",
+         "minutes": 40
+        }
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "savingsVsNaive": 27.730000000000018,
+ "iataCodes": {
+  "Paris": "PAR",
+  "Amsterdam": "AMS",
+  "Berlin": "BER"
+ },
+ "dates": {
+  "Paris": {
+   "arrival": "2027-01-12",
+   "departure": "2027-01-15"
+  },
+  "Berlin": {
+   "arrival": "2027-01-15",
+   "departure": "2027-01-17"
+  },
+  "Amsterdam": {
+   "arrival": "2027-01-17",
+   "departure": "2027-01-19"
+  }
+ },
+ "dateShiftChecked": false,
+ "outboundLeg": {
+  "originAirport": "JFK",
+  "destAirport": "PAR",
+  "price": 447,
+  "currency": "USD",
+  "durationMinutes": 498,
+  "operator": "British Airways",
+  "carrierCode": "BA",
+  "departTime": "08:30",
+  "arriveTime": "22:48",
+  "departDate": "2027-01-12",
+  "arriveDate": "2027-01-12",
+  "stops": 0,
+  "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20JFK%20on%202027-01-12",
+  "alternatives": [
+   {
+    "originAirport": "EWR",
+    "destAirport": "PAR",
+    "price": 457.4,
+    "currency": "USD",
+    "durationMinutes": 500,
+    "operator": "British Airways",
+    "carrierCode": "BA",
+    "departTime": "08:30",
+    "arriveTime": "22:50",
+    "departDate": "2027-01-12",
+    "arriveDate": "2027-01-12",
+    "stops": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20EWR%20on%202027-01-12"
+   },
+   {
+    "originAirport": "LGA",
+    "destAirport": "PAR",
+    "price": 465.94,
+    "currency": "USD",
+    "durationMinutes": 498,
+    "operator": "American Airlines",
+    "carrierCode": "AA",
+    "departTime": "08:30",
+    "arriveTime": "22:48",
+    "departDate": "2027-01-12",
+    "arriveDate": "2027-01-12",
+    "stops": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20LGA%20on%202027-01-12"
+   },
+   {
+    "originAirport": "JFK",
+    "destAirport": "PAR",
+    "price": 466,
+    "currency": "USD",
+    "durationMinutes": 498,
+    "operator": "Iberia",
+    "carrierCode": "IB",
+    "departTime": "08:30",
+    "arriveTime": "22:48",
+    "departDate": "2027-01-12",
+    "arriveDate": "2027-01-12",
+    "stops": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20PAR%20from%20JFK%20on%202027-01-12"
+   }
+  ]
+ },
+ "returnLeg": {
+  "originAirport": "AMS",
+  "destAirport": "JFK",
+  "price": 449.9,
+  "currency": "USD",
+  "durationMinutes": 502,
+  "operator": "American Airlines",
+  "carrierCode": "AA",
+  "departTime": "13:56",
+  "arriveTime": "16:18",
+  "departDate": "2027-01-19",
+  "arriveDate": "2027-01-19",
+  "stops": 0,
+  "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20JFK%20from%20AMS%20on%202027-01-19",
+  "alternatives": [
+   {
+    "originAirport": "AMS",
+    "destAirport": "LGA",
+    "price": 450.08,
+    "currency": "USD",
+    "durationMinutes": 502,
+    "operator": "American Airlines",
+    "carrierCode": "AA",
+    "departTime": "13:56",
+    "arriveTime": "16:18",
+    "departDate": "2027-01-19",
+    "arriveDate": "2027-01-19",
+    "stops": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20LGA%20from%20AMS%20on%202027-01-19"
+   },
+   {
+    "originAirport": "AMS",
+    "destAirport": "EWR",
+    "price": 454.74,
+    "currency": "USD",
+    "durationMinutes": 504,
+    "operator": "American Airlines",
+    "carrierCode": "AA",
+    "departTime": "13:56",
+    "arriveTime": "16:20",
+    "departDate": "2027-01-19",
+    "arriveDate": "2027-01-19",
+    "stops": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20EWR%20from%20AMS%20on%202027-01-19"
+   },
+   {
+    "originAirport": "AMS",
+    "destAirport": "JFK",
+    "price": 454.82,
+    "currency": "USD",
+    "durationMinutes": 502,
+    "operator": "Iberia",
+    "carrierCode": "IB",
+    "departTime": "13:56",
+    "arriveTime": "16:18",
+    "departDate": "2027-01-19",
+    "arriveDate": "2027-01-19",
+    "stops": 0,
+    "bookingUrl": "https://www.google.com/travel/flights?q=Flights%20to%20JFK%20from%20AMS%20on%202027-01-19"
+   }
+  ]
+ }
+}

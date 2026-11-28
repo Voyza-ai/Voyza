@@ -25,7 +25,7 @@ jest.mock('../config/env', () => ({
   },
 }));
 
-// Only the Deutsche Bahn provider's stop cache touches Supabase.
+// No rail provider touches Supabase any more; kept so nothing can by accident.
 jest.mock('../services/supabase', () => ({
   getSupabase: () => ({
     from: () => ({

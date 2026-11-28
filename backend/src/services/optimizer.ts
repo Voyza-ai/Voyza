@@ -341,6 +341,59 @@ type OptimizedRoute = {
  */
 type ScoredRoute = OptimizedRoute & { unpricedLegs: number };
 
+/**
+ * The winning route priced the way the results page shows it.
+ *
+ * The page builds each leg's card from `leg.options[0]` (PlanningChat
+ * legToTransport) and the home cards from `outboundLeg` / `returnLeg`, and
+ * its header adds those up. Ranking's own numbers can differ from both:
+ *
+ *  - The winner's legs are searched again for their alternatives
+ *    (searchLegOptions), and that search can find the train an incomplete
+ *    rail answer left out of ranking. Replayed on recorded answers (3 cities
+ *    from New York, 2027-01-12): the card showed a $87.70 Paris-Berlin
+ *    train while totalCost still held the $102.35 flight.
+ *  - On 4+ cities ranking prices home flights on one search per city
+ *    (HomeFares), and the card shows the cheapest of every home airport.
+ *    Same replay, 4 cities: JFK $492.68 in the total, EWR $489.94 on the card.
+ *
+ * So the response's totalCost, each leg's `cost` and the unpriced count are
+ * recomputed from the prices on the cards. `comparison` is left as ranking
+ * found it (the page reads it only when a leg has no options), and so are
+ * savingsVsNaive and the date-shift baseline, which compare ranking with
+ * ranking. `home` is null when the trip has no home, otherwise the home legs
+ * the trip has (the return only on a round trip), null where none was found.
+ */
+function withShownPrices(route: ScoredRoute, home: Array<HomeLeg | null> | null): ScoredRoute {
+  const legs = route.legs.map((leg) => {
+    const shown = leg.options?.[0]?.price;
+    return typeof shown === 'number' && Number.isFinite(shown) ? { ...leg, cost: shown } : leg;
+  });
+  let totalCost = 0;
+  let rankCost = 0;
+  let unpricedLegs = 0;
+  for (const leg of legs) {
+    if (leg.cost === Infinity) {
+      rankCost += UNAVAILABLE_LEG_PENALTY;
+      unpricedLegs++;
+    } else {
+      totalCost += leg.cost;
+      rankCost += leg.cost;
+    }
+  }
+  for (const leg of home ?? []) {
+    const price = leg?.price;
+    if (typeof price === 'number' && Number.isFinite(price)) {
+      totalCost += price;
+      rankCost += price;
+    } else {
+      rankCost += UNAVAILABLE_HOME_LEG_PENALTY;
+      unpricedLegs++;
+    }
+  }
+  return { ...route, legs, totalCost, rankCost, unpricedLegs };
+}
+
 function toPublicRoute(route: ScoredRoute): OptimizedRoute {
   const { unpricedLegs: _unpriced, ...rest } = route;
   return rest;
@@ -2652,6 +2705,11 @@ export async function optimize(params: OptimizeParams): Promise<OptimizeResult> 
   // results header then makes no price claim); its unsent searches are
   // dropped (probeGate) and the few in flight finish into flights.ts' cache.
   const [, [outboundLeg, returnLeg]] = await Promise.all([enrichTask, homeLegsTask]);
+  // The total the trip will show, from the cards themselves (withShownPrices).
+  topRoutes[0] = withShownPrices(
+    topRoutes[0],
+    homeKnown ? (returnToHome ? [outboundLeg, returnLeg] : [outboundLeg]) : null,
+  );
   const graceMs = DATE_SHIFT_GRACE_SHORT_TRIP_MS;
   const PROBE_TIMED_OUT = Symbol('probe timed out');
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
