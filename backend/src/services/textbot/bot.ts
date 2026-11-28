@@ -357,6 +357,13 @@ export class TextBot {
       tripId: row.tripId,
       linkedByUserId: row.userId,
     });
+    const others = msg.participants.map((p) => toE164(p)).filter((p) => p && p !== from);
+    if (!others.length) {
+      return reply(
+        `Linked to "${loaded?.title ?? 'your trip'}". Ask me anything about it, e.g. "what time is our flight home?". ` +
+          `Want me to text you first with trip alerts? Reply "${this.cfg.name} alerts on".`,
+      );
+    }
     return reply(
       `Linked to "${loaded?.title ?? 'your trip'}". Everyone else here needs to verify their number before I share details: ` +
         `open the trip, tap "Text your trip", and send "verify CODE". Say "${this.cfg.name} help" any time.`,

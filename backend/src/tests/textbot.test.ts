@@ -483,3 +483,13 @@ describe('textbot: "booked" reply', () => {
     expect(env.chatCalls).toHaveLength(0);
   });
 });
+
+describe('textbot: linking a 1:1 chat', () => {
+  it('does not ask "everyone else" to verify when there is nobody else', async () => {
+    const env = setup();
+    const c = await env.store.createCode('link', TRIP, OWNER);
+    const out = await env.send(P_OWNER, `link ${c.code}`, []);
+    expect(out[0]).toMatch(/^Linked to "Paris & London"\. Ask me anything/);
+    expect(out[0]).not.toMatch(/Everyone else/);
+  });
+});

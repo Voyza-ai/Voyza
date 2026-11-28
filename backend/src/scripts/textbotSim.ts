@@ -22,6 +22,10 @@ import { LoopbackChatEngine } from '../services/textbot/chatEngine';
 import { MemoryTextStore } from '../services/textbot/store';
 import { SimulatorProvider } from '../services/textbot/providers/simulator';
 import { NudgeEngine } from '../services/textbot/nudges';
+import { SupabaseTextStore } from '../services/textbot/supabaseStore';
+import { SupabaseTripLoader } from '../services/textbot/tripLoader';
+import { TripProposalApplier } from '../services/textbot/applier';
+import { DirectChatEngine } from '../services/textbot/chatEngine';
 import type { ChatEngine, ProposalApplier, TripLoader } from '../services/textbot/types';
 
 const [tripPath, ...rest] = process.argv.slice(2);
@@ -34,7 +38,14 @@ const chatUrl = chatUrlIdx >= 0 ? rest[chatUrlIdx + 1] : undefined;
 /** --stub-chat: answer with a canned line instead of calling the AI (owner's rule: no AI unless testing replies). */
 const stubChat = rest.includes('--stub-chat');
 
-const trip = JSON.parse(readFileSync(tripPath, 'utf8'));
+/**
+ * LIVE mode: `textbotSim.ts --live <tripId>` uses the REAL database (durable
+ * store, trip loader, YES-saver) and the real chat core in-process. Only the
+ * owner takes part, on test number +15005550001. Writes real rows: clean up
+ * with --cleanup after.
+ */
+const LIVE = tripPath === '--live' ? rest[0] : null;
+const trip = LIVE ? { id: LIVE, title: '(live)' } : JSON.parse(readFileSync(tripPath, 'utf8'));
 const TRIP_ID = String(trip.id ?? 'sim-trip');
 
 const PEOPLE: Record<string, { userId: string; phone: string; role?: 'owner' | 'editor' | 'viewer' }> = {
@@ -46,10 +57,10 @@ const PEOPLE: Record<string, { userId: string; phone: string; role?: 'owner' | '
 const inGroup = new Set(['owner', 'editor', 'viewer']);
 
 let clock = Date.now(); // "/time <ISO>" moves it
-const store = new MemoryTextStore(() => clock);
+const store: any = LIVE ? new SupabaseTextStore() : new MemoryTextStore(() => clock);
 const booked = new Set<string>(); // "/book <legId>"
 
-const trips: TripLoader = {
+const fileTrips: TripLoader = {
   async load(id) {
     return id === TRIP_ID ? { trip, title: String(trip.title ?? 'Trip'), updatedAt: 'sim' } : null;
   },
@@ -60,7 +71,9 @@ const trips: TripLoader = {
     return m;
   },
 };
-const applier: ProposalApplier = {
+const liveLoader = new SupabaseTripLoader();
+const trips: TripLoader = LIVE ? liveLoader : fileTrips;
+const simApplier: ProposalApplier = {
   async apply(_id, result) {
     console.log('  [sim] WOULD APPLY (not applied):', JSON.stringify(result).slice(0, 400));
     // Never claim a save that didn't happen, even in the simulator.
@@ -68,9 +81,12 @@ const applier: ProposalApplier = {
   },
 };
 const provider = new SimulatorProvider((m) => console.log(`  BlueMurr ▸ ${m.text.replace(/\n/g, '\n             ')}`));
+const applier: ProposalApplier = LIVE ? new TripProposalApplier(liveLoader) : simApplier;
+let aiCalls = 0;
+const realChat: ChatEngine = LIVE ? new DirectChatEngine() : new LoopbackChatEngine(chatUrl);
 const chat: ChatEngine = stubChat
   ? { run: async ({ message }) => ({ type: 'answer', reply: `[stub AI] you asked: ${message}` }) }
-  : new LoopbackChatEngine(chatUrl);
+  : { run: async (i) => { aiCalls++; console.log(`  [AI call #${aiCalls}]`); return realChat.run(i); } };
 const bot = new TextBot({ store, chat, trips, provider, applier, now: () => clock });
 const nudges = new NudgeEngine({ store, trips, provider, bookings: { isBooked: async (_t, leg) => booked.has(leg.id) } });
 
@@ -79,7 +95,20 @@ let lastCode = '';
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' });
 console.log(`Trip "${trip.title}" (${TRIP_ID}). Try: /code link owner, then "owner: link CODE".`);
 rl.prompt();
-let chain: Promise<void> = Promise.resolve();
+const LIVE_PHONE = '+15005550001';
+let chain: Promise<void> = Promise.resolve(
+  (async () => {
+    if (!LIVE) return;
+    const owner = [...(await liveLoader.members(LIVE))].find(([, r]) => r === 'owner')?.[0];
+    if (!owner) throw new Error('live trip has no owner');
+    PEOPLE.owner = { userId: owner, phone: LIVE_PHONE, role: 'owner' };
+    for (const k of ['editor', 'viewer']) delete PEOPLE[k].role;
+    inGroup.clear();
+    inGroup.add('owner');
+    const t = await liveLoader.load(LIVE);
+    console.log(`  [LIVE] trip "${t?.title}" — real database, real AI. Owner on test number ${LIVE_PHONE}.`);
+  })(),
+);
 rl.on('line', (line) => {
   chain = chain.then(() => onLine(line));
 });
@@ -98,6 +127,26 @@ async function onLine(line: string) {
     if ((t = l.match(/^\/book (.+)$/))) {
       booked.add(t[1]);
       return console.log(`  [bookings] booked: ${[...booked].join(', ')}`);
+    }
+    if (l === '/cleanup' && LIVE) {
+      // Remove every row this live run wrote, except the trip edit itself.
+      const { getSupabase } = await import('../services/supabase');
+      const db = getSupabase();
+      const del = async (t: string, f: (q: any) => any) => { const r = await f(db.from(t).delete()); if (r.error) throw new Error(`${t}: ${r.error.message}`); };
+      await del('blue_nudges', (q) => q.eq('trip_id', LIVE));
+      await del('text_threads', (q) => q.eq('provider', 'simulator').eq('trip_id', LIVE));
+      await del('text_link_codes', (q) => q.eq('trip_id', LIVE));
+      await del('user_phones', (q) => q.eq('phone_e164', LIVE_PHONE));
+      await del('text_phone_prefs', (q) => q.eq('phone_e164', LIVE_PHONE));
+      await del('text_legs_booked', (q) => q.eq('trip_id', LIVE));
+      return console.log('  [cleanup] removed this run\'s rows (thread, test phone, codes, prefs, nudges)');
+    }
+    if (l === '/ai') return console.log(`  [AI calls so far] ${aiCalls}`);
+    if (l === '/websave' && LIVE) {
+      // Simulate an open website tab saving the trip: only updated_at moves.
+      const { getSupabase } = await import('../services/supabase');
+      const r = await getSupabase().from('trips').update({ updated_at: new Date().toISOString() }).eq('id', LIVE).select('updated_at');
+      return console.log(`  [website save simulated] updated_at → ${r.data?.[0]?.updated_at ?? r.error?.message}`);
     }
     if (l === '/nudge') {
       const r = await nudges.runOnce(clock);
