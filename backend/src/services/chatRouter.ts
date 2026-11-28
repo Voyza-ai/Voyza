@@ -86,6 +86,7 @@ const WORDS = (list: string) => new RegExp(`\\b(?:${list})\\b`, 'i');
 const PREFILTER: Array<[string, RegExp]> = [
   ['change', WORDS('change|changing|switch|swap|move|add|remove|drop|replace|cancel|book|booking|reserve|reservation|instead|extend|shorten|reorder|skip|rearrange|upgrade|downgrade')],
   ['prefer', WORDS("rather|prefer|want|wanna|would like|i'd like|we'd like|let's|lets|can (?:we|i|you)|could (?:we|i|you)|should (?:we|i)|make|give|set|push|shift|delay|bump|postpone|longer|shorter|more|fewer|less|extra|another|later|earlier")],
+  ['constraint', /\b(?:lock|pin|fix|freeze|avoid|minimum|maximum|at least|at most|no later|no earlier|not before|not after|no (?:flights?|trains?|red-?eyes?)|(?:before|after|until|by) \d)/i],
   ['search', WORDS('options?|alternatives?|direct|nonstop|non-stop|other flights?|other trains?|search|find|show me|any (?:other|better)')],
   ['price', /\$|\b(?:how much|cost|costs|price|prices|pricing|fare|fares|pay|paying|spend|total|budget|expensive|cheap|cheaper|cheapest|save|saving|savings|deal)\b/i],
   ['compare', WORDS('compare|comparison|vs|versus|better|best|faster|fastest|quicker')],
@@ -103,7 +104,7 @@ export function prefilter(message: string, history: ChatTurn[] = []): Prefilter 
   const real = realHistory(history);
   const lastAssistant = [...history].reverse().find((t) => t.role === 'assistant');
   if (lastAssistant && isProposalTurn(lastAssistant.content)) return { rule: 'after_proposal' };
-  if (/\b(?:yes|yeah|yep|yup|ok|okay|sure|do it|go ahead|please do|sounds good|no|nope|nah|that|this|it|those|them|these|same|the (?:first|second|third|last|other) ?(?:one)?|that one)\b/i.test(m)) {
+  if (/\b(?:yes|yeah|yep|yup|ok|okay|sure|do it|go ahead|please do|sounds good|that|this|it|those|them|these|same|the (?:first|second|third|last|other) ?(?:one)?|that one)\b/i.test(m)) {
     return { rule: 'back_reference' };
   }
   if (real.length > 0 && m.split(' ').filter(Boolean).length < 4) return { rule: 'short_followup' };

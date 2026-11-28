@@ -115,6 +115,8 @@ describe('pre-filter: straight to tier 2', () => {
     ['how much is the hotel?', 'price'],
     ['will I need a coat in London?', 'weather'],
     ['Why Paris before London?', 'why'],
+    ['Lock London to Jan 15-17', 'constraint'],
+    ['no flights before 10am please', 'constraint'],
     ['flight or train to London — which is faster?', 'compare'],
     ['somewhere nice for dinner?', 'dining'],
     ['any sights to visit in Paris?', 'plans'],
