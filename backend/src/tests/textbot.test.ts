@@ -454,3 +454,17 @@ describe('textbot: STOP, START and alerts consent', () => {
     expect(await env.store.participants('simulator:g1')).toEqual([P_OWNER, P_EDITOR].sort());
   });
 });
+
+describe('textbot: mute / unmute', () => {
+  it('"mute 2h" mutes nudges for 2 hours, "mute" until unmuted, "unmute" clears', async () => {
+    const env = setup();
+    await linkedGroup(env);
+    expect((await env.send(P_VIEWER, 'BlueMurr mute 2h', GROUP))[0]).toMatch(/Muted for 2 hours/);
+    expect(await env.store.mutedUntil('simulator:g1')).toBe(1_000_000 + 2 * 3_600_000);
+    expect((await env.send(P_VIEWER, 'BlueMurr mute', GROUP))[0]).toMatch(/unmute" turns alerts back on/);
+    expect(await env.store.mutedUntil('simulator:g1')).toBeGreaterThan(1_000_000 + 365 * 86_400_000);
+    expect((await env.send(P_VIEWER, 'BlueMurr unmute', GROUP))[0]).toMatch(/text first again/);
+    expect(await env.store.mutedUntil('simulator:g1')).toBe(0);
+    expect(env.chatCalls).toHaveLength(0); // commands never reach the AI
+  });
+});

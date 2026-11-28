@@ -187,6 +187,22 @@ export class TextBot {
     const lower = body.toLowerCase();
 
     if (lower === 'help' || lower === '') return reply(this.helpText(!!thread));
+    const mute = lower.match(/^(un)?mute(?:\s+(\d{1,3})\s*(h|hr|hrs|hours?|d|days?))?$/);
+    if (mute) {
+      if (!thread) return reply('This chat is not linked to a trip, so there is nothing to mute.');
+      if (mute[1]) {
+        await store.setMutedUntil(threadKey, 0);
+        return reply("OK, I'll text first again when something needs attention.");
+      }
+      const n = mute[2] ? Number(mute[2]) : 0;
+      const ms = n ? n * (mute[3].startsWith('d') ? 86_400_000 : 3_600_000) : 100 * 365 * 86_400_000;
+      await store.setMutedUntil(threadKey, now + ms);
+      return reply(
+        n
+          ? `Muted for ${n} ${mute[3].startsWith('d') ? 'day' : 'hour'}${n === 1 ? '' : 's'}: I'll only reply when asked.`
+          : `Muted: I'll only reply when asked. "${this.cfg.name} unmute" turns alerts back on.`,
+      );
+    }
     const alerts = lower.match(ALERTS);
     if (alerts) {
       const on = alerts[1].toLowerCase() === 'on';

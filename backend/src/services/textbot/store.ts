@@ -74,6 +74,23 @@ export interface TextStore {
   setParticipants(threadKey: string, phones: Phone[]): Promise<void>;
   participants(threadKey: string): Promise<Phone[]>;
 
+  /** Every linked thread (for the nudge engine). */
+  listThreads(): Promise<ThreadLink[]>;
+  /** Mute proactive nudges in a thread until `untilMs` (0 = unmuted). */
+  setMutedUntil(threadKey: string, untilMs: number): Promise<void>;
+  mutedUntil(threadKey: string): Promise<number>;
+  /**
+   * Nudge ledger, claim-first: returns true only for the FIRST claim of
+   * (tripId, key). A later claim — a re-run, a restart, a second worker —
+   * returns false whatever the first one's status, so a nudge is never sent twice.
+   */
+  claimNudge(tripId: string, key: string, threadKey: string, localDay: string, now: number): Promise<boolean>;
+  markNudge(tripId: string, key: string, status: 'sent' | 'failed'): Promise<void>;
+  /** Nudges marked sent for a trip on a local day (YYYY-MM-DD). */
+  sentNudgesOn(tripId: string, localDay: string): Promise<number>;
+  /** When the last nudge for a trip was claimed (0 = never). */
+  lastNudgeAt(tripId: string): Promise<number>;
+
   history(threadKey: string): Promise<ChatTurn[]>;
   appendHistory(threadKey: string, turn: ChatTurn): Promise<void>;
 
@@ -104,6 +121,8 @@ export class MemoryTextStore implements TextStore {
   private optedOut = new Set<Phone>();
   private consent = new Set<Phone>();
   private members = new Map<string, Phone[]>();
+  private muted = new Map<string, number>();
+  private ledger = new Map<string, { threadKey: string; localDay: string; status: 'pending' | 'sent' | 'failed'; at: number }>();
 
   /** Clock is injectable so tests and the bot agree on "now". */
   constructor(private clock: () => number = () => Date.now()) {}
@@ -191,6 +210,37 @@ export class MemoryTextStore implements TextStore {
   }
   async participants(threadKey: string) {
     return [...(this.members.get(threadKey) ?? [])];
+  }
+
+  async listThreads() {
+    return [...this.threads.values()];
+  }
+  async setMutedUntil(threadKey: string, untilMs: number) {
+    if (untilMs > 0) this.muted.set(threadKey, untilMs);
+    else this.muted.delete(threadKey);
+  }
+  async mutedUntil(threadKey: string) {
+    return this.muted.get(threadKey) ?? 0;
+  }
+  async claimNudge(tripId: string, key: string, threadKey: string, localDay: string, now: number) {
+    const k = `${tripId}|${key}`;
+    if (this.ledger.has(k)) return false;
+    this.ledger.set(k, { threadKey, localDay, status: 'pending', at: now });
+    return true;
+  }
+  async markNudge(tripId: string, key: string, status: 'sent' | 'failed') {
+    const row = this.ledger.get(`${tripId}|${key}`);
+    if (row) row.status = status;
+  }
+  async lastNudgeAt(tripId: string) {
+    let last = 0;
+    for (const [k, v] of this.ledger) if (k.startsWith(`${tripId}|`) && v.status !== 'failed' && v.at > last) last = v.at;
+    return last;
+  }
+  async sentNudgesOn(tripId: string, localDay: string) {
+    let n = 0;
+    for (const [k, v] of this.ledger) if (k.startsWith(`${tripId}|`) && v.localDay === localDay && v.status === 'sent') n++;
+    return n;
   }
 
   async history(threadKey: string) {
