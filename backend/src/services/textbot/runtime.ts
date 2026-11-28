@@ -4,6 +4,7 @@ import { listBookings } from '../bookingStore';
 import { TextBot } from './bot';
 import { LoopbackChatEngine } from './chatEngine';
 import { MemoryTextStore, type TextStore } from './store';
+import { SupabaseTextStore } from './supabaseStore';
 import { SupabaseTripLoader } from './tripLoader';
 import { NudgeEngine, type BookingLookup, type NudgeLeg } from './nudges';
 import { SendbluePoller, SendblueProvider, sendblueConfigFromEnv } from './providers/sendblue';
@@ -69,8 +70,15 @@ let nudges: NudgeEngine | null = null;
 let nudgeTimer: NodeJS.Timeout | null = null;
 let botNumber: string | null = null;
 
+/**
+ * TEXTBOT_STORE=supabase → durable (migration 016 tables). Default: memory.
+ * Demo mode always uses memory: its users are not real accounts.
+ */
 export function textStore(): TextStore {
-  if (!store) store = new MemoryTextStore();
+  if (!store) {
+    const durable = process.env.TEXTBOT_STORE === 'supabase' && !process.env.TEXTBOT_DEMO_TRIP_FILE;
+    store = durable ? new SupabaseTextStore() : new MemoryTextStore();
+  }
   return store;
 }
 
@@ -185,7 +193,7 @@ export function startTextBot(): void {
       );
     }
   }
-  logger.info('Text bot started', { mode, provider: which, store: 'memory', nudges: !!nudgeTimer, demo: !!demo });
+  logger.info('Text bot started', { mode, provider: which, store: textStore() instanceof SupabaseTextStore ? 'supabase' : 'memory', nudges: !!nudgeTimer, demo: !!demo });
 }
 
 export function stopTextBot(): void {
