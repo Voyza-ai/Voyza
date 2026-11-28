@@ -86,7 +86,7 @@ it('Prague → Vienna with no sensible flight: the card is not the 22-hour fligh
   expect(screen.getByTestId('no-sensible-flight')).toHaveTextContent('Fastest flight 22h 50m');
   // The 22h flight is not the card's pick (no $301 price pill); it is only offered.
   expect(screen.queryByText('$301')).toBeNull();
-  expect(screen.getByTestId('use-long-flight')).toHaveTextContent('Use it anyway · $301');
+  expect(screen.getByTestId('use-long-flight')).toHaveTextContent('Fly anyway · $301');
 });
 
 it('the long flight can still be taken from the card: it becomes the leg and the total includes it', async () => {
@@ -95,7 +95,7 @@ it('the long flight can still be taken from the card: it becomes the leg and the
   const leg = trip.cities[0].transportOut;
   expect(leg.alternatives?.map((a) => [a.operator, a.price])).toEqual([['LOT', 301]]);
   render(<Connector transport={leg} index={0} cityIndex={0} isExpanded={false} onToggle={() => {}} />);
-  expect(screen.getByTestId('use-long-flight')).toHaveTextContent('Use it anyway · $301');
+  expect(screen.getByTestId('use-long-flight')).toHaveTextContent('Fly anyway · $301');
   fireEvent.click(screen.getByTestId('use-long-flight'));
   const after = useTripStore.getState().currentTrip!;
   expect(after.cities[0].transportOut).toMatchObject({ operator: 'LOT', price: 301, duration: '22h 50m' });

@@ -171,7 +171,11 @@ export default function Connector({
                   className="text-[10px] text-[#2e6bc4] underline mt-1 hover:text-[#1e5ab3]"
                   data-testid="use-long-flight"
                 >
-                  {`Use it anyway · $${displayAmount(transport.alternatives[0].price, priceMode, travelers).toLocaleString()}`}
+                  {/* "Fly", not "Use it": the line above offers a train-or-bus
+                      estimate, so "Use it anyway · $32" read as the train fare
+                      when the price is the 22h flight's. Short enough to stay
+                      on one line in a card this narrow. */}
+                  {`Fly anyway · $${displayAmount(transport.alternatives[0].price, priceMode, travelers).toLocaleString()}`}
                 </button>
               )}
               <a
