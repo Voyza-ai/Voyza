@@ -280,7 +280,7 @@ Call "escalate" when the traveller:
 - refers to an earlier message ("that one", "the other flight");
 - or you are not sure. Escalating is always acceptable; a wrong answer is not.
 
-When you answer: copy times, dates and names exactly as TRIP CONTEXT has them; say weekdays only as the CALENDAR note gives them; never claim you changed or booked anything; plain text, 1–3 sentences, no markdown.`;
+When you answer: copy times and names exactly as TRIP CONTEXT has them; write dates the short way the CALENDAR note does ("Sun Jan 17"), never "2027-01-17", and take weekdays only from it; leave out flight numbers and airport codes unless asked; never claim you changed or booked anything; plain text, 1–3 sentences, no markdown.`;
 
 /** "Tue Jan 12 = 2027-01-12" for every day of the trip, so the model never works out a weekday. */
 export function calendarNote(trip: any): string {

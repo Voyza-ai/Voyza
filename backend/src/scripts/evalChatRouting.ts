@@ -40,11 +40,14 @@ async function main() {
   let calls = 0;
   const rows: any[] = [];
 
+  // EVAL_TIER1_ONLY=1: only the cases that reach tier 1, and no tier-2 baseline calls.
+  const tier1Only = process.env.EVAL_TIER1_ONLY === '1';
   for (const c of cases) {
     const history: ChatTurn[] = [GREETING, ...(c.history ?? [])];
     const row: any = { q: c.q, expectedTier: c.expectedTier };
     const t0 = tier0(c.q, trip, history);
     const pf = t0 ? null : prefilter(c.q, history);
+    if (tier1Only && (t0 || pf)) continue;
     if (t0) Object.assign(row, { tier: 0, reply: t0.reply, reason: t0.intent });
     else if (pf) Object.assign(row, { tier: 2, reason: `prefilter:${pf.rule}` });
     else {
@@ -59,6 +62,13 @@ async function main() {
       else Object.assign(row, { tier: 2, reason: `escalate:${t1.reason}` });
     }
 
+    if (tier1Only) {
+      row.dangerous = row.tier !== 2 && c.expectedTier === 2;
+      row.factsOk = row.tier === 2 ? null : (c.mustContain ?? []).every((s: string) => String(row.reply).includes(s));
+      rows.push(row);
+      process.stdout.write(`${row.tier} ${row.factsOk === false ? 'FACTS? ' : ''}${c.q} → ${row.reply ?? row.reason}\n`);
+      continue;
+    }
     // Baseline: today's tier-2 request (tool not run).
     calls++;
     const started = Date.now();
@@ -88,6 +98,11 @@ async function main() {
     process.stdout.write(`${row.tier} ${row.dangerous ? 'DANGER ' : ''}${row.factsOk === false ? 'FACTS? ' : ''}${c.q}\n`);
   }
 
+  if (tier1Only) {
+    console.log(JSON.stringify({ calls, answered: rows.filter((r) => r.tier === 1).length, factsOk: rows.filter((r) => r.factsOk).length, escalated: rows.filter((r) => r.tier === 2).length, dangerous: rows.filter((r) => r.dangerous).length }));
+    if (process.env.EVAL_OUT) writeFileSync(process.env.EVAL_OUT, JSON.stringify({ rows }, null, 2));
+    return;
+  }
   const sum = (f: (r: any) => number) => rows.reduce((s, r) => s + (f(r) || 0), 0);
   const n = rows.length;
   const byTier = [0, 1, 2].map((t) => rows.filter((r) => r.tier === t).length);
