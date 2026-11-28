@@ -44,9 +44,6 @@ const envSchema = z.object({
   // Hotels (RapidAPI / Booking.com)
   RAPIDAPI_KEY: z.string().optional(),
 
-  // Deutsche Bahn REST API
-  DB_REST_BASE_URL: z.string().default('https://v6.db.transport.rest'),
-
   // All Aboard (EU rail, GraphQL). Key is test-scoped for now; the URL
   // defaults to their test gateway — switch to api-gateway.allaboard.eu
   // at go-live together with a live-scoped key.
