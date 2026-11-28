@@ -200,12 +200,12 @@ export function tier0(message: string, trip: any, history: ChatTurn[] = []): Tie
     const verb = arriving ? `You arrive in ${hit.c.name}` : `You leave ${hit.c.name}`;
     return {
       intent: arriving ? 'arrive_in' : 'leave_c',
-      reply: `${verb} on ${shortDate(day)}: ${cap(legPhrase(leg))} ${legTimes(c)}${operatorWords(c)}.`,
+      reply: `${verb} on ${shortDate(day)}: ${legPhrase(leg)} ${legTimes(c)}${operatorWords(c)}.`,
     };
   }
 
   // nights_in
-  if ((x = /^how many nights (?:are we|am i|do we have) (?:staying )?in (.+)$/.exec(m))) {
+  if ((x = /^how many nights (?:(?:are we|am i|do we have|will we be|do we spend) )?(?:staying |spending )?in (.+)$/.exec(m))) {
     const hit = cityByName(trip, x[1]);
     const a = hit?.c?.dates?.arrival;
     const d = hit?.c?.dates?.departure;
