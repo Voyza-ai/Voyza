@@ -171,3 +171,49 @@ describe('missing prices notice (M2)', () => {
     ).toEqual(['a way from Lisbon to Sintra']);
   });
 });
+
+describe('"I\'m chasing a vibe" with the budget skipped (owner, 2026-11-28: Skip means no limit)', () => {
+  it('builds the trip, asking the suggester with no budget limit', async () => {
+    mockedVibe.mockResolvedValue({
+      suggestions: [{ destination_city: 'Vienna', destination_country: 'Austria', why_it_fits_vibe: 'Culture.' }],
+      reasoning_summary: '',
+    } as any);
+    mockedOptimize.mockResolvedValue(optimizeFor('Vienna'));
+
+    window.history.pushState({}, '', '/plan?resume=1&autorun=1');
+    sessionStorage.setItem(
+      'bluemurr-autorun',
+      JSON.stringify({
+        origin: 'Boston',
+        originAirports: ['BOS'],
+        travelers: 2,
+        vibe: 'Culture',
+        returnToHome: true,
+        planningMode: 'vibe',
+      }),
+    );
+    render(<PlanningChat />);
+
+    await waitFor(() => expect(mockedVibe).toHaveBeenCalledTimes(1));
+    expect(mockedVibe.mock.calls[0][0]).toMatchObject({ vibe: 'Culture', origin: 'Boston', budgetPerPerson: null, partySize: 2 });
+    await waitFor(() => expect(mockedOptimize).toHaveBeenCalledTimes(1));
+    expect(mockedOptimize.mock.calls[0][0].cities).toEqual([{ name: 'Vienna' }]);
+    expect(screen.queryByText(/a budget/)).toBeNull();
+  });
+
+  it('a budget that was given is still sent per person', async () => {
+    mockedVibe.mockResolvedValue({
+      suggestions: [{ destination_city: 'Vienna', destination_country: 'Austria', why_it_fits_vibe: 'Culture.' }],
+      reasoning_summary: '',
+    } as any);
+    mockedOptimize.mockResolvedValue(optimizeFor('Vienna'));
+    window.history.pushState({}, '', '/plan?resume=1&autorun=1');
+    sessionStorage.setItem(
+      'bluemurr-autorun',
+      JSON.stringify({ origin: 'Boston', originAirports: ['BOS'], travelers: 2, vibe: 'Culture', returnToHome: true, budget: 3000, budgetPerPerson: false, planningMode: 'vibe' }),
+    );
+    render(<PlanningChat />);
+    await waitFor(() => expect(mockedVibe).toHaveBeenCalledTimes(1));
+    expect(mockedVibe.mock.calls[0][0].budgetPerPerson).toBe(1500);
+  });
+});

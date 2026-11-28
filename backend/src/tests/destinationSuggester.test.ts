@@ -168,3 +168,32 @@ describe('suggestDestinationsForVibe retry policy', () => {
     expect(second.meta.fallbackUsed).toBe(true);
   });
 });
+
+describe('suggestDestinationsForVibe with no budget limit (budget skipped on the vibe path)', () => {
+  beforeEach(() => {
+    mockCreate.mockReset();
+  });
+
+  it('tells the model there is no limit, instead of a number', async () => {
+    mockCreate.mockResolvedValueOnce(claudeReply('Lisbon'));
+    const r = await suggestDestinationsForVibe({ ...baseInput, vibe: 'nolimit-prompt', budgetPerPerson: null });
+    expect(r.suggestions[0].destination_city).toBe('Lisbon');
+    const userTurn = JSON.stringify(mockCreate.mock.calls[0][0].messages);
+    expect(userTurn).toContain('Budget per person: no limit');
+    expect(userTurn).not.toMatch(/Budget per person: \$/);
+  });
+
+  it('is its own cache entry: a no-limit answer never serves a budgeted request, or the other way round', async () => {
+    mockCreate.mockResolvedValueOnce(claudeReply('Lisbon')).mockResolvedValueOnce(claudeReply('Faro'));
+    const open = await suggestDestinationsForVibe({ ...baseInput, vibe: 'nolimit-cache', budgetPerPerson: null });
+    const capped = await suggestDestinationsForVibe({ ...baseInput, vibe: 'nolimit-cache', budgetPerPerson: 800 });
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(open.suggestions[0].destination_city).toBe('Lisbon');
+    expect(capped.meta.cacheHit).toBe(false);
+  });
+
+  it('a budget left out altogether is still a caller error', async () => {
+    const { budgetPerPerson: _omit, ...rest } = baseInput;
+    await expect(suggestDestinationsForVibe(rest as any)).rejects.toThrow(/budgetPerPerson/);
+  });
+});

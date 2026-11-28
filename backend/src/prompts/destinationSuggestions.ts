@@ -15,8 +15,11 @@
 export type SuggestDestinationsInput = {
   vibe: string;
   origin: string;
-  /** Per-person budget in USD. Required — the prompt uses this to gate which destinations plausibly fit. */
-  budgetPerPerson: number;
+  /**
+   * Per-person budget in USD, used to gate which destinations plausibly fit.
+   * null: the traveller skipped the budget — no limit.
+   */
+  budgetPerPerson: number | null;
   /** Human-readable travel window (e.g. "June 15 – 22, 2026", "flexible in July", "late October"). */
   travelWindow: string;
   partySize: number;
@@ -77,7 +80,11 @@ export function buildDestinationSuggestionsUserMessage(input: SuggestDestination
   const lines: string[] = [];
   lines.push(`Vibe: ${input.vibe}`);
   lines.push(`Origin: ${input.origin}`);
-  lines.push(`Budget per person: $${input.budgetPerPerson.toLocaleString()} USD`);
+  lines.push(
+    input.budgetPerPerson == null
+      ? 'Budget per person: no limit (they skipped the budget question). Pick the best fits for the vibe at sensible prices, and omit tier_up_suggestion.'
+      : `Budget per person: $${input.budgetPerPerson.toLocaleString()} USD`,
+  );
   lines.push(`Travel window: ${input.travelWindow}`);
   lines.push(`Party size: ${input.partySize}`);
   lines.push(`Trip type: ${input.tripType}`);

@@ -176,7 +176,8 @@ const VIBE_STEPS: Step[] = [
   { id: 'travelers', question: "How many people?", type: 'travelers' },
   // Not skippable: the destination suggester needs a budget to pick places
   // (a skipped budget used to dead-end on "I still need: a budget").
-  { id: 'budget', question: "What's your budget looking like?", type: 'budget' },
+  // Skippable: a skipped budget means "no limit" for the suggester (owner, 2026-11-28).
+  { id: 'budget', question: "What's your budget looking like?", type: 'budget', skippable: true },
   { id: 'notes', question: "Anything else I should know?", type: 'notes', skippable: true, placeholder: 'E.g. "Somewhere warm with good food"' },
 ];
 
@@ -716,7 +717,8 @@ export default function PlanningChat() {
       // Per spec: vibe, origin, budget, travelWindow, partySize are
       // all required before we can call suggestDestinationsForVibe.
       if (!a.vibe || !a.vibe.trim()) errors.push('a vibe');
-      if (typeof a.budget !== 'number' || a.budget <= 0) errors.push('a budget');
+      // The budget is skippable on this path: skipped means no limit, and
+      // the suggester is told so (budgetPerPerson: null).
       // Dates are skippable on this path: a missing window is sent to the
       // suggester as 'flexible'. Destination is NOT required — AI suggests one.
     } else if (mode === 'budget') {
@@ -2002,11 +2004,15 @@ export default function PlanningChat() {
         const result = await suggestDestinationsForVibe({
           vibe: answers.vibe?.trim() || 'Open to anything: the best-value trip for this budget',
           origin: answers.origin!,
-          budgetPerPerson: answers.budgetPerPerson
-            ? answers.budget!
-            // If user gave a total budget for a group, convert to per-person
-            // for the prompt (Claude reasons about per-person costs).
-            : Math.round(answers.budget! / Math.max(1, answers.travelers ?? 1)),
+          // A skipped budget (vibe path) is no limit: null, not a number.
+          budgetPerPerson:
+            typeof answers.budget !== 'number' || answers.budget <= 0
+              ? null
+              : answers.budgetPerPerson
+                ? answers.budget
+                // If user gave a total budget for a group, convert to per-person
+                // for the prompt (Claude reasons about per-person costs).
+                : Math.round(answers.budget / Math.max(1, answers.travelers ?? 1)),
           travelWindow: answers.dateRange
             ? `${answers.dateRange.start} to ${answers.dateRange.end}`
             : 'flexible',

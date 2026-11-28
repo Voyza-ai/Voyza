@@ -156,7 +156,7 @@ const cache: SuggesterCache = new InMemoryCache();
 function buildCacheKey(input: SuggestDestinationsInput): string {
   const vibeNorm = input.vibe.trim().toLowerCase();
   const originNorm = input.origin.trim().toLowerCase();
-  const budgetBucket = Math.round(input.budgetPerPerson / 100) * 100;
+  const budgetBucket = input.budgetPerPerson == null ? 'nolimit' : Math.round(input.budgetPerPerson / 100) * 100;
   const monthBucket = extractMonthBucket(input.travelWindow);
   const tripType = input.tripType;
   const extrasNorm = normalizeExtras(input.extras);
@@ -418,8 +418,13 @@ export async function suggestDestinationsForVibe(
 ): Promise<SuggestDestinationsResult> {
   const started = Date.now();
   const requiredFields: (keyof SuggestDestinationsInput)[] = [
-    'vibe', 'origin', 'budgetPerPerson', 'travelWindow', 'partySize', 'tripType',
+    'vibe', 'origin', 'travelWindow', 'partySize', 'tripType',
   ];
+  // budgetPerPerson may be null: a skipped budget means no limit. It must
+  // still be given (a number or null), never forgotten.
+  if (input.budgetPerPerson === undefined) {
+    throw new Error('suggestDestinationsForVibe: missing required field "budgetPerPerson"');
+  }
   for (const f of requiredFields) {
     if (input[f] === undefined || input[f] === null || input[f] === '') {
       throw new Error(`suggestDestinationsForVibe: missing required field "${f}"`);

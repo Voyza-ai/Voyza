@@ -320,7 +320,8 @@ Return JSON with:
 const suggestForVibeSchema = z.object({
   vibe: z.string().min(1),
   origin: z.string().min(1),
-  budgetPerPerson: z.number().positive(),
+  // null: the traveller skipped the budget — no limit (vibe path).
+  budgetPerPerson: z.number().positive().nullable(),
   travelWindow: z.string().min(1),
   partySize: z.number().int().positive(),
   tripType: z.enum(['one-way', 'round-trip']),

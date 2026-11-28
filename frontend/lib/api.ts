@@ -403,7 +403,7 @@ export type SuggestDestinationsForVibeResult = {
 export async function suggestDestinationsForVibe(params: {
   vibe: string;
   origin: string;
-  budgetPerPerson: number;
+  budgetPerPerson: number | null; // null: budget skipped, no limit
   travelWindow: string;
   partySize: number;
   tripType: 'one-way' | 'round-trip';
