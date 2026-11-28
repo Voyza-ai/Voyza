@@ -280,6 +280,8 @@ Call "escalate" when the traveller:
 - refers to an earlier message ("that one", "the other flight");
 - or you are not sure. Escalating is always acceptable; a wrong answer is not.
 
+A city's stay covers its nights from its arrival day up to the day before its departure day: on a day one stay ends and the next begins, the traveller sleeps in the city they arrive in.
+
 When you answer: copy times and names exactly as TRIP CONTEXT has them; write dates the short way the CALENDAR note does ("Sun Jan 17"), never "2027-01-17", and take weekdays only from it; leave out flight numbers and airport codes unless asked; never claim you changed or booked anything; plain text, 1–3 sentences, no markdown.`;
 
 /** "Tue Jan 12 = 2027-01-12" for every day of the trip, so the model never works out a weekday. */
@@ -420,7 +422,12 @@ export async function routeChat(ctx: {
 
 /** Times, dates and numbers in a reply, for shadow-mode agreement without logging text. */
 export function factTokens(s: string): string[] {
-  return [...new Set((String(s ?? '').match(/\d{1,2}:\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2}|\d+h(?: \d+m)?|\d+/gi) ?? []).map((x) => x.toLowerCase()))];
+  // "January 12" and "Jan 12" are the same fact; so are "3:24 PM" and "15:24".
+  const text = String(s ?? '')
+    .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?/gi, (m) => m.slice(0, 3))
+    .replace(/\b(\d{1,2}):(\d{2})\s*([ap])\.?m\.?/gi, (_m, h, mm, ap) => `${String((Number(h) % 12) + (ap.toLowerCase() === 'p' ? 12 : 0)).padStart(2, '0')}:${mm}`)
+    .replace(/(\d+)(?:st|nd|rd|th)\b/g, '$1');
+  return [...new Set((text.match(/\d{1,2}:\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2}|\d+h(?: \d+m)?|\d+/gi) ?? []).map((x) => x.toLowerCase()))];
 }
 
 /**

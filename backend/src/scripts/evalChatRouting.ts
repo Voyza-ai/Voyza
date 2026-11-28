@@ -48,6 +48,7 @@ async function main() {
     const t0 = tier0(c.q, trip, history);
     const pf = t0 ? null : prefilter(c.q, history);
     if (tier1Only && (t0 || pf)) continue;
+    if (process.env.EVAL_ONLY_Q && !c.q.toLowerCase().includes(process.env.EVAL_ONLY_Q.toLowerCase())) continue;
     if (t0) Object.assign(row, { tier: 0, reply: t0.reply, reason: t0.intent });
     else if (pf) Object.assign(row, { tier: 2, reason: `prefilter:${pf.rule}` });
     else {

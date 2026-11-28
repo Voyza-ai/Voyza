@@ -198,6 +198,10 @@ describe('switch, shadow verdicts and cost', () => {
     expect(shadowAgreement({ tier: 1, reply: 'leaves at 12:23', reason: 'answer' }, 'find_transport_option', '')).toBe('DANGEROUS');
     expect(shadowAgreement({ tier: 0, reply: 'arrives at 09:00', reason: 'arrive_in' }, 'answer_only', 'It arrives at 10:48.')).toBe('DANGEROUS');
     expect(shadowAgreement({ tier: 2, reason: 'prefilter:why' }, 'answer_only', 'x')).toBe('missed_saving');
+    // Same facts, other wording (measured live 2026-11-28: was flagged DANGEROUS).
+    expect(shadowAgreement({ tier: 0, reply: "In Paris you're staying at Ibis Styles Paris Batignolles (Jan 12–15).", reason: 'hotel_in' }, 'answer_only',
+      "You're staying at the Ibis Styles Paris Batignolles for 3 nights (January 12-15, 2027) at $131.57 per night.")).toBe('safe');
+    expect(shadowAgreement({ tier: 0, reply: 'arrives at 15:24 on Jan 17', reason: 'home_time' }, 'answer_only', 'It lands at 3:24 PM on January 17th.')).toBe('safe');
   });
   it('cost per call from usage, cache reads and writes included', () => {
     // 1,000 in + 1,000 cache read + 1,000 cache write + 100 out on Sonnet 4.5: $0.003 + $0.0003 + $0.00375 + $0.0015
