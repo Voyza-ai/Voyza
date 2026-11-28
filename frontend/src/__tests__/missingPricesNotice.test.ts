@@ -1,4 +1,4 @@
-import { missingPriceParts } from '@/components/results/MissingPricesNotice';
+import { estimatedLegNotes, missingPriceParts } from '@/components/results/MissingPricesNotice';
 
 /**
  * Website audit (2026-11-13): a destination nothing flies to (Tristan da
@@ -49,15 +49,23 @@ describe('missing prices notice (M2)', () => {
     ).toEqual(['a way from Lisbon to Sintra']);
   });
 
-  it('a hop with no sensible flight is "a sensible flight", not "a way" (it has a train-or-bus estimate)', () => {
-    expect(
-      missingPriceParts({
-        cities: [
-          city('Prague', { transportOut: { unavailable: true, noSensibleFlight: { fastestMinutes: 1370, stops: 2, groundHours: [4, 5] } } }),
-          city('Vienna'),
-        ],
-      } as any),
-    ).toEqual(['a sensible flight from Prague to Vienna']);
+  it('a hop with no sensible flight but a train-or-bus estimate is a neutral note, not a warning', () => {
+    const trip = {
+      cities: [
+        city('Prague', { transportOut: { unavailable: true, noSensibleFlight: { fastestMinutes: 1370, stops: 2, groundHours: [4, 5] } } }),
+        city('Vienna'),
+      ],
+    } as any;
+    expect(missingPriceParts(trip)).toEqual([]);
+    expect(estimatedLegNotes(trip)).toEqual(['Prague → Vienna: no sensible flight; about 4–5 h by train or bus (estimate), not in the total.']);
+  });
+
+  it('with no estimate (too far to guess), it stays a warning: "a sensible flight", not "a way"', () => {
+    const trip = {
+      cities: [city('Prague', { transportOut: { unavailable: true, noSensibleFlight: { fastestMinutes: 1370, stops: 2, groundHours: null } } }), city('Vienna')],
+    } as any;
+    expect(missingPriceParts(trip)).toEqual(['a sensible flight from Prague to Vienna']);
+    expect(estimatedLegNotes(trip)).toEqual([]);
   });
 
   it('two cities without a hotel read as "London or Paris", not one place', () => {

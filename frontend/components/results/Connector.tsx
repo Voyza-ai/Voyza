@@ -131,8 +131,9 @@ export default function Connector({
               className="flex items-center justify-center w-10 h-10 rounded-full border"
               style={{ background: `${dimGray}25`, borderColor: `${dimGray}55` }}
             >
-              {transport.groundEstimate && !transport.noSensibleFlight ? (
-                // A routine hop we can't book: a train, not a "broken" ✕.
+              {transport.groundEstimate || transport.noSensibleFlight ? (
+                // Both cards point the traveller to a train or bus (an
+                // estimate), so both show a train — not a "broken" ✕.
                 <TrainFront size={16} style={{ color: dimGray }} data-testid="ground-estimate-icon" />
               ) : (
                 <X size={16} style={{ color: dimGray }} />

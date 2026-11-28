@@ -82,6 +82,7 @@ it('Prague → Vienna with no sensible flight: the card is not the 22-hour fligh
   expect(leg).toMatchObject({ unavailable: true, price: 0, noSensibleFlight: FLAG });
   render(<Connector transport={leg} index={0} cityIndex={0} isExpanded={false} onToggle={() => {}} />);
   expect(screen.getByText('No sensible flight')).toBeInTheDocument();
+  expect(screen.getByTestId('ground-estimate-icon')).toBeInTheDocument();
   expect(screen.getByTestId('no-sensible-flight')).toHaveTextContent('About 4–5 h by train or bus (estimate)');
   expect(screen.getByTestId('no-sensible-flight')).toHaveTextContent('Fastest flight 22h 50m');
   // The 22h flight is not the card's pick (no $301 price pill); it is only offered.

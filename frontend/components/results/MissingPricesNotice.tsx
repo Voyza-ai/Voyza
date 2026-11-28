@@ -27,10 +27,10 @@ export function missingPriceParts(trip: Pick<Trip, 'cities' | 'origin' | 'return
     }
   }
   cities.slice(0, -1).forEach((c, i) => {
-    // A hop with only absurd flights (no sensible one) is not "no way" there:
-    // the card gives a train-or-bus estimate; the total leaves the leg out.
-    // A hop with nothing bookable but a ground estimate gets its own line (estimatedLegNotes).
-    if (c.transportOut?.unavailable && !(c.transportOut.groundEstimate && !c.transportOut.noSensibleFlight)) {
+    // A hop with only absurd flights (no sensible one) is not "no way" there.
+    // A hop the card can estimate by train or bus gets its own neutral line
+    // instead (estimatedLegNotes) — not this warning.
+    if (c.transportOut?.unavailable && !hasEstimate(c.transportOut)) {
       parts.push(c.transportOut.noSensibleFlight ? `a sensible flight from ${c.name} to ${cities[i + 1].name}` : `a way from ${c.name} to ${cities[i + 1].name}`);
     }
   });
@@ -42,7 +42,8 @@ export function missingPriceParts(trip: Pick<Trip, 'cities' | 'origin' | 'return
 }
 
 /**
- * One line per leg with nothing bookable but a train-or-bus estimate:
+ * One line per leg the card estimates by train or bus (nothing bookable, or
+ * no sensible flight):
  * "Lisbon → Sintra isn't bookable here: about 35–45 min by train or bus
  * (estimate), not in the total." Not "no train" — Sintra has trains every
  * 20 minutes; we just can't book them. Shown with a neutral info icon, not
@@ -52,9 +53,20 @@ export function estimatedLegNotes(trip: Pick<Trip, 'cities'>): string[] {
   const cities = trip.cities ?? [];
   return cities.slice(0, -1).flatMap((c, i) => {
     const t = c.transportOut;
-    if (!t?.unavailable || t.noSensibleFlight || !t.groundEstimate) return [];
-    return [`${c.name} → ${cities[i + 1].name} isn't bookable here: about ${formatGroundRange(t.groundEstimate.minutes)} by train or bus (estimate), not in the total.`];
+    if (!t?.unavailable || !hasEstimate(t)) return [];
+    const hop = `${c.name} → ${cities[i + 1].name}`;
+    // Prague → Vienna: flights exist but the fastest takes 22h 50m.
+    if (t.noSensibleFlight?.groundHours) {
+      const [lo, hi] = t.noSensibleFlight.groundHours;
+      return [`${hop}: no sensible flight; about ${lo}–${hi} h by train or bus (estimate), not in the total.`];
+    }
+    return [`${hop} isn't bookable here: about ${formatGroundRange(t.groundEstimate!.minutes)} by train or bus (estimate), not in the total.`];
   });
+}
+
+/** The card gives a train-or-bus estimate for this leg. */
+function hasEstimate(t: Trip['cities'][number]['transportOut']): boolean {
+  return t.noSensibleFlight ? Boolean(t.noSensibleFlight.groundHours) : Boolean(t.groundEstimate);
 }
 
 function joinParts(parts: string[]): string {
