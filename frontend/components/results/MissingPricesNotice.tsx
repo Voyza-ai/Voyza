@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, Info, X } from 'lucide-react';
 import { useState } from 'react';
 import type { Trip } from '@/lib/types';
 import { formatGroundRange } from '@/lib/groundEstimate';
@@ -43,15 +43,17 @@ export function missingPriceParts(trip: Pick<Trip, 'cities' | 'origin' | 'return
 
 /**
  * One line per leg with nothing bookable but a train-or-bus estimate:
- * "Lisbon → Sintra: no bookable train or flight; about 35–45 min by train or
- * bus (estimate), not in the total."
+ * "Lisbon → Sintra isn't bookable here: about 35–45 min by train or bus
+ * (estimate), not in the total." Not "no train" — Sintra has trains every
+ * 20 minutes; we just can't book them. Shown with a neutral info icon, not
+ * the warning triangle: it is a routine hop, not something that went wrong.
  */
 export function estimatedLegNotes(trip: Pick<Trip, 'cities'>): string[] {
   const cities = trip.cities ?? [];
   return cities.slice(0, -1).flatMap((c, i) => {
     const t = c.transportOut;
     if (!t?.unavailable || t.noSensibleFlight || !t.groundEstimate) return [];
-    return [`${c.name} → ${cities[i + 1].name}: no bookable train or flight; about ${formatGroundRange(t.groundEstimate.minutes)} by train or bus (estimate), not in the total.`];
+    return [`${c.name} → ${cities[i + 1].name} isn't bookable here: about ${formatGroundRange(t.groundEstimate.minutes)} by train or bus (estimate), not in the total.`];
   });
 }
 
@@ -73,23 +75,26 @@ export default function MissingPricesNotice({
   return (
     <div className="mx-8 mt-3 mb-1" role="note" data-testid="missing-prices-notice">
       <div
-        className="flex items-center gap-2 px-3 py-2 rounded-xl border bg-white"
+        className="flex items-start gap-2 px-3 py-2 rounded-xl border bg-white"
         style={{ borderColor: 'rgba(0,0,0,0.08)' }}
       >
-        <AlertTriangle size={13} style={{ color: '#f59e0b' }} className="flex-shrink-0" />
-        <span className="flex-1 min-w-0 text-gray-600 text-[12px]">
+        <div className="flex-1 min-w-0 flex flex-col gap-1 text-gray-600 text-[12px]">
           {parts.length > 0 && (
-            <>
-              We couldn&apos;t find {joinParts(parts)}, so the total leaves {parts.length === 1 ? 'it' : 'them'} out. Try a bigger city nearby or
-              other dates.
-            </>
+            <div className="flex items-center gap-2" data-testid="missing-prices-warning">
+              <AlertTriangle size={13} style={{ color: '#f59e0b' }} className="flex-shrink-0" />
+              <span>
+                We couldn&apos;t find {joinParts(parts)}, so the total leaves {parts.length === 1 ? 'it' : 'them'} out. Try a bigger city nearby or
+                other dates.
+              </span>
+            </div>
           )}
           {notes.map((n) => (
-            <span key={n} className="block" data-testid="estimated-leg-note">
-              {n}
-            </span>
+            <div key={n} className="flex items-center gap-2" data-testid="estimated-leg-note">
+              <Info size={13} style={{ color: '#6b7280' }} className="flex-shrink-0" />
+              <span>{n}</span>
+            </div>
           ))}
-        </span>
+        </div>
         <button
           onClick={() => setDismissed(true)}
           className="flex-shrink-0 text-gray-400 hover:text-gray-700 transition-colors p-0.5"

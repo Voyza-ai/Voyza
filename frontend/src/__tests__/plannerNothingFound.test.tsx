@@ -3,7 +3,7 @@
  * 2026-11-23, "Plan a similar trip" on the Lisbon & Sintra Escape preset:
  * All Aboard has no CP trains and nothing flies Lisbon → Sintra). When the
  * backend sends a ground estimate (compareLeg `groundEstimate`, only for a
- * close hop over land) the card says "No train or flight found, about
+ * close hop over land) the card says "Not bookable here, about
  * 35–45 min by train or bus (estimate)" and the banner says the leg is not in
  * the total. A far hop has none and stays "No direct option".
  */
@@ -84,7 +84,8 @@ it('Lisbon → Sintra with nothing bookable: the card gives a train-or-bus estim
   const leg = trip.cities[0].transportOut;
   expect(leg).toMatchObject({ unavailable: true, price: 0, groundEstimate: ESTIMATE });
   render(<Connector transport={leg} index={0} cityIndex={0} isExpanded={false} onToggle={() => {}} />);
-  expect(screen.getByText('No train or flight found')).toBeInTheDocument();
+  expect(screen.getByText('Not bookable here')).toBeInTheDocument();
+  expect(screen.getByTestId('ground-estimate-icon')).toBeInTheDocument();
   expect(screen.getByTestId('ground-estimate')).toHaveTextContent('About 35–45 min by train or bus (estimate)');
   expect(screen.queryByText(/\$\d/)).toBeNull();
 });
@@ -95,11 +96,17 @@ it('the total leaves the estimated leg out, and the banner says so in one line',
   expect(liveTripTotal(trip)).toBe(980);
   expect(missingPriceParts(trip)).not.toContain('a way from Lisbon to Sintra');
   expect(estimatedLegNotes(trip)).toEqual([
-    'Lisbon → Sintra: no bookable train or flight; about 35–45 min by train or bus (estimate), not in the total.',
+    'Lisbon → Sintra isn\'t bookable here: about 35–45 min by train or bus (estimate), not in the total.',
   ]);
   render(<MissingPricesNotice trip={trip} />);
+  // A routine hop: a neutral info line, not the warning triangle (the warning
+  // here is only for the hotels this test trip has none of).
+  const note = screen.getByTestId('estimated-leg-note');
+  expect(note.querySelector('svg.lucide-info')).not.toBeNull();
+  expect(note.querySelector('svg.lucide-triangle-alert')).toBeNull();
+  expect(screen.getByTestId('missing-prices-warning')).not.toHaveTextContent('a way from Lisbon to Sintra');
   expect(screen.getByTestId('missing-prices-notice')).toHaveTextContent(
-    'Lisbon → Sintra: no bookable train or flight; about 35–45 min by train or bus (estimate), not in the total.',
+    'Lisbon → Sintra isn\'t bookable here: about 35–45 min by train or bus (estimate), not in the total.',
   );
 });
 
@@ -110,7 +117,11 @@ it('a far hop with nothing found (no estimate) stays "No direct option"', async 
   expect(leg.groundEstimate).toBeUndefined();
   render(<Connector transport={leg} index={0} cityIndex={0} isExpanded={false} onToggle={() => {}} />);
   expect(screen.getByText('No direct option')).toBeInTheDocument();
+  expect(screen.queryByTestId('ground-estimate-icon')).toBeNull();
   expect(screen.queryByTestId('ground-estimate')).toBeNull();
   expect(missingPriceParts(trip)).toContain('a way from Lisbon to Berlin');
   expect(estimatedLegNotes(trip)).toEqual([]);
+  // Nothing found and nothing to estimate: still the warning.
+  render(<MissingPricesNotice trip={trip} />);
+  expect(screen.getByTestId('missing-prices-warning').querySelector('svg.lucide-triangle-alert, svg.lucide-alert-triangle')).not.toBeNull();
 });

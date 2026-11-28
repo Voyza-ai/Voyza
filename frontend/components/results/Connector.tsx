@@ -131,14 +131,19 @@ export default function Connector({
               className="flex items-center justify-center w-10 h-10 rounded-full border"
               style={{ background: `${dimGray}25`, borderColor: `${dimGray}55` }}
             >
-              <X size={16} style={{ color: dimGray }} />
+              {transport.groundEstimate && !transport.noSensibleFlight ? (
+                // A routine hop we can't book: a train, not a "broken" ✕.
+                <TrainFront size={16} style={{ color: dimGray }} data-testid="ground-estimate-icon" />
+              ) : (
+                <X size={16} style={{ color: dimGray }} />
+              )}
             </div>
             <div
               className="flex flex-col items-center justify-center px-2 py-1.5 rounded-xl border w-full text-center"
               style={{ background: `${dimGray}15`, borderColor: `${dimGray}55` }}
             >
               <div className="text-gray-700 text-[11px] font-semibold leading-tight">
-                {transport.noSensibleFlight ? 'No sensible flight' : transport.groundEstimate ? 'No train or flight found' : 'No direct option'}
+                {transport.noSensibleFlight ? 'No sensible flight' : transport.groundEstimate ? 'Not bookable here' : 'No direct option'}
               </div>
               {!transport.noSensibleFlight && transport.groundEstimate && (
                 // Nothing bookable, but a close hop over land: how long by
