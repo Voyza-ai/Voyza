@@ -28,9 +28,13 @@ import { originIndex } from './location/originAirports';
  *
  * Date rules — chosen so an edit moves as little as possible:
  *  - replace: the new city takes the old city's exact dates.
- *  - remove: the trip keeps its length. The previous city keeps the removed
- *    city's nights (the next city, when the first one goes), so the flights
- *    home stay on their days.
+ *  - remove: the trip gets shorter by the removed city's nights; every city
+ *    after it moves that much earlier, and the flight home with them. This is
+ *    the mirror of add, so adding a city and removing it again gives back the
+ *    trip you had, and it matches removing a city from its card (the frontend
+ *    re-chains the dates the same way). It used to give the nights to the
+ *    previous city instead: "add Salzburg" then "remove Salzburg" left Munich
+ *    with 4 nights and every later date 2 days late.
  *  - add: the new city gets `nights` (default 2) after `afterCity`, or right
  *    before `beforeCity` (at the very start when that is the first city), by
  *    default after the last city; everything after it moves later by that much — the
@@ -144,30 +148,41 @@ export function planCityEdit(
     }
     const removed = stops[idx];
     const nights = nightsBetween(removed.arrival, removed.departure);
-    const after: PlannedStop[] = stops.map(kept);
-    let absorber: number;
-    if (idx > 0) {
-      absorber = idx - 1;
-      after[absorber] = { ...after[absorber], departure: removed.departure, status: 'moved' };
-    } else {
-      absorber = idx + 1;
-      after[absorber] = { ...after[absorber], arrival: removed.arrival, status: 'moved' };
-    }
-    after.splice(idx, 1);
-    const absorberAfter = absorber > idx ? absorber - 1 : absorber;
-    const legs: number[] = [];
-    // The new leg prev → next, on the day prev now leaves.
-    if (idx > 0 && idx < last) legs.push(idx - 1);
+    const after: PlannedStop[] = [];
+    stops.forEach((s, i) => {
+      if (i < idx) after.push(kept(s, i));
+      else if (i > idx) {
+        after.push({
+          name: s.name,
+          arrival: addDays(s.arrival, -nights),
+          departure: addDays(s.departure, -nights),
+          status: 'moved',
+          fromIndex: i,
+        });
+      }
+    });
+    // Every stay from the removed slot on moved: its hotel is re-searched.
+    const hotels = after.map((_, i) => i).filter((i) => i >= idx);
+    // The new leg prev → next, plus every later leg (its day moved).
+    const legs = after.map((_, i) => i).filter((i) => i >= Math.max(0, idx - 1) && i < after.length - 1);
+    const shifted = after.length - idx;
     return {
       ok: true,
       plan: {
         after,
         removed: [removed.name],
-        hotels: [absorberAfter],
+        hotels,
         legs,
+        // A new first city is where the flight from home now lands.
         outbound: idx === 0,
-        ret: idx === last,
-        note: `${after[absorberAfter].name} keeps ${removed.name}'s ${plural(nights, 'night')}, so your trip dates don't change.`,
+        // The trip now ends earlier (or from a new last city).
+        ret: true,
+        note:
+          shifted === 0
+            ? `Your trip ends ${plural(nights, 'day')} earlier, so you fly home from ${after[after.length - 1].name}.`
+            : shifted === 1
+              ? `Your trip is ${plural(nights, 'day')} shorter, so ${after[after.length - 1].name} moves ${plural(nights, 'day')} earlier.`
+              : `Your trip is ${plural(nights, 'day')} shorter, so the ${shifted} cities after it move ${plural(nights, 'day')} earlier.`,
       },
     };
   }
