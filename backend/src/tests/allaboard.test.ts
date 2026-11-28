@@ -301,11 +301,11 @@ describe('searchAllAboard: a journey sold as more than one ticket', () => {
 });
 
 describe('provider registry integration', () => {
-  it('searchTrains merges All Aboard results with Deutsche Bahn', async () => {
+  it('searchTrains returns All Aboard results as party totals', async () => {
     jest.isolateModules(() => {
       /* re-import inside isolation below */
     });
-    // Route by URL: All Aboard calls hit the gateway, DB REST calls 500 out.
+    // Route by URL: All Aboard calls hit the gateway; anything else 503s.
     mockFetch.mockImplementation((url: string, init?: any) => {
       if (String(url).includes('api-gateway.allaboard.eu')) {
         const body = init?.body ?? '';
@@ -317,11 +317,11 @@ describe('provider registry integration', () => {
         if (body.includes('getJourneyOffer'))
           return Promise.resolve(gqlOk(partyOfferResponse([3985])(body)));
       }
-      // Deutsche Bahn path: fail fast, provider returns [] non-fatally.
+      // No other rail service exists; nothing should land here.
       return Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) });
     });
 
-    // Supabase is only used by the DB provider's stop cache.
+    // No rail provider touches Supabase; mocked so nothing can by accident.
     jest.doMock('../services/supabase', () => ({
       getSupabase: () => ({
         from: () => ({
